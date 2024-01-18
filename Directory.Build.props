@@ -1,0 +1,16 @@
+<Project>
+	<PropertyGroup>
+		<TargetFrameworks>net6.0;net7.0;net8.0</TargetFrameworks>
+		<RepositoryType>git</RepositoryType>
+		<Copyright>© Assimalign LLC $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
+		<RepositoryUrl>https://github.com/assimalign-cohesion/cohesion</RepositoryUrl>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<PropertyGroup Condition="$(TargetFramework) == 'net7.0'">
+		<StripSymbols>false</StripSymbols>
+	</PropertyGroup>
+	<PropertyGroup Condition="$(TargetFramework) == 'net8.0'">
+		<IsAotCompatible>true</IsAotCompatible>
+		<StripSymbols>false</StripSymbols>
+	</PropertyGroup>
+</Project>

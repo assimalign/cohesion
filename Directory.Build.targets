@@ -1,0 +1,6 @@
+<Project>
+	<ItemGroup>
+		<PackageReference Update="BenchmarkDotNet" Version="0.13.11"/>
+		<PackageReference Update="System.IO.Pipelines" Version="8.0.0"/>
+	</ItemGroup>
+</Project>

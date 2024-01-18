@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+
+	<ItemGroup>
+	  <Compile Remove="Internal\**" />
+	  <EmbeddedResource Remove="Internal\**" />
+	  <None Remove="Internal\**" />
+	</ItemGroup>
+
+
+</Project>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Storage\src\Assimalign.PanopticDb.Storage\Assimalign.PanopticDb.Storage.csproj" />
+  </ItemGroup>
+</Project>

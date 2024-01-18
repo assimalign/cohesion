@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+	  <Compile Remove="Exceptions\**" />
+	  <Compile Remove="Execution\**" />
+	  <Compile Remove="Logging\**" />
+	  <Compile Remove="Server\**" />
+	  <EmbeddedResource Remove="Exceptions\**" />
+	  <EmbeddedResource Remove="Execution\**" />
+	  <EmbeddedResource Remove="Logging\**" />
+	  <EmbeddedResource Remove="Server\**" />
+	  <None Remove="Exceptions\**" />
+	  <None Remove="Execution\**" />
+	  <None Remove="Logging\**" />
+	  <None Remove="Server\**" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Storage\src\Assimalign.PanopticDb.Storage\Assimalign.PanopticDb.Storage.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Storage\Iterators\" />
+	</ItemGroup>
+
+
+</Project>

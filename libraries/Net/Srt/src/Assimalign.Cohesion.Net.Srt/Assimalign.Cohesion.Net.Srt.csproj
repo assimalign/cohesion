@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<Folder Include="Abstractions\" />
+		<Folder Include="Server\Internal\" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Core\src\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
+	</ItemGroup>
+</Project>
