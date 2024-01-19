@@ -1,0 +1,6 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\..\..\modules\ograph\src\Assimalign.OGraph\Assimalign.OGraph.csproj" />
+		<ProjectReference Include="..\..\..\..\Net\Core\src\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
+	</ItemGroup>
+</Project>

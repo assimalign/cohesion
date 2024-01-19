@@ -1,9 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\..\Core\Configuration\src\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
-		<ProjectReference Include="..\..\..\..\Core\Hosting\src\Assimalign.Cohesion.Hosting\Assimalign.Cohesion.Hosting.csproj" />
-		<ProjectReference Include="..\..\..\..\Core\Logging\src\Assimalign.Cohesion.Logging\Assimalign.Cohesion.Logging.csproj" />
-		<ProjectReference Include="..\Assimalign.Cohesion.Net.Cryptography\Assimalign.Cohesion.Net.Cryptography.csproj" />
-		<ProjectReference Include="..\Assimalign.Cohesion.Net.Transports\Assimalign.Cohesion.Net.Transports.csproj" />
+		<ProjectReference Include="..\..\..\Http\src\Assimalign.Cohesion.Net.Http\Assimalign.Cohesion.Net.Http.csproj" />
+		<ProjectReference Include="..\..\..\Srt\src\Assimalign.Cohesion.Net.Srt\Assimalign.Cohesion.Net.Srt.csproj" />
+		<ProjectReference Include="..\..\..\Udt\src\Assimalign.Cohesion.Net.Udt\Assimalign.Cohesion.Net.Udt.csproj" />
+		<ProjectReference Include="..\..\..\WebSockets\src\Assimalign.Cohesion.Net.WebSockets\Assimalign.Cohesion.Net.WebSockets.csproj" />
 	</ItemGroup>
 </Project>

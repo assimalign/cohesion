@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Operations;
+namespace Assimalign.Cohesion.Database.Execution.Operations;
 
-public interface IPanopticDbFunction
+public interface ICohesion.DatabaseFunction
 {
 
 }

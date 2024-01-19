@@ -4,19 +4,19 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage;
+namespace Assimalign.Cohesion.Database.Execution.Storage;
 
-public interface IPanopticDbStorageSegment
+public interface ICohesion.DatabaseStorageSegment
 {
     /// <summary>
     /// Specifies the type of segment currently being processed.
     /// </summary>
-    PanopticDbStorageSegmentType SegmentType { get; set; }
+    Cohesion.DatabaseStorageSegmentType SegmentType { get; set; }
 
     /// <summary>
     /// Gets the Segment Header of the
     /// </summary>
-    IPanopticDbStorageSegmentHeader SegmentHeader { get; }
+    ICohesion.DatabaseStorageSegmentHeader SegmentHeader { get; }
 
     /// <summary>
     /// Defines whether the segment is set to a fixed length

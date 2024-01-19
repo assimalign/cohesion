@@ -1,4 +1,4 @@
-﻿namespace Assimalign.PanopticDb.Language.Sql
+﻿namespace Assimalign.Cohesion.Database.Language.Sql
 {
     public class Class1
     {

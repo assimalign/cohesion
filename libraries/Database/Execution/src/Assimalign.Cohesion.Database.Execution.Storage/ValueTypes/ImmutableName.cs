@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 
-namespace Assimalign.PanopticDb.Execution.Storage.ValueTypes;
+namespace Assimalign.Cohesion.Database.Execution.Storage.ValueTypes;
 
 /// <summary>
 /// represents a case-insensitive name. When set all 

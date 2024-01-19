@@ -8,29 +8,29 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage;
+namespace Assimalign.Cohesion.Database.Execution.Storage;
 
 
-public class PanopticDbStorageResource : IPanopticDbStorageResource
+public class Cohesion.DatabaseStorageResource : ICohesion.DatabaseStorageResource
 {
 
     private readonly FileStream resourceStream;
 
 
-    public PanopticDbStorageResource()
+    public Cohesion.DatabaseStorageResource()
     {
        
         
     }
 
-    public IPanopticDbStorageResourceHeader Header => throw new NotImplementedException();
+    public ICohesion.DatabaseStorageResourceHeader Header => throw new NotImplementedException();
 
-    public IPanopticDbStorageIndexIterator CreateIndexIterator()
+    public ICohesion.DatabaseStorageIndexIterator CreateIndexIterator()
     {
         throw new NotImplementedException();
     }
 
-    public IPanopticDbStorageSegmentIterator CreateSegmentIterator()
+    public ICohesion.DatabaseStorageSegmentIterator CreateSegmentIterator()
     {
         throw new NotImplementedException();
     }
@@ -45,7 +45,7 @@ public class PanopticDbStorageResource : IPanopticDbStorageResource
         throw new NotImplementedException();
     }
 
-    public Task LoadAsync(PanopticDbStorageContext context)
+    public Task LoadAsync(Cohesion.DatabaseStorageContext context)
     {
         var indexHeader = CreateIndexIterator();
 

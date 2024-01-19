@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Document;
+namespace Assimalign.Cohesion.Database.Execution.Storage.Document;
 
 //var d = 1.0d;  // double
 //var d0 = 1.0;   // double
@@ -17,13 +17,13 @@ namespace Assimalign.PanopticDb.Execution.Storage.Document;
 //var ul = 1UL;   // ulong
 //var l = 1L;    // long
 
-public class PanopticDbDocument
+public class Cohesion.DatabaseDocument
 {
     private const int DocumentSizeMax = 5000000;        // 5 MB     - The Maximum possible size the document can be
     private const int DocumentPartitionSize = 100000;   // 0.10 MB  - The size that will split up the document
 
 
-    public PanopticDbDocumentHeader Header { get; set; }
+    public Cohesion.DatabaseDocumentHeader Header { get; set; }
 
 
 

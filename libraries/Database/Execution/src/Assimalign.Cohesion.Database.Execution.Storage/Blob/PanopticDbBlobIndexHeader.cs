@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Blob;
+namespace Assimalign.Cohesion.Database.Execution.Storage.Blob;
 
-public class PanopticDbBlobIndexHeader
+public class Cohesion.DatabaseBlobIndexHeader
 {
     public int MyProperty { get; set; }
 

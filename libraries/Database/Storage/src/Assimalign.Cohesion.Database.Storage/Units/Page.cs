@@ -1,4 +1,4 @@
-﻿namespace Assimalign.PanopticDb.Storage.Units;
+﻿namespace Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// 

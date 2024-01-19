@@ -4,14 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Operations
+namespace Assimalign.Cohesion.Database.Execution.Operations
 {
-    public class PanopticDbOperationQueue
+    public class Cohesion.DatabaseOperationQueue
     {
         private readonly Queue<IPanoptisDbOperation> operationsQueue;
 
 
-        public PanopticDbOperationQueue()
+        public Cohesion.DatabaseOperationQueue()
         {
 
         }

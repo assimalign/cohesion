@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Document
+namespace Assimalign.Cohesion.Database.Execution.Storage.Document
 {
-    public class PanopticDbDocumentCollectionPartition
+    public class Cohesion.DatabaseDocumentCollectionPartition
     {
 
     }

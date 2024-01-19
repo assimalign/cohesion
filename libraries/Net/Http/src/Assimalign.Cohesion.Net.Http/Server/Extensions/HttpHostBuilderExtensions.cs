@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.Http;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Net.Transports;
 
 public static class HttpHostBuilderExtensions

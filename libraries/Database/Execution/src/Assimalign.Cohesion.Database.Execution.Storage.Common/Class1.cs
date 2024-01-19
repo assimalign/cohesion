@@ -1,4 +1,4 @@
-﻿namespace Assimalign.PanopticDb.Execution.Storage.Common;
+﻿namespace Assimalign.Cohesion.Database.Execution.Storage.Common;
 
 
 

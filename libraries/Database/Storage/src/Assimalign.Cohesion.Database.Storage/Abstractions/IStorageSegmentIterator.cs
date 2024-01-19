@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Storage;
+namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// A Breadth-first Iterator

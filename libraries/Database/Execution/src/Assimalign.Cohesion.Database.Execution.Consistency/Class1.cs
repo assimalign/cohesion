@@ -1,4 +1,4 @@
-﻿namespace Assimalign.PanopticDb.Execution.Consistency
+﻿namespace Assimalign.Cohesion.Database.Execution.Consistency
 {
     public class Class1
     {

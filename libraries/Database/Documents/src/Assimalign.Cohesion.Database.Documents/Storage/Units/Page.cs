@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Documents.Storage.Units;
+namespace Assimalign.Cohesion.Database.Documents.Storage.Units;
 
-using Assimalign.PanopticDb.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 public class Page : IStorageUnit
 {

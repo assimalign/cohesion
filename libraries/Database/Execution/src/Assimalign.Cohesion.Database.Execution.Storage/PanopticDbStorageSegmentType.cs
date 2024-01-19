@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage;
+namespace Assimalign.Cohesion.Database.Execution.Storage;
 
-public enum PanopticDbStorageSegmentType
+public enum Cohesion.DatabaseStorageSegmentType
 {
     // Document DB Segment Types
     Document,

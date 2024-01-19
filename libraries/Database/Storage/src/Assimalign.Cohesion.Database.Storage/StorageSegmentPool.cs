@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Storage
+namespace Assimalign.Cohesion.Database.Storage
 {
     internal class StorageSegmentPool
     {

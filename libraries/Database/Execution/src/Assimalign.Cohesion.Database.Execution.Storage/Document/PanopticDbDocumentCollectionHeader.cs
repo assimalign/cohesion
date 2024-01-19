@@ -1,14 +1,14 @@
-﻿using Assimalign.PanopticDb.Execution.Storage.ValueTypes;
+﻿using Assimalign.Cohesion.Database.Execution.Storage.ValueTypes;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Document;
+namespace Assimalign.Cohesion.Database.Execution.Storage.Document;
 
 
-public class PanopticDbDocumentCollectionHeader
+public class Cohesion.DatabaseDocumentCollectionHeader
 {
     /// <summary>
     /// The position of constraints for the collection

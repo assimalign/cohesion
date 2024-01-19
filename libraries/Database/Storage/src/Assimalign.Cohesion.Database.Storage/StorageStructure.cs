@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Storage;
+namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// The storage structure specifies how segments are organized in the data file.

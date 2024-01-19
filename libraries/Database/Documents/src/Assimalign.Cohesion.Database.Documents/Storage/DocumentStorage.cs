@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Documents.Storage;
+namespace Assimalign.Cohesion.Database.Documents.Storage;
 
-using Assimalign.PanopticDb.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// 16 bytes - Storage ID

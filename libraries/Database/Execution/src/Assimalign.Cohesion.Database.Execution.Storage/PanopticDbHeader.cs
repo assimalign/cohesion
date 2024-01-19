@@ -4,12 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage;
+namespace Assimalign.Cohesion.Database.Execution.Storage;
 
-using Assimalign.PanopticDb.Execution.Storage.ValueTypes;
+using Assimalign.Cohesion.Database.Execution.Storage.ValueTypes;
 
 
-public abstract class PanopticDbHeader : IPanopticDbStorageSegmentHeader
+public abstract class Cohesion.DatabaseHeader : ICohesion.DatabaseStorageSegmentHeader
 {
     public const int SegmentIdOffset = 16;      // 16 bytes
     public const int SegmentNameOffset = 255;   // 255 bytes for max 255 character name

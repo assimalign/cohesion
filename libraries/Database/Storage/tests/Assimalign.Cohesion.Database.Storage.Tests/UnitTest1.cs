@@ -1,4 +1,4 @@
-namespace Assimalign.PanopticDb.Storage.Tests
+namespace Assimalign.Cohesion.Database.Storage.Tests
 {
     public class UnitTest1
     {

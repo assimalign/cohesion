@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace Assimalign.PanopticDb.Storage;
+namespace Assimalign.Cohesion.Database.Storage;
 
 
 /// <summary>

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Types;
+namespace Assimalign.Cohesion.Database.Types;
 
 public interface DbType
 {

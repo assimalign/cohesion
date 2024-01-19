@@ -4,32 +4,32 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage
+namespace Assimalign.Cohesion.Database.Execution.Storage
 {
-    public interface IPanopticDbStorageResource : IDisposable, IAsyncDisposable
+    public interface ICohesion.DatabaseStorageResource : IDisposable, IAsyncDisposable
     {
         /// <summary>
         /// 
         /// </summary>
-        IPanopticDbStorageResourceHeader Header { get; }
+        ICohesion.DatabaseStorageResourceHeader Header { get; }
 
         /// <summary>
         /// 
         /// </summary>
         /// <returns></returns>
-        IPanopticDbStorageIndexIterator CreateIndexIterator();
+        ICohesion.DatabaseStorageIndexIterator CreateIndexIterator();
 
         /// <summary>
         /// 
         /// </summary>
         /// <returns></returns>
-        IPanopticDbStorageSegmentIterator CreateSegmentIterator();
+        ICohesion.DatabaseStorageSegmentIterator CreateSegmentIterator();
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="context"></param>
         /// <returns></returns>
-        Task LoadAsync(PanopticDbStorageContext context);
+        Task LoadAsync(Cohesion.DatabaseStorageContext context);
     }
 }

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Types.ScalarTypes
+namespace Assimalign.Cohesion.Database.Types.ScalarTypes
 {
     internal class ScalarType
     {

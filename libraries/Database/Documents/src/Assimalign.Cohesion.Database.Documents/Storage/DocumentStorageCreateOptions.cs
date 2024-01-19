@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Documents.Storage;
+namespace Assimalign.Cohesion.Database.Documents.Storage;
 
 public sealed class DocumentStorageCreateOptions
 {

@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Document
+namespace Assimalign.Cohesion.Database.Execution.Storage.Document
 {
-    public class PanopticDbDocumentHeader
+    public class Cohesion.DatabaseDocumentHeader
     {
 
     }

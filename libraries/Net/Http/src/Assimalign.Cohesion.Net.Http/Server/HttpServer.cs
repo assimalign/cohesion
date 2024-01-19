@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Net.Http;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Net.Logging;
 using Assimalign.Cohesion.Net.Transports;
 using Assimalign.Cohesion.Net.Http.Internal;

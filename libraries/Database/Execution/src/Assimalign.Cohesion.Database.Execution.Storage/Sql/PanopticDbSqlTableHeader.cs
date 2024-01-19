@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage.Sql
+namespace Assimalign.Cohesion.Database.Execution.Storage.Sql
 {
-    public class PanopticDbSqlTableHeader
+    public class Cohesion.DatabaseSqlTableHeader
     {
 
     }

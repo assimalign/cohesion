@@ -1,4 +1,4 @@
-﻿using Assimalign.PanopticDb.Storage;
+﻿using Assimalign.Cohesion.Database.Storage;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Documents.Storage;
+namespace Assimalign.Cohesion.Database.Documents.Storage;
 
 internal class PartitionStorageSegment : IStorageSegmentComposite
 {

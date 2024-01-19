@@ -1,4 +1,4 @@
-﻿namespace Assimalign.PanopticDb.Storage;
+﻿namespace Assimalign.Cohesion.Database.Storage;
 
 public enum PageType
 {

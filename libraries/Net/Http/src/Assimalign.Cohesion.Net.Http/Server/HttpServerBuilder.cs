@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Net.Http;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 
 public sealed class HttpServerBuilder : IHostServerBuilder
 {

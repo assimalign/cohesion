@@ -4,7 +4,6 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\..\..\libraries\Http\src\Assimalign.Cohesion.Net.Http\Assimalign.Cohesion.Net.Http.csproj" />
-		<ProjectReference Include="..\..\..\libraries\Identity\src\Assimalign.Cohesion.Net.Identity\Assimalign.Cohesion.Net.Identity.csproj" />
 		<ProjectReference Include="..\..\..\libraries\Srt\src\Assimalign.Cohesion.Net.Srt\Assimalign.Cohesion.Net.Srt.csproj" />
 		<ProjectReference Include="..\..\..\libraries\Udt\src\Assimalign.Cohesion.Net.Udt\Assimalign.Cohesion.Net.Udt.csproj" />
 		<ProjectReference Include="..\..\..\libraries\WebSockets\src\Assimalign.Cohesion.Net.WebSockets\Assimalign.Cohesion.Net.WebSockets.csproj" />

@@ -6,4 +6,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libraries\App\OGraph\src\Assimalign.Cohesion.OGraph\Assimalign.Cohesion.OGraph.csproj" />
+    <ProjectReference Include="..\..\..\libraries\App\WebApi\src\Assimalign.Cohesion.WebApi\Assimalign.Cohesion.WebApi.csproj" />
+    <ProjectReference Include="..\..\..\libraries\Integration\ConfigurationStore\src\Assimalign.Cohesion.ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.csproj" />
+    <ProjectReference Include="..\..\..\libraries\Integration\EventHub\src\Assimalign.Cohesion.EventHub\Assimalign.Cohesion.EventHub.csproj" />
+    <ProjectReference Include="..\..\..\libraries\Integration\MessageHub\src\Assimalign.Cohesion.MessageHub\Assimalign.Cohesion.MessageHub.csproj" />
+    <ProjectReference Include="..\..\..\libraries\Integration\SecretStore\src\Assimalign.Cohesion.SecretStore\Assimalign.Cohesion.SecretStore.csproj" />
+    <ProjectReference Include="..\..\..\libraries\Monitoring\LogSpace\src\Assimalign.Cohesion.LogSpace\Assimalign.Cohesion.LogSpace.csproj" />
+  </ItemGroup>
+
 </Project>

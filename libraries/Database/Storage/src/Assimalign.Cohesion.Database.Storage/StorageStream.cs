@@ -6,7 +6,7 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Storage;
+namespace Assimalign.Cohesion.Database.Storage;
 
 public sealed class StorageStream : Stream
 {

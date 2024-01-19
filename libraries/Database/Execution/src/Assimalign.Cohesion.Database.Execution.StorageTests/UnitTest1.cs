@@ -1,7 +1,7 @@
 using System.IO;
 using Xunit;
 
-namespace Assimalign.PanopticDb.Execution.StorageTests
+namespace Assimalign.Cohesion.Database.Execution.StorageTests
 {
     public class UnitTest1
     {

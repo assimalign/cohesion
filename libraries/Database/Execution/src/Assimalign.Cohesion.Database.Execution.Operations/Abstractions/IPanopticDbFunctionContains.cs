@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Operations.Abstractions
+namespace Assimalign.Cohesion.Database.Execution.Operations.Abstractions
 {
-    public interface IPanopticDbFunctionContains<in TEnumerable>
+    public interface ICohesion.DatabaseFunctionContains<in TEnumerable>
         where TEnumerable : IEnumerable
     {
 

@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage
+namespace Assimalign.Cohesion.Database.Execution.Storage
 {
-    public interface IPanopticDbStorageSegmentIterator
+    public interface ICohesion.DatabaseStorageSegmentIterator
     {
 
     }

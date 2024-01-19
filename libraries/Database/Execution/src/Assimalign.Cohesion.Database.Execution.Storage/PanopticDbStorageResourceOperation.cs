@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.PanopticDb.Execution.Storage;
+namespace Assimalign.Cohesion.Database.Execution.Storage;
 
-public sealed class PanopticDbStorageResourceOperation
+public sealed class Cohesion.DatabaseStorageResourceOperation
 {
     public Guid OperationId { get; set; }
 
