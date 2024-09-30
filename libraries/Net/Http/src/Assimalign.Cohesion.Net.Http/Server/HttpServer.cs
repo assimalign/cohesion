@@ -8,21 +8,18 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Net.Http;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Net.Logging;
-using Assimalign.Cohesion.Net.Transports;
-using Assimalign.Cohesion.Net.Http.Internal;
+using Internal;
+using Transports;
 
-public sealed partial class HttpServer : IHostServer
+public partial class HttpServer
 {
-    private readonly ILogger logger;
     private readonly IList<ITransport> transports;
     private readonly IHttpContextExecutor executor;
     private readonly HttpConnectionFactory factory;
 
     private readonly HttpServerOptions options;
 
-    internal HttpServer(HttpServerOptions options)
+    internal HttpServer(HttpServerOptionsInternal options)
     {
         if (options is null)
         {
@@ -30,25 +27,22 @@ public sealed partial class HttpServer : IHostServer
         }
         this.options = options;
         this.transports = options.Transports;
-        this.executor = options.Executor ?? new HttpContextExecutor();
-        this.State = new HttpServerState()
-        {
-            ServerName = options.ServerName
-        };
+        this.executor = options.Executor;
         this.factory = HttpConnectionFactory.New();
     }
-    
-    public IHostServerState State { get; }
 
-    public ValueTask StartAsync(CancellationToken cancellationToken = default)
-    {        
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
         return ProcessAsync(cancellationToken);
     }
-    private async ValueTask ProcessAsync(CancellationToken cancellationToken = default)
+
+    private async Task ProcessAsync(CancellationToken cancellationToken = default)
     {
+        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         while (true)
         {
-            await foreach (var transportConnection in ProcessTransportConnectionsAsync().WithCancellation(cancellationToken))
+            await foreach (var transportConnection in ProcessTransportConnectionsAsync().WithCancellation(cancellationTokenSource.Token))
             {
                 try
                 {
@@ -74,13 +68,13 @@ public sealed partial class HttpServer : IHostServer
                                 await disposable.DisposeAsync();
                             }
                         }
-                        catch (Exception exception)
+                        catch (Exception)
                         {
 
                         }
                     }, transportConnection, false);
                 }
-                catch (Exception exception)
+                catch (Exception)
                 {
                     continue;
                 }
@@ -90,7 +84,7 @@ public sealed partial class HttpServer : IHostServer
         async IAsyncEnumerable<ITransportConnection> ProcessTransportConnectionsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // Will use this as
-            var taskQueue = new Dictionary<Task<ITransportConnection?>, int>();
+            var taskQueue = new Dictionary<Task<ITransportConnection>, int>();
 
             while (true)
             {
@@ -107,8 +101,8 @@ public sealed partial class HttpServer : IHostServer
                     }
                 }
 
-                var tasks           = taskQueue.Select(task => task.Key);
-                var taskCompleted   = await Task.WhenAny(tasks);
+                var tasks = taskQueue.Select(task => task.Key);
+                var taskCompleted = await Task.WhenAny(tasks);
 
                 taskQueue.Remove(taskCompleted);
 
@@ -125,19 +119,20 @@ public sealed partial class HttpServer : IHostServer
         }
     }
 
-    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
         foreach (var transport in this.transports)
         {
             transport.Dispose();
         }
 
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
 
     public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
-    public ValueTask DisposeAsync() => StopAsync();
-
-    
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+    }
 }

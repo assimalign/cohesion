@@ -21,8 +21,6 @@ internal sealed class WindowsCertificateProvider : CertificateProviderBase
         return certificate;
         throw new NotImplementedException();
     }
-
-
     public override CertificateResult ImportCertificate(FilePath filePath, string password)
     {
         if (!File.Exists(filePath.ToString()))

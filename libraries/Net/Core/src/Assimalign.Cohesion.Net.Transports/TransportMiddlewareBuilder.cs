@@ -1,13 +1,11 @@
-﻿// Ignore Spelling: memoise
-
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Net.Transports;
 
-using Assimalign.Cohesion.Net.Internal;
+using Assimalign.Cohesion.Net;
 using Assimalign.Cohesion.Net.Transports.Internal;
 
 public sealed class TransportMiddlewareBuilder<TContext, TMiddleware> : ITransportMiddlewareBuilder

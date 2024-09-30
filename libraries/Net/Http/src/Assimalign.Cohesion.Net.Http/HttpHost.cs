@@ -23,9 +23,6 @@ public readonly struct HttpHost : IEquatable<HttpHost>
         Value = value;
     }
 
-
-
-
     public string Value { get; }
     //public int? Port { get; }
     public bool Equals(HttpHost other)

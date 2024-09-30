@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.WebSockets;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 
-public sealed class WebSocketServerBuilder : IHostServerBuilder
+public sealed class WebSocketServerBuilder : IHostServiceBuilder
 {
     private Func<IServiceProvider> serviceProviderAction;
     private IList<Action<IServiceProvider, WebSocketServerOptions>> settings;
@@ -250,7 +250,7 @@ public sealed class WebSocketServerBuilder : IHostServerBuilder
     }
 
 
-    IHostServer IHostServerBuilder.Build()
+    IHostService IHostServiceBuilder.Build()
     {
         var options = new WebSocketServerOptions();
         var serviceProvider = serviceProviderAction.Invoke();

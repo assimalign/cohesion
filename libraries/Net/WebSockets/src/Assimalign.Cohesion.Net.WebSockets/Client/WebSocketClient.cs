@@ -23,7 +23,7 @@ public sealed class WebSocketClient
     {
         var transport = Transport.CreateTcpClient(options =>
         {
-            options.Endpoint = new IPEndPoint(IPAddress.Loopback, 8085);
+            options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
         });
 
         var connection = await transport.InitializeAsync();

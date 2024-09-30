@@ -14,11 +14,11 @@ public interface IHttpContext : IAsyncDisposable
     /// <summary>
     /// 
     /// </summary>
-    IHttpSession? Session { get; }
+    IHttpSession Session { get; }
     /// <summary>
     /// Represents the HTTP Request.
     /// </summary>
-    IHttpRequest? Request { get; }
+    IHttpRequest Request { get; }
     /// <summary>
     /// Represents the HTTP Response.
     /// </summary>
@@ -28,9 +28,5 @@ public interface IHttpContext : IAsyncDisposable
     /// that carries the data needs to handle the request and response. 
     /// The actual reading and writing of the response will be done internally.
     /// </remarks>
-    IHttpResponse? Response { get; }
-    /// <summary>
-    /// 
-    /// </summary>
-    IServiceProvider? ServiceProvider { get; }
+    IHttpResponse Response { get; }
 }

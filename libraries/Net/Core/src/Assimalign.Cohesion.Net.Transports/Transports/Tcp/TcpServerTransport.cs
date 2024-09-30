@@ -21,6 +21,8 @@ public sealed class TcpServerTransport : ServerTransport
 
     private readonly List<ITransportConnection> connections = new();
 
+    public TcpServerTransport() : this(new()) { }
+
     public TcpServerTransport(TcpServerTransportOptions options)
     {
         if (options is null)

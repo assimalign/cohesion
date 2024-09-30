@@ -10,9 +10,9 @@ namespace Assimalign.Cohesion.Net.Cryptography.Internal;
 
 internal abstract class CertificateProviderBase : ICertificateProvider
 {
-    private const int CurrentCohesion.NetCoreCertificateVersion = 2;
-    private const string Cohesion.NetHttpsOid = "1.3.6.1.4.1.311.84.1.1";
-    private const string Cohesion.NetHttpsOidFriendlyName = "Cohesion.Net Server HTTPS Development Certificate";
+    private const int CurrentCohesionNetCoreCertificateVersion = 2;
+    private const string CohesionNetHttpsOid = "1.3.6.1.4.1.311.84.1.1";
+    private const string CohesionNetHttpsOidFriendlyName = "Cohesion.Net Server HTTPS Development Certificate";
     private const string ServerAuthenticationEnhancedKeyUsageOid = "1.3.6.1.5.5.7.3.1";
     private const string ServerAuthenticationEnhancedKeyUsageOidFriendlyName = "Server Authentication";
     private const int    RSAMinimumKeySizeInBits = 2048;

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<EnableDefaultItems>true</EnableDefaultItems>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\Assimalign.Cohesion.Configuration.FileExtensions\Assimalign.Cohesion.Configuration.FileExtensions.csproj" />
+	</ItemGroup>
+</Project>

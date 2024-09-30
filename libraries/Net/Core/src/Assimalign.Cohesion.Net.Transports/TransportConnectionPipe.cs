@@ -67,9 +67,10 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
 
     public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer)
     {
+  
         var result = await Output.WriteAsync(buffer);
 
-        Output.Advance(buffer.Length);
+        //Output.Advance(buffer.Length);
 
         return result;
     }

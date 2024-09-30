@@ -8,34 +8,25 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Net.WebSockets;
 
-
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Net.Transports;
-using Assimalign.Cohesion.Net.WebSockets.Internal;
 
-public sealed class WebSocketServer : IHostServer
+public sealed class WebSocketServer : IHostService
 {
     private readonly IList<ITransport> transports;
 
     internal WebSocketServer(WebSocketServerOptions options)
     {
         this.transports = options.Transports;
-
-        this.State = new WebSocketServerState()
-        {
-            ServerName = options.ServerName
-        };
     }
 
 
-    public IHostServerState State { get; }
-
-    public ValueTask StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
         return ProcessAsync(cancellationToken);
     }
 
-    private async ValueTask ProcessAsync(CancellationToken cancellationToken = default)
+    private async Task ProcessAsync(CancellationToken cancellationToken = default)
     {
         while (true)
         {
@@ -47,12 +38,12 @@ public sealed class WebSocketServer : IHostServer
                     var socket = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions()
                     {
                         IsServer = true,
+
                     });
                     var queued = ThreadPool.UnsafeQueueUserWorkItem(async socket =>
                     {
                         try
                         {
-                            
                         }
                         catch (Exception exception)
                         {
@@ -105,7 +96,7 @@ public sealed class WebSocketServer : IHostServer
         }
     }
 
-    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

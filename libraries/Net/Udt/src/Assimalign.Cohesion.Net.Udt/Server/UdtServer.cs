@@ -8,26 +8,25 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.Udt;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Net.Udt.Internal;
 
 
-public sealed class UdtServer : IHostServer
+public sealed class UdtServer : IHostService
 {
     internal UdtServer(UdtServerOptions options)
     {
-        this.State = new UdtServerState();
+        //this.State = new UdtServerState();
     }
 
-    public IHostServerState State { get; }
 
-    public ValueTask StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 }

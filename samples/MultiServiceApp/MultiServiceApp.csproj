@@ -2,7 +2,13 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 	</PropertyGroup>
+	
 	<ItemGroup>
-	  <ProjectReference Include="..\..\sdks\src\Assimalign.Cohesion.Sdk\Assimalign.Cohesion.Sdk.csproj" />
+	  <Folder Include="Properties\" />
+	</ItemGroup>
+	
+	<ItemGroup>
+	  <ProjectReference Include="..\MultiServiceApp.ConfigurationStore\MultiServiceApp.ConfigurationStore.csproj" />
+	  <ProjectReference Include="..\MultiServiceApp.OGraph\MultiServiceApp.OGraph.csproj" />
 	</ItemGroup>
 </Project>

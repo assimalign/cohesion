@@ -6,6 +6,6 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.Http;
 
-public interface IHttpCookieCollection
+public interface IHttpCookieCollection : ICollection<HttpCookie>
 {
 }

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.Udt;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 
 public static class UdtHostBuilderExtensions
 {
@@ -30,6 +30,6 @@ public static class UdtHostBuilderExtensions
 
         configure.Invoke(serverBuilder);
 
-        return builder.AddServer(serverBuilder);
+        return builder.AddService(((IHostServiceBuilder)serverBuilder).Build());
     }
 }

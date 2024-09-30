@@ -44,9 +44,9 @@ public sealed class TcpClientTransport : ClientTransport
     {
         if (socket is null)
         {
-            socket = options.Endpoint switch
+            socket = options.EndPoint switch
             {
-                UnixDomainSocketEndPoint        => new Socket(options.Endpoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
+                UnixDomainSocketEndPoint        => new Socket(options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
                 /* 
                     We're passing "ownsHandle: true" here even though we don't necessarily
                     own the handle because Socket.Dispose will clean-up everything safely.
@@ -59,9 +59,9 @@ public sealed class TcpClientTransport : ClientTransport
                     when it attempts to stop.
                 */
                 FileHandleEndPoint fileHandle   => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
-                _                               => new Socket(options.Endpoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
+                _                               => new Socket(options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
             };
-            if (options.Endpoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
+            if (options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
             {
                 socket.DualMode = true;
             }
@@ -72,7 +72,7 @@ public sealed class TcpClientTransport : ClientTransport
         }
         if (!socket.Connected)
         {
-            await socket.ConnectAsync(options.Endpoint);
+            await socket.ConnectAsync(options.EndPoint);
 
             settings.Socket = socket;
         }

@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+	  <Compile Remove="Internal\PollingFileChangeToken.cs" />
+	  <Compile Remove="Internal\PollingWildCardChangeToken.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\Assimalign.Cohesion.FileSystem.Globbing\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
+	</ItemGroup>
+</Project>

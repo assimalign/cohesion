@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<ItemGroup>
-		<ProjectReference Include="..\..\..\..\..\modules\ograph\src\Assimalign.OGraph\Assimalign.OGraph.csproj" />
-		<ProjectReference Include="..\..\..\..\Net\Core\src\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
-	</ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\..\..\assimalign-ograph\ograph\libraries\Core\src\Assimalign.OGraph\Assimalign.OGraph.csproj" />
+    <ProjectReference Include="..\..\..\..\Core\Configuration\src\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
+    <ProjectReference Include="..\..\..\..\Core\DependencyInjection\src\Assimalign.Cohesion.DependencyInjection\Assimalign.Cohesion.DependencyInjection.csproj" />
+    <ProjectReference Include="..\..\..\..\Core\Logging\src\Assimalign.Cohesion.Logging\Assimalign.Cohesion.Logging.csproj" />
+    <ProjectReference Include="..\..\..\..\Net\Core\src\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,137 +1,174 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
 
 internal sealed class Host : IHost
 {
-    private readonly Timer timer;
-    private readonly HostContext context;
-    private readonly IList<ValueTask> startTask;
-    private readonly IList<ValueTask> stopTask;
-
-    private volatile bool stop;
-    private volatile bool isStopped;
-
-
-    public Host(HostContext context)
+    private readonly HostOptions options;
+    public Host(HostOptions options)
     {
-        this.context = context;
-        this.timer = new Timer(new TimerCallback(OnCheckInterval), context, TimeSpan.Zero, context.StateCheckInterval);
-        this.startTask= new List<ValueTask>();
-        this.stopTask = new List<ValueTask>();
+        this.options = options;
+        this.Context = new()
+        {
+            Environment = new HostEnvironment()
+            {
+                Name = options.Environment
+            }
+        };
     }
 
-    public HostServerStateCallbackAsync StateCallback => this.context.ServerStateCallback;
+    public HostContext Context { get; }
+    IHostContext IHost.Context => Context;
 
-    public async ValueTask RunAsync(CancellationToken cancellationToken = default)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken = cancellationToken == default ? CancellationToken.None : cancellationToken;
-        
+        // Let's control the task completion of 'RunAsync()` by manually setting the 
+        // results when Cancellation is Requested
+        var taskCompletionSource = new TaskCompletionSource<Host>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Create a cancellation token source to pass
         var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        foreach (var server in context.Servers)
+        // Set the Shutdown handle
+        Context.ShutdownCallback = () =>
         {
-            try
-            {
-                startTask.Add(server.StartAsync(cancellationTokenSource.Token));
-            }
-            catch (Exception exception) when (!context.ThrowExceptionOnServerStartFailure)
-            {
-                continue;
-            }
-            catch (Exception exception)
-            {
-                throw new BadStartException($"Unable to start server: {server.GetType().Name}", exception);
-            }
-        }
+            cancellationTokenSource.Cancel();
+        };
 
-        // At this point all servers should be started.
-        // Begin monitoring server state.
-        await MonitorAsync(cancellationTokenSource.Token);
-    }    
-    private async ValueTask MonitorAsync(CancellationToken cancellationToken)
-    {
-        try
+        // Let's register a callback to complete the task 
+        cancellationTokenSource.Token.Register(state =>
         {
-            while (true)
+            options.Trace(Context);
+
+            var source = (TaskCompletionSource<Host>)state!;
+
+            source.SetResult(this);
+
+        }, taskCompletionSource);
+
+        Context.State = HostState.Starting;
+
+        // Begin trace
+        options.Trace(Context);
+
+        await StartAsync(cancellationTokenSource.Token).ConfigureAwait(false);
+
+        Context.State = HostState.Running;
+
+        options.Trace(Context);
+
+        await taskCompletionSource.Task.ConfigureAwait(false);
+
+        Context.State = HostState.Stopping;
+
+        options.Trace(Context);
+
+        await StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
+    }
+
+    private async Task StartAsync(CancellationToken cancellationToken)
+    {
+        var startCancellationToken = cancellationToken;
+
+        if (options.ServiceStartupTimeout is not null)
+        {
+            var timeoutCancellationTokenSource = new CancellationTokenSource(options.ServiceStartupTimeout.Value);
+            var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                timeoutCancellationTokenSource.Token,
+                cancellationToken);
+
+            startCancellationToken = linkedCancellationTokenSource.Token;
+        }
+        startCancellationToken.Register(() =>
+        {
+            // TODO: Need to change implementation for safer shutdown process
+            Context.Shutdown();
+        });
+
+        var services = Context.HostedServices;
+
+        if (options.StartServicesConcurrently)
+        {
+            var tasks = new List<Task>();
+
+            for (int i = 0; i < services.Count; i++)
             {
-                if (stop || cancellationToken.IsCancellationRequested)
+                var service = services[i];
+
+                if (service is IHostLifecycleService lifecycleService)
                 {
-                    foreach (var server in context.Servers)
+                    tasks.Add(Task.Run(async () =>
                     {
-                        stopTask.Add(SafeAsyncWrapper(server.StopAsync(cancellationToken)));
-                    }
-
-                    isStopped = true;
+                        await lifecycleService.StartingAsync(startCancellationToken).ConfigureAwait(false);
+                        await lifecycleService.StartAsync(startCancellationToken).ConfigureAwait(false);
+                        await lifecycleService.StartedAsync(startCancellationToken).ConfigureAwait(false);
+                    }));
                 }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            foreach (var server in context.Servers)
-            {
-                stopTask.Add(SafeAsyncWrapper(server.StopAsync(cancellationToken)));
-            }
-
-            isStopped = true;
-        }
-    }
-
-    // This method will be used for the TimerCallback
-    // to monitor server state. Current interval is 5 seconds
-    private void OnCheckInterval(object state)
-    {
-        if (state is HostContext context)
-        {
-            foreach (var server in this.context.Servers)
-            {
-                if (server.State is not null)
+                else
                 {
-                    StateCallback.Invoke(server.State);
+                    tasks.Add(service.StartAsync(startCancellationToken));
+                }
+            }
+
+            await Task.WhenAll(tasks);
+        }
+        else
+        {
+            for (int i = 0; i < services.Count; i++)
+            {
+                var service = services[i];
+
+                if (service is IHostLifecycleService lifecycleService)
+                {
+                    await lifecycleService.StartingAsync(startCancellationToken).ConfigureAwait(false);
+                    await lifecycleService.StartAsync(startCancellationToken).ConfigureAwait(false);
+                    await lifecycleService.StartedAsync(startCancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await service.StartAsync(startCancellationToken).ConfigureAwait(false);
                 }
             }
         }
     }
-
-    private async ValueTask SafeAsyncWrapper(ValueTask task)
+    private async Task StopAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            await task; 
-        }
-        catch
-        {
+        var shutdownCancellationToken = cancellationToken;
 
+        if (options.ServiceShutdownTimeout is not null)
+        {
+            var timeoutCancellationTokenSource = new CancellationTokenSource(options.ServiceShutdownTimeout.Value);
+            var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                timeoutCancellationTokenSource.Token,
+                cancellationToken);
+
+            shutdownCancellationToken = linkedCancellationTokenSource.Token;
+        }
+
+        var services = Context.HostedServices;
+
+        for (int i = 0; i < services.Count; i++)
+        {
+            var service = services[i];
+
+            if (service is IHostLifecycleService lifecycleService)
+            {
+                await lifecycleService.StoppingAsync(shutdownCancellationToken).ConfigureAwait(false);
+                await lifecycleService.StopAsync(shutdownCancellationToken).ConfigureAwait(false);
+                await lifecycleService.StoppedAsync(shutdownCancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await service.StopAsync(shutdownCancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
     public void Dispose()
     {
-        DisposeAsync().GetAwaiter().GetResult();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        stop = true;
-
-        while (isStopped == false)
-        {
-
-        }
-
-        var tasks = new List<Task>()
-        {
-            timer.DisposeAsync().AsTask()
-        };
-
-        foreach (var stop in startTask)
-        {
-            tasks.Add(stop.AsTask());
-        }
-
-        await Task.WhenAll(tasks);
+        
     }
 }

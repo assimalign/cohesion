@@ -838,4 +838,3 @@ public readonly partial struct HttpHeaderValue :
         }
     }
 }
-

@@ -205,16 +205,96 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         }
     }
 
-
-
-
-
     public HttpHeaderValue? Accepts => GetHeaderValue(HttpHeader.Accept);
     public HttpHeaderValue? ContentType => GetHeaderValue(HttpHeader.ContentType);
     public HttpHeaderValue? ContentLength => GetHeaderValue(HttpHeader.ContentLength);
     public HttpHeaderValue? TransferEncoding => GetHeaderValue(HttpHeader.TransferEncoding);
     public HttpHeaderValue? Connection => GetHeaderValue(HttpHeader.Connection);
-
+    public HttpHeaderValue? AcceptCharset => GetHeaderValue(HttpHeader.AcceptCharset);
+    public HttpHeaderValue? AcceptEncoding => GetHeaderValue(HttpHeader.AcceptEncoding);
+    public HttpHeaderValue? AcceptLanguage => GetHeaderValue(HttpHeader.AcceptLanguage);
+    public HttpHeaderValue? AcceptRanges => GetHeaderValue(HttpHeader.AcceptRanges);
+    public HttpHeaderValue? AccessControlAllowCredentials => GetHeaderValue(HttpHeader.AccessControlAllowCredentials);
+    public HttpHeaderValue? AccessControlAllowHeaders => GetHeaderValue(HttpHeader.AccessControlAllowHeaders);
+    public HttpHeaderValue? AccessControlAllowMethods => GetHeaderValue(HttpHeader.AccessControlAllowMethods);
+    public HttpHeaderValue? AccessControlAllowOrigin => GetHeaderValue(HttpHeader.AccessControlAllowOrigin);
+    public HttpHeaderValue? AccessControlExposeHeaders => GetHeaderValue(HttpHeader.AccessControlExposeHeaders);
+    public HttpHeaderValue? AccessControlMaxAge => GetHeaderValue(HttpHeader.AccessControlMaxAge);
+    public HttpHeaderValue? AccessControlRequestHeaders => GetHeaderValue(HttpHeader.AccessControlRequestHeaders);
+    public HttpHeaderValue? AccessControlRequestMethod => throw new NotImplementedException();
+    public HttpHeaderValue? Age => throw new NotImplementedException();
+    public HttpHeaderValue? Allow => throw new NotImplementedException();
+    public HttpHeaderValue? AltSvc => throw new NotImplementedException();
+    public HttpHeaderValue? Authorization => throw new NotImplementedException();
+    public HttpHeaderValue? Baggage => throw new NotImplementedException();
+    public HttpHeaderValue? CacheControl => throw new NotImplementedException();
+    public HttpHeaderValue? ContentDisposition => throw new NotImplementedException();
+    public HttpHeaderValue? ContentEncoding => throw new NotImplementedException();
+    public HttpHeaderValue? ContentLanguage => throw new NotImplementedException();
+    public HttpHeaderValue? ContentLocation => throw new NotImplementedException();
+    public HttpHeaderValue? ContentMD5 => throw new NotImplementedException();
+    public HttpHeaderValue? ContentRange => throw new NotImplementedException();
+    public HttpHeaderValue? ContentSecurityPolicy => throw new NotImplementedException();
+    public HttpHeaderValue? ContentSecurityPolicyReportOnly => throw new NotImplementedException();
+    public HttpHeaderValue? CorrelationContext => throw new NotImplementedException();
+    public HttpHeaderValue? Cookie => throw new NotImplementedException();
+    public HttpHeaderValue? Date => throw new NotImplementedException();
+    public HttpHeaderValue? ETag => throw new NotImplementedException();
+    public HttpHeaderValue? Expires => throw new NotImplementedException();
+    public HttpHeaderValue? Expect => throw new NotImplementedException();
+    public HttpHeaderValue? From => throw new NotImplementedException();
+    public HttpHeaderValue? GrpcAcceptEncoding => throw new NotImplementedException();
+    public HttpHeaderValue? GrpcEncoding => throw new NotImplementedException();
+    public HttpHeaderValue? GrpcMessage => throw new NotImplementedException();
+    public HttpHeaderValue? GrpcStatus => throw new NotImplementedException();
+    public HttpHeaderValue? GrpcTimeout => throw new NotImplementedException();
+    public HttpHeaderValue? Host => throw new NotImplementedException();
+    public HttpHeaderValue? KeepAlive => throw new NotImplementedException();
+    public HttpHeaderValue? IfMatch => throw new NotImplementedException();
+    public HttpHeaderValue? IfModifiedSince => throw new NotImplementedException();
+    public HttpHeaderValue? IfNoneMatch => throw new NotImplementedException();
+    public HttpHeaderValue? IfRange => throw new NotImplementedException();
+    public HttpHeaderValue? IfUnmodifiedSince => throw new NotImplementedException();
+    public HttpHeaderValue? LastModified => throw new NotImplementedException();
+    public HttpHeaderValue? Link => throw new NotImplementedException();
+    public HttpHeaderValue? Location => throw new NotImplementedException();
+    public HttpHeaderValue? MaxForwards => throw new NotImplementedException();
+    public HttpHeaderValue? Origin => throw new NotImplementedException();
+    public HttpHeaderValue? Pragma => throw new NotImplementedException();
+    public HttpHeaderValue? ProxyAuthenticate => throw new NotImplementedException();
+    public HttpHeaderValue? ProxyAuthorization => throw new NotImplementedException();
+    public HttpHeaderValue? ProxyConnection => throw new NotImplementedException();
+    public HttpHeaderValue? Range => throw new NotImplementedException();
+    public HttpHeaderValue? Referer => throw new NotImplementedException();
+    public HttpHeaderValue? RetryAfter => throw new NotImplementedException();
+    public HttpHeaderValue? RequestId => throw new NotImplementedException();
+    public HttpHeaderValue? SecWebSocketAccept => throw new NotImplementedException();
+    public HttpHeaderValue? SecWebSocketKey => throw new NotImplementedException();
+    public HttpHeaderValue? SecWebSocketProtocol => throw new NotImplementedException();
+    public HttpHeaderValue? SecWebSocketVersion => throw new NotImplementedException();
+    public HttpHeaderValue? SecWebSocketExtensions => throw new NotImplementedException();
+    public HttpHeaderValue? Server => throw new NotImplementedException();
+    public HttpHeaderValue? SetCookie => throw new NotImplementedException();
+    public HttpHeaderValue? StrictTransportSecurity => throw new NotImplementedException();
+    public HttpHeaderValue? TE => throw new NotImplementedException();
+    public HttpHeaderValue? Trailer => throw new NotImplementedException();
+    public HttpHeaderValue? Translate => throw new NotImplementedException();
+    public HttpHeaderValue? TraceParent => throw new NotImplementedException();
+    public HttpHeaderValue? TraceState => throw new NotImplementedException();
+    public HttpHeaderValue? Upgrade => throw new NotImplementedException();
+    public HttpHeaderValue? UpgradeInsecureRequests => throw new NotImplementedException();
+    public HttpHeaderValue? UserAgent => throw new NotImplementedException();
+    public HttpHeaderValue? Vary => throw new NotImplementedException();
+    public HttpHeaderValue? Via => throw new NotImplementedException();
+    public HttpHeaderValue? Warning => throw new NotImplementedException();
+    public HttpHeaderValue? WebSocketSubProtocols => throw new NotImplementedException();
+    public HttpHeaderValue? WWWAuthenticate => throw new NotImplementedException();
+    public HttpHeaderValue? XContentTypeOptions => throw new NotImplementedException();
+    public HttpHeaderValue? XFrameOptions => throw new NotImplementedException();
+    public HttpHeaderValue? XPoweredBy => throw new NotImplementedException();
+    public HttpHeaderValue? XRequestedWith => throw new NotImplementedException();
+    public HttpHeaderValue? XUACompatible => throw new NotImplementedException();
+    public HttpHeaderValue? XXSSProtection => throw new NotImplementedException();
 
     private HttpHeaderValue? GetHeaderValue(string key)
     {

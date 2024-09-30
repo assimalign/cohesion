@@ -27,8 +27,6 @@ public readonly struct HttpMethod
         return $"Method: {Value}";
     }
 
-
-
     /// <summary>
     /// HTTP "CONNECT" method.
     /// </summary>

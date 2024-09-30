@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration.Providers</RootNamespace>
+		<Description>Extension methods for configuring file-based configuration providers for Assimalign.Extensions.Configuration.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\File\src\Assimalign.Cohesion.FileSystem.Physical\Assimalign.Cohesion.FileSystem.Physical.csproj" />
+		<ProjectReference Include="..\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+</Project>

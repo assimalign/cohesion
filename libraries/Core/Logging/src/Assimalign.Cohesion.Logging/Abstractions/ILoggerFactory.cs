@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Net.Logging;
+﻿namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// 

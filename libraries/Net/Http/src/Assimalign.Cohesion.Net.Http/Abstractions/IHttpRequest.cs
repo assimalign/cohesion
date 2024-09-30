@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Net.Http;
 
@@ -24,10 +25,6 @@ public interface IHttpRequest
     /// </summary>
     HttpScheme Scheme { get; }
     /// <summary>
-    /// Gets the User Or Application for this request.
-    /// </summary>
-    IHttpClaimsPrincipal ClaimsPrincipal { get; }
-    /// <summary>
     /// 
     /// </summary>
     IHttpQueryCollection Query { get; }
@@ -47,4 +44,8 @@ public interface IHttpRequest
     /// 
     /// </summary>
     Stream Body { get; }
+    /// <summary>
+    /// Gets the User Or Application for this request.
+    /// </summary>
+    ClaimsPrincipal ClaimsPrincipal { get; }
 }

@@ -4,13 +4,14 @@
 		<RepositoryType>git</RepositoryType>
 		<Copyright>© Assimalign LLC $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
 		<RepositoryUrl>https://github.com/assimalign-cohesion/cohesion</RepositoryUrl>
-		<Nullable>enable</Nullable>
 	</PropertyGroup>
 	<PropertyGroup Condition="$(TargetFramework) == 'net7.0'">
 		<StripSymbols>false</StripSymbols>
+		<Nullable>enable</Nullable>
 	</PropertyGroup>
 	<PropertyGroup Condition="$(TargetFramework) == 'net8.0'">
 		<IsAotCompatible>true</IsAotCompatible>
 		<StripSymbols>false</StripSymbols>
+		<Nullable>enable</Nullable>
 	</PropertyGroup>
 </Project>

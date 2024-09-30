@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting;
 
@@ -10,92 +7,121 @@ using Assimalign.Cohesion.Hosting.Internal;
 
 public sealed class HostBuilder : IHostBuilder
 {
-    private static bool isBuilt;
-    private readonly IList<IHostServer> servers;
+    private bool isBuilt;
+
     private readonly HostOptions options;
-    private HostServerStateCallbackAsync callback;
+    private readonly List<Action<HostContext>> onServiceAdd = new();
+    private readonly List<Action<HostContext>> onServiceProviderAdd = new();
 
-    public HostBuilder()
+    public HostBuilder(HostOptions options)
     {
-        this.servers = new List<IHostServer>();
-        this.options = new();
-        this.callback = async state =>
+        if (options is null)
         {
-            Console.WriteLine("");
-        };
+            ThrowHelper.ThrowArgumentNullException(nameof(options));
+        }
+        this.options = options;
     }
 
     /// <inheritdoc/>
-    public IHostBuilder AddServerStateCallback(HostServerStateCallbackAsync callback)
+    public IHostBuilder AddService(IHostService service)
     {
-        if (callback is null)
+        if (service is null)
         {
-            throw new ArgumentNullException(nameof(callback));
+            ThrowHelper.ThrowArgumentNullException(nameof(service));
         }
-
-        this.callback = callback;
-
+        onServiceAdd.Add(context =>
+        {
+            context.HostedServices.Add(service);
+        });
         return this;
     }
 
     /// <inheritdoc/>
-    public IHostBuilder AddServer(IHostServer server)
-    {
-        if (server is null)
-        {
-            throw new ArgumentNullException(nameof(server));
-        }
-
-        this.servers.Add(server);
-
-        return this;
-    }
-    
-    /// <inheritdoc/>
-    public IHostBuilder AddServer(IHostServerBuilder builder) => AddServer(builder.Build());
-
-    /// <summary>
-    /// Configure options the default IHost.
-    /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
-    public IHostBuilder ConfigureOptions(Action<HostOptions> configure)
+    public IHostBuilder AddService(Func<IHostContext, IHostService> configure)
     {
         if (configure is null)
         {
-            throw new ArgumentNullException(nameof(configure));
+            ThrowHelper.ThrowArgumentNullException(nameof(configure));
         }
+        onServiceAdd.Add(context =>
+        {
+            context.HostedServices.Add(configure.Invoke(context));
+        });
+        return this;
+    }
 
-        configure.Invoke(options);
+    /// <inheritdoc/>
+    public IHostBuilder AddServiceProvider(IServiceProvider serviceProvider)
+    {
+        if (serviceProvider is null)
+        {
+            ThrowHelper.ThrowArgumentNullException(nameof(serviceProvider));
+        }
+        onServiceProviderAdd.Add(context =>
+        {
+            context.ServiceProvider = serviceProvider;
+        });
+        return this;
+    }
 
+    /// <inheritdoc/>
+    public IHostBuilder AddServiceProvider(Func<IHostContext, IServiceProvider> method)
+    {
+        if (method is null)
+        {
+            ThrowHelper.ThrowArgumentNullException(nameof(method));
+        }
+        onServiceProviderAdd.Add(context =>
+        {
+            context.ServiceProvider = method.Invoke(context);
+        });
         return this;
     }
 
     /// <inheritdoc/>
     public IHost Build()
     {
-        if (isBuilt)
+        if (isBuilt == true)
         {
-            throw new InvalidHostBuildException("The host has already been built.");
-        }
-        if (servers.Count <= 0)
-        {
-            throw new InvalidHostBuildException("At least one server must be added to the host before building.");
+            ThrowHelper.ThrowInvalidOperationException("The host has already been built.");
         }
 
-        var host = new Host(new HostContext()
-        {
-            Servers = servers,
-            ServerStateCallback = callback,
-            StateCheckInterval = options.StateCheckInterval,
-            ThrowExceptionOnServerStartFailure = options.StopAllServersOnSingleFailure,
-        });
+        var host = new Host(options);
+
+        OnBuild(host, onServiceProviderAdd);
+        OnBuild(host, onServiceAdd);
 
         isBuilt = true;
 
         return host;
     }
 
-    public static IHostBuilder Create() => new HostBuilder();
+
+    private void OnBuild(Host host, IList<Action<HostContext>> actions)
+    {
+        foreach (var action in actions)
+        {
+            action.Invoke(host.Context);
+        }
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public static IHostBuilder Create() => new HostBuilder(new());
+    /// <summary>
+    /// 
+    /// </summary>
+    public static IHostBuilder Create(Action<HostOptions> configure)
+    {
+        if (configure is null)
+        {
+            ThrowHelper.ThrowArgumentNullException(nameof(configure));
+        }
+        var options = new HostOptions();
+
+        configure.Invoke(options);
+
+        return new HostBuilder(options);
+    }
 }

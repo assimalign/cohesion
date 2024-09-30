@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Net.Http.Server.Internal.Http3
 {
@@ -14,8 +15,6 @@ namespace Assimalign.Cohesion.Net.Http.Server.Internal.Http3
         public HttpMethod Method => throw new NotImplementedException();
 
         public HttpScheme Scheme => HttpScheme.Https;
-
-        public IHttpClaimsPrincipal ClaimsPrincipal => throw new NotImplementedException();
 
         public IHttpQueryCollection Query => throw new NotImplementedException();
 
@@ -28,5 +27,7 @@ namespace Assimalign.Cohesion.Net.Http.Server.Internal.Http3
         public HttpHost Host => throw new NotImplementedException();
 
         public IHttpFormCollection Form => throw new NotImplementedException();
+
+        public ClaimsPrincipal ClaimsPrincipal => throw new NotImplementedException();
     }
 }

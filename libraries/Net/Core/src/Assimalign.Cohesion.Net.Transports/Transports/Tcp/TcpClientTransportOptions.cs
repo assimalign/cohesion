@@ -12,7 +12,7 @@ public sealed class TcpClientTransportOptions
 	/// <summary>
 	/// The endpoint in which the socket should listen on.
 	/// </summary>
-	public EndPoint Endpoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 8081);
+	public EndPoint EndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 8081);
 
 	/// <summary>
 	/// Wait until there is data available to allocate a buffer. Setting this to false 

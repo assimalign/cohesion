@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<ProjectReference Include="..\..\..\Http\src\Assimalign.Cohesion.Net.Http\Assimalign.Cohesion.Net.Http.csproj" />
-		<ProjectReference Include="..\..\..\Srt\src\Assimalign.Cohesion.Net.Srt\Assimalign.Cohesion.Net.Srt.csproj" />
+		<ProjectReference Include="..\..\..\LoadBalancer\src\Assimalign.Cohesion.LoadBalancer\Assimalign.Cohesion.LoadBalancer.csproj" />
 		<ProjectReference Include="..\..\..\Udt\src\Assimalign.Cohesion.Net.Udt\Assimalign.Cohesion.Net.Udt.csproj" />
 		<ProjectReference Include="..\..\..\WebSockets\src\Assimalign.Cohesion.Net.WebSockets\Assimalign.Cohesion.Net.WebSockets.csproj" />
 	</ItemGroup>

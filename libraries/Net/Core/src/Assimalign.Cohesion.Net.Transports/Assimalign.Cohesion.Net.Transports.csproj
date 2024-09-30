@@ -8,7 +8,7 @@
 		<PackageReference Include="System.IO.Pipelines" />
 	</ItemGroup>
 	<ItemGroup>
-		<Compile Include="..\Assimalign.Cohesion.Net\Internal\Utilities\Cacher.cs" Link="Internal\Utilities\Cacher.cs" />
+	  <ProjectReference Include="..\..\..\..\Core\Shared\src\Assimalign.Cohesion.Core\Assimalign.Cohesion.Core.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Update="README.md">

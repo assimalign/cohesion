@@ -1,0 +1,268 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="arm64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Services/Networking/" />
+  <Folder Name="/Services/IoT/Hub/" />
+  <Folder Name="/Services/IoT/" />
+  <Folder Name="/Services/Integration/" />
+  <Folder Name="/Services/" />
+  <Folder Name="/Sdks/src/">
+    <Project Path="sdks\src\Assimalign.Cohesion.Net.Sdk\Assimalign.Cohesion.Net.Sdk.csproj" />
+    <Project Path="sdks\src\Assimalign.Cohesion.Sdk\Assimalign.Cohesion.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/Sdks/" />
+  <Folder Name="/Samples/">
+    <Project Path="samples\MultiServiceApp.ConfigurationStore\MultiServiceApp.ConfigurationStore.csproj" />
+    <Project Path="samples\MultiServiceApp.OGraph\MultiServiceApp.OGraph.csproj" />
+    <Project Path="samples\MultiServiceApp\MultiServiceApp.csproj" />
+  </Folder>
+  <Folder Name="/Root/">
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Build.targets" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/sample/">
+    <Project Path="modules\ograph\sample\Assimalign.ErpCore\Assimalign.ErpCore.csproj" />
+    <Project Path="modules\ograph\sample\Temp\Temp.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Syntax/tests/">
+    <Project Path="modules\ograph\libraries\Syntax\tests\Assimalign.OGraph.Syntax.Tests\Assimalign.OGraph.Syntax.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Syntax/src/">
+    <Project Path="modules\ograph\libraries\Syntax\src\Assimalign.OGraph.Syntax\Assimalign.OGraph.Syntax.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Syntax/" />
+  <Folder Name="/Modules/OGraph/Libraries/Server/tests/">
+    <Project Path="modules\ograph\libraries\Server\tests\Assimalign.OGraph.Server.Tests\Assimalign.OGraph.Server.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Server/src/">
+    <Project Path="modules\ograph\libraries\Server\src\Assimalign.OGraph.Server\Assimalign.OGraph.Server.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Server/" />
+  <Folder Name="/Modules/OGraph/Libraries/Gdm/tests/">
+    <Project Path="modules\ograph\libraries\Gdm\tests\Assimalign.OGraph.Gdm.Tests\Assimalign.OGraph.Gdm.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Gdm/src/">
+    <Project Path="modules\ograph\libraries\Gdm\src\Assimalign.OGraph.Gdm\Assimalign.OGraph.Gdm.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Gdm/" />
+  <Folder Name="/Modules/OGraph/Libraries/Core/tests/" />
+  <Folder Name="/Modules/OGraph/Libraries/Core/src/">
+    <Project Path="modules\ograph\libraries\Core\src\Assimalign.OGraph.Core\Assimalign.OGraph.Core.csproj" />
+    <Project Path="modules\ograph\libraries\Core\src\Assimalign.OGraph\Assimalign.OGraph.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Core/" />
+  <Folder Name="/Modules/OGraph/Libraries/Client/tests/">
+    <Project Path="modules\ograph\libraries\Client\tests\Assimalign.OGraph.Client.Tests\Assimalign.OGraph.Client.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Client/src/">
+    <Project Path="modules\ograph\libraries\Client\src\Assimalign.OGraph.Client\Assimalign.OGraph.Client.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/Libraries/Client/" />
+  <Folder Name="/Modules/OGraph/Libraries/">
+    <Project Path="modules\ograph\libraries\Assimalign.OGraph.Old\Assimalign.OGraph.Old.csproj" />
+    <Project Path="modules\ograph\libraries\Codegen\src\Assimalign.OGraph.Codegen\Assimalign.OGraph.Codegen.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/benchmark/">
+    <Project Path="modules\ograph\benchmark\Assimalign.OGraph.AspNetCore.App\Assimalign.OGraph.AspNetCore.App.csproj" />
+    <Project Path="modules\ograph\benchmark\Assimalign.OGraph.AspNetCore\Assimalign.OGraph.AspNetCore.csproj" />
+  </Folder>
+  <Folder Name="/Modules/OGraph/">
+    <File Path="modules\ograph\Directory.Build.props" />
+  </Folder>
+  <Folder Name="/Modules/" />
+  <Folder Name="/Libraries/Security/Identity/src/">
+    <Project Path="libraries\Security\Identity\src\Assimalign.Cohesion.Identity.Core\Assimalign.Cohesion.Identity.Core.csproj" />
+    <Project Path="libraries\Security\Identity\src\Assimalign.Cohesion.Identity.JsonWebToken\Assimalign.Cohesion.Identity.JsonWebToken.csproj" />
+    <Project Path="libraries\Security\Identity\src\Assimalign.Cohesion.Identity\Assimalign.Cohesion.Identity.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Security/Identity/" />
+  <Folder Name="/Libraries/Security/" />
+  <Folder Name="/Libraries/Net/WebSockets/tests/">
+    <Project Path="libraries\Net\WebSockets\tests\Assimalign.Cohesion.Net.WebSockets.Tests\Assimalign.Cohesion.Net.WebSockets.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/WebSockets/src/">
+    <Project Path="libraries\Net\WebSockets\src\Assimalign.Cohesion.Net.WebSockets\Assimalign.Cohesion.Net.WebSockets.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/WebSockets/" />
+  <Folder Name="/Libraries/Net/Udt/tests/">
+    <Project Path="libraries\Net\Udt\tests\Assimalign.Cohesion.Net.Udt.Tests\Assimalign.PanopticNet.Udt.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Udt/src/">
+    <Project Path="libraries\Net\Udt\src\Assimalign.Cohesion.Net.Udt\Assimalign.Cohesion.Net.Udt.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Udt/" />
+  <Folder Name="/Libraries/Net/Srt/src/">
+    <Project Path="libraries\Net\Srt\src\Assimalign.Cohesion.Net.Srt.Core\Assimalign.Cohesion.Net.Srt.Core.csproj" />
+    <Project Path="libraries\Net\Srt\src\Assimalign.Cohesion.Net.Srt.Transport\Assimalign.Cohesion.Net.Srt.Transport.csproj" />
+    <Project Path="libraries\Net\Srt\src\Assimalign.Cohesion.Net.Srt\Assimalign.Cohesion.Net.Srt.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Srt/" />
+  <Folder Name="/Libraries/Net/LoadBalancer/src/">
+    <Project Path="libraries\Net\LoadBalancer\src\Assimalign.Cohesion.LoadBalancer\Assimalign.Cohesion.LoadBalancer.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/LoadBalancer/" />
+  <Folder Name="/Libraries/Net/Http/tests/">
+    <Project Path="libraries\Net\Http\tests\Assimalign.Cohesion.Net.Http.Tests\Assimalign.Cohesion.Net.Http.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Http/src/">
+    <Project Path="libraries\Net\Http\src\Assimalign.Cohesion.Net.Http.Cors\Assimalign.Cohesion.Net.Http.Cors.csproj" />
+    <Project Path="libraries\Net\Http\src\Assimalign.Cohesion.Net.Http.Identity\Assimalign.Cohesion.Net.Http.Identity.csproj" />
+    <Project Path="libraries\Net\Http\src\Assimalign.Cohesion.Net.Http\Assimalign.Cohesion.Net.Http.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Http/benchmarks/">
+    <Project Path="libraries\Net\Http\benchmarks\Assimalign.Cohesion.Net.Http.Benchmarks\Assimalign.Cohesion.Net.Http.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Http/" />
+  <Folder Name="/Libraries/Net/Core/tests/">
+    <Project Path="libraries\Net\Core\tests\Assimalign.Cohesion.Net.Hosting.Tests\Assimalign.Cohesion.Net.Hosting.Tests.csproj" />
+    <Project Path="libraries\Net\Core\tests\Assimalign.Cohesion.Net.Transport.Tests\Assimalign.Cohesion.Net.Transports.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Core/src/">
+    <Project Path="libraries\Net\Core\src\Assimalign.Cohesion.Net.Core\Assimalign.Cohesion.Net.Core.csproj" />
+    <Project Path="libraries\Net\Core\src\Assimalign.Cohesion.Net.Cryptography\Assimalign.Cohesion.Net.Cryptography.csproj" />
+    <Project Path="libraries\Net\Core\src\Assimalign.Cohesion.Net.Transports\Assimalign.Cohesion.Net.Transports.csproj" />
+    <Project Path="libraries\Net\Core\src\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Net/Core/" />
+  <Folder Name="/Libraries/Net/" />
+  <Folder Name="/Libraries/Monitoring/LogSpace/src/">
+    <Project Path="libraries\Monitoring\LogSpace\src\Assimalign.Cohesion.LogSpace.Telemetry\Assimalign.Cohesion.LogSpace.Telemetry.csproj" />
+    <Project Path="libraries\Monitoring\LogSpace\src\Assimalign.Cohesion.LogSpace\Assimalign.Cohesion.LogSpace.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Monitoring/LogSpace/" />
+  <Folder Name="/Libraries/Monitoring/" />
+  <Folder Name="/Libraries/Integration/SecretStore/src/">
+    <Project Path="libraries\Integration\SecretStore\src\Assimalign.Cohesion.SecretStore\Assimalign.Cohesion.SecretStore.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Integration/SecretStore/" />
+  <Folder Name="/Libraries/Integration/NotificationHub/src/" />
+  <Folder Name="/Libraries/Integration/NotificationHub/" />
+  <Folder Name="/Libraries/Integration/MessageHub/src/">
+    <Project Path="libraries\Integration\MessageHub\src\Assimalign.Cohesion.MessageHub\Assimalign.Cohesion.MessageHub.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Integration/MessageHub/" />
+  <Folder Name="/Libraries/Integration/IoTHub/src/" />
+  <Folder Name="/Libraries/Integration/IoTHub/" />
+  <Folder Name="/Libraries/Integration/EventHub/src/">
+    <Project Path="libraries\Integration\EventHub\src\Assimalign.Cohesion.EventHub\Assimalign.Cohesion.EventHub.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Integration/EventHub/" />
+  <Folder Name="/Libraries/Integration/ConfigurationStore/src/">
+    <Project Path="libraries\Integration\ConfigurationStore\src\Assimalign.Cohesion.ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Integration/ConfigurationStore/" />
+  <Folder Name="/Libraries/Integration/" />
+  <Folder Name="/Libraries/Database/Types/src/">
+    <Project Path="libraries\Database\Types\src\Assimalign.Cohesion.Database.Types\Assimalign.Cohesion.Database.Types.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Types/" />
+  <Folder Name="/Libraries/Database/Storage/tests/">
+    <Project Path="libraries\Database\Storage\tests\Assimalign.Cohesion.Database.Storage.Tests\Assimalign.Cohesion.Database.Storage.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Storage/src/">
+    <Project Path="libraries\Database\Storage\src\Assimalign.Cohesion.Database.Storage\Assimalign.Cohesion.Database.Storage.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Storage/" />
+  <Folder Name="/Libraries/Database/Partitions/src/">
+    <Project Path="libraries\Database\Partitions\src\Assimalign.Cohesion.Database.Partitions\Assimalign.Cohesion.Database.Partitions.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Partitions/" />
+  <Folder Name="/Libraries/Database/Models/Sql/src/">
+    <Project Path="libraries\Database\Sql\src\Assimalign.Cohesion.Database.Sql\Assimalign.Cohesion.Database.Sql.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Models/Sql/" />
+  <Folder Name="/Libraries/Database/Models/KeyValuePair/src/">
+    <Project Path="libraries\Database\KeyValuePair\src\Assimalign.Cohesion.Database.KeyValuePair\Assimalign.Cohesion.Database.KeyValuePair.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Models/KeyValuePair/" />
+  <Folder Name="/Libraries/Database/Models/Graph/src/">
+    <Project Path="libraries\Database\Graph\src\Assimalign.Cohesion.Database.Graph\Assimalign.Cohesion.Database.Graph.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Models/Graph/" />
+  <Folder Name="/Libraries/Database/Models/Documents/src/">
+    <Project Path="libraries\Database\Documents\src\Assimalign.Cohesion.Database.Documents\Assimalign.Cohesion.Database.Documents.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Models/Documents/" />
+  <Folder Name="/Libraries/Database/Models/Blob/src/">
+    <Project Path="libraries\Database\Blob\src\Assimalign.Cohesion.Database.Blob\Assimalign.Cohesion.Database.Blob.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Models/Blob/" />
+  <Folder Name="/Libraries/Database/Models/" />
+  <Folder Name="/Libraries/Database/Language/src/">
+    <Project Path="libraries\Database\Language\src\Assimalign.Cohesion.Database.Language.Gql\Assimalign.Cohesion.Database.Language.Gql.csproj" />
+    <Project Path="libraries\Database\Language\src\Assimalign.Cohesion.Database.Language.Oql\Assimalign.Cohesion.Database.Language.Oql.csproj" />
+    <Project Path="libraries\Database\Language\src\Assimalign.Cohesion.Database.Language.Sql\Assimalign.Cohesion.Database.Language.Sql.csproj" />
+    <Project Path="libraries\Database\Language\src\Assimalign.Cohesion.Database.Language\Assimalign.Cohesion.Database.Language.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Language/" />
+  <Folder Name="/Libraries/Database/Execution/src/">
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.Consistency\Assimalign.Cohesion.Database.Execution.Consistency.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.Operations\Assimalign.Cohesion.Database.Execution.Operations.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.Queue\Assimalign.Cohesion.Database.Execution.Queue.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.Storage.Common\Assimalign.Cohesion.Database.Execution.Storage.Common.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.StorageTests\Assimalign - Backup.Cohesion.Database.Execution.StorageTests.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.StorageTests\Assimalign.Cohesion.Database.Execution.StorageTests.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution.Storage\Assimalign.Cohesion.Database.Execution.Storage.csproj" />
+    <Project Path="libraries\Database\Execution\src\Assimalign.Cohesion.Database.Execution\Assimalign.Cohesion.Database.Execution.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Execution/" />
+  <Folder Name="/Libraries/Database/Documents/src/">
+    <Project Path="libraries\Database\Documents\src\Assimalign.Cohesion.Database.Documents\Assimalign - Backup.Cohesion.Database.Documents.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Documents/" />
+  <Folder Name="/Libraries/Database/Core/" />
+  <Folder Name="/Libraries/Database/Blob/src/">
+    <Project Path="libraries\Database\Blob\src\Assimalign.Cohesion.Database.Blob\Assimalign - Backup.Cohesion.Database.Blob.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Database/Blob/" />
+  <Folder Name="/Libraries/Database/" />
+  <Folder Name="/Libraries/Core/Logging/src/">
+    <Project Path="libraries\Core\Logging\src\Assimalign.Cohesion.Logging\Assimalign.Cohesion.Logging.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Core/Logging/" />
+  <Folder Name="/Libraries/Core/Hosting/tests/">
+    <Project Path="libraries\Core\Hosting\tests\Assimalign.Cohesion.Hosting.Tests\Assimalign.Cohesion.Hosting.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Core/Hosting/src/">
+    <Project Path="libraries\Core\Hosting\src\Assimalign.Cohesion.Hosting\Assimalign.Cohesion.Hosting.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Core/Hosting/" />
+  <Folder Name="/Libraries/Core/Configuration/tests/">
+    <Project Path="libraries\Core\Configuration\tests\Assimalign.Cohesion.Configuration.Tests\Assimalign.Cohesion.Configuration.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Core/Configuration/src/">
+    <Project Path="libraries\Core\Configuration\src\Assimalign.Cohesion.Configuration.Binder\Assimalign.Cohesion.Configuration.Binder.csproj" />
+    <Project Path="libraries\Core\Configuration\src\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/Core/Configuration/" />
+  <Folder Name="/Libraries/Core/" />
+  <Folder Name="/Libraries/App/WebApi/src/">
+    <Project Path="libraries\App\WebApi\src\Assimalign.Cohesion.WebApi\Assimalign.Cohesion.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/App/WebApi/" />
+  <Folder Name="/Libraries/App/OGraph/src/">
+    <Project Path="libraries\App\OGraph\src\Assimalign.Cohesion.OGraph\Assimalign.Cohesion.OGraph.csproj" />
+  </Folder>
+  <Folder Name="/Libraries/App/OGraph/" />
+  <Folder Name="/Libraries/App/Functions/src/" />
+  <Folder Name="/Libraries/App/Functions/" />
+  <Folder Name="/Libraries/App/" />
+  <Folder Name="/Libraries/">
+    <File Path="libraries\Directory.Build.props" />
+    <File Path="libraries\Directory.Build.targets" />
+  </Folder>
+  <Folder Name="/Installers/" />
+  <Folder Name="/Extensions/VisualStudio/">
+    <Project Path="extensions\VisualStudio\src\Assimalign.Cohesion\Assimalign.Cohesion.csproj" Type="Classic C#">
+      <Configuration Solution="*|arm64" Project="*|arm64" />
+      <Configuration Solution="*|x86" Project="*|x86" />
+    </Project>
+  </Folder>
+  <Folder Name="/Extensions/" />
+</Solution>

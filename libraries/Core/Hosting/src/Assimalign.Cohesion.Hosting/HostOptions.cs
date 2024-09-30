@@ -3,17 +3,46 @@
 namespace Assimalign.Cohesion.Hosting;
 
 /// <summary>
-/// The default host options 
+/// The default host options.
 /// </summary>
 public sealed class HostOptions
 {
     /// <summary>
-    /// Specify the timespan interval in which to check each server's state. The default is 5 seconds.
+    /// Specify whether the services should be started concurrently.
     /// </summary>
-    public TimeSpan StateCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
+    public bool StartServicesConcurrently { get; set; }
     /// <summary>
-    /// Gracefully shutdown all servers if one fails to start successfully. The default is 'true'.
+    /// Specify the timeout for each service startup. Default is 0.
     /// </summary>
-    public bool StopAllServersOnSingleFailure { get; set; } = true;
+    public TimeSpan? ServiceStartupTimeout { get; set; }
+    /// <summary>
+    /// 
+    /// </summary>
+    public TimeSpan? ServiceShutdownTimeout { get; set; }
+    /// <summary>
+    /// Sets the environment name of
+    /// </summary>
+    /// <remarks>
+    /// The environment name can be set manually. Otherwise it is set via environment variables within the process.
+    /// </remarks>
+    public string? Environment { get; set; } = AppEnvironment.GetEnvironmentName();
 
+    internal Action<IHostContext> Trace { get; set; } = trace => { };
+    /// <summary>
+    /// Sets a trace handler.
+    /// </summary>
+    /// <param name="action"></param>
+    public void OnTrace(Action<IHostContext> action)
+    {
+        if (action is null)
+        {
+            throw new ArgumentNullException(nameof(action));
+        }
+        Trace = action;
+    }
+
+    public void OnTrace<T>(Action<T, HostTrace> action)
+    {
+
+    }
 }

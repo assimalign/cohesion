@@ -15,11 +15,11 @@ internal sealed class Http1Context : IHttpContext
     public Http1Request Request { get; set; } = new();
     public Http1Response Response { get; set; } = new();
     public Http1Session Session { get; set; } = new();
-    public IServiceProvider? ServiceProvider { get; set; }
+    public IServiceProvider ServiceProvider { get; set; }
 
-    IHttpSession? IHttpContext.Session => this.Session;
-    IHttpRequest? IHttpContext.Request => this.Request;
-    IHttpResponse? IHttpContext.Response => this.Response;
+    IHttpSession IHttpContext.Session => this.Session;
+    IHttpRequest IHttpContext.Request => this.Request;
+    IHttpResponse IHttpContext.Response => this.Response;
 
 
     public ValueTask DisposeAsync()

@@ -1,13 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Remove="Server\Internal\Extensions\HttpStatusCodeExtensions.cs" />
 		<Compile Remove="Server\Internal\Utilities\IntegerDecoder.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\Core\src\Assimalign.Cohesion.Net.Core\Assimalign.Cohesion.Net.Core.csproj" />
+		<ProjectReference Include="..\..\..\Core\src\Assimalign.Cohesion.Net.Transports\Assimalign.Cohesion.Net.Transports.csproj" />
 	</ItemGroup>
 </Project>

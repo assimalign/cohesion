@@ -5,21 +5,18 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Hosting;
 
 /// <summary>
-/// 
+/// A application host.
 /// </summary>
-public interface IHost : IDisposable, IAsyncDisposable
+public interface IHost : IDisposable
 {
     /// <summary>
-    /// A callback function to be used to check the state of the server(s).
+    /// The Host Context.
     /// </summary>
-    /// <remarks>
-    /// If set, the callback should be generic enough to handle multiple server checks.
-    /// </remarks>
-    HostServerStateCallbackAsync StateCallback { get; }
+    IHostContext Context { get; }
     /// <summary>
-    /// Starts all the servers in the host
+    /// Starts all the services in the host
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask RunAsync(CancellationToken cancellationToken = default);
+    Task RunAsync(CancellationToken cancellationToken = default);
 }

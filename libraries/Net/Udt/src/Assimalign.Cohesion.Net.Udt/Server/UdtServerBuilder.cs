@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Net.Udt;
 
-using Assimalign.Cohesion.Net.Hosting;
+using Assimalign.Cohesion.Hosting;
 
-public sealed class UdtServerBuilder : IHostServerBuilder
+public sealed class UdtServerBuilder : IHostServiceBuilder
 {
-    IHostServer IHostServerBuilder.Build()
+    IHostService IHostServiceBuilder.Build()
     {
         return new UdtServer(default);
     }
