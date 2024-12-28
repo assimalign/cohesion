@@ -14,27 +14,27 @@ public interface IConfigurationBuilder
     /// </summary>
     IDictionary<string, object> Properties { get; }
     /// <summary>
-    /// Gets the sources used to obtain configuration values
-    /// </summary>
-    //IEnumerable<IConfigurationSource> Sources { get; }
-    /// <summary>
     /// Adds a new configuration source.
     /// </summary>
     /// <param name="source">The configuration source to add.</param>
     /// <returns>The same <see cref="IConfigurationBuilder"/>.</returns>
-    IConfigurationBuilder Add(IConfigurationSource source);
+    IConfigurationBuilder AddProvider(IConfigurationProvider provider);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="func"></param>
+    /// <returns></returns>
+    IConfigurationBuilder AddProvider(Func<IConfigurationProvider> func);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    IConfigurationBuilder AddProvider(Func<IDictionary<string, object>, IConfigurationProvider> provider);
     /// <summary>
     /// Builds an <see cref="IConfiguration"/> with keys and values from the set of sources registered in
     /// <see cref="Sources"/>.
     /// </summary>
     /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered sources.</returns>
     IConfigurationRoot Build();
-}
-
-
-public interface IConfigurationContext
-{
-    IEnumerable<IConfigurationProvider> Providers { get; }
-
-
 }

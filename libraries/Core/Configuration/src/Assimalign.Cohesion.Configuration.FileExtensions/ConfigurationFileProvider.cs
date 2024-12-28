@@ -5,7 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 
-namespace Assimalign.Extensions.Configuration.Providers;
+namespace Assimalign.Cohesion.Configuration.Providers;
 
 using Assimalign.Cohesion;
 using Assimalign.Cohesion.FileSystem;
@@ -26,10 +26,10 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
 
-        if (Source.ReloadOnChange && Source.FileProvider != null)
+        if (Source.ReloadOnChange && Source.FileSytem != null)
         {
             _changeTokenRegistration = ChangeToken.OnChange(
-                () => Source.FileProvider.Watch(Source.Path),
+                () => Source.FileSytem.Watch(Source.Path),
                 () =>
                 {
                     Thread.Sleep(Source.ReloadDelay);
@@ -52,7 +52,7 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
 
     private void Load(bool reload)
     {
-        var file = Source.FileProvider?.GetFile(Source.Path);
+        var file = Source.FileSytem?.GetFile(Source.Path);
         if (file == null || !file.Exists)
         {
             if (Source.Optional || reload) // Always optional on reload

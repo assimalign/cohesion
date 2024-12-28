@@ -13,7 +13,7 @@ public class ConfigurationSection : IConfigurationSection
 {
     private readonly IConfigurationRoot root;
     private readonly string path;
-    private string key;
+    private stConring key;
 
     /// <summary>
     /// Initializes a new instance.
@@ -39,12 +39,12 @@ public class ConfigurationSection : IConfigurationSection
     /// <summary>
     /// Gets the full path to this section from the <see cref="IConfigurationRoot"/>.
     /// </summary>
-    public string Path => path;
+    public ConfigPath Path => path;
 
     /// <summary>
     /// Gets the key this section occupies in its parent.
     /// </summary>
-    public string Key
+    public ConfigKey Key
     {
         get
         {

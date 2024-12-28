@@ -2,9 +2,11 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Core.Tests;
 
+using IO;
+
 public class SizeTests
 {
-    [Fact]
+    [Fact(DisplayName = "Core (Tests): Success Size Calculation")]
     public void SuccessSizeCalculationTest()
     {
         var size = new Size(253928);

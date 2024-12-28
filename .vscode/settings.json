@@ -1,0 +1,10 @@
+{
+    "vsicons.associations.folders": [
+        {
+            "icon": "docs", "extensions": [".docs"]
+        },
+        {
+            "icon": "tools", "extensions": ["tooling"]
+        }
+    ]
+}

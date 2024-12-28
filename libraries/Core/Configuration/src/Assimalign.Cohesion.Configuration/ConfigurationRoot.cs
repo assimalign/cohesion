@@ -40,10 +40,10 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     /// </summary>
     /// <param name="key">The configuration key.</param>
     /// <returns>The configuration value.</returns>
-    public string this[string key]
+    public string? this[string key]
     {
         get => GetConfiguration(providers, key);
-        set => SetConfiguration(providers, key, value);
+        set => SetConfiguration(providers, key, value!);
     }
 
     /// <summary>
@@ -104,7 +104,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         }
     }
 
-    internal static string GetConfiguration(IList<IConfigurationProvider> providers, string key)
+    internal static string? GetConfiguration(IList<IConfigurationProvider> providers, string key)
     {
         for (int i = providers.Count - 1; i >= 0; i--)
         {

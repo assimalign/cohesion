@@ -19,6 +19,6 @@ public static class FileSystemFileExtensions
             ThrowHelper.ThrowArgumentNullException(nameof(file));
         }
 
-        JsonSerializer.Serialize<T>(file.Stream, value, options);
+        JsonSerializer.Serialize<T>(file.Open(), value, options);
     }
 }

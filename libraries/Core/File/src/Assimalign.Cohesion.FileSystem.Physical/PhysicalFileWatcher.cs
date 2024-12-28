@@ -97,7 +97,7 @@ public class PhysicalFilesWatcher : IDisposable
         PollForChanges = pollForChanges;
         _filters = filters;
 
-        PollingChangeTokens = new ConcurrentDictionary<IPollingChangeToken, IPollingChangeToken>();
+        PollingChangeTokens = new ConcurrentDictionary<IFileSystemChangeToken, IFileSystemChangeToken>();
         _timerFactory = () => NonCapturingTimer.Create(RaiseChangeEvents, state: PollingChangeTokens, dueTime: TimeSpan.Zero, period: DefaultPollingInterval);
     }
 
@@ -131,7 +131,7 @@ public class PhysicalFilesWatcher : IDisposable
         filter = NormalizePath(filter);
 
         // Absolute paths and paths traversing above root not permitted.
-        if (Path.IsPathRooted(filter) || PathUtilities.PathNavigatesAboveRoot(filter))
+        if (System.IO.Path.IsPathRooted(filter) || PathUtilities.PathNavigatesAboveRoot(filter))
         {
             return NullChangeToken.Singleton;
         }

@@ -5,19 +5,23 @@ namespace Assimalign.Cohesion.FileSystem;
 public interface IFileSystemInfo
 {
     /// <summary>
-    /// The name of the file or directory, not including any path.
+    /// The name of the file or directory.
     /// </summary>
     string Name { get; }
     /// <summary>
-    /// The path to the file, including the file name. Return null if the file is not directly accessible.
+    /// The path to the file, including the file name.
     /// </summary>
     Path Path { get; }
     /// <summary>
     /// When the file was last modified.
     /// </summary>
-    DateTimeOffset UpdatedDateTime { get; }
+    DateTimeOffset UpdatedOn { get; }
     /// <summary>
     /// When the file was created.
     /// </summary>
-    DateTimeOffset CreatedDateTime { get; }
+    DateTimeOffset CreatedOn { get; }
+    /// <summary>
+    /// 
+    /// </summary>
+    DateTimeOffset AccessedOn { get; }
 }

@@ -8,33 +8,59 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfigurationProvider
 {
     /// <summary>
-    /// Tries to get a configuration value for the specified key.
+    /// Returns the provider name.
     /// </summary>
-    /// <param name="key">The key.</param>
-    /// <param name="value">The value.</param>
-    /// <returns><c>True</c> if a value for the specified key was found, otherwise <c>false</c>.</returns>
-    bool TryGet(string key, out string value);
+    string Name { get; }
     /// <summary>
-    /// Sets a configuration value for the specified key.
+    /// 
     /// </summary>
-    /// <param name="key">The key.</param>
-    /// <param name="value">The value.</param>
-    void Set(string key, string value);
+    /// <typeparam name="T"></typeparam>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    T Get<T>(ConfigPath path);
     /// <summary>
     /// Get the configuration 
     /// </summary>
-    /// <param name="key"></param>
+    /// <param name="path"></param>
     /// <returns></returns>
-    string Get(string key);
+    object Get(ConfigPath path);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    bool TryGet<T>(ConfigPath path, out T value);
+    /// <summary>
+    /// Tries to get a configuration value for the specified key.
+    /// </summary>
+    /// <param name="path">The key.</param>
+    /// <param name="value">The value.</param>
+    /// <returns><c>True</c> if a value for the specified key was found, otherwise <c>false</c>.</returns>
+    bool TryGet(ConfigPath path, out object value);
+    /// <summary>
+    /// Sets a configuration value for the specified key.
+    /// </summary>
+    /// <param name="path">The key.</param>
+    /// <param name="value">The value.</param>
+    void Set(ConfigPath path, object value);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    bool TrySet(ConfigPath path, object value);
     /// <summary>
     /// Loads configuration values from the source represented by this <see cref="IConfigurationProvider"/>.
     /// </summary>
     void Load();
     /// <summary>
-    /// Returns a change token if this provider supports change tracking, null otherwise.
+    /// 
     /// </summary>
-    /// <returns>The change token.</returns>
-    IChangeToken? GetReloadToken();
+    /// <returns></returns>
+    IEnumerable<IConfigurationEntry> EnumerateEntries();
     /// <summary>
     /// Returns the immediate descendant configuration keys for a given parent path based on this
     /// <see cref="IConfigurationProvider"/>s data and the set of keys returned by all the preceding

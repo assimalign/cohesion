@@ -11,6 +11,32 @@ namespace Assimalign.Cohesion.Configuration;
 /// </summary>
 public static class ConfigurationExtensions
 {
+
+    public static IConfigurationSection GetSection(this IConfiguration configuration, ConfigPath path)
+    {
+        foreach (var entry in configuration)
+        {
+            if (entry is IConfigurationSection section && section.Path == path)
+            {
+                return section;
+            }
+        }
+
+        throw new Exception();
+    }
+    public static IEnumerable<IConfigurationSection> GetChildSections(this IConfiguration configuration)
+    {
+        foreach (var entry in configuration)
+        {
+            if (entry is IConfigurationSection section)
+            {
+                yield return section;
+            }
+        }
+    }
+
+
+
     /// <summary>
     /// Adds a new configuration source.
     /// </summary>

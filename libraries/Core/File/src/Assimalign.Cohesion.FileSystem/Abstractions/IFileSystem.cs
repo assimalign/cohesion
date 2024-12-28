@@ -6,10 +6,10 @@ namespace Assimalign.Cohesion.FileSystem;
 /// <summary>
 /// 
 /// </summary>
-public interface IFileSystem : IEnumerable<IFileSystemInfo>, IAsyncDisposable
+public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
 {
     /// <summary>
-    /// 
+    /// The name of the file system.
     /// </summary>
     string Name { get; }
     /// <summary>
@@ -39,7 +39,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IAsyncDisposable
     /// </summary>
     /// <param name="filter">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
     /// <returns>An <see cref="IChangeToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
-    IChangeToken Watch(string filter);
+    IFileSystemChangeToken Watch(string filter);
     /// <summary>
     /// Enumerates through all the directories in the file system.
     /// </summary>

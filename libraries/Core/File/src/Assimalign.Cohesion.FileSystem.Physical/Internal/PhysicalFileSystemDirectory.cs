@@ -1,14 +1,14 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
-
-namespace Assimalign.Cohesion.FileSystem.Internal;
-
-using Globbing;
-using Internal;
 using System.Diagnostics;
-using System.Linq;
+namespace Assimalign.Cohesion.FileSystem;
+
+
+using Internal;
+using Globbing;
 
 /// <summary>
 /// Represents a directory on a physical filesystem
@@ -80,22 +80,12 @@ internal class PhysicalFileSystemDirectory : IFileSystemDirectory
         }
     }
 
-    public IEnumerable<IFileSystemDirectory> GetDirectories()
-    {
-        throw new NotImplementedException();
-    }
-
     public IFileSystemDirectory GetDirectory(FileName name)
     {
         throw new NotImplementedException();
     }
 
     public bool TryGetDirectory(FileName name, out IFileSystemDirectory? directory)
-    {
-        throw new NotImplementedException();
-    }
-
-    public IEnumerable<IFileSystemInfo> GetFiles()
     {
         throw new NotImplementedException();
     }
@@ -110,19 +100,30 @@ internal class PhysicalFileSystemDirectory : IFileSystemDirectory
         throw new NotImplementedException();
     }
 
+    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    {
+        return this.OfType<IFileSystemDirectory>();
+    }
+    public IEnumerable<IFileSystemFile> GetFiles()
+    {
+        return this.OfType<IFileSystemFile>();
+    }
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
-        return directoryInfo
-            .EnumerateFileSystemInfos()
+        return directoryInfo.EnumerateFileSystemInfos("*", new EnumerationOptions()
+        {
+            IgnoreInaccessible = true,
+            RecurseSubdirectories = true
+        })
             .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
             {
                 FileInfo info => new PhysicalFileSystemFile(info),
-                DirectoryInfo info => new PhysicalFileSystemDirectory(info)
+                DirectoryInfo info => new PhysicalFileSystemDirectory(info),
+                _ => throw new Exception("Invalid object in physical file system.")
 
             }).GetEnumerator();
     }
-
-    IEnumerator IEnumerable.GetEnumerator() => this.GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public bool Exist(Path path)
     {

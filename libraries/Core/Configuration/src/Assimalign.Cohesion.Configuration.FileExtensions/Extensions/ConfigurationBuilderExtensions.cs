@@ -1,10 +1,10 @@
 ﻿using System;
 
-namespace Assimalign.Extensions.Configuration;
+namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Extensions.FileProviders;
-using Assimalign.Extensions.FileProviders.Physical;
-using Assimalign.Extensions.Configuration.Providers;
+using Assimalign.Cohesion.FileProviders;
+using Assimalign.Cohesion.FileProviders.Physical;
+using Assimalign.Cohesion.Configuration.Providers;
 
 public static partial class ConfigurationBuilderExtensions
 {

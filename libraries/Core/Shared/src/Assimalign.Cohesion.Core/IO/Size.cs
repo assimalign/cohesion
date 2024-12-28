@@ -2,6 +2,9 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
+#if NET7_0_OR_GREATER
+using System.Numerics;
+#endif
 
 namespace Assimalign.Cohesion;
 
@@ -11,7 +14,12 @@ using Internal;
 /// Represents the size of data.
 /// </summary>
 [DebuggerDisplay("Length: {Length} | {Gigabytes} GB")]
-public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComparer<Size>
+public readonly struct Size :  IEquatable<Size> ,IComparable<Size> ,IEqualityComparer<Size>
+#if NET7_0_OR_GREATER
+    ,IEqualityOperators<Size, Size, bool>
+    ,IAdditionOperators<Size, Size, Size>
+    ,ISubtractionOperators<Size, Size, Size>
+#endif
 {
     private const long kilobyte = 1000;
     private const long megabyte = kilobyte * 1000;
@@ -19,6 +27,10 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     private const long terabyte = gigabyte * 1000;
     private const long petabyte = terabyte * 1000;
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="length">The length of bytes.</param>
     public Size(long length)
     {
         if (Length < -1)
@@ -27,11 +39,19 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
         }
         Length = length;
     }
+
+    #region Implementation
     /// <summary>
     /// Returns an empty size.
     /// </summary>
     public static Size Empty => new Size(-1);
+    /// <summary>
+    /// The length represented in 
+    /// </summary>
     public long Length { get; }
+    /// <summary>
+    /// The size represented in kilobytes.
+    /// </summary>
     public double Kilobytes
     {
         get
@@ -43,6 +63,9 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
             return ((double)Length) / kilobyte;
         }
     }
+    /// <summary>
+    /// The size represented in megabytes.
+    /// </summary>
     public double Megabytes
     {
         get
@@ -54,6 +77,9 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
             return ((double)Length) / megabyte;
         }
     }
+    /// <summary>
+    /// The size represented in gigabytes.
+    /// </summary>
     public double Gigabytes
     {
         get
@@ -65,6 +91,9 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
             return ((double)Length) / gigabyte;
         }
     }
+    /// <summary>
+    /// The size represented in terabytes.
+    /// </summary>
     public double Terabytes
     {
         get
@@ -76,6 +105,9 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
             return ((double)Length) / terabyte;
         }
     }
+    /// <summary>
+    /// The size represented in petabytes.
+    /// </summary>
     public double Petabytes
     {
         get
@@ -87,11 +119,12 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
             return ((double)Length) / petabyte;
         }
     }
-   
+    #endregion
+
     #region Overloads
 
     /// <inheritdoc />
-    public override bool Equals([NotNullWhen(true)] object? obj)
+    public override bool Equals(object? obj)
     {
         return obj is Size size ? Equals(size) : false;
     }
@@ -148,17 +181,55 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
         };
     }
     #endregion
-    #region Operators
-    public static implicit operator long(Size fileSize) => fileSize.Length;
 
-    public static implicit operator Size(long length) => new Size(length);
-    public static bool operator ==(Size left, Size right) => left.Equals(right);
-    public static bool operator !=(Size left, Size right) => !left.Equals(right);
-    public static bool operator >(Size left, Size right) => left.CompareTo(right) > 0;
-    public static bool operator <(Size left, Size right) => left.CompareTo(right) < 0;
-    public static bool operator >=(Size left, Size right) => left.CompareTo(right) >= 0;
-    public static bool operator <=(Size left, Size right) => left.CompareTo(right) <= 0;
+    #region Operators
+    public static implicit operator long(Size fileSize)
+    {
+        return fileSize.Length;
+    }
+    public static implicit operator Size(long length)
+    {
+        return new Size(length);
+    }
+    public static bool operator ==(Size left, Size right)
+    {
+        return left.Equals(right);
+    }
+    public static bool operator !=(Size left, Size right)
+    {
+        return !left.Equals(right);
+    }
+    public static bool operator >(Size left, Size right)
+    {
+        return left.CompareTo(right) > 0;
+    }
+    public static bool operator <(Size left, Size right)
+    {
+        return left.CompareTo(right) < 0;
+    }
+    public static bool operator >=(Size left, Size right)
+    {
+        return left.CompareTo(right) >= 0;
+    }
+    public static bool operator <=(Size left, Size right)
+    {
+        return left.CompareTo(right) <= 0;
+    }
+    public static Size operator +(Size left, Size right)
+    {
+        return left.Length + right.Length;
+    }
+    public static Size operator -(Size left, Size right)
+    {
+        var value = left.Length - right.Length;
+        if (value < -1)
+        {
+
+        }
+        return value;
+    }
     #endregion
+
     #region Helpers
     public static Size FromKilobytes(double size)
     {

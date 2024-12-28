@@ -1,21 +1,20 @@
 ﻿using System.IO;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
-
-using Assimalign.Cohesion.Primitives;
 
 
 internal static class PathUtilities
 {
-    private static readonly char[] _invalidFileNameChars = Path.GetInvalidFileNameChars()
-        .Where(c => c != Path.DirectorySeparatorChar && c != Path.AltDirectorySeparatorChar).ToArray();
+    private static readonly char[] _invalidFileNameChars = System.IO.Path.GetInvalidFileNameChars()
+        .Where(c => c != System.IO.Path.DirectorySeparatorChar && c != System.IO.Path.AltDirectorySeparatorChar).ToArray();
 
     private static readonly char[] _invalidFilterChars = _invalidFileNameChars
         .Where(c => c != '*' && c != '|' && c != '?').ToArray();
 
     private static readonly char[] _pathSeparators = new[]
-        {Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar};
+        {System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar};
 
     internal static bool HasInvalidPathChars(string path)
     {
@@ -30,9 +29,9 @@ internal static class PathUtilities
     internal static string EnsureTrailingSlash(string path)
     {
         if (!string.IsNullOrEmpty(path) &&
-            path[path.Length - 1] != Path.DirectorySeparatorChar)
+            path[path.Length - 1] != System.IO.Path.DirectorySeparatorChar)
         {
-            return path + Path.DirectorySeparatorChar;
+            return path + System.IO.Path.DirectorySeparatorChar;
         }
 
         return path;
@@ -40,10 +39,9 @@ internal static class PathUtilities
 
     internal static bool PathNavigatesAboveRoot(string path)
     {
-        var tokenizer = new StringTokenizer(path, _pathSeparators);
         int depth = 0;
 
-        foreach (StringSegment segment in tokenizer)
+        foreach (var segment in GetSegments(path))
         {
             if (segment.Equals(".") || segment.Equals(""))
             {
@@ -65,5 +63,24 @@ internal static class PathUtilities
         }
 
         return false;
+    }
+
+    private static IEnumerable<string> GetSegments(string path)
+    {
+        int index = 0;
+
+        for (int i = 0; i < path.Length; i++)
+        {
+            if (_pathSeparators.Contains(path[i]))
+            {
+                yield return path.Substring(index, i - 1);
+
+                index = i + 1;
+            }
+            if ((i + 1) == path.Length)
+            {
+                yield return path.Substring(index, i + 1);
+            }
+        }
     }
 }

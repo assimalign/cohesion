@@ -11,7 +11,6 @@ public interface IConfigurationRoot : IConfiguration
     /// Force the configuration values to be reloaded from the underlying <see cref="IConfigurationProvider"/>s.
     /// </summary>
     void Reload();
-
     /// <summary>
     /// The <see cref="IConfigurationProvider"/>s for this configuration.
     /// </summary>

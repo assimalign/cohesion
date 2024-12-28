@@ -1,12 +1,10 @@
 ﻿using System;
 using System.IO;
 
-namespace Assimalign.Extensions.Configuration.Providers;
+namespace Assimalign.Cohesion.Configuration.Providers;
 
-using Assimalign.Extensions.Configuration;
-using Assimalign.Extensions.FileProviders;
-using Assimalign.Extensions.FileProviders.Physical;
-
+using Assimalign.Cohesion.Configuration;
+using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
 /// Represents a base class for file based <see cref="IConfigurationSource"/>.
@@ -16,12 +14,12 @@ public abstract class ConfigurationFileSource : IConfigurationSource
     /// <summary>
     /// Used to access the contents of the file.
     /// </summary>
-    public IFileProvider FileProvider { get; set; }
+    public IFileSystem FileSytem { get; set; }
 
     /// <summary>
     /// The path to the file.
     /// </summary>
-    public string Path { get; set; }
+    public Path Path { get; set; }
 
     /// <summary>
     /// Determines if loading the file is optional.
@@ -57,7 +55,7 @@ public abstract class ConfigurationFileSource : IConfigurationSource
     /// <param name="builder">The <see cref="IConfigurationBuilder"/>.</param>
     public void EnsureDefaults(IConfigurationBuilder builder)
     {
-        FileProvider = FileProvider ?? builder.GetFileProvider();
+        FileSytem = FileSytem ?? builder.GetFileProvider();
         OnLoadException = OnLoadException ?? builder.GetFileLoadExceptionHandler();
     }
 
@@ -67,7 +65,7 @@ public abstract class ConfigurationFileSource : IConfigurationSource
     /// </summary>
     public void ResolveFileProvider()
     {
-        if (FileProvider == null &&
+        if (FileSytem == null &&
             !string.IsNullOrEmpty(Path) &&
             System.IO.Path.IsPathRooted(Path))
         {
@@ -80,7 +78,7 @@ public abstract class ConfigurationFileSource : IConfigurationSource
             }
             if (Directory.Exists(directory))
             {
-                FileProvider = new PhysicalFileProvider(directory);
+                FileSytem = new PhysicalFileProvider(directory);
                 Path = pathToFile;
             }
         }

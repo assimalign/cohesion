@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Extensions.Configuration.Providers;
+namespace Assimalign.Cohesion.Configuration.Providers;
 
 /// <summary>
 /// Contains information about a file load exception.

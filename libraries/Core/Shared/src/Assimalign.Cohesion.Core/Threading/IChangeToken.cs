@@ -14,6 +14,12 @@ public interface IChangeToken
     /// </summary>
     bool ActiveChangeCallbacks { get; }
     /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="callback"></param>
+    /// <returns></returns>
+    IDisposable OnChange(Action callback);
+    /// <summary>
     /// Registers for a callback that will be invoked when the entry has changed.
     /// <see cref="HasChanged"/> MUST be set before the callback is invoked.
     /// </summary>
