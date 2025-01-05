@@ -8,11 +8,11 @@
         },
         {
             "icon": "github", 
-            "extensions": [".github/workflows"]
+            "extensions": [".github"]
         }
     ],
     "files.associations": {
-        "**/.github/workflows/Core/Assimalign.Cohesion.Core.yml": "github-actions-workflow"
+        "**/.github/workflows/**/*.yml": "github-actions-workflow"
     },
     "dotnet.preferCSharpExtension": true,
     "dotnet.defaultSolution": "Assimalign.Cohesion.sln"

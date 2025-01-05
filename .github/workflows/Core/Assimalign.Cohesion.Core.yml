@@ -1,50 +1,48 @@
-name: assimalign.cohesion.filesystem.ci
+name: assimalign.cohesion.core.ci
+
+env:
+  SERVICE: 'Core'
+  PROJECT: 'Assimalign.Cohesion.Core'
 
 on:
   push:
-    branches:
-    - main
-    - development
-    - users/**
-    - features/**
     paths: 
-    - 'libraries/Core/Assimalign.Cohesion.FileSystem/**'
-    - 'libraries/Directory.Build.props'                                     # When the Global Props File Changes
-    - '.github/workflows/Core/Assimalign.Cohesion.Filesystem.yml'        # When Pipeline File Changes
+      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - 'libraries/${{ SERVICE }}/${{ PROJECT }}/**'
+      - '.github/workflows/${{ SERVICE }}/${{ PROJECT }}.yml'        # When Pipeline File Changes
 
-  
 jobs:
   build:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v2    
     
-    - name: Setup .NET 6
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: '6.x'
+    # - name: Setup .NET 6
+    #   uses: actions/setup-dotnet@v1
+    #   with:
+    #     dotnet-version: '6.x'
 
-    - name: Setup .NET 7
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: '7.x'
-        include-prerelease: true
+    # - name: Setup .NET 7
+    #   uses: actions/setup-dotnet@v1
+    #   with:
+    #     dotnet-version: '7.x'
+    #     include-prerelease: true
     
     - name: Restore Project
       run: dotnet restore 
-      working-directory: './libraries/Core/Assimalign.Cohesion.FileSystem'
+      working-directory: './libraries/${{ SERVICE }}/${{ PROJECT }}'
     
     - name: Build Project
       run: dotnet build --configuration Release --no-restore
-      working-directory: './libraries/Core/Assimalign.Cohesion.FileSystem'
+      working-directory: './libraries/${{ SERVICE }}/${{ PROJECT }}'
 
     - name: Restore Unit Tests Project
       run: dotnet restore 
-      working-directory: './libraries/Core/Assimalign.Cohesion.FileSystem/tests'
+      working-directory: './libraries/${{ SERVICE }}/${{ PROJECT }}/tests'
 
     - name: Run Unit Tests
       run: dotnet test --no-restore --verbosity normal
-      working-directory: './libraries/Core/Assimalign.Cohesion.FileSystem/tests'
+      working-directory: './libraries/${{ SERVICE }}/${{ PROJECT }}/tests'
     
     # - name: Publish Nuget Package
     #   if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
