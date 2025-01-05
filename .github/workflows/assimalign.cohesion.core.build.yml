@@ -1,17 +1,18 @@
-name: cohesion.core.ci
+name: assimalign.cohesion.core.build
 
 on:
   push:
     paths: 
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'libraries/Core/**'
-      - '.github/workflows/cohesion-core-build.yml'        # When Pipeline File Changes
+      - '.github/workflows/assimalign.cohesion.core.build.yml'        # When Pipeline File Changes
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             # 'Assimalign.Cohesion.App',
             # 'Assimalign.Cohesion.Caching',
@@ -46,12 +47,17 @@ jobs:
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
     steps:
-    - uses: actions/checkout@v2  
+    - uses: actions/checkout@v2
+      name: 'Checkout: ${{ matrix.projects }}'
 
-    - name: Restore Project
+    - name: '.NET Restore: ${{ matrix.projects }}'
       run: dotnet restore 
       working-directory: './libraries/Core/${{ matrix.projects }}'
     
-    - name: Build Project
+    - name: '.NET Build: ${{ matrix.projects }}'
       run: dotnet build --configuration Release --no-restore
       working-directory:  './libraries/Core/${{ matrix.projects }}'
+
+    - name: '.NET Unit Tests: ${{ matrix.projects }}'
+      run: dotnet test --no-restore --verbosity normal
+      working-directory: './libraries/Core/${{ matrix.projects }}/tests'

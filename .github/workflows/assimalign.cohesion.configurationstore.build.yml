@@ -1,0 +1,33 @@
+name: assimalign.cohesion.configurationstore.build
+
+on:
+  push:
+    paths: 
+      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - 'libraries/ConfigurationStore/**'
+      - '.github/workflows/assimalign.cohesion.configurationstore.build.yml'        # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.ConfigurationStore'
+        ]
+    steps:
+    - uses: actions/checkout@v2
+      name: 'Checkout: ${{ matrix.projects }}'
+
+    - name: '.NET Restore: ${{ matrix.projects }}'
+      run: dotnet restore 
+      working-directory: './libraries/ConfigurationStore/${{ matrix.projects }}'
+    
+    - name: '.NET Build: ${{ matrix.projects }}'
+      run: dotnet build --configuration Release --no-restore
+      working-directory:  './libraries/ConfigurationStore/${{ matrix.projects }}'
+
+    - name: '.NET Unit Tests: ${{ matrix.projects }}'
+      run: dotnet test --no-restore --verbosity normal
+      working-directory: './libraries/ConfigurationStore/${{ matrix.projects }}/tests'
