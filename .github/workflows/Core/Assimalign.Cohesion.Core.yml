@@ -11,6 +11,7 @@ on:
       - 'libraries/${{ SERVICE }}/${{ PROJECT }}/**'
       - '.github/workflows/${{ SERVICE }}/${{ PROJECT }}.yml'        # When Pipeline File Changes
 
+    
 jobs:
   build:
     runs-on: windows-latest
