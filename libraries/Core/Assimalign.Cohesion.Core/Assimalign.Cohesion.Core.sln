@@ -17,7 +17,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", 
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{EDB9E5E0-25F5-4F91-8C4F-851C4088D98E}"
 	ProjectSection(SolutionItems) = preProject
-		..\..\..\.github\workflows\Assimalign.Cohesion.Core.yml = ..\..\..\.github\workflows\Assimalign.Cohesion.Core.yml
+		..\..\..\.github\workflows\Core\Assimalign.Cohesion.Core.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.Core.yml
 	EndProjectSection
 EndProject
 Global
