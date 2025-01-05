@@ -6,6 +6,10 @@ env:
 
 on:
   push:
+    branches:
+      - main
+      - development/**
+      - users/**
     paths: 
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'libraries/${{ SERVICE }}/${{ PROJECT }}/**'
