@@ -1,0 +1,5 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.Logging\src\Assimalign.Cohesion.Logging.csproj" />
+	</ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
+	</ItemGroup>
+</Project>

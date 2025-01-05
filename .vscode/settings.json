@@ -5,6 +5,15 @@
         },
         {
             "icon": "tools", "extensions": ["tooling"]
+        },
+        {
+            "icon": "github", 
+            "extensions": [".github/workflows"]
         }
-    ]
+    ],
+    "files.associations": {
+        "**/.github/workflows/Core/Assimalign.Cohesion.Core.yml": "github-actions-workflow"
+    },
+    "dotnet.preferCSharpExtension": true,
+    "dotnet.defaultSolution": "Assimalign.Cohesion.sln"
 }

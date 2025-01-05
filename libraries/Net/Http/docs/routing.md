@@ -1,9 +1,0 @@
-
-
-
-
-
-# Routing Segments
-
-- Literal Segments:
-- 

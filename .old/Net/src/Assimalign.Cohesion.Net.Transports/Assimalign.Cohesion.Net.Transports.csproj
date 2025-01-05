@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>A collection of generic network transports for creating client and server implementations.</Description>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="System.IO.Pipelines" />
+	</ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\Assimalign.Cohesion.Net\Assimalign.Cohesion.Net.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Update="README.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+</Project>

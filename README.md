@@ -12,10 +12,35 @@ The following l
 | Folder         | Usage                                                                 |
 | -------------- | --------------------------------------------------------------------- |
 | `./build`      | This contains all the scripts and process for packaging the SDK which |
-| `./docs`       |                                                                       |
+| `./.docs`      |                                                                       |
 | `./extensions` |                                                                       |
 | `./libraries`  | All the source code for cohesion lives in the following folder.       |
 | `./modules`    |                                                                       |
 | `./samples`    |                                                                       |
 | `./sdk`        | This contains source code for MSBuild SDK Style Project.              |
 | `./tooling`    |                                                                       |
+
+
+
+### SDK Breakdown
+
+
+|     | Category    | Sub Layer 1 | Sub Layer 2 | Assembly                        | Plaine |     |     |
+| --- | ----------- | ----------- | ----------- | ------------------------------- | ------ | --- | --- |
+|     | Networking  | DNS         |             |                                 |        |     |     |
+|     |             | HTTP        |             | Assimalign.Cohesion.Http        |        |     |     |
+|     |             | WebSockets  |             |                                 |        |     |     |
+|     | Security    | Identity    |             | Assimalign.Cohesion.Identity    |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     | Database    |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     | Integration | ConfigStore |             | Assimalign.Cohesion.ConfigStore |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     |             |             |             |                                 |        |     |     |
+|     | Application | OGraph      |             |                                 |        |     |     |
+|     |             | WebApi      |             |                                 |        |     |     |
