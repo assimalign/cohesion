@@ -13,8 +13,8 @@ on:
       - users/**
     paths: 
       - '**/Directory.Build.props'                        # When the Global Props File Changes
-      - 'libraries/${{ SERVICE }}/${{ PROJECT }}/**'
-      - '.github/workflows/${{ SERVICE }}/${{ PROJECT }}.yml'        # When Pipeline File Changes
+      - 'libraries/Core/Assimalign.Cohesion.Core/**'
+      - '.github/workflows/Assimalign.Cohesion.Core.yml'        # When Pipeline File Changes
 
 jobs:
   build:
