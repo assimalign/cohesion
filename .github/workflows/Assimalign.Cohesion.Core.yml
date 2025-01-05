@@ -15,7 +15,6 @@ on:
       - 'libraries/Core/Assimalign.Cohesion.Core/**'
       - '.github/workflows/Assimalign.Cohesion.Core.yml'        # When Pipeline File Changes
 
-    
 jobs:
   build:
     runs-on: windows-latest
