@@ -1,5 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-	<ItemGroup>
-		<ProjectReference Include="..\Assimalign.Cohesion.Hosting\Assimalign.Cohesion.Hosting.csproj" />
-	</ItemGroup>
-</Project>

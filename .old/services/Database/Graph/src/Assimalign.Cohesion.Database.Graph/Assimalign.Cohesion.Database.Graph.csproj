@@ -1,7 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-	<ItemGroup>
-		<ProjectReference Include="..\..\..\Storage\src\Assimalign.Cohesion.Database.Storage\Assimalign.Cohesion.Database.Storage.csproj" />
-	</ItemGroup>
-
-</Project>

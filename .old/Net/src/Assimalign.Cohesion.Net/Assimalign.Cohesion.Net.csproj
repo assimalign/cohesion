@@ -1,5 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\Base\src\Assimalign.Cohesion.Core\Assimalign.Cohesion.Core.csproj" />
-  </ItemGroup>
-</Project>

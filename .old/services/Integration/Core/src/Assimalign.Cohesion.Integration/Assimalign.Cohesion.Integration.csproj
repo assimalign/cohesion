@@ -1,9 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<ItemGroup>
-		<ProjectReference Include="..\..\..\ConfigurationStore\src\Assimalign.Cohesion.ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.csproj" />
-		<ProjectReference Include="..\..\..\EventHub\src\Assimalign.Cohesion.EventHub\Assimalign.Cohesion.EventHub.csproj" />
-		<ProjectReference Include="..\..\..\IoTHub\src\Assimalign.Cohesion.IoTHub\Assimalign.Cohesion.IoTHub.csproj" />
-		<ProjectReference Include="..\..\..\MessageHub\src\Assimalign.Cohesion.MessageHub\Assimalign.Cohesion.MessageHub.csproj" />
-		<ProjectReference Include="..\..\..\NotificationHub\src\Assimalign.Cohesion.NotificationHub\Assimalign.Cohesion.NotificationHub.csproj" />
-	</ItemGroup>
-</Project>

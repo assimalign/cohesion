@@ -1,5 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <ProjectReference Include="..\Assimalign.Cohesion.FileSystem.Globbing\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
-  </ItemGroup>
-</Project>

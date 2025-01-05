@@ -1,0 +1,57 @@
+name: cohesion.core.ci
+
+on:
+  push:
+    paths: 
+      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - 'libraries/Core/**'
+      - '.github/workflows/cohesion-core-build.yml'        # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        projects: [
+            # 'Assimalign.Cohesion.App',
+            # 'Assimalign.Cohesion.Caching',
+            # 'Assimalign.Cohesion.Configuration',
+            # 'Assimalign.Cohesion.Configuration.Binder',
+            # 'Assimalign.Cohesion.Configuration.CommandLine',
+            # 'Assimalign.Cohesion.Configuration.EnvironmentVariables',
+            # 'Assimalign.Cohesion.Configuration.FileExtensions',
+            # 'Assimalign.Cohesion.Configuration.Ini',
+            # 'Assimalign.Cohesion.Configuration.Json',
+            # 'Assimalign.Cohesion.Configuration.Xml',
+            'Assimalign.Cohesion.Core',
+            # 'Assimalign.Cohesion.DependencyInjection',
+            # 'Assimalign.Cohesion.Diagnostics',
+            'Assimalign.Cohesion.FileSystem',
+            # 'Assimalign.Cohesion.FileSystem.Composite',
+            # 'Assimalign.Cohesion.FileSystem.Globbing',
+            # 'Assimalign.Cohesion.FileSystem.InMemory',
+            # 'Assimalign.Cohesion.FileSystem.Physical',
+            # 'Assimalign.Cohesion.Hosting',
+            # 'Assimalign.Cohesion.Hosting.BackgroundService',
+            # 'Assimalign.Cohesion.Hosting.ServiceManagement',
+            # 'Assimalign.Cohesion.Logging',
+            # 'Assimalign.Cohesion.Logging.Console',
+            # 'Assimalign.Cohesion.Net',
+            # 'Assimalign.Cohesion.Net.Http',
+            # 'Assimalign.Cohesion.Net.Http.ClientFactory',
+            # 'Assimalign.Cohesion.Net.Transports',
+            # 'Assimalign.Cohesion.ObjectMapping',
+            # 'Assimalign.Cohesion.ObjectPool',
+            # 'Assimalign.Cohesion.ObjectValidation',
+            # 'Assimalign.Cohesion.Security.Cryptography'
+        ]
+    steps:
+    - uses: actions/checkout@v2  
+
+    - name: Restore Project
+      run: dotnet restore 
+      working-directory: './libraries/Core/${{ matrix.projects }}'
+    
+    - name: Build Project
+      run: dotnet build --configuration Release --no-restore
+      working-directory:  './libraries/Core/${{ matrix.projects }}'
