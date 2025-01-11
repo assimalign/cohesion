@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
@@ -30,7 +31,7 @@ public interface IReadOnlyFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    bool Exist(Path path);
+    bool Exist(FileSystemPath path);
     /// <summary>
     /// Creates a <see cref="IChangeToken"/> for the specified <paramref name="filter"/>.
     /// </summary>
@@ -52,11 +53,11 @@ public interface IReadOnlyFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    IFileSystemDirectory GetDirectory(Path path);
+    IFileSystemDirectory GetDirectory(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    IFileSystemFile GetFile(Path path);
+    IFileSystemFile GetFile(FileSystemPath path);
 }

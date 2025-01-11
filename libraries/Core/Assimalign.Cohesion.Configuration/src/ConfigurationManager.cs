@@ -45,14 +45,14 @@ public sealed class ConfigurationManager : IConfigurationBuilder, IConfiguration
         {
             lock (providerLock)
             {
-                return ConfigurationRoot.GetConfiguration(providers, key);
+                return ConfigurationRootOld.GetConfiguration(providers, key);
             }
         }
         set
         {
             lock (providerLock)
             {
-                ConfigurationRoot.SetConfiguration(providers, key, value);
+                ConfigurationRootOld.SetConfiguration(providers, key, value);
             }
         }
     }

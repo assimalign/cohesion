@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
@@ -11,7 +12,7 @@ public interface IFileSystemInfo
     /// <summary>
     /// The path to the file, including the file name.
     /// </summary>
-    Path Path { get; }
+    FileSystemPath Path { get; }
     /// <summary>
     /// When the file was last modified.
     /// </summary>
@@ -21,7 +22,7 @@ public interface IFileSystemInfo
     /// </summary>
     DateTimeOffset CreatedOn { get; }
     /// <summary>
-    /// The last time the info was accesed.
+    /// The last time the info was accessed.
     /// </summary>
     DateTimeOffset AccessedOn { get; }
 }

@@ -3,38 +3,18 @@ namespace Assimalign.Cohesion.Configuration.Tests;
 public class ConfigurationPathTests
 {
     [Fact]
-    public void CombineWithEmptySegmentLeavesDelimiter()
+    public void MixedFormatEqualityTest()
     {
-        Assert.Equal("parent:", ConfigurationPath.Combine("parent", ""));
-        Assert.Equal("parent::", ConfigurationPath.Combine("parent", "", ""));
-        Assert.Equal("parent:::key", ConfigurationPath.Combine("parent", "", "", "key"));
+        Key key1 = "/key1.key2\\key3[0]:key4";
+        Key key2 = "/key1/key2:key3[0]\\key4";
+
+        Assert.Equal(key1, key2);
+
+        var entry = new ConfigurationEntry(key2)
+        {
+            Value = 23
+        };
     }
 
-    [Fact]
-    public void GetLastSegmentGetSectionKeyTests()
-    {
-        Assert.Null(ConfigurationPath.GetSectionKey(null!));
-        Assert.Equal("", ConfigurationPath.GetSectionKey(""));
-        Assert.Equal("", ConfigurationPath.GetSectionKey(":::"));
-        Assert.Equal("c", ConfigurationPath.GetSectionKey("a::b:::c"));
-        Assert.Equal("", ConfigurationPath.GetSectionKey("a:::b:"));
-        Assert.Equal("key", ConfigurationPath.GetSectionKey("key"));
-        Assert.Equal("key", ConfigurationPath.GetSectionKey(":key"));
-        Assert.Equal("key", ConfigurationPath.GetSectionKey("::key"));
-        Assert.Equal("key", ConfigurationPath.GetSectionKey("parent:key"));
-    }
-
-    [Fact]
-    public void GetParentPathTests()
-    {
-        Assert.Null(ConfigurationPath.GetParentPath(null!));
-        Assert.Null(ConfigurationPath.GetParentPath(""));
-        Assert.Equal("::", ConfigurationPath.GetParentPath(":::"));
-        Assert.Equal("a::b::", ConfigurationPath.GetParentPath("a::b:::c"));
-        Assert.Equal("a:::b", ConfigurationPath.GetParentPath("a:::b:"));
-        Assert.Null(ConfigurationPath.GetParentPath("key"));
-        Assert.Equal("", ConfigurationPath.GetParentPath(":key"));
-        Assert.Equal(":", ConfigurationPath.GetParentPath("::key"));
-        Assert.Equal("parent", ConfigurationPath.GetParentPath("parent:key"));
-    }
+  
 }

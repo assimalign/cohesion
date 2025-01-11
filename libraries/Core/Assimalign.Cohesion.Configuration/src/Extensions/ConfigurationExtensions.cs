@@ -11,8 +11,49 @@ namespace Assimalign.Cohesion.Configuration;
 /// </summary>
 public static class ConfigurationExtensions
 {
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    public static bool TrySet(this IConfiguration configuration, ConfigurationPath path, object value)
+    {
+        throw new NotImplementedException();
+    }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    public static T Get<T>(this IConfiguration configuration, ConfigurationPath path)
+    {
+        throw new NotImplementedException();
+    }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    public static bool TryGet<T>(this IConfiguration configuration, ConfigurationPath path, out T value)
+    {
+        throw new NotImplementedException();
+    }
+    /// <summary>
+    /// Tries to get a configuration value for the specified key.
+    /// </summary>
+    /// <param name="path">The key.</param>
+    /// <param name="value">The value.</param>
+    /// <returns><c>True</c> if a value for the specified key was found, otherwise <c>false</c>.</returns>
+    public static bool TryGet(this IConfiguration configuration, ConfigurationPath path, out object value)
+    {
+        throw new NotImplementedException();
+    }
 
-    public static IConfigurationSection GetSection(this IConfiguration configuration, ConfigPath path)
+    public static IConfigurationSection GetSection(this IConfiguration configuration, ConfigurationPath path)
     {
         foreach (var entry in configuration)
         {

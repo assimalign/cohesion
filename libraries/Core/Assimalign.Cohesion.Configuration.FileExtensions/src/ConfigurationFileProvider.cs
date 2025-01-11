@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Configuration.Providers;
 using Assimalign.Cohesion;
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.FileSystem.Globbing;
+using Assimalign.Cohesion.System.IO;
 
 /// <summary>
 /// Base class for file based <see cref="ConfigurationProvider"/>.

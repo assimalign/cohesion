@@ -23,14 +23,14 @@ internal class PhysicalFileSystemFile : IFileSystemFile
         this.fileInfo = fileInfo;
     }
 
-    public PhysicalFileSystemFile(Path path)
+    public PhysicalFileSystemFile(FileSystemPath path)
     {
         this.fileInfo = new FileInfo(path);
     }
 
     public string Name => fileInfo.Name;
-    public Path Path => fileInfo.FullName;
     public Size Size => fileInfo.Length;
+    public FileSystemPath Path => fileInfo.FullName;
     public DateTimeOffset UpdatedOn => fileInfo.LastWriteTimeUtc;
     public DateTimeOffset CreatedOn => fileInfo.CreationTimeUtc;
     public DateTimeOffset AccessedOn => fileInfo.LastAccessTimeUtc;

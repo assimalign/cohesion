@@ -5,6 +5,7 @@ namespace Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.FileProviders;
 using Assimalign.Cohesion.FileProviders.Physical;
 using Assimalign.Cohesion.Configuration.Providers;
+using Assimalign.Cohesion.FileSystem;
 
 public static partial class ConfigurationBuilderExtensions
 {
@@ -106,4 +107,10 @@ public static partial class ConfigurationBuilderExtensions
         return null;
     }
     #endregion
+
+
+    public static IConfigurationBuilder AddConfigurationFile(this IConfigurationBuilder builder, Func<IFileSystem>)
+    {
+
+    }
 }

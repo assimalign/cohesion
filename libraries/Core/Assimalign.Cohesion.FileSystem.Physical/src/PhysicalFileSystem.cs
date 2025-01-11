@@ -11,8 +11,9 @@ namespace Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
 
+
 [DebuggerDisplay("{Name} - Size: {Size} | Used: {SpaceUsed}")]
-public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
+public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
 {
     private static readonly char[] separators =
     [
@@ -33,7 +34,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
     public Size Space => driveInfo.TotalFreeSpace;
     public Size SpaceUsed => (driveInfo.TotalSize - driveInfo.TotalFreeSpace);
     public IFileSystemDirectory RootDirectory => new PhysicalFileSystemDirectory(driveInfo.RootDirectory);
-    public bool Exist(Path path)
+    public bool Exist(FileSystemPath path)
     {
         var fullPath = GetFullPath(path);
 
@@ -47,7 +48,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
         return false;
 #endif
     }
-    public IFileSystemDirectory CreateDirectory(Path path)
+    public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
         CheckIfReadOnly();
 
@@ -64,7 +65,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             throw;
         }
     }
-    public IFileSystemFile CreateFile(Path path)
+    public IFileSystemFile CreateFile(FileSystemPath path)
     {
         CheckIfReadOnly();
 
@@ -83,7 +84,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             throw;
         }
     }
-    public void DeleteDirectory(Path path)
+    public void DeleteDirectory(FileSystemPath path)
     {
         CheckIfReadOnly();
 
@@ -100,7 +101,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             throw;
         }
     }
-    public void DeleteFile(Path path)
+    public void DeleteFile(FileSystemPath path)
     {
         CheckIfReadOnly();
 
@@ -117,26 +118,26 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             throw;
         }
     }
-    public IFileSystemDirectory GetDirectory(Path path)
+    public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
         CheckFileOrDirectoryExist(path);
 
         return new PhysicalFileSystemDirectory(path);
     }
-    public IFileSystemFile GetFile(Path path)
+    public IFileSystemFile GetFile(FileSystemPath path)
     {
         CheckFileOrDirectoryExist(path);
 
         throw new NotImplementedException();
     }
-    public void CopyFile(Path source, Path destination)
+    public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
         CheckIfReadOnly();
         CheckFileOrDirectoryExist(source);
 
         File.Copy(source, destination);
     }
-    public void Move(Path source, Path destination)
+    public void Move(FileSystemPath source, FileSystemPath destination)
     {
         CheckIfReadOnly();
 
@@ -185,7 +186,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
         return driveInfo.RootDirectory.EnumerateFileSystemInfos("*", new EnumerationOptions()
         {
             IgnoreInaccessible = true,
-            RecurseSubdirectories = true
+            RecurseSubdirectories = true,
         })
             .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
             {
@@ -202,9 +203,9 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
         throw new NotImplementedException();
     }
 
-    private Path GetFullPath(Path path)
+    private FileSystemPath GetFullPath(FileSystemPath path)
     {
-        return System.IO.Path.GetFullPath(path, driveInfo.Name);
+        return Path.GetFullPath(path, driveInfo.Name);
     }
     private void CheckIfReadOnly()
     {
@@ -213,7 +214,7 @@ public sealed class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             ThrowHelper.ThrowFileSystemIsReadOnly();
         }
     }
-    private void CheckFileOrDirectoryExist(Path path)
+    private void CheckFileOrDirectoryExist(FileSystemPath path)
     {
         if (!Exist(path))
         {

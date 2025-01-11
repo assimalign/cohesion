@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// Stream based configuration provider
 /// </summary>
-public abstract class StreamConfigurationProvider : ConfigurationProvider
+public abstract class StreamConfigurationProvider : ConfigurationProviderOld
 {
     private bool isLoaded;
 

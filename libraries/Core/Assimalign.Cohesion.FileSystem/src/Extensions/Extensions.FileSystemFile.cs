@@ -12,13 +12,13 @@ using Assimalign.Cohesion.Internal;
 
 public static class FileSystemFileExtensions
 {
-    public static void WriteObjectAsJson<T>(this IFileSystemFile file, T value, JsonSerializerOptions? options = null)
-    {
-        if (file is null)
-        {
-            ThrowHelper.ThrowArgumentNullException(nameof(file));
-        }
+    //public static void WriteObjectAsJson<T>(this IFileSystemFile file, T value, JsonSerializerOptions? options = null)
+    //{
+    //    if (file is null)
+    //    {
+    //        ThrowHelper.ThrowArgumentNullException(nameof(file));
+    //    }
 
-        JsonSerializer.Serialize<T>(file.Open(), value, options);
-    }
+    //    JsonSerializer.Serialize<T>(file.Open(), value, options);
+    //}
 }

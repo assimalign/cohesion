@@ -39,19 +39,19 @@ public class ConfigurationSection : IConfigurationSection
     /// <summary>
     /// Gets the full path to this section from the <see cref="IConfigurationRoot"/>.
     /// </summary>
-    public ConfigPath Path => path;
+    public ConfigurationPath Path => path;
 
     /// <summary>
     /// Gets the key this section occupies in its parent.
     /// </summary>
-    public ConfigKey Key
+    public ConfigurationKey Key
     {
         get
         {
             if (key == null)
             {
                 // Key is calculated lazily as last portion of Path
-                key = ConfigurationPath.GetSectionKey(path);
+                key = ConfigurationPathHelper.GetSectionKey(path);
             }
             return key;
         }
@@ -81,12 +81,12 @@ public class ConfigurationSection : IConfigurationSection
     {
         get
         {
-            return root[ConfigurationPath.Combine(Path, key)];
+            return root[ConfigurationPathHelper.Combine(Path, key)];
         }
 
         set
         {
-            root[ConfigurationPath.Combine(Path, key)] = value;
+            root[ConfigurationPathHelper.Combine(Path, key)] = value;
         }
     }
 
@@ -99,7 +99,7 @@ public class ConfigurationSection : IConfigurationSection
     ///     This method will never return <c>null</c>. If no matching sub-section is found with the specified key,
     ///     an empty <see cref="IConfigurationSection"/> will be returned.
     /// </remarks>
-    public IConfigurationSection GetSection(string key) => root.GetSection(ConfigurationPath.Combine(Path, key));
+    public IConfigurationSection GetSection(string key) => root.GetSection(ConfigurationPathHelper.Combine(Path, key));
 
     /// <summary>
     /// Gets the immediate descendant configuration sub-sections.

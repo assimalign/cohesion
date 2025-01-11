@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// In-memory implementation of <see cref="Assimalign.Cohesion.Configuration.IConfigurationProvider"/>
 /// </summary>
-public class MemoryConfigurationProvider : ConfigurationProvider, IEnumerable<KeyValuePair<string, string>>
+public class MemoryConfigurationProvider : ConfigurationProviderOld, IEnumerable<KeyValuePair<string, string>>
 {
     private readonly MemoryConfigurationSource _source;
 

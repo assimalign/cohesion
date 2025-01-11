@@ -3,12 +3,80 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json.Benchmarks", "benchmarks\Assimalign.Cohesion.Configuration.Json.Benchmarks.csproj", "{A773504F-93AE-46FC-975E-0DF7847A57A4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json", "src\Assimalign.Cohesion.Configuration.Json.csproj", "{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json.Tests", "tests\Assimalign.Cohesion.Configuration.Json.Tests.csproj", "{1752DB49-7788-4C89-AC1B-FED677A9CE53}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{22F81928-620C-4A7D-BB71-BF26CEFB2E4D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{21D68019-5858-4443-B279-6818E5794C17}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{F63F3450-3B43-40C7-9AFB-F882DC007444}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{9132CEFB-9E74-4657-A52F-FDBDD3D93D74}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{3394277F-1FF7-401C-A58B-A704D63B9E6C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.FileExtensions", "..\Assimalign.Cohesion.Configuration.FileExtensions\src\Assimalign.Cohesion.Configuration.FileExtensions.csproj", "{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Physical", "..\Assimalign.Cohesion.FileSystem.Physical\src\Assimalign.Cohesion.FileSystem.Physical.csproj", "{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration", "..\Assimalign.Cohesion.Configuration\src\Assimalign.Cohesion.Configuration.csproj", "{C65CE178-4FB5-48BD-85B3-3F3FABD43621}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem", "..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj", "{80D3EDC0-EC88-42F2-83AD-E907A537506C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A773504F-93AE-46FC-975E-0DF7847A57A4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A773504F-93AE-46FC-975E-0DF7847A57A4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A773504F-93AE-46FC-975E-0DF7847A57A4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A773504F-93AE-46FC-975E-0DF7847A57A4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1752DB49-7788-4C89-AC1B-FED677A9CE53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1752DB49-7788-4C89-AC1B-FED677A9CE53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1752DB49-7788-4C89-AC1B-FED677A9CE53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1752DB49-7788-4C89-AC1B-FED677A9CE53}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3394277F-1FF7-401C-A58B-A704D63B9E6C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3394277F-1FF7-401C-A58B-A704D63B9E6C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3394277F-1FF7-401C-A58B-A704D63B9E6C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3394277F-1FF7-401C-A58B-A704D63B9E6C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C65CE178-4FB5-48BD-85B3-3F3FABD43621}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C65CE178-4FB5-48BD-85B3-3F3FABD43621}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C65CE178-4FB5-48BD-85B3-3F3FABD43621}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C65CE178-4FB5-48BD-85B3-3F3FABD43621}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80D3EDC0-EC88-42F2-83AD-E907A537506C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80D3EDC0-EC88-42F2-83AD-E907A537506C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80D3EDC0-EC88-42F2-83AD-E907A537506C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80D3EDC0-EC88-42F2-83AD-E907A537506C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A773504F-93AE-46FC-975E-0DF7847A57A4} = {F63F3450-3B43-40C7-9AFB-F882DC007444}
+		{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B} = {22F81928-620C-4A7D-BB71-BF26CEFB2E4D}
+		{1752DB49-7788-4C89-AC1B-FED677A9CE53} = {21D68019-5858-4443-B279-6818E5794C17}
+		{3394277F-1FF7-401C-A58B-A704D63B9E6C} = {9132CEFB-9E74-4657-A52F-FDBDD3D93D74}
+		{2F2B74CA-4106-43B4-A8E8-DB9D4290FA47} = {9132CEFB-9E74-4657-A52F-FDBDD3D93D74}
+		{DEB6FCEF-FA62-441C-BA19-DC33CBA6E434} = {9132CEFB-9E74-4657-A52F-FDBDD3D93D74}
+		{C65CE178-4FB5-48BD-85B3-3F3FABD43621} = {9132CEFB-9E74-4657-A52F-FDBDD3D93D74}
+		{80D3EDC0-EC88-42F2-83AD-E907A537506C} = {9132CEFB-9E74-4657-A52F-FDBDD3D93D74}
 	EndGlobalSection
 EndGlobal

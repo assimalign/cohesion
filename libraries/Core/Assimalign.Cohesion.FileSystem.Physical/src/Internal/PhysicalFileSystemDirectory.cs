@@ -8,7 +8,7 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Assimalign.Cohesion;
+using Assimalign.Cohesion.System.IO;
 using Internal;
 
 /// <summary>

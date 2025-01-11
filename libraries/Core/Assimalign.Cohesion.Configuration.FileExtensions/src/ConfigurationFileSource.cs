@@ -5,6 +5,7 @@ namespace Assimalign.Cohesion.Configuration.Providers;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.FileSystem;
+using Assimalign.Cohesion.System.IO;
 
 /// <summary>
 /// Represents a base class for file based <see cref="IConfigurationSource"/>.

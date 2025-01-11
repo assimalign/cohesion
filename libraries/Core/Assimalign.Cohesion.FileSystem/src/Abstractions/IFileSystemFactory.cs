@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Assimalign.Cohesion.FileSystem;
+﻿namespace Assimalign.Cohesion.FileSystem;
 
 /// <summary>
 /// A file system factory that creates named file systems.

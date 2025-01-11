@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 
-namespace Assimalign.Cohesion;
+namespace Assimalign.Cohesion.Utilities;
 
 public static class Cacher<TIn, TOut>
     where TIn : notnull

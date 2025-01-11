@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -6,7 +7,7 @@ namespace Assimalign.Cohesion.FileSystem;
 /// <summary>
 /// 
 /// </summary>
-public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
+public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// The name of the file system.
@@ -33,7 +34,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    bool Exist(Path path);
+    bool Exist(FileSystemPath path);
     /// <summary>
     /// Creates a <see cref="IChangeToken"/> for the specified <paramref name="filter"/>.
     /// </summary>
@@ -51,49 +52,49 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
     /// <returns></returns>
     IEnumerable<IFileSystemFile> GetFiles();
     /// <summary>
-    /// 
+    /// Returns the directory at the given path.
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="path">The path of the directory.</param>
     /// <returns></returns>
-    IFileSystemDirectory GetDirectory(Path path);
+    IFileSystemDirectory GetDirectory(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    IFileSystemFile GetFile(Path path);
+    IFileSystemFile GetFile(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    IFileSystemDirectory CreateDirectory(Path path);
+    IFileSystemDirectory CreateDirectory(FileSystemPath path);
     /// <summary>
     ///
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    IFileSystemFile CreateFile(Path path);
+    IFileSystemFile CreateFile(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
-    void DeleteDirectory(Path path);
+    void DeleteDirectory(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
-    void DeleteFile(Path path);
+    void DeleteFile(FileSystemPath path);
     /// <summary>
     /// 
     /// </summary>
     /// <param name="source"></param>
     /// <param name="destination"></param>
-    void CopyFile(Path source, Path destination);
+    void CopyFile(FileSystemPath source, FileSystemPath destination);
     /// <summary>
     /// Moves a directory or file the the provided destination.
     /// </summary>
     /// <param name="source"></param>
     /// <param name="destination"></param>
-    void Move(Path source, Path destination);
+    void Move(FileSystemPath source, FileSystemPath destination);
 }

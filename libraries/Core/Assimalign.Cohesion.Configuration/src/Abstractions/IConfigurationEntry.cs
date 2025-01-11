@@ -6,15 +6,15 @@
 public interface IConfigurationEntry
 {
     /// <summary>
-    /// Gets the key this section occupies in its parent.
+    /// Get the inner most child key.
     /// </summary>
-    ConfigKey Key { get; }
+    Key Key { get; }
     /// <summary>
-    /// The full path of the given <see cref="IConfigurationEntry" />
+    /// Returns the entire unique key.
     /// </summary>
-    ConfigPath Path { get; }
+    Key Path { get; }
     /// <summary>
     /// The raw configuration value.
     /// </summary>
-    object Value { get; set; }
+    object? Value { get; set; }
 }

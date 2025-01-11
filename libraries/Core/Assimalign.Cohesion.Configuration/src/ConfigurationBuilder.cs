@@ -1,44 +1,41 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
+
+using Assimalign.Cohesion.Internal;
+using Assimalign.Cohesion.Configuration.Internal;
 
 /// <summary>
 /// Used to build key/value based configuration settings for use in an application.
 /// </summary>
 public class ConfigurationBuilder : IConfigurationBuilder
 {
-    private readonly IList<IConfigurationSource> sources;
+    private readonly IList<Action<IConfigurationContext>> onAdd;
 
     public ConfigurationBuilder()
     {
-        this.sources = new List<IConfigurationSource>();
+        this.onAdd = new List<Action<IConfigurationContext>>();
     }
 
-    /// <summary>
-    /// Returns the sources used to obtain configuration values.
-    /// </summary>
-    public IEnumerable<IConfigurationSource> Sources => this.sources;
-
-    /// <summary>
-    /// Gets a key/value collection that can be used to share data between the <see cref="IConfigurationBuilder"/>
-    /// and the registered <see cref="IConfigurationProvider"/>s.
-    /// </summary>
-    public IDictionary<string, object> Properties { get; } = new Dictionary<string, object>();
-
-    /// <summary>
-    /// Adds a new configuration source.
-    /// </summary>
-    /// <param name="source">The configuration source to add.</param>
-    /// <returns>The same <see cref="IConfigurationBuilder"/>.</returns>
-    public IConfigurationBuilder Add(IConfigurationSource source)
+    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> func)
     {
-        if (source == null)
+        if (func is null)
         {
-            throw new ArgumentNullException(nameof(source));
+            ThrowHelper.ThrowArgumentNullException(nameof(func));
         }
+        onAdd.Add(context =>
+        {
+            var provider = func.Invoke(context);
 
-        sources.Add(source);
+            if (context.Providers.Any(p => p.Name == provider.Name))
+            {
+                ThrowHelper.ThrowInvalidOperationException($"The configuration provider: '{provider.Name}' has already been added.");
+            }
+
+            ((ConfigurationContext)context).Add(provider);
+        });
         return this;
     }
 
@@ -49,12 +46,13 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered providers.</returns>
     public IConfigurationRoot Build()
     {
-        var providers = new List<IConfigurationProvider>();
-        foreach (IConfigurationSource source in Sources)
+        var context = new ConfigurationContext();
+
+        foreach (var action in onAdd)
         {
-            IConfigurationProvider provider = source.Build(this);
-            providers.Add(provider);
+            action.Invoke(context);
         }
-        return new ConfigurationRoot(providers);
+
+        return new ConfigurationRoot(context.Providers);
     }
 }

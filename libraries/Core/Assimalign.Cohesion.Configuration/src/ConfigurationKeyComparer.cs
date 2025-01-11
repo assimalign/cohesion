@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// </summary>
 public class ConfigurationKeyComparer : IComparer<string>
 {
-    private static readonly string[] _keyDelimiterArray = new[] { ConfigurationPath.KeyDelimiter };
+    private static readonly string[] _keyDelimiterArray = new[] { ConfigurationPathHelper.KeyDelimiter };
 
     /// <summary>
     /// The default instance.

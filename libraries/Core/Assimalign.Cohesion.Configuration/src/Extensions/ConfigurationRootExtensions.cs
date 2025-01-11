@@ -24,7 +24,7 @@ public static class ConfigurationRootExtensions
             .Aggregate(Enumerable.Empty<string>(),
                 (seed, source) => source.GetChildKeys(seed, path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(key => root.GetSection(path == null ? key : ConfigurationPath.Combine(path, key)));
+            .Select(key => root.GetSection(path == null ? key : ConfigurationPathHelper.Combine(path, key)));
     }
 
     /// <summary>

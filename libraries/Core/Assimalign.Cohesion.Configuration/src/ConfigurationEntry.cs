@@ -8,13 +8,11 @@ namespace Assimalign.Cohesion.Configuration;
 
 public class ConfigurationEntry : IConfigurationEntry
 {
-    public ConfigurationEntry()
+    public ConfigurationEntry(Key key)
     {
+        Path = key;
     }
-
-
-    public required ConfigKey Key { get; init; }
-    public ConfigPath Path => throw new NotImplementedException();
-
-    public object Value { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public Key Key => Path.GetInnerMostSegment();
+    public Key Path { get; }
+    public object? Value { get; set; }
 }
