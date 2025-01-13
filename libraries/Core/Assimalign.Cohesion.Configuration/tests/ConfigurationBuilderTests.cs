@@ -12,9 +12,9 @@ public class ConfigurationBuilderTests
     {
         var builder = default(IConfigurationBuilder)!;
 
-        builder.AddProvider(context =>
-        {
-            context.
-        });
+        //builder.AddProvider(context =>
+        //{
+        //    context.
+        //});
     }
 }

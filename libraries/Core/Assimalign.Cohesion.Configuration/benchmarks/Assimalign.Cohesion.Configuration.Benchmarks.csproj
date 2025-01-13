@@ -1,4 +1,14 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\src\Assimalign.Cohesion.Configuration.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="BenchmarkDotNet" />
+	</ItemGroup>
 </Project>

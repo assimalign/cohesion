@@ -12,7 +12,7 @@ public class ConfigurationEntry : IConfigurationEntry
     {
         Path = key;
     }
-    public Key Key => Path.GetInnerMostSegment();
+    public Key Key { get; }
     public Key Path { get; }
     public object? Value { get; set; }
 }

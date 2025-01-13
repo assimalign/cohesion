@@ -2,6 +2,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 #if NET7_0_OR_GREATER
 using System.Numerics;
 #endif
@@ -13,6 +15,7 @@ using Assimalign.Cohesion.Internal;
 /// <summary>
 /// Represents the size of data.
 /// </summary>
+//[JsonConverter(typeof(SizeJsonConverter))]
 [DebuggerDisplay("Length: {Gigabytes}")]
 public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComparer<Size>
 #if NET7_0_OR_GREATER
@@ -49,30 +52,34 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     /// </summary>
     public long Length { get; }
 
-    // Decimal Prefix
+    /* Decimal Prefix */
 
     /// <summary>
     /// The size represented in kilobytes.
     /// </summary>
     public double Kilobytes => Calculate(1000, 1);
+
     /// <summary>
     /// The size represented in megabytes.
     /// </summary>
     public double Megabytes => Calculate(1000, 2);
+
     /// <summary>
     /// The size represented in gigabytes.
     /// </summary>
     public double Gigabytes => Calculate(1000, 3);
+
     /// <summary>
     /// The size represented in terabytes.
     /// </summary>
     public double Terabytes => Calculate(1000, 4);
+
     /// <summary>
     /// The size represented in petabytes.
     /// </summary>
     public double Petabytes => Calculate(1000, 5);
 
-    // Binary Prefix
+    /* Binary Prefix */
 
     /// <summary>
     /// The size represented in kibibytes.
@@ -135,7 +142,7 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     }
     public int GetHashCode([DisallowNull] Size obj)
     {
-        return obj.GetHashCode();
+        return Length.GetHashCode();
     }
     public int CompareTo(Size other)
     {
@@ -213,10 +220,12 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     public static Size operator -(Size left, Size right)
     {
         var value = left.Length - right.Length;
+        
         if (value < -1)
         {
-
+            ThrowHelper.ThrowInvalidOperationException("The calculated must exceed -1.");
         }
+
         return value;
     }
     #endregion

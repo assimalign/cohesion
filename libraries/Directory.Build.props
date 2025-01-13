@@ -1,17 +1,29 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
 	<PropertyGroup>
-		<TargetFrameworks>$(TargetFrameworksForLibraries)</TargetFrameworks>
+	<!-- 
+		All projects should follow the same directory pattern
+
+		/ Service 
+			/ Library
+				/src
+				/test
+				/benchmarks
+	 -->
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('\src'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('\tests'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('\benchmarks'))">$(TargetFrameworksForBenchmark)</TargetFrameworks>
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>
 	</PropertyGroup>
+
 	<!-- AOT Info-->
 	<PropertyGroup Condition="$(TargetFramework) == 'net8.0' or $(TargetFramework) == 'net9.0'">
 		<IsAotCompatible>true</IsAotCompatible>
 		<StripSymbols>false</StripSymbols>
 	</PropertyGroup>
 
-	<!-- Include README in package if exists -->
+	<!-- Include README in package, if exists -->
 	<PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\README.md')">
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>

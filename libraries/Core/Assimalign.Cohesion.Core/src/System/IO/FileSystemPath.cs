@@ -12,7 +12,6 @@ using System.Numerics;
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
-using System.Runtime.CompilerServices;
 
 
 /// <summary>
