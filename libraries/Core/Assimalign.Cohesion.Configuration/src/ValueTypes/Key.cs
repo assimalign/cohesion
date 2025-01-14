@@ -1,28 +1,48 @@
 ﻿using System;
 using System.Linq;
 using System.Diagnostics;
-using System.Collections;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
-using System.Threading;
+using System.Collections;
+using System.Collections.Generic;
 
-/*
-    - Slash Format: 			"/key1/"
-	- Backward Slash Format:	"\\key1\\key2[index]\\key3"
-	- Namespace Format:			"key1.key2[index].key3
-	- Colon Format:				"key1:key2[index]:key3"
-	- Mixed Format:				"/key1.key2\\key3[index]:key4"
-    - Colon Format (labels):    "key1$label1:key2$label2[index]:key3$label3"
- */
 /// <summary>
-/// The configuration <see cref="Key"/> is a representation of a composite key within a key-value pair.
+/// The configuration <see cref="Key"/> is a representation of a composite key within a key-value pair. 
+/// <para>Format Examples:</para>
+/// <list type="bullet">
+/// <item>
+///     <term>Slash Format</term>
+///     <description>"/key1/"</description>
+/// </item>
+/// <item>
+///     <term>Backward Slash Format</term>
+///     <description>"\\key1\\key2[index]\\key3"</description>
+/// </item>
+/// <item>
+///     <term>Namespace Format</term>
+///     <description>"key1.key2[index].key3</description>
+/// </item>
+/// <item>
+///     <term>Colon Format</term>
+///     <description>"key1:key2[index]:key3"</description>
+/// </item>
+/// <item>
+///     <term>Mixed Format</term>
+///     <description>"/key1.key2\\key3[index]:key4"</description>
+/// </item>
+/// <item>
+///     <term>Colon Format (labels)</term>
+///     <description>"key1$label1:key2$label2[index]:key3$label3"</description>
+/// </item>
+/// </list>
 /// </summary>
 [DebuggerDisplay("{ToString()}")]
-public readonly struct Key : IEquatable<Key>
+[JsonConverter(typeof(KeyJsonConverter))]
+public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
 {
     /// <summary>
     /// 
@@ -115,7 +135,7 @@ public readonly struct Key : IEquatable<Key>
     /// </summary>
     /// <param name="other"></param>
     /// <returns></returns>
-    public Key Concat(Key other)
+    public Key Combine(Key other)
     {
         return Combine(this, other);
     }
@@ -223,7 +243,7 @@ public readonly struct Key : IEquatable<Key>
     /// <returns></returns>
     public override string ToString()
     {
-        return string.Join(DefaultDelimiter, [.. Segments]);
+        return string.Join(DefaultDelimiter, Segments);
     }
 
     public override int GetHashCode()
@@ -302,7 +322,7 @@ public readonly struct Key : IEquatable<Key>
 
         int start = 0;
         int count = 0;
-        KeySegment[] segments = new KeySegment[5]; 
+        KeySegment[] segments = new KeySegment[5];
 
         while (start < span.Length)
         {
@@ -317,7 +337,7 @@ public readonly struct Key : IEquatable<Key>
             }
 
             ReadOnlySpan<char> segment = span.Slice(start, segmentEnd);
-            
+
             start += segmentEnd + 1; // Move start past the current segment
 
             // Parse the segment
@@ -332,6 +352,16 @@ public readonly struct Key : IEquatable<Key>
         }
 
         return new Key(segments);
+    }
+
+    public IEnumerator<KeySegment> GetEnumerator()
+    {
+        return (IEnumerator<KeySegment>)Segments.GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
     }
 
     #endregion
@@ -380,7 +410,7 @@ public readonly struct Key : IEquatable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator ==(Key? left, Key right) =>  left.HasValue && left.Equals(right);
+    public static bool operator ==(Key? left, Key right) => left.HasValue && left.Equals(right);
 
     /// <summary>
     /// 
@@ -388,7 +418,7 @@ public readonly struct Key : IEquatable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator !=(Key? left, Key right) =>  left.HasValue && !left.Equals(right);
+    public static bool operator !=(Key? left, Key right) => left.HasValue && !left.Equals(right);
 
     /// <summary>
     /// 
@@ -396,7 +426,7 @@ public readonly struct Key : IEquatable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator ==(Key left, Key? right) =>  right.HasValue && left.Equals(right);
+    public static bool operator ==(Key left, Key? right) => right.HasValue && left.Equals(right);
 
     public static bool operator !=(Key left, Key? right)
     {
@@ -411,6 +441,32 @@ public readonly struct Key : IEquatable<Key>
     //    return right.HasValue && !left.Equals(right);
     //}
     #endregion
+
+
+    partial class KeyJsonConverter : JsonConverter<Key>
+    {
+        public override Key Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String)
+            {
+                throw new JsonException("Key expected a string token type.");
+            }
+
+            var str = reader.GetString();
+
+            if (str is null || str == string.Empty)
+            {
+                return Key.Empty;
+            }
+
+            return Key.Parse(str);
+        }
+
+        public override void Write(Utf8JsonWriter writer, Key value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value);
+        }
+    }
 }
 
 

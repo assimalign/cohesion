@@ -1,18 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace Assimalign.Cohesion.Configuration;
 
-namespace Assimalign.Cohesion.Configuration;
-
-public class ConfigurationEntry : IConfigurationEntry
+public record class ConfigurationEntry : IConfigurationEntry
 {
-    public ConfigurationEntry(Key key)
+    public ConfigurationEntry(Key key, object? value)
     {
-        Path = key;
+        Key = key;
+        Value = value;
     }
     public Key Key { get; }
-    public Key Path { get; }
-    public object? Value { get; set; }
+    public object? Value { get; }
 }

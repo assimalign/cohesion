@@ -7,6 +7,8 @@ using System.Collections;
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 
 public class ConfigurationRootOld : IConfigurationRoot, IDisposable
@@ -200,7 +202,7 @@ public class ConfigurationRoot : IConfigurationRoot
     }
     public void Reload()
     {
-        throw new NotImplementedException();
+        
     }
 
     public async Task ReloadAsync()
@@ -212,8 +214,11 @@ public class ConfigurationRoot : IConfigurationRoot
             var finished = await Task.WhenAny(tasks);
 
             tasks.Remove(finished);
+        }
 
-            
+        foreach (var provider in Providers)
+        {
+            provider.EnumerateEntries().GroupBy()
         }
     }
 
@@ -250,5 +255,99 @@ public class ConfigurationRoot : IConfigurationRoot
     internal void SetConfigurationEntry(Key key, IConfigurationEntry entry)
     {
         throw new Exception();
+    }
+
+    public IConfigurationSection GetSection(Key key)
+    {
+        throw new NotImplementedException();
+    }
+
+
+
+
+
+
+    partial class ConfigurationDictionary : IDictionary<Key, IConfigurationEntry>
+    {
+        private readonly ConfigurationDictionary sections;
+
+        public ConfigurationDictionary()
+        {
+            sections = new ConfigurationDictionary();
+        }
+
+        public bool HasChildren => sections.Count > 0;
+
+
+
+        public IConfigurationEntry this[Key key] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        public ICollection<Key> Keys => throw new NotImplementedException();
+
+        public ICollection<IConfigurationEntry> Values => throw new NotImplementedException();
+
+        public int Count => throw new NotImplementedException();
+
+        public bool IsReadOnly => throw new NotImplementedException();
+
+        public void Add(Key key, IConfigurationEntry value)
+        {
+            if (key.Segments.Length > 1)
+            {
+                var key = 
+                var section = key.Subkey(1);
+
+            }
+        }
+
+        public void Add(KeyValuePair<Key, IConfigurationEntry> item)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void Clear()
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool Contains(KeyValuePair<Key, IConfigurationEntry> item)
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool ContainsKey(Key key)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CopyTo(KeyValuePair<Key, IConfigurationEntry>[] array, int arrayIndex)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IEnumerator<KeyValuePair<Key, IConfigurationEntry>> GetEnumerator()
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool Remove(Key key)
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool Remove(KeyValuePair<Key, IConfigurationEntry> item)
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool TryGetValue(Key key, [MaybeNullWhen(false)] out IConfigurationEntry value)
+        {
+            throw new NotImplementedException();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            throw new NotImplementedException();
+        }
     }
 }

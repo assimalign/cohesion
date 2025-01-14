@@ -21,8 +21,6 @@
 	  <Compile Remove="ConfigurationPathHelper.cs" />
 	  <Compile Remove="ConfigurationProviderOld.cs" />
 	  <Compile Remove="ConfigurationReloadToken.cs" />
-	  <Compile Remove="ConfigurationRootOld.cs" />
-	  <Compile Remove="ConfigurationSection.cs" />
 	  <Compile Remove="ConfigurationStrategy.cs" />
 	  <Compile Remove="ValueTypes\ConfigurationKey.cs" />
 	  <Compile Remove="ValueTypes\ConfigurationPath.cs" />

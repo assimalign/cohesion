@@ -10,11 +10,7 @@ public interface IConfigurationEntry
     /// </summary>
     Key Key { get; }
     /// <summary>
-    /// Returns the entire unique key.
-    /// </summary>
-    Key Path { get; }
-    /// <summary>
     /// The raw configuration value.
     /// </summary>
-    object? Value { get; set; }
+    object? Value { get; }
 }
