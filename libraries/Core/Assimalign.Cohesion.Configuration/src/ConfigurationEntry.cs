@@ -1,12 +1,14 @@
 ﻿namespace Assimalign.Cohesion.Configuration;
 
-public record class ConfigurationEntry : IConfigurationEntry
+public record class ConfigurationEntry : IConfigurationValue
 {
-    public ConfigurationEntry(Key key, object? value)
+    public ConfigurationEntry(KeyPath path, object? value)
     {
-        Key = key;
+        Path = path;
         Value = value;
     }
-    public Key Key { get; }
+    public Key Key => Path.GetLast();
+    public KeyPath Path { get; }
     public object? Value { get; }
+    public IConfigurationProvider Provider => throw new System.NotImplementedException();
 }

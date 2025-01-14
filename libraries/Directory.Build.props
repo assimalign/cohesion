@@ -18,7 +18,7 @@
 	</PropertyGroup>
 
 	<!-- AOT Info-->
-	<PropertyGroup Condition="$(TargetFramework) == 'net8.0' or $(TargetFramework) == 'net9.0'">
+	<PropertyGroup Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('\src'))">
 		<IsAotCompatible>true</IsAotCompatible>
 		<StripSymbols>false</StripSymbols>
 	</PropertyGroup>

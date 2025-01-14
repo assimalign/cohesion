@@ -1,218 +1,89 @@
 ﻿using System;
 using System.Linq;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
-using System.Collections;
-using System.Collections.Generic;
 
-/// <summary>
-/// The configuration <see cref="Key"/> is a representation of a composite key within a key-value pair. 
-/// <para>Format Examples:</para>
-/// <list type="bullet">
-/// <item>
-///     <term>Slash Format</term>
-///     <description>"/key1/"</description>
-/// </item>
-/// <item>
-///     <term>Backward Slash Format</term>
-///     <description>"\\key1\\key2[index]\\key3"</description>
-/// </item>
-/// <item>
-///     <term>Namespace Format</term>
-///     <description>"key1.key2[index].key3</description>
-/// </item>
-/// <item>
-///     <term>Colon Format</term>
-///     <description>"key1:key2[index]:key3"</description>
-/// </item>
-/// <item>
-///     <term>Mixed Format</term>
-///     <description>"/key1.key2\\key3[index]:key4"</description>
-/// </item>
-/// <item>
-///     <term>Colon Format (labels)</term>
-///     <description>"key1$label1:key2$label2[index]:key3$label3"</description>
-/// </item>
-/// </list>
-/// </summary>
 [DebuggerDisplay("{ToString()}")]
 [JsonConverter(typeof(KeyJsonConverter))]
-public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
+public readonly struct Key : IEquatable<Key>, IComparable<Key>
 {
+    #region Constructors
+
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="segments"></param>
-    public Key(KeySegment[] segments)
+    /// <param name="value"></param>
+    /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="ArgumentNullException"></exception>
+    public Key(string value)
     {
-        Segments = segments;
+        if (string.IsNullOrEmpty(value))
+        {
+            ThrowHelper.ThrowArgumentNullException(nameof(value));
+        }
+        if (value.ContainsAny(KeyPath.Delimiters))
+        {
+            ThrowHelper.ThrowArgumentException("");
+        }
+        if (value.Contains(LabelSeparator))
+        {
+            ThrowHelper.ThrowArgumentException("");
+        }
+
+        Value = value;
     }
 
-    #region Properties/Fields
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    /// <param name="label"></param>
+    public Key(string value, string label) : this(value)
+    {
+        if (string.IsNullOrEmpty(label))
+        {
+            ThrowHelper.ThrowArgumentNullException(nameof(label));
+        }
+        if (label.ContainsAny(KeyPath.Delimiters))
+        {
+            ThrowHelper.ThrowArgumentException("");
+        }
+        if (label.Contains(LabelSeparator))
+        {
+            ThrowHelper.ThrowArgumentException($"The parameter {label} cannot contain the '$' ");
+        }
+
+        Label = label;
+    }
+
+    #endregion
+
+    #region Properties
 
     /// <summary>
-    /// Get the key parts.
+    /// The raw key value.
     /// </summary>
-    public readonly KeySegment[] Segments { get; }
+    public string Value { get; }
 
     /// <summary>
-    /// Returns the default separator used within a composite key.
+    /// Gets the label segment.
     /// </summary>
-    public const char DefaultDelimiter = ':';
+    public string? Label { get; }
 
     /// <summary>
-    /// Allowed separators.
+    /// The separator used to identify a labeled segment.
     /// </summary>
-    public static readonly char[] Delimiters = ['\\', '/', ':', '.'];
-
-    /// <summary>
-    /// Gets an empty key.
-    /// </summary>
-    public static readonly Key Empty = "";
+    public const char LabelSeparator = '$';
 
     #endregion
 
     #region Methods
-
-    /// <summary>
-    /// Returns a new key instance from the last segment of the key.
-    /// </summary>
-    /// <returns></returns>
-    public Key GetLastSegment()
-    {
-        if (Segments.Length == 0)
-        {
-            return this;
-        }
-        return new Key([Segments[Segments.Length - 1]]);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="start">The starting index.</param>
-    /// <returns></returns>
-    public Key Subkey(int start)
-    {
-        return Subkey(start, Segments.Length - start);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="start"></param>
-    /// <param name="length"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    public Key Subkey(int start, int length)
-    {
-        if (start > Segments.Length || start < 0)
-        {
-            ThrowHelper.ThrowArgumentException("");
-        }
-        if (length > Segments.Length || length < 1)
-        {
-            ThrowHelper.ThrowArgumentException("");
-        }
-
-        var segments = new KeySegment[length];
-
-        for (int i = 0; i < segments.Length; i++)
-        {
-            segments[i] = Segments[start + i];
-        }
-
-        return new Key(segments);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="other"></param>
-    /// <returns></returns>
-    public Key Combine(Key other)
-    {
-        return Combine(this, other);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    public bool StartsWith(Key key)
-    {
-        return Equals(key, KeyComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <param name="comparison"></param>
-    /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
-    public bool StartsWith(Key key, KeyComparison comparison)
-    {
-        var ls = Segments;
-        var rs = key.Segments;
-
-        if (rs.Length > ls.Length)
-        {
-            return false;
-        }
-        for (int i = 0; i < rs.Length; i++)
-        {
-            if (!rs[i].Equals(ls[i], comparison))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    public bool EndsWith(Key key)
-    {
-        return EndsWith(key, KeyComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <param name="comparison"></param>
-    /// <returns></returns>
-    public bool EndsWith(Key key, KeyComparison comparison)
-    {
-        var ls = Segments;
-        var rs = key.Segments;
-
-        if (rs.Length > ls.Length)
-        {
-            return false;
-        }
-
-        var l = ls.Length;
-
-        for (int i = rs.Length; i < rs.Length; i--)
-        {
-            //if (!rs[i .Equals(ls[i], comparison))
-            //{
-            //    return false;
-            //}
-        }
-
-        return true;
-    }
 
     /// <summary>
     /// 
@@ -221,36 +92,62 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
     /// <returns></returns>
     public bool Equals(Key other)
     {
-        return Equals(other, KeyComparison.Ordinal);
+        return Equals(this, other, KeyComparison.Ordinal);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="other"></param>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
     /// <param name="comparison"></param>
     /// <returns></returns>
-    public bool Equals(Key other, KeyComparison comparison)
+    /// <exception cref="ArgumentException"></exception>
+    public static bool Equals(Key left, Key right, KeyComparison comparison)
     {
-        return Equals(this, other, comparison);
+        var comparer = comparison switch
+        {
+            KeyComparison.Ordinal => StringComparer.Ordinal,
+            KeyComparison.OrdinalIgnoreCase => StringComparer.OrdinalIgnoreCase,
+            _ => throw new ArgumentException()
+        };
+
+        return comparer.Equals(left.Value, right.Value) && 
+            comparer.Equals(left.Label, right.Label);
     }
+
     #endregion
 
     #region Overloads
+
     /// <summary>
-    /// Returns a formatted key value.
+    /// 
     /// </summary>
     /// <returns></returns>
     public override string ToString()
     {
-        return string.Join(DefaultDelimiter, Segments);
+        // TODO: Look into using String.Create() with span allocation. May be faster.
+        return string.Join(LabelSeparator, Value, Label);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
     public override int GetHashCode()
     {
-        return ToString().GetHashCode();
+        if (Label is not null)
+        {
+            return Value.GetHashCode() >> Label.GetHashCode();
+        }
+        return Value.GetHashCode();
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="obj"></param>
+    /// <returns></returns>
     public override bool Equals(object? obj)
     {
         if (obj is Key key)
@@ -260,6 +157,36 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
         return false;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    /// <exception cref="NotImplementedException"></exception>
+    public int CompareTo(Key other)
+    {
+        return CompareTo(other, KeyComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException"></exception>
+    public int CompareTo(Key other, KeyComparison comparison)
+    {
+        var comparer = comparison switch
+        {
+            KeyComparison.Ordinal => KeyComparer.Ordinal,
+            KeyComparison.OrdinalIgnoreCase => KeyComparer.OrdinalIgnoreCase,
+            _ => throw new ArgumentException()
+        };
+
+        return comparer.Compare(this, other);
+    }
+
     #endregion
 
     #region Helpers
@@ -267,42 +194,9 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <param name="comparison"></param>
+    /// <param name="value"></param>
     /// <returns></returns>
-    public static bool Equals(Key left, Key right, KeyComparison comparison)
-    {
-        var ls = left.Segments;
-        var rs = right.Segments;
-
-        if (ls.Length != rs.Length)
-        {
-            return false;
-        }
-        for (int i = 0; i < ls.Length; i++)
-        {
-            if (!ls[i].Equals(rs[i], comparison))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    public static Key Combine(Key left, Key right)
-    {
-        return new Key([.. left.Segments, .. right.Segments]);
-    }
-
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Key Parse(string? value)
+    public static Key Parse(string value)
     {
         return Parse(value.AsSpan());
     }
@@ -310,58 +204,24 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="value"></param>
+    /// <param name="segment"></param>
     /// <returns></returns>
-
-    public static Key Parse(ReadOnlySpan<char> span)
+    public static Key Parse(ReadOnlySpan<char> segment)
     {
-        if (span.IsEmpty)
+        ReadOnlySpan<char> value = segment;
+        ReadOnlySpan<char> label = ReadOnlySpan<char>.Empty;
+
+        // Check for label `$`
+        int labelIndex = segment.IndexOf('$');
+        if (labelIndex != -1)
         {
-            return Empty;
+            value = segment.Slice(0, labelIndex);
+            label = segment.Slice(labelIndex + 1);
+
+            return new Key(new string(value), new string(label));
         }
 
-        int start = 0;
-        int count = 0;
-        KeySegment[] segments = new KeySegment[5];
-
-        while (start < span.Length)
-        {
-            // Find the next segment by locating ':'
-            int segmentEnd = span.Slice(start).IndexOfAny(Delimiters);
-
-            if (segmentEnd == -1)
-            {
-                segmentEnd = span.Length - start;
-
-                Array.Resize(ref segments, count + 1);
-            }
-
-            ReadOnlySpan<char> segment = span.Slice(start, segmentEnd);
-
-            start += segmentEnd + 1; // Move start past the current segment
-
-            // Parse the segment
-            segments[count] = KeySegment.Parse(segment);
-
-            count++;
-
-            if (count > segments.Length)
-            {
-                Array.Resize(ref segments, count + 5);
-            }
-        }
-
-        return new Key(segments);
-    }
-
-    public IEnumerator<KeySegment> GetEnumerator()
-    {
-        return (IEnumerator<KeySegment>)Segments.GetEnumerator();
-    }
-
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
+        return new Key(new string(value));
     }
 
     #endregion
@@ -379,14 +239,6 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
     /// </summary>
     /// <param name="value"></param>
     public static implicit operator Key(string value) => Key.Parse(value);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    public static Key operator +(Key left, Key right) => Combine(left, right);
 
     /// <summary>
     /// 
@@ -428,20 +280,33 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
     /// <returns></returns>
     public static bool operator ==(Key left, Key? right) => right.HasValue && left.Equals(right);
 
-    public static bool operator !=(Key left, Key? right)
-    {
-        return right.HasValue && !left.Equals(right);
-    }
-    //public static bool operator ==(Key? left, Key? right)
-    //{
-    //    return right.HasValue && left.Equals(right);
-    //}
-    //public static bool operator !=(Key? left, Key? right)
-    //{
-    //    return right.HasValue && !left.Equals(right);
-    //}
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool operator !=(Key left, Key? right) => right.HasValue && !left.Equals(right);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool operator ==(Key? left, Key? right) => (!left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && left.Value.Equals(right.Value));
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool operator !=(Key? left, Key? right) => (!left.HasValue && right.HasValue) || (left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && left.Value.Equals(right.Value));
+
     #endregion
 
+    #region Partials
 
     partial class KeyJsonConverter : JsonConverter<Key>
     {
@@ -456,7 +321,7 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
 
             if (str is null || str == string.Empty)
             {
-                return Key.Empty;
+                throw new JsonException("Key expected a string token type.");
             }
 
             return Key.Parse(str);
@@ -467,7 +332,472 @@ public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
             writer.WriteStringValue(value);
         }
     }
+
+    #endregion
 }
+
+
+/// <summary>
+/// The configuration <see cref="Key"/> is a representation of a composite key within a key-value pair. 
+/// <para>Format Examples:</para>
+/// <list type="bullet">
+/// <item>
+///     <term>Slash Format</term>
+///     <description>"/key1/"</description>
+/// </item>
+/// <item>
+///     <term>Backward Slash Format</term>
+///     <description>"\\key1\\key2[index]\\key3"</description>
+/// </item>
+/// <item>
+///     <term>Namespace Format</term>
+///     <description>"key1.key2[index].key3</description>
+/// </item>
+/// <item>
+///     <term>Colon Format</term>
+///     <description>"key1:key2[index]:key3"</description>
+/// </item>
+/// <item>
+///     <term>Mixed Format</term>
+///     <description>"/key1.key2\\key3[index]:key4"</description>
+/// </item>
+/// <item>
+///     <term>Colon Format (labels)</term>
+///     <description>"key1$label1:key2$label2[index]:key3$label3"</description>
+/// </item>
+/// </list>
+/// </summary>
+//[DebuggerDisplay("{ToString()}")]
+//[JsonConverter(typeof(KeyJsonConverter))]
+//public readonly struct Key : IEquatable<Key>, IEnumerable<KeySegment>
+//{
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="segments"></param>
+//    public Key(KeySegment[] segments)
+//    {
+//        Segments = segments;
+//    }
+
+//    #region Properties/Fields
+
+//    /// <summary>
+//    /// Get the key parts.
+//    /// </summary>
+//    public readonly KeySegment[] Segments { get; }
+
+//    /// <summary>
+//    /// Returns the default separator used within a composite key.
+//    /// </summary>
+//    public const char DefaultDelimiter = ':';
+
+//    /// <summary>
+//    /// Allowed separators.
+//    /// </summary>
+//    public static readonly char[] Delimiters = ['\\', '/', ':', '.'];
+
+//    /// <summary>
+//    /// Gets an empty key.
+//    /// </summary>
+//    public static readonly Key Empty = "";
+
+//    #endregion
+
+//    #region Methods
+
+//    /// <summary>
+//    /// Returns a new key instance from the last segment of the key.
+//    /// </summary>
+//    /// <returns></returns>
+//    public Key GetLastSegment()
+//    {
+//        if (Segments.Length == 0)
+//        {
+//            return this;
+//        }
+//        return new Key([Segments[Segments.Length - 1]]);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="start">The starting index.</param>
+//    /// <returns></returns>
+//    public Key Subkey(int start)
+//    {
+//        return Subkey(start, Segments.Length - start);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="start"></param>
+//    /// <param name="length"></param>
+//    /// <returns></returns>
+//    /// <exception cref="ArgumentException"></exception>
+//    public Key Subkey(int start, int length)
+//    {
+//        if (start > Segments.Length || start < 0)
+//        {
+//            ThrowHelper.ThrowArgumentException("");
+//        }
+//        if (length > Segments.Length || length < 1)
+//        {
+//            ThrowHelper.ThrowArgumentException("");
+//        }
+
+//        var segments = new KeySegment[length];
+
+//        for (int i = 0; i < segments.Length; i++)
+//        {
+//            segments[i] = Segments[start + i];
+//        }
+
+//        return new Key(segments);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="other"></param>
+//    /// <returns></returns>
+//    public Key Combine(Key other)
+//    {
+//        return Combine(this, other);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="key"></param>
+//    /// <returns></returns>
+//    public bool StartsWith(Key key)
+//    {
+//        return Equals(key, KeyComparison.Ordinal);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="key"></param>
+//    /// <param name="comparison"></param>
+//    /// <returns></returns>
+//    /// <exception cref="NotImplementedException"></exception>
+//    public bool StartsWith(Key key, KeyComparison comparison)
+//    {
+//        var ls = Segments;
+//        var rs = key.Segments;
+
+//        if (rs.Length > ls.Length)
+//        {
+//            return false;
+//        }
+//        for (int i = 0; i < rs.Length; i++)
+//        {
+//            if (!rs[i].Equals(ls[i], comparison))
+//            {
+//                return false;
+//            }
+//        }
+//        return true;
+//    }
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="key"></param>
+//    /// <returns></returns>
+//    public bool EndsWith(Key key)
+//    {
+//        return EndsWith(key, KeyComparison.Ordinal);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="key"></param>
+//    /// <param name="comparison"></param>
+//    /// <returns></returns>
+//    public bool EndsWith(Key key, KeyComparison comparison)
+//    {
+//        var ls = Segments;
+//        var rs = key.Segments;
+
+//        if (rs.Length > ls.Length)
+//        {
+//            return false;
+//        }
+
+//        var l = ls.Length;
+
+//        for (int i = rs.Length; i < rs.Length; i--)
+//        {
+//            //if (!rs[i .Equals(ls[i], comparison))
+//            //{
+//            //    return false;
+//            //}
+//        }
+
+//        return true;
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="other"></param>
+//    /// <returns></returns>
+//    public bool Equals(Key other)
+//    {
+//        return Equals(other, KeyComparison.Ordinal);
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="other"></param>
+//    /// <param name="comparison"></param>
+//    /// <returns></returns>
+//    public bool Equals(Key other, KeyComparison comparison)
+//    {
+//        return Equals(this, other, comparison);
+//    }
+//    #endregion
+
+//    #region Overloads
+//    /// <summary>
+//    /// Returns a formatted key value.
+//    /// </summary>
+//    /// <returns></returns>
+//    public override string ToString()
+//    {
+//        return string.Join(DefaultDelimiter, Segments);
+//    }
+
+//    public override int GetHashCode()
+//    {
+//        return ToString().GetHashCode();
+//    }
+
+//    public override bool Equals(object? obj)
+//    {
+//        if (obj is Key key)
+//        {
+//            return Equals(key);
+//        }
+//        return false;
+//    }
+
+//    #endregion
+
+//    #region Helpers
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <param name="comparison"></param>
+//    /// <returns></returns>
+//    public static bool Equals(Key left, Key right, KeyComparison comparison)
+//    {
+//        var ls = left.Segments;
+//        var rs = right.Segments;
+
+//        if (ls.Length != rs.Length)
+//        {
+//            return false;
+//        }
+//        for (int i = 0; i < ls.Length; i++)
+//        {
+//            if (!ls[i].Equals(rs[i], comparison))
+//            {
+//                return false;
+//            }
+//        }
+//        return true;
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static Key Combine(Key left, Key right)
+//    {
+//        return new Key([.. left.Segments, .. right.Segments]);
+//    }
+
+//    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
+//    public static Key Parse(string? value)
+//    {
+//        return Parse(value.AsSpan());
+//    }
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="value"></param>
+//    /// <returns></returns>
+
+//    public static Key Parse(ReadOnlySpan<char> span)
+//    {
+//        if (span.IsEmpty)
+//        {
+//            return Empty;
+//        }
+
+//        int start = 0;
+//        int count = 0;
+//        KeySegment[] segments = new KeySegment[5];
+
+//        while (start < span.Length)
+//        {
+//            // Find the next segment by locating ':'
+//            int segmentEnd = span.Slice(start).IndexOfAny(Delimiters);
+
+//            if (segmentEnd == -1)
+//            {
+//                segmentEnd = span.Length - start;
+
+//                Array.Resize(ref segments, count + 1);
+//            }
+
+//            ReadOnlySpan<char> segment = span.Slice(start, segmentEnd);
+
+//            start += segmentEnd + 1; // Move start past the current segment
+
+//            // Parse the segment
+//            segments[count] = KeySegment.Parse(segment);
+
+//            count++;
+
+//            if (count > segments.Length)
+//            {
+//                Array.Resize(ref segments, count + 5);
+//            }
+//        }
+
+//        return new Key(segments);
+//    }
+
+//    public IEnumerator<KeySegment> GetEnumerator()
+//    {
+//        return (IEnumerator<KeySegment>)Segments.GetEnumerator();
+//    }
+
+//    IEnumerator IEnumerable.GetEnumerator()
+//    {
+//        return GetEnumerator();
+//    }
+
+//    #endregion
+
+//    #region Operators
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="key"></param>
+//    public static implicit operator string(Key key) => key.ToString();
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="value"></param>
+//    public static implicit operator Key(string value) => Key.Parse(value);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static Key operator +(Key left, Key right) => Combine(left, right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator ==(Key left, Key right) => left.Equals(right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator !=(Key left, Key right) => !left.Equals(right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator ==(Key? left, Key right) => left.HasValue && left.Equals(right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator !=(Key? left, Key right) => left.HasValue && !left.Equals(right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator ==(Key left, Key? right) => right.HasValue && left.Equals(right);
+
+//    /// <summary>
+//    /// 
+//    /// </summary>
+//    /// <param name="left"></param>
+//    /// <param name="right"></param>
+//    /// <returns></returns>
+//    public static bool operator !=(Key left, Key? right) => right.HasValue && !left.Equals(right);
+//    //public static bool operator ==(Key? left, Key? right)
+//    //{
+//    //    return right.HasValue && left.Equals(right);
+//    //}
+//    //public static bool operator !=(Key? left, Key? right)
+//    //{
+//    //    return right.HasValue && !left.Equals(right);
+//    //}
+//    #endregion
+
+
+//    partial class KeyJsonConverter : JsonConverter<Key>
+//    {
+//        public override Key Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+//        {
+//            if (reader.TokenType != JsonTokenType.String)
+//            {
+//                throw new JsonException("Key expected a string token type.");
+//            }
+
+//            var str = reader.GetString();
+
+//            if (str is null || str == string.Empty)
+//            {
+//                return Key.Empty;
+//            }
+
+//            return Key.Parse(str);
+//        }
+
+//        public override void Write(Utf8JsonWriter writer, Key value, JsonSerializerOptions options)
+//        {
+//            writer.WriteStringValue(value);
+//        }
+//    }
+//}
 
 
 

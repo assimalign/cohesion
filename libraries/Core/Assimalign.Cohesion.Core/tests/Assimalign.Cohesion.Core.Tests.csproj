@@ -9,6 +9,7 @@
 		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-	  <ProjectReference Include="..\src\Assimalign.Cohesion.Core.csproj" />
+		<ProjectReference Include="..\src\Assimalign.Cohesion.Core.csproj" />
 	</ItemGroup>
+
 </Project>

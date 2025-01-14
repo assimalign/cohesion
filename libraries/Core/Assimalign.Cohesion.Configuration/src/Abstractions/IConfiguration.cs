@@ -3,16 +3,26 @@
 namespace Assimalign.Cohesion.Configuration;
 
 /// <summary>
-/// 
+/// <see cref="IConfiguration"/> represents a client for working with all the 
+/// elements in the configuration tree.
 /// </summary>
+/// <remarks>
+/// IConfiguration uses a composite pattern to manage configuration 
+/// </remarks>
 public interface IConfiguration : IEnumerable<IConfigurationEntry>
 {
     /// <summary>
-    /// Gets or sets a configuration value.
+    /// 
     /// </summary>
-    /// <param name="key">The configuration key.</param>
-    /// <returns>The configuration value.</returns>
-    IConfigurationEntry this[Key key] { get; set; }
+    /// <param name="path"></param>
+    /// <returns></returns>
+    object? this[KeyPath path] { get; set; }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    IConfigurationValue GetValue(Key key);
     /// <summary>
     /// Returns a section of the <see cref="IConfiguration"/> instance.
     /// </summary>
@@ -24,4 +34,9 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// </summary>
     /// <returns></returns>
     IConfigurationChangeToken GetChangeToken();
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    IEnumerable<IConfigurationValue> EnumerateEntries();
 }

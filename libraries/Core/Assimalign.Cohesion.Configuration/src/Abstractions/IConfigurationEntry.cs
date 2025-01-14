@@ -6,11 +6,17 @@
 public interface IConfigurationEntry
 {
     /// <summary>
-    /// Get the inner most child key.
+    /// 
     /// </summary>
     Key Key { get; }
+
     /// <summary>
-    /// The raw configuration value.
+    /// The composite path
     /// </summary>
-    object? Value { get; }
+    KeyPath Path { get; }
+
+    /// <summary>
+    /// The provider in which the entry belongs to.
+    /// </summary>
+    IConfigurationProvider Provider { get;  }
 }
