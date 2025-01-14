@@ -18,33 +18,18 @@ public interface IConfigurationProvider : IDisposable
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
-    IConfigurationEntry? this[Key key] { get; }
+    //IConfigurationEntry? this[Key key] { get; }
     /// <summary>
     /// Get the configuration.
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
-    object Get(Key key);
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <param name="entry"></param>
-    /// <returns></returns>
-    bool TryGet(Key key, out IConfigurationEntry? entry);
+    IConfigurationEntry? Get(Key key);
     /// <summary>
     /// Sets a configuration value for the specified key.
     /// </summary>
-    /// <param name="key">The key.</param>
-    /// <param name="value">The value.</param>
-    void Set(Key key, object value);
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <param name="value"></param>
-    /// <returns></returns>
-    bool TrySet(Key key, object value);
+    /// <param name="entry">The value.</param>
+    void Set(IConfigurationEntry? entry);
     /// <summary>
     /// Loads configuration values from the source represented by this <see cref="IConfigurationProvider"/>.
     /// </summary>

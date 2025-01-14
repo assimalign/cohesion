@@ -18,7 +18,7 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// <returns></returns>
     object? this[KeyPath path] { get; set; }
     /// <summary>
-    /// 
+    /// Gets an <see cref="IConfigurationValue.Value"/> from the <see cref="IConfiguration"/> instance.
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>

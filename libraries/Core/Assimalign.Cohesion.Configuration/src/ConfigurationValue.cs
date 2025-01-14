@@ -1,8 +1,8 @@
 ﻿namespace Assimalign.Cohesion.Configuration;
 
-public record class ConfigurationEntry : IConfigurationValue
+public record class ConfigurationValue : IConfigurationValue
 {
-    public ConfigurationEntry(KeyPath path, object? value)
+    public ConfigurationValue(KeyPath path, object? value)
     {
         Path = path;
         Value = value;

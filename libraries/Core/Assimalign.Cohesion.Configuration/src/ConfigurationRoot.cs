@@ -11,7 +11,6 @@ using Assimalign.Cohesion.Internal;
 
 public class ConfigurationRoot : IConfigurationRoot
 {
-
     public ConfigurationRoot(IEnumerable<IConfigurationProvider> providers)
     {
         if (providers is null || !providers.Any())
@@ -23,12 +22,37 @@ public class ConfigurationRoot : IConfigurationRoot
     }
 
 
+    private List<IConfigurationEntry> Entries { get; } = new();
+
+
     public object? this[KeyPath path]
     {
         get => GetConfigurationValue(path);
-        set => throw new NotImplementedException();
+        set => SetConfigurationValue(path, value);
     }
 
+    private void SetConfigurationValue(KeyPath path, object? value)
+    {
+        var key = path.GetFirst();
+
+        foreach (var provider in Providers)
+        {
+            if (provider.TryGet(key, out var entry))
+            {
+                if (entry is IConfigurationSection section)
+                {
+                    var sub = path.GetSubpath(1);
+                    section[sub] = value;
+                }
+                else
+                {
+                    provider.Set(key, new ConfigurationValue(key, value));
+                }
+
+                break;
+            }
+        }
+    }
     private object? GetConfigurationValue(KeyPath path)
     {
         IConfigurationEntry? entry = null;
@@ -107,8 +131,6 @@ public class ConfigurationRoot : IConfigurationRoot
         {
             foreach (var entry in )
         }
-
-        I
     }
 
 

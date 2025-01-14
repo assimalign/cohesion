@@ -19,6 +19,6 @@ public class ConfigurationJsonStreamProvider : StreamConfigurationProvider
     /// <param name="stream">The json <see cref="Stream"/> to load configuration data from.</param>
     public override void Load(Stream stream)
     {
-        Data = ConfigurationJsonProvider.JsonConfigurationFileParser.Parse(stream);
+        Data = ConfigurationJsonProviderOld.JsonConfigurationFileParser.Parse(stream);
     }
 }

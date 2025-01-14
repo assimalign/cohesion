@@ -27,15 +27,18 @@ public class ConfigurationSection : IConfigurationSection
     }
 
 
-    protected virtual IDictionary<Key, IConfigurationEntry> Entries { get; }
+    public Key Key { get; }
+    public KeyPath Path { get; }
+    public IConfigurationProvider Provider { get; }
 
-    public IConfigurationEntry this[KeyPath path] { get; set; }
+    object? IConfiguration.this[KeyPath path] 
+    {
+        get => throw new NotImplementedException(); 
+        set => throw new NotImplementedException(); 
+    }
 
-    public Key Key => throw new NotImplementedException();
-    public KeyPath Path => throw new NotImplementedException();
 
-    public EntryKind Kind => throw new NotImplementedException();
-
+    private void SetConfigurationValue(Key key)
 
     public IEnumerable<IConfigurationEntry> EnumerateEntries()
     {
@@ -60,6 +63,21 @@ public class ConfigurationSection : IConfigurationSection
     }
 
     IEnumerator IEnumerable.GetEnumerator()
+    {
+        throw new NotImplementedException();
+    }
+
+    public object? ToValue()
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationValue GetValue(Key key)
+    {
+        throw new NotImplementedException();
+    }
+
+    IEnumerable<IConfigurationValue> IConfiguration.EnumerateEntries()
     {
         throw new NotImplementedException();
     }

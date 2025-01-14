@@ -6,11 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
-public static class ConfigurationProviderExtensions
+public abstract class ConfigurationJsonEntry : IConfigurationEntry
 {
-
-    public static IConfigurationProvider Get(Key key, KeyComparison)
-    {
-
-    }
+    public abstract Key Key { get; }
 }

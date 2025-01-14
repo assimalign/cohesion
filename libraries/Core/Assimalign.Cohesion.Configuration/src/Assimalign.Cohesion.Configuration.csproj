@@ -1,16 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 	  <Compile Remove="Exceptions\**" />
-	  <Compile Remove="Extensions\**" />
-	  <Compile Remove="Providers\**" />
 	  <Compile Remove="Utilities\**" />
 	  <EmbeddedResource Remove="Exceptions\**" />
-	  <EmbeddedResource Remove="Extensions\**" />
-	  <EmbeddedResource Remove="Providers\**" />
 	  <EmbeddedResource Remove="Utilities\**" />
 	  <None Remove="Exceptions\**" />
-	  <None Remove="Extensions\**" />
-	  <None Remove="Providers\**" />
 	  <None Remove="Utilities\**" />
 	</ItemGroup>
 	<ItemGroup>
@@ -19,8 +13,8 @@
 	  <Compile Remove="ConfigurationKeyNameAttribute.cs" />
 	  <Compile Remove="ConfigurationManager.cs" />
 	  <Compile Remove="ConfigurationPathHelper.cs" />
-	  <Compile Remove="ConfigurationProviderOld.cs" />
 	  <Compile Remove="ConfigurationReloadToken.cs" />
+	  <Compile Remove="ConfigurationSection.cs" />
 	  <Compile Remove="ConfigurationStrategy.cs" />
 	  <Compile Remove="ValueTypes\ConfigurationKey.cs" />
 	  <Compile Remove="ValueTypes\ConfigurationPath.cs" />

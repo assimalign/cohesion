@@ -77,6 +77,11 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public string? Label { get; }
 
     /// <summary>
+    /// 
+    /// </summary>
+    public bool IsEmpty => string.IsNullOrEmpty(Value);
+
+    /// <summary>
     /// The separator used to identify a labeled segment.
     /// </summary>
     public const char LabelSeparator = '$';
@@ -94,6 +99,8 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     {
         return Equals(this, other, KeyComparison.Ordinal);
     }
+
+    public bool Equals(Key other, )
 
     /// <summary>
     /// 

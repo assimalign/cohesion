@@ -10,10 +10,10 @@ public class ConfigurationPathTests
 
         Assert.Equal(key1, key2);
 
-        var entry = new ConfigurationEntry(key2)
-        {
-            Value = 23
-        };
+        //var entry = new ConfigurationEntry(key2)
+        //{
+        //    Value = 23
+        //};
     }
 
   

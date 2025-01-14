@@ -8,6 +8,11 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfigurationSection : IConfigurationEntry, IConfiguration
 {
     /// <summary>
+    /// The composite path
+    /// </summary>
+    KeyPath Path { get; }
+
+    /// <summary>
     /// Converts the the section into a raw value by the underlying provider.
     /// </summary>
     /// <returns></returns>
