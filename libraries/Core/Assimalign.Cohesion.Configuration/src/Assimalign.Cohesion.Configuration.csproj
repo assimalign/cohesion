@@ -1,23 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-	  <Compile Remove="Exceptions\**" />
 	  <Compile Remove="Utilities\**" />
-	  <EmbeddedResource Remove="Exceptions\**" />
 	  <EmbeddedResource Remove="Utilities\**" />
-	  <None Remove="Exceptions\**" />
 	  <None Remove="Utilities\**" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Compile Remove="ConfigurationBuilder.cs" />
 	  <Compile Remove="ConfigurationKeyComparer.cs" />
 	  <Compile Remove="ConfigurationKeyNameAttribute.cs" />
 	  <Compile Remove="ConfigurationManager.cs" />
 	  <Compile Remove="ConfigurationPathHelper.cs" />
 	  <Compile Remove="ConfigurationReloadToken.cs" />
-	  <Compile Remove="ConfigurationSection.cs" />
 	  <Compile Remove="ConfigurationStrategy.cs" />
-	  <Compile Remove="ValueTypes\ConfigurationKey.cs" />
-	  <Compile Remove="ValueTypes\ConfigurationPath.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />

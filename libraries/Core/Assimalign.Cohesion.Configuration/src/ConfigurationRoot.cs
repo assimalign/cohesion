@@ -11,15 +11,38 @@ using Assimalign.Cohesion.Internal;
 
 public class ConfigurationRoot : IConfigurationRoot
 {
+    private readonly ConfigurationRootOptions options;
+    private readonly List<IConfigurationProvider> providers;
+
+    private bool isDisposed;
+    private bool isInit;
+
+
+    #region Constructors
+
     public ConfigurationRoot(IEnumerable<IConfigurationProvider> providers)
     {
-        if (providers is null || !providers.Any())
+        if (providers is null)
         {
-            ThrowHelper.ThrowArgumentNullException("Provider is either null or empty");
+            ThrowHelper.ThrowArgumentNullException(nameof(providers));
         }
 
-        Providers = providers;
+        if (!providers.Any())
+        {
+            ThrowHelper.ThrowArgumentException("");
+        }
+
+        this.providers = providers.ToList();
     }
+
+    public ConfigurationRoot(IEnumerable<IConfigurationProvider> providers, ConfigurationRootOptions options)
+        : this(providers)
+    {
+        this.options = options;
+    }
+
+    #endregion
+
 
 
     private List<IConfigurationEntry> Entries { get; } = new();
@@ -30,6 +53,7 @@ public class ConfigurationRoot : IConfigurationRoot
         get => GetConfigurationValue(path);
         set => SetConfigurationValue(path, value);
     }
+    public IEnumerable<IConfigurationProvider> Providers => this.providers.AsReadOnly();
 
     private void SetConfigurationValue(KeyPath path, object? value)
     {
@@ -79,12 +103,11 @@ public class ConfigurationRoot : IConfigurationRoot
         return entry switch
         {
             IConfigurationValue value => value.Value,
-            IConfigurationSection section => section.ToValue(),
+            IConfigurationSection section => section.GetValue(),
             _ => null
         };
     }
 
-    public IEnumerable<IConfigurationProvider> Providers { get; }
 
 
     public IConfigurationChangeToken GetChangeToken()
@@ -98,15 +121,21 @@ public class ConfigurationRoot : IConfigurationRoot
     /// <param name="name"></param>
     /// <returns></returns>
     /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="ArgumentNullException"></exception>
     public IConfigurationProvider GetProvider(string name)
     {
-        foreach (var provider in Providers)
+        ThrowHelper.ThrowIfNull(name, nameof(name));
+
+        for (int i = 0; i < providers.Count; i++)
         {
+            var provider = providers[i];
+
             if (provider is not null && provider.Name == name)
             {
                 return provider;
             }
         }
+
         throw new ArgumentException("Provider not found.");
     }
 
@@ -117,12 +146,14 @@ public class ConfigurationRoot : IConfigurationRoot
 
     public void Reload()
     {
-        throw new NotImplementedException();
+        ReloadAsync().GetAwaiter().GetResult();
     }
 
     public Task ReloadAsync()
     {
-        throw new NotImplementedException();
+        var tasks = providers.Select(p => p.ReloadAsync());
+
+        return Task.WhenAll(tasks);
     }
 
     public IEnumerable<IConfigurationEntry> EnumerateEntries()
@@ -144,14 +175,35 @@ public class ConfigurationRoot : IConfigurationRoot
         return GetEnumerator();
     }
 
-    IEnumerable<IConfigurationValue> IConfiguration.EnumerateEntries()
-    {
-        throw new NotImplementedException();
-    }
+
 
     public IConfigurationValue GetValue(Key key)
     {
         throw new NotImplementedException();
+    }
+
+    public void Dispose()
+    {
+        DisposeAsync().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (isDisposed)
+        {
+            ThrowHelper.ThrowObjectDisposedException(nameof(ConfigurationRoot));
+        }
+
+        var tasks = Providers.Select(p => p.DisposeAsync().AsTask()).ToList();
+
+        while (tasks.Any())
+        {
+            var finished = await Task.WhenAny(tasks);
+
+            tasks.Remove(finished);
+        }
+
+        isDisposed = true;
     }
 }
 

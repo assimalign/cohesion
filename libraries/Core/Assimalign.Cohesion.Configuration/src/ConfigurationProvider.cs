@@ -53,28 +53,32 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             Data.Add(entry);
         }
     }
+
     public virtual IEnumerable<IConfigurationEntry> GetEntries()
     {
         return Data;
     }
+
     public virtual void Load()
     {
-        RefreshAsync().GetAwaiter().GetResult();
+        ReloadAsync().GetAwaiter().GetResult();
     }
-    public abstract Task LoadAsync();
-    public void Refresh()
+
+    public abstract Task LoadAsync(CancellationToken cancellationToken = default);
+    
+    public void Reload()
     {
-        RefreshAsync().GetAwaiter().GetResult();
+        ReloadAsync().GetAwaiter().GetResult();
     }
-    public virtual Task RefreshAsync()
+
+    public virtual Task ReloadAsync(CancellationToken cancellationToken = default)
     {
         Data.Clear();
-
-        return RefreshAsync();
+        return LoadAsync(cancellationToken);
     }
 
-    public void Dispose()
+    public virtual void Dispose()
     {
-        throw new NotImplementedException();
+        Data.Clear();
     }
 }

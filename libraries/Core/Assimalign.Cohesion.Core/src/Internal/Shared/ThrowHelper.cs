@@ -6,45 +6,72 @@ namespace Assimalign.Cohesion.Internal;
 
 internal static partial class ThrowHelper
 {
-    internal static void ThrowIfArgumentNull(object value, string paramName)
-    {
-        if (value is null)
-        {
-            throw new ArgumentNullException("");
-        }
-    }
-    internal static void ThrowIfArgumentNullOrEmpty(string? value, string paramName)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            throw new ArgumentNullException($"The {paramName} cannot be null or empty.");
-        }
-    }
+    #region Arguments
 
-    internal static void ThrowArgumentExceptionIf([DoesNotReturnIf(true)]bool condition, string message)
+    internal static void ThrowIfNull(object? value, string paramName)
     {
-        if (condition)
+        if (value is null || (value is string str && string.IsNullOrEmpty(str)))
         {
-            throw new ArgumentException("");
+            throw GetArgumentNullException(paramName);
         }
     }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentNullException(string paramName)
-    {
-        throw new ArgumentNullException(paramName);
-    }
+    internal static void ThrowArgumentNullException(string paramName) =>
+        throw GetArgumentNullException(paramName);
 
     [DoesNotReturn]
-    internal static void ThrowArgumentException(string message)
-    {
-        throw new ArgumentException(message);
-    }
+    internal static void ThrowArgumentNullException(string paramName, string message) =>
+        throw GetArgumentNullException(paramName, message);
 
     [DoesNotReturn]
-    internal static void ThrowInvalidOperationException(string message)
-    {
+    internal static void ThrowArgumentException(string message) =>
+        throw GetArgumentException(message);
+
+    [DoesNotReturn]
+    internal static void ThrowArgumentException(string message, string paramName) =>
+        throw GetArgumentException(message, paramName);
+    
+    [DoesNotReturn]
+    internal static void ThrowInvalidOperationException(string message) =>
         throw new InvalidOperationException(message);
-    }
+    
+    internal static ArgumentException GetArgumentException(string message) =>
+        new ArgumentException(message);
+    
+    internal static ArgumentException GetArgumentException(string message, string paramName) =>
+        new ArgumentException(message, paramName);
+
+    internal static ArgumentNullException GetArgumentNullException(string paramName) =>
+        new ArgumentNullException(paramName);
+
+    internal static ArgumentNullException GetArgumentNullException(string paramName, string message) =>
+        new ArgumentNullException(paramName, message);
+
+    #endregion
+
+    #region Threading
+
+    [DoesNotReturn]
+    internal static void ThrowObjectDisposedException(string objectName) =>
+        throw GetObjectDisposedException(objectName);
+
+    [DoesNotReturn]
+    internal static void ThrowObjectDisposedException(string objectName, string message) =>
+        throw GetObjectDisposedException(objectName, message);
+
+    internal static ObjectDisposedException GetObjectDisposedException(string objectName) =>
+        new ObjectDisposedException(objectName);
+
+    internal static ObjectDisposedException GetObjectDisposedException(string objectName, string message) =>
+        new ObjectDisposedException(objectName, message);
+
+    #endregion
+
+
+
+
+
+
 
 }

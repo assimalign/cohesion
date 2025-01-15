@@ -40,7 +40,7 @@ internal class ConfigurationJsonSection : ConfigurationJsonEntry, IConfiguration
         throw new NotImplementedException();
     }
 
-    public object? ToValue()
+    public object? GetValue()
     {
         throw new NotImplementedException();
     }

@@ -12,40 +12,58 @@ namespace Assimalign.Cohesion.Configuration;
 /// </summary>
 public class ConfigurationSection : IConfigurationSection
 {
-    private readonly IConfiguration configuration;
-    private readonly Key key;
+    private readonly object? value;
 
     /// <summary>
     /// Initializes a new instance.
     /// </summary>
     /// <param name="root">The configuration root.</param>
     /// <param name="key">The path to this section.</param>
-    public ConfigurationSection(IConfiguration configuration, Key key)
+    public ConfigurationSection(KeyPath path, object? value)
     {
-        this.configuration = configuration;
-        this.key = key;
+        Key = path.GetLast();
+        Path = path;
+        this.value = value;
     }
 
 
     public Key Key { get; }
     public KeyPath Path { get; }
-    public IConfigurationProvider Provider { get; }
-
-    object? IConfiguration.this[KeyPath path] 
+    public object? this[KeyPath path] 
     {
         get => throw new NotImplementedException(); 
         set => throw new NotImplementedException(); 
     }
 
-
-    private void SetConfigurationValue(Key key)
-
-    public IEnumerable<IConfigurationEntry> EnumerateEntries()
+    private object? GetSectionValue(KeyPath path)
     {
-        foreach (var item in )
+        Path.Combine(path);
+    }
+
+    public object? GetValue()
+    {
         throw new NotImplementedException();
     }
 
+    public IConfigurationValue GetValue(Key key)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IEnumerable<IConfigurationValue> GetValues()
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationSection GetSection(Key key)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IEnumerable<IConfigurationSection> GetSections()
+    {
+        throw new NotImplementedException();
+    }
 
     public IConfigurationChangeToken GetChangeToken()
     {
@@ -57,30 +75,11 @@ public class ConfigurationSection : IConfigurationSection
         throw new NotImplementedException();
     }
 
-    public IConfigurationSection GetSection(Key key)
-    {
-        throw new NotImplementedException();
-    }
-
     IEnumerator IEnumerable.GetEnumerator()
     {
         throw new NotImplementedException();
     }
 
-    public object? ToValue()
-    {
-        throw new NotImplementedException();
-    }
-
-    public IConfigurationValue GetValue(Key key)
-    {
-        throw new NotImplementedException();
-    }
-
-    IEnumerable<IConfigurationValue> IConfiguration.EnumerateEntries()
-    {
-        throw new NotImplementedException();
-    }
 
 
 

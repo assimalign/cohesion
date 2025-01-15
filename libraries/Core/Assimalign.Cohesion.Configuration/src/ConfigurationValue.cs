@@ -10,5 +10,4 @@ public record class ConfigurationValue : IConfigurationValue
     public Key Key => Path.GetLast();
     public KeyPath Path { get; }
     public object? Value { get; }
-    public IConfigurationProvider Provider => throw new System.NotImplementedException();
 }

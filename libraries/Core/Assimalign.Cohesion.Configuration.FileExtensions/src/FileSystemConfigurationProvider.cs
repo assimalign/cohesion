@@ -49,7 +49,7 @@ internal abstract class FileSystemConfigurationProvider : IConfigurationProvider
         throw new NotImplementedException();
     }
 
-    public void Refresh()
+    public void Reload()
     {
         throw new NotImplementedException();
     }

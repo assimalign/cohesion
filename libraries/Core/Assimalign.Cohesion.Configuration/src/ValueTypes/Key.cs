@@ -100,7 +100,16 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         return Equals(this, other, KeyComparison.Ordinal);
     }
 
-    public bool Equals(Key other, )
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public bool Equals(Key other, KeyComparison comparison)
+    {
+        return Equals(this, other, comparison);
+    }
 
     /// <summary>
     /// 

@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -12,22 +15,31 @@ using Assimalign.Cohesion.Configuration.Internal;
 /// </summary>
 public class ConfigurationBuilder : IConfigurationBuilder
 {
-    private readonly IList<Action<IConfigurationContext>> onAdd;
+    private readonly IList<Func<IConfigurationContext, Task>> onAdd;
 
     public ConfigurationBuilder()
     {
-        this.onAdd = new List<Action<IConfigurationContext>>();
+        this.onAdd = new List<Func<IConfigurationContext, Task>>();
     }
 
-    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> func)
+    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
     {
-        if (func is null)
+        return AddProvider(
+            new Func<IConfigurationContext, Task<IConfigurationProvider>>(context =>
+            {
+                return Task.FromResult(configure.Invoke(context));
+            }));
+    }
+
+    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
+    {
+        if (configure is null)
         {
-            ThrowHelper.ThrowArgumentNullException(nameof(func));
+            ThrowHelper.ThrowArgumentNullException(nameof(configure));
         }
-        onAdd.Add(context =>
+        onAdd.Add(async context =>
         {
-            var provider = func.Invoke(context);
+            var provider = await configure.Invoke(context);
 
             if (context.Providers.Any(p => p.Name == provider.Name))
             {
@@ -46,12 +58,15 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered providers.</returns>
     public IConfigurationRoot Build()
     {
-        var context = new ConfigurationContext();
+        return BuildAsync().GetAwaiter().GetResult();
+    }
 
-        foreach (var action in onAdd)
-        {
-            action.Invoke(context);
-        }
+    public async ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
+    {
+        var context = new ConfigurationContext();
+        var tasks = onAdd.Select(func => func.Invoke(context));
+
+        await Task.WhenAll(tasks);
 
         return new ConfigurationRoot(context.Providers);
     }

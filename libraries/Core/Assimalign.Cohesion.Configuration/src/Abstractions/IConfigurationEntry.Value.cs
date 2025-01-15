@@ -16,15 +16,3 @@ public interface IConfigurationValue : IConfigurationEntry
     /// </summary>
     object? Value { get; }
 }
-
-/// <summary>
-/// 
-/// </summary>
-/// <typeparam name="T"></typeparam>
-public interface IConfigurationValue<T> : IConfigurationValue
-{
-    /// <summary>
-    /// 
-    /// </summary>
-    new T Value { get; }
-}

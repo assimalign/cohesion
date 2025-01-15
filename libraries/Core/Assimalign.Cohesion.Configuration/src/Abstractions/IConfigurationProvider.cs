@@ -1,13 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
 /// <summary>
 /// Provides configuration key/values for an application.
 /// </summary>
-public interface IConfigurationProvider : IDisposable
+public interface IConfigurationProvider : IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// Returns the provider name.
@@ -31,23 +32,25 @@ public interface IConfigurationProvider : IDisposable
     /// <param name="entry">The value.</param>
     void Set(IConfigurationEntry? entry);
     /// <summary>
-    /// Loads configuration values from the source represented by this <see cref="IConfigurationProvider"/>.
+    /// Synchronously loads the configuration values.
     /// </summary>
     void Load();
     /// <summary>
     /// 
     /// </summary>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task LoadAsync();
+    Task LoadAsync(CancellationToken cancellationToken = default);
     /// <summary>
-    /// 
+    /// Synchronously reloads the configuration provider.
     /// </summary>
-    void Refresh();
+    void Reload();
     /// <summary>
-    /// 
+    /// Asynchronously reloads the configuration provider.
     /// </summary>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task RefreshAsync();
+    Task ReloadAsync(CancellationToken cancellationToken = default);
     /// <summary>
     /// 
     /// </summary>
