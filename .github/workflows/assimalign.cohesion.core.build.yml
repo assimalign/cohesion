@@ -68,7 +68,7 @@ jobs:
     #     dotnet restore './libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj'
     
     - name: '.NET Build: ${{ matrix.projects }}'
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build --configuration Release
       working-directory: './libraries/Core/${{ matrix.projects }}'
 
     - name: '.NET Unit Tests: ${{ matrix.projects }}'
