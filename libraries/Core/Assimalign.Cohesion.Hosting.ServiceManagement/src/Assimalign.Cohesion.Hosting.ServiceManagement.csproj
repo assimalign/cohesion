@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.Hosting\src\Assimalign.Cohesion.Hosting.csproj" />
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

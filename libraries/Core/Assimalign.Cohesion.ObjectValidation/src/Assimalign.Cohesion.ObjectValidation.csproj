@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<Description>The following library offers an extensive set of fluent APIs for object validation built the unified .NET. NOTE: Any .NET framework below version 5 is NOT supported.</Description>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -22,4 +23,5 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

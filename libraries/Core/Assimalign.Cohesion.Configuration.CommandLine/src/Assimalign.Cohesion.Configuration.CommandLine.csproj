@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Configuration.Providers</RootNamespace>
 		<Description>Command line configuration provider implementation for Assimalign.Extensions.Configuration.</Description>
@@ -12,4 +13,5 @@
 	<ItemGroup>
 	  <ProjectReference Include="..\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

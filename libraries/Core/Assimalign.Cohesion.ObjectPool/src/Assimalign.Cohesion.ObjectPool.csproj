@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<!--<ItemGroup>
 		<None Include="..\..\..\..\.assimalign.logo.png">
 			<Pack>True</Pack>
@@ -11,4 +12,5 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>-->
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 	</PropertyGroup>
@@ -10,4 +11,5 @@
 	<ItemGroup>
 		<ProjectReference Include="..\src\Assimalign.Cohesion.ObjectMapping.csproj" />
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

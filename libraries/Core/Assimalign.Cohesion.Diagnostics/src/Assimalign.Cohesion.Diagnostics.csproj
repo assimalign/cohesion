@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<ItemGroup>
 		<None Include="README.md">
 			<Pack>true</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

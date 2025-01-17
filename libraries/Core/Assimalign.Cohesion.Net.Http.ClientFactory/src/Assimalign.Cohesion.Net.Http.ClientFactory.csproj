@@ -1,5 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
     <PropertyGroup>
         <RootNamespace>Assimalign.Cohesion.Net.Http</RootNamespace>
     </PropertyGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

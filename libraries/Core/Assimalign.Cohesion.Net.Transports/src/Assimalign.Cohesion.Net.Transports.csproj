@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<Description>A collection of generic network transports for creating client and server implementations.</Description>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -20,4 +21,5 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

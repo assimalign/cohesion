@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ObjectMapping</RootNamespace>
 		<Description>
@@ -22,4 +23,5 @@
 			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
 		</EmbeddedResource>
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>

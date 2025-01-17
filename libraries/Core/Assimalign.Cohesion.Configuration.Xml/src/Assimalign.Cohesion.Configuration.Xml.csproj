@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="..\..\Directory.Build.props" />
 	<PropertyGroup>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<EnableDefaultItems>true</EnableDefaultItems>
@@ -12,4 +13,5 @@
 	<ItemGroup>
 	  <ProjectReference Include="..\Assimalign.Cohesion.Configuration.FileExtensions\Assimalign.Cohesion.Configuration.FileExtensions.csproj" />
 	</ItemGroup>
+	<Import Project="..\..\Directory.Build.targets" />
 </Project>
