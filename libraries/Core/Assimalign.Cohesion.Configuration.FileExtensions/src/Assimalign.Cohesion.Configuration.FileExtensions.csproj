@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
 		<Description>Extension methods for configuring file-based configuration providers for Assimalign.Extensions.Configuration.</Description>
@@ -17,5 +17,5 @@
 	<ItemGroup>
 	  <Folder Include="Internal\" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

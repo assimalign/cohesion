@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
@@ -11,5 +11,5 @@
     <ProjectReference Include="..\Assimalign.Extensions.Configuration\Assimalign.Extensions.Configuration.csproj" />
   </ItemGroup>
 
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

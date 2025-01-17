@@ -3,7 +3,7 @@ name: assimalign.cohesion.core.build
 on:
   push:
     paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - '**/Directory.Build.props'                                    # When the Global Props File Changes
       - 'libraries/Core/**'
       - '.github/workflows/assimalign.cohesion.core.build.yml'        # When Pipeline File Changes
 
@@ -49,6 +49,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       name: 'Checkout: ${{ matrix.projects }}'
+      with:
+        show-progress: false
 
     - name: Install .NET
       uses: actions/setup-dotnet@v3

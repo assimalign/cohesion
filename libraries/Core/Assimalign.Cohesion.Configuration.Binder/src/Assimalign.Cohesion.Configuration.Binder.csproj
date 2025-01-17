@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.Configuration\src\Assimalign.Cohesion.Configuration.csproj" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

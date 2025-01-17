@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
 		<EnableAOTAnalyzer>true</EnableAOTAnalyzer>
@@ -27,5 +27,5 @@
 			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
 		</EmbeddedResource>
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

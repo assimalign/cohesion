@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
@@ -17,5 +17,5 @@
 	<ItemGroup>
 	  <Folder Include="Spcification\" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

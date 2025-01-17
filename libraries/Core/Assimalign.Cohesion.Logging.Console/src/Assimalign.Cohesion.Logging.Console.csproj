@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.Logging\src\Assimalign.Cohesion.Logging.csproj" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

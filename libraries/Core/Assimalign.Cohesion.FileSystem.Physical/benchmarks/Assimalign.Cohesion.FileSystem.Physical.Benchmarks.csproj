@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 	</PropertyGroup>
@@ -7,5 +7,5 @@
 		<PackageReference Include="BenchmarkDotNet" />
 		<PackageReference Include="Zio" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

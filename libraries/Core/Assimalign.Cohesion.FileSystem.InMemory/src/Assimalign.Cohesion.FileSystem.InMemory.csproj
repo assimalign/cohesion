@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
 	</PropertyGroup>
@@ -9,5 +9,5 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

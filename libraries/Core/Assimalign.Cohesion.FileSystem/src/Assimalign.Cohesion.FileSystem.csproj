@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
@@ -16,5 +16,5 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

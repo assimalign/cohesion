@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 	</PropertyGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>

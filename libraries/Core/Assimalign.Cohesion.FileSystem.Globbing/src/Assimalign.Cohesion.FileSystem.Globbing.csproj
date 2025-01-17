@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="..\..\Directory.Build.props" />
+	
 	<PropertyGroup>
 		<Description>
 			This library contains a set of APIs for blob pattern matching.
@@ -14,5 +14,5 @@
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
 	</ItemGroup>
-	<Import Project="..\..\Directory.Build.targets" />
+	
 </Project>
