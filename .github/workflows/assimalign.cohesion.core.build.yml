@@ -63,9 +63,9 @@ jobs:
 
     - name: '.NET Restore: ${{ matrix.projects }}'
       run: |
-        dotnet restore './libraries/Core/src/${{ matrix.projects }}/${{ matrix.projects }}.csproj'
-        dotnet restore './libraries/Core/tests/${{ matrix.projects }}/${{ matrix.projects }}.Tests.csproj'
-        dotnet restore './libraries/Core/benchmarks/${{ matrix.projects }}/${{ matrix.projects }}.Benchmarks.csproj'
+        dotnet restore './libraries/Core/${{ matrix.projects }}/src/${{ matrix.projects }}.csproj'
+        dotnet restore './libraries/Core/${{ matrix.projects }}/tests/${{ matrix.projects }}.Tests.csproj'
+        dotnet restore './libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj'
     
     - name: '.NET Build: ${{ matrix.projects }}'
       run: dotnet build --configuration Release --no-restore
