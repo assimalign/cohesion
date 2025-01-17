@@ -1,14 +1,15 @@
-name: assimalign.cohesion.core.build
+name: Core
 
 on:
   push:
     paths: 
       - '**/Directory.Build.props'                                    # When the Global Props File Changes
       - 'libraries/Core/**'
-      - '.github/workflows/assimalign.cohesion.core.build.yml'        # When Pipeline File Changes
+      - '.github/workflows/core.yml'        # When Pipeline File Changes
 
 jobs:
   build:
+    name: '${{ matrix.projects }} [${{ matrix.os }}]'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -16,7 +17,7 @@ jobs:
         projects: [
             # 'Assimalign.Cohesion.App',
             # 'Assimalign.Cohesion.Caching',
-            # 'Assimalign.Cohesion.Configuration',
+            'Assimalign.Cohesion.Configuration',
             # 'Assimalign.Cohesion.Configuration.Binder',
             # 'Assimalign.Cohesion.Configuration.CommandLine',
             # 'Assimalign.Cohesion.Configuration.EnvironmentVariables',
@@ -32,18 +33,18 @@ jobs:
             # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
             # 'Assimalign.Cohesion.FileSystem.Physical',
-            # 'Assimalign.Cohesion.Hosting',
+            'Assimalign.Cohesion.Hosting',
             # 'Assimalign.Cohesion.Hosting.BackgroundService',
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
-            # 'Assimalign.Cohesion.Logging',
+            'Assimalign.Cohesion.Logging',
             # 'Assimalign.Cohesion.Logging.Console',
-            # 'Assimalign.Cohesion.Net',
-            # 'Assimalign.Cohesion.Net.Http',
-            # 'Assimalign.Cohesion.Net.Http.ClientFactory',
+            'Assimalign.Cohesion.Net',
+            'Assimalign.Cohesion.Net.Http',
+            'Assimalign.Cohesion.Net.Http.ClientFactory',
             # 'Assimalign.Cohesion.Net.Transports',
             'Assimalign.Cohesion.ObjectMapping',
-            # 'Assimalign.Cohesion.ObjectPool',
-            # 'Assimalign.Cohesion.ObjectValidation',
+            'Assimalign.Cohesion.ObjectPool',
+            'Assimalign.Cohesion.ObjectValidation',
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
     steps:

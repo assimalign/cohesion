@@ -1,11 +1,11 @@
-name: assimalign.cohesion.configurationstore.build
+name: Configuration Store
 
 on:
   push:
     paths: 
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'libraries/ConfigurationStore/**'
-      - '.github/workflows/assimalign.cohesion.configurationstore.build.yml'        # When Pipeline File Changes
+      - '.github/workflows/configuration-store.yml'        # When Pipeline File Changes
 
 jobs:
   build:

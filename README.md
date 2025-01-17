@@ -1,7 +1,8 @@
 # Cohesion
 
-This project is a 
 
+
+[![assimalign.cohesion.core.build](https://github.com/assimalign/cohesion/actions/workflows/assimalign.cohesion.core.build.yml/badge.svg?branch=development)](https://github.com/assimalign/cohesion/actions/workflows/assimalign.cohesion.core.build.yml)
 
 # Repository Structure
 
