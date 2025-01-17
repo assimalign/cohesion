@@ -4,9 +4,9 @@ using System.Collections;
 using System.Linq;
 using System.Linq.Expressions;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Extensions.Mapping.Properties;
+using Assimalign.Cohesion.ObjectMapping.Properties;
 
 
 /* 

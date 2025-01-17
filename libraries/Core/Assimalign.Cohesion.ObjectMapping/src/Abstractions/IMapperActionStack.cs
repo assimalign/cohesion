@@ -2,7 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
 /// 

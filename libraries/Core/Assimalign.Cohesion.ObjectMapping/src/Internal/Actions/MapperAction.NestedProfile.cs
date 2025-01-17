@@ -4,10 +4,10 @@ using System.Linq.Expressions;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Extensions.Mapping.Properties;
-using Assimalign.Extensions.Mapping.Internal.Exceptions;
+using Assimalign.Cohesion.ObjectMapping.Properties;
+using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 internal sealed class MapperActionNestedProfile<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TTargetMember : class, new()

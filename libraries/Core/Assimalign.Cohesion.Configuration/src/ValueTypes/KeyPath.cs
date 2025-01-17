@@ -39,14 +39,18 @@ namespace Assimalign.Cohesion.Configuration;
 [DebuggerDisplay("{ToString()}")]
 public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
 {
+    #region Constructors
+
     /// <summary>
-    /// 
+    /// The default constructor
     /// </summary>
     /// <param name="keys"></param>
     public KeyPath(Key[] keys)
     {
         Keys = (keys ??= []);
     }
+
+    #endregion
 
     #region Properties
 
@@ -56,7 +60,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     public const char DefaultDelimiter = ':';
 
     /// <summary>
-    /// Allowed separators.
+    /// Allowed delimiters.
     /// </summary>
     public static readonly char[] Delimiters = ['\\', '/', ':', '.'];
 
@@ -68,7 +72,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <summary>
     /// 
     /// </summary>
-    public Key[] Keys { get; }
+    public Key[] Keys { get; } = [];
 
     /// <summary>
     /// The number of keys in the path.
@@ -83,13 +87,15 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// Gets the last key in the path.
     /// </summary>
     /// <returns></returns>
-    public Key GetLast() => Keys[Keys.Length - 1];
+    /// <exception cref="IndexOutOfRangeException"></exception>
+    public Key GetLastKey() => Keys[Keys.Length - 1];
 
     /// <summary>
     /// Gets the first key in the path.
     /// </summary>
     /// <returns></returns>
-    public Key GetFirst() => Keys[0];
+    /// <exception cref="IndexOutOfRangeException"></exception>
+    public Key GetFirstKey() => Keys[0];
 
     /// <summary>
     /// 
@@ -104,7 +110,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="start"></param>
+    /// <param name="start">The starting index to begin.</param>
     /// <param name="length"></param>
     /// <returns></returns>
     public KeyPath GetSubpath(int start, int length)
@@ -203,9 +209,8 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="value"></param>
+    /// <param name="span"></param>
     /// <returns></returns>
-
     public static KeyPath Parse(ReadOnlySpan<char> span)
     {
         if (span.IsEmpty)
@@ -261,6 +266,18 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// </summary>
     /// <param name="value"></param>
     public static implicit operator KeyPath(string value) => Parse(value);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    public static implicit operator KeyPath(Key key) => new KeyPath([key]);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="keys"></param>
+    public static implicit operator KeyPath(Key[] keys) => new KeyPath(keys);
 
     /// <summary>
     /// 

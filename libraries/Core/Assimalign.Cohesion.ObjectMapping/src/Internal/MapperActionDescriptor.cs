@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Extensions.Mapping.Internal.Exceptions;
+using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 
 internal class MapperActionDescriptor : IMapperActionDescriptor

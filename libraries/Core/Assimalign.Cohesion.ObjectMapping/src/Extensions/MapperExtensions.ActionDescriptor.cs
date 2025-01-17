@@ -7,10 +7,10 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
-using Assimalign.Extensions.Mapping.Internal;
-using Assimalign.Extensions.Mapping.Internal.Exceptions;
+using Assimalign.Cohesion.ObjectMapping.Internal;
+using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 using System.Diagnostics.CodeAnalysis;
 
 public static class MapperActionDescriptorExtensions

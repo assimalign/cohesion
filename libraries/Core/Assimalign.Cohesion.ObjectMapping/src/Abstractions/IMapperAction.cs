@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Extensions.Mapping;
+﻿namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
 /// Represents a single mapping 

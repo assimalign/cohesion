@@ -4,10 +4,10 @@ using System.Reflection;
 using System.Linq.Expressions;
 using System.Collections.Generic;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Extensions.Mapping.Properties;
-using Assimalign.Extensions.Mapping.Internal.Exceptions;
+using Assimalign.Cohesion.ObjectMapping.Properties;
+using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TSourceMember : class, new()

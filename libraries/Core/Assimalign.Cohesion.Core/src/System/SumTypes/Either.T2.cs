@@ -217,10 +217,10 @@ public record Either<T1, T2> : IEither
         {
             case 1:
                 @if = AsT1;
-                @else = default;
+                @else = default!;
                 return true;
             case 2:
-                @if = default;
+                @if = default!;
                 @else = AsT2;
                 return false;
             default:

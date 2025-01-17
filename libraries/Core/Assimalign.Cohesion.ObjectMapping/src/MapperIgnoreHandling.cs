@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Extensions.Mapping;
+﻿namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
 /// Determines the default behavior for handling Default and Null values when mapping.

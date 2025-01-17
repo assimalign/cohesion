@@ -22,6 +22,11 @@ public class ConfigurationBuilder : IConfigurationBuilder
         this.onAdd = new List<Func<IConfigurationContext, Task>>();
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configure"></param>
+    /// <returns></returns>
     public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
     {
         return AddProvider(
@@ -31,6 +36,11 @@ public class ConfigurationBuilder : IConfigurationBuilder
             }));
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configure"></param>
+    /// <returns></returns>
     public IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
     {
         if (configure is null)
@@ -61,6 +71,11 @@ public class ConfigurationBuilder : IConfigurationBuilder
         return BuildAsync().GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
     public async ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
     {
         var context = new ConfigurationContext();

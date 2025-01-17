@@ -21,7 +21,7 @@ public class ConfigurationSection : IConfigurationSection
     /// <param name="key">The path to this section.</param>
     public ConfigurationSection(KeyPath path, object? value)
     {
-        Key = path.GetLast();
+        Key = path.GetLastKey();
         Path = path;
         this.value = value;
     }

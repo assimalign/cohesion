@@ -2,7 +2,7 @@
 using System.Linq.Expressions;
 using System.Collections.Generic;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
 /// The <see cref="IMapperActionDescriptor"/> represents a builder interface for pushing 

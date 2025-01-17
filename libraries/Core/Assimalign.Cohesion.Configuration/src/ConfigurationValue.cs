@@ -7,7 +7,7 @@ public record class ConfigurationValue : IConfigurationValue
         Path = path;
         Value = value;
     }
-    public Key Key => Path.GetLast();
+    public Key Key => Path.GetLastKey();
     public KeyPath Path { get; }
     public object? Value { get; }
 }

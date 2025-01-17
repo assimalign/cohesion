@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 
 internal static class MapperMemoise<TIn, TOut>

@@ -41,7 +41,7 @@ jobs:
             # 'Assimalign.Cohesion.Net.Http',
             # 'Assimalign.Cohesion.Net.Http.ClientFactory',
             # 'Assimalign.Cohesion.Net.Transports',
-            # 'Assimalign.Cohesion.ObjectMapping',
+            'Assimalign.Cohesion.ObjectMapping',
             # 'Assimalign.Cohesion.ObjectPool',
             # 'Assimalign.Cohesion.ObjectValidation',
             # 'Assimalign.Cohesion.Security.Cryptography'
@@ -49,6 +49,25 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       name: 'Checkout: ${{ matrix.projects }}'
+
+    - name: Check if .NET 9 is Installed
+      id: check-dotnet
+      run: |
+        if dotnet --list-sdks | grep -q "^${{ env.DOTNET_VERSION }}"; then
+          echo "Found .NET version ${{ env.DOTNET_VERSION }}"
+          echo "dotnet_installed=true" >> $GITHUB_ENV
+        else
+          echo "Missing .NET version ${{ env.DOTNET_VERSION }}"
+          echo "dotnet_installed=false" >> $GITHUB_ENV
+        fi
+      env:
+        DOTNET_VERSION: '9.0'
+
+    - name: Setup .NET (if missing)
+      if: env.dotnet_installed == 'false'
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: '.NET Restore: ${{ matrix.projects }}'
       run: dotnet restore 

@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
-using Assimalign.Extensions.Mapping.Internal;
+using Assimalign.Cohesion.ObjectMapping.Internal;
 
 public sealed class MapperFactoryBuilder
 {

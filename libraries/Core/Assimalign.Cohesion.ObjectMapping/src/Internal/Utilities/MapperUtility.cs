@@ -2,9 +2,9 @@
 using System.Linq;
 using System.Linq.Expressions;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
-using Assimalign.Extensions.Mapping.Internal;
+using Assimalign.Cohesion.ObjectMapping.Internal;
 using System.Diagnostics.CodeAnalysis;
 
 internal static class MapperUtility

@@ -57,7 +57,7 @@ public class ConfigurationRoot : IConfigurationRoot
 
     private void SetConfigurationValue(KeyPath path, object? value)
     {
-        var key = path.GetFirst();
+        var key = path.GetFirstKey();
 
         foreach (var provider in Providers)
         {
@@ -80,7 +80,7 @@ public class ConfigurationRoot : IConfigurationRoot
     private object? GetConfigurationValue(KeyPath path)
     {
         IConfigurationEntry? entry = null;
-        Key key = path.GetFirst();
+        Key key = path.GetFirstKey();
 
         foreach (var provider in Providers)
         {

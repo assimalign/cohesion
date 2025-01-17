@@ -2,4 +2,4 @@
 
 
 
-[assembly: InternalsVisibleTo("Assimalign.Extensions.Mapping.Tests")]
+[assembly: InternalsVisibleTo("Assimalign.Cohesion.ObjectMapping.Tests")]

@@ -5,9 +5,9 @@ using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace Assimalign.Extensions.Mapping.Tests;
+namespace Assimalign.Cohesion.ObjectMapping.Tests;
 
-using Assimalign.Extensions.Mapping;
+using Assimalign.Cohesion.ObjectMapping;
 using System.Diagnostics;
 
 public partial class MapperTests

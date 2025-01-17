@@ -1,10 +1,10 @@
-using Assimalign.Extensions.Mapping;
+using Assimalign.Cohesion.ObjectMapping;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Xunit;
 
-namespace Assimalign.Extensions.Mapping.Tests;
+namespace Assimalign.Cohesion.ObjectMapping.Tests;
 
 public partial class MapperTests
 {

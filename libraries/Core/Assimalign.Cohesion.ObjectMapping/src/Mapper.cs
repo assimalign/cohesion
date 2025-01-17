@@ -6,9 +6,9 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
-using Assimalign.Extensions.Mapping.Internal.Exceptions;
+using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 /// <summary>
 /// 

@@ -36,7 +36,7 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// </summary>
     void Load();
     /// <summary>
-    /// 
+    /// Asynchronously loads the configuration values.
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Extensions.Mapping.Internal;
+namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 internal class MapperAction : IMapperAction
 {

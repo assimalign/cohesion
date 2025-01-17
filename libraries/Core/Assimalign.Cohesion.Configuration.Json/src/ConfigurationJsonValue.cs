@@ -6,7 +6,7 @@ public class ConfigurationJsonValue : ConfigurationJsonEntry, IConfigurationValu
     {
         
     }
-    public override Key Key => Path.GetLast();
+    public override Key Key => Path.GetLastKey();
     public KeyPath Path { get; }
     public object? Value { get; }
 }

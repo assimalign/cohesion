@@ -1,9 +1,9 @@
 ﻿using System;
 
-namespace Assimalign.Extensions.Mapping;
+namespace Assimalign.Cohesion.ObjectMapping;
 
 
-using Assimalign.Extensions.Mapping.Internal;
+using Assimalign.Cohesion.ObjectMapping.Internal;
 
 /// <summary>
 /// 

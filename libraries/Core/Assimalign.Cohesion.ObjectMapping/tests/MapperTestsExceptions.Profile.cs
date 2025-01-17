@@ -5,10 +5,10 @@ using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace Assimalign.Extensions.Mapping.Tests;
+namespace Assimalign.Cohesion.ObjectMapping.Tests;
 
-using Assimalign.Extensions.Mapping;
-using Assimalign.Extensions.Mapping.Internal;
+using Assimalign.Cohesion.ObjectMapping;
+using Assimalign.Cohesion.ObjectMapping.Internal;
 
 public partial class MapperTestsExceptions
 {
