@@ -12,9 +12,10 @@
 		<VersionSuffix>pre.1.0.0</VersionSuffix>
 	</PropertyGroup>
 	<PropertyGroup>
-		<TargetFrameworksForLibraries>net6.0;net8.0</TargetFrameworksForLibraries>
-		<TargetFrameworksForBenchmark>net8.0</TargetFrameworksForBenchmark>
-		<TargetFrameworkForCli>net8.0</TargetFrameworkForCli>
-		<TargetFrameworkForPortal>net</TargetFrameworkForPortal>
+		<TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
+		<TargetFrameworksForLibraries>net6.0;net8.0;$(TargetFrameworkLatest)</TargetFrameworksForLibraries>
+		<TargetFrameworksForBenchmark>$(TargetFrameworkLatest)</TargetFrameworksForBenchmark>
+		<TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
+		<TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
 	</PropertyGroup>
 </Project>

@@ -49,26 +49,20 @@ jobs:
     steps:
     - uses: actions/checkout@v2
       name: 'Checkout: ${{ matrix.projects }}'
-      with:
-        show-progress: false
 
-    - name: Install .NET
+    - name: .NET Installation
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: |
           6.x
-          7.x
           8.x
           9.x
 
-    # - name: '.NET Restore: ${{ matrix.projects }}'
-    #   run: |
-    #     dotnet restore './libraries/Core/${{ matrix.projects }}/src/${{ matrix.projects }}.csproj'
-    #     dotnet restore './libraries/Core/${{ matrix.projects }}/tests/${{ matrix.projects }}.Tests.csproj'
-    #     dotnet restore './libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj'
+    - name: '.NET Restore: ${{ matrix.projects }}'
+      run:  dotnet restore './libraries/Core/${{ matrix.projects }}'
     
     - name: '.NET Build: ${{ matrix.projects }}'
-      run: dotnet build --configuration Release
+      run: dotnet build --configuration Release --no-restore
       working-directory: './libraries/Core/${{ matrix.projects }}'
 
     - name: '.NET Unit Tests: ${{ matrix.projects }}'
