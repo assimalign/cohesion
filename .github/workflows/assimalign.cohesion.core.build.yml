@@ -62,12 +62,14 @@ jobs:
           9.x
 
     - name: '.NET Restore: ${{ matrix.projects }}'
-      run: dotnet restore 
-      working-directory: './libraries/Core/${{ matrix.projects }}'
+      run: |
+        dotnet restore './libraries/Core/src/${{ matrix.projects }}/${{ matrix.projects }}.csproj'
+        dotnet restore './libraries/Core/tests/${{ matrix.projects }}/${{ matrix.projects }}.Tests.csproj'
+        dotnet restore './libraries/Core/benchmarks/${{ matrix.projects }}/${{ matrix.projects }}.Benchmarks.csproj'
     
     - name: '.NET Build: ${{ matrix.projects }}'
       run: dotnet build --configuration Release --no-restore
-      working-directory:  './libraries/Core/${{ matrix.projects }}'
+      working-directory: './libraries/Core/${{ matrix.projects }}'
 
     - name: '.NET Unit Tests: ${{ matrix.projects }}'
       run: dotnet test --no-restore --verbosity normal
