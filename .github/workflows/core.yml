@@ -54,7 +54,10 @@ jobs:
     - name: .NET Installation
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: ${{ vars.COHESION_DOTNET_RUNTIMES }}
+        dotnet-version: |
+          6.x
+          8.x
+          9.x
 
     - name: '.NET Restore: ${{ matrix.projects }}'
       run:  dotnet restore './libraries/Core/${{ matrix.projects }}'
