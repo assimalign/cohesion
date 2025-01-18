@@ -15,22 +15,31 @@ using Assimalign.Cohesion.Configuration.Internal;
 /// </summary>
 public class ConfigurationBuilder : IConfigurationBuilder
 {
-    private readonly IList<Func<IConfigurationContext, Task>> onAdd;
+    private readonly ConfigurationRootOptions options;
+    private readonly IList<Func<IConfigurationBuilderContext, Task>> onAdd;
 
     public ConfigurationBuilder()
     {
-        this.onAdd = new List<Func<IConfigurationContext, Task>>();
+        this.onAdd = new List<Func<IConfigurationBuilderContext, Task>>();
+        this.options ??= ConfigurationRootOptions.Default;
     }
+
+    public ConfigurationBuilder(ConfigurationRootOptions options) : this()
+    {
+        this.options = options;
+    }
+
+   
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
+    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
     {
         return AddProvider(
-            new Func<IConfigurationContext, Task<IConfigurationProvider>>(context =>
+            new Func<IConfigurationBuilderContext, Task<IConfigurationProvider>>(context =>
             {
                 return Task.FromResult(configure.Invoke(context));
             }));
@@ -41,7 +50,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
+    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
         if (configure is null)
         {
@@ -62,27 +71,72 @@ public class ConfigurationBuilder : IConfigurationBuilder
     }
 
     /// <summary>
-    /// Builds an <see cref="IConfiguration"/> with keys and values from the set of providers registered in
-    /// <see cref="Sources"/>.
+    /// 
     /// </summary>
-    /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered providers.</returns>
-    public IConfigurationRoot Build()
+    /// <returns></returns>
+    public ConfigurationRoot Build()
     {
         return BuildAsync().GetAwaiter().GetResult();
     }
-
+    
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
     {
+        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        
+
         var context = new ConfigurationContext();
         var tasks = onAdd.Select(func => func.Invoke(context));
 
         await Task.WhenAll(tasks);
 
-        return new ConfigurationRoot(context.Providers);
+        return new ConfigurationRoot(context.Providers, options);
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configure"></param>
+    /// <returns></returns>
+    public static ConfigurationBuilder Create(Action<ConfigurationRootOptions> configure)
+    {
+        ThrowHelper.ThrowIfNull(configure, nameof(configure));
+
+        var options = new ConfigurationRootOptions();
+
+        configure.Invoke(options);
+
+        return new ConfigurationBuilder(options);
+    }
+
+
+    #region Interfaces
+
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
+    {
+        return AddProvider(configure);
+    }
+
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
+    {
+        return AddProvider(configure);
+    }
+
+    IConfigurationRoot IConfigurationBuilder.Build()
+    {
+        return Build();
+    }
+
+    async ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken = default)
+    {
+        return await BuildAsync(cancellationToken);
+    }
+
+    #endregion
+
 }

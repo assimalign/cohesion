@@ -40,7 +40,7 @@ public class ConfigurationSection : IConfigurationSection
         Path.Combine(path);
     }
 
-    public object? GetValue()
+    public object? ToValue()
     {
         throw new NotImplementedException();
     }

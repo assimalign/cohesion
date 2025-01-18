@@ -19,6 +19,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{65AC8637-D
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{3E4A3C5E-E2A0-44CD-8FC7-111C0BF4BB14}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{AD23632C-AC68-4753-B66A-031DA23CFDB6}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\..\.github\workflows\core.yml = ..\..\..\.github\workflows\core.yml
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

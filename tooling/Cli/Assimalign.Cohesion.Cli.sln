@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{1BCCFC7E-0BED-45F8-AD9C-404DC094D82B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Cli", "src\Assimalign.Cohesion.Cli\Assimalign.Cohesion.Cli.csproj", "{60D166B8-1F6C-4D99-AE9F-651B52BE8A41}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0B60B30B-9332-4325-8D2B-03CEA39F4F57}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Cli.Tests", "tests\Assimalign.Cohesion.Cli.Tests\Assimalign.Cohesion.Cli.Tests.csproj", "{8F66DC7F-2512-4D4B-878C-216F23EBC0FA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{60D166B8-1F6C-4D99-AE9F-651B52BE8A41}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{60D166B8-1F6C-4D99-AE9F-651B52BE8A41}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{60D166B8-1F6C-4D99-AE9F-651B52BE8A41}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{60D166B8-1F6C-4D99-AE9F-651B52BE8A41}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F66DC7F-2512-4D4B-878C-216F23EBC0FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F66DC7F-2512-4D4B-878C-216F23EBC0FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F66DC7F-2512-4D4B-878C-216F23EBC0FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F66DC7F-2512-4D4B-878C-216F23EBC0FA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{60D166B8-1F6C-4D99-AE9F-651B52BE8A41} = {1BCCFC7E-0BED-45F8-AD9C-404DC094D82B}
+		{8F66DC7F-2512-4D4B-878C-216F23EBC0FA} = {0B60B30B-9332-4325-8D2B-03CEA39F4F57}
+	EndGlobalSection
+EndGlobal

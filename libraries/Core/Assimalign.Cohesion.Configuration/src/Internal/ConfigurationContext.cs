@@ -5,7 +5,7 @@ using System.Collections.Immutable;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-internal class ConfigurationContext : IConfigurationContext
+internal class ConfigurationContext : IConfigurationBuilderContext
 {
     private readonly List<IConfigurationProvider> providers;
     

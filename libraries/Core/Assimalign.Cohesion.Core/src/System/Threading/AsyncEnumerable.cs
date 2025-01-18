@@ -1,17 +1,20 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace System.Threading.Tasks;
 
 public static class AsyncEnumerable
 {
-
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="tasks"></param>
+    /// <returns></returns>
     public static async IAsyncEnumerable<T> EnumerateAsync<T>(this IEnumerable<Task<T>> tasks)
     {
-        var items = tasks.ToList();
+        var items = tasks is ICollection<Task<T>> collection ? collection : tasks.ToList();
 
         while (items.Any())
         {

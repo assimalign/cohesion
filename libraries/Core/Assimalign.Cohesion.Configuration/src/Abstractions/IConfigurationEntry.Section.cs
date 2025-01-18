@@ -11,8 +11,8 @@ public interface IConfigurationSection : IConfigurationEntry, IConfiguration
     KeyPath Path { get; }
 
     /// <summary>
-    /// Gets the raw value by the underlying provider.
+    /// Converts 
     /// </summary>
     /// <returns></returns>
-    object? GetValue();
+    object? ToValue();
 }

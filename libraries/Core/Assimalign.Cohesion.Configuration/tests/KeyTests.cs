@@ -19,6 +19,12 @@ public class KeyTests
 
     }
 
+
+    public void MyTest()
+    {
+
+    }
+
     //[Theory(DisplayName = "Configuration Test: Key Value Null Exception")]
     //[InlineData("")]
     //[InlineData(null)]

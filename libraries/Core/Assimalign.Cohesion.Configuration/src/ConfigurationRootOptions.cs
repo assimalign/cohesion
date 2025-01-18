@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -33,6 +29,11 @@ public sealed class ConfigurationRootOptions
             setStrategy = value;
         }
     }
+
+    /// <summary>
+    /// The amount of time to wait before canceling the load or reload.
+    /// </summary>
+    public TimeSpan LoadTimeout { get; set; } = TimeSpan.Zero;
 
 
     public static ConfigurationRootOptions Default { get; } = new();

@@ -2,6 +2,7 @@
 	<ItemGroup>
 		<PackageReference Update="BenchmarkDotNet" Version="0.14.0" />
 		<PackageReference Update="System.IO.Pipelines" Version="8.0.0" />
+		<PackageReference Update="Sharprompt" Version="3.0.0" />
 	</ItemGroup>
 
 	<!-- XUnit Test Dependencies-->

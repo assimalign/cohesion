@@ -14,14 +14,14 @@ public interface IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns>The same instance of <see cref="IConfigurationBuilder"/>.</returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure);
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure);
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure);
 
     /// <summary>
     /// Builds an <see cref="IConfiguration"/> with keys and values from the set of sources registered in

@@ -3,7 +3,10 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
-public interface IConfigurationContext
+/// <summary>
+/// 
+/// </summary>
+public interface IConfigurationBuilderContext
 {
     /// <summary>
     /// Gets a key/value collection that can be used to share data between the <see cref="IConfigurationBuilder"/>

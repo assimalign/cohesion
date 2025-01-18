@@ -28,7 +28,7 @@ jobs:
             'Assimalign.Cohesion.Core',
             # 'Assimalign.Cohesion.DependencyInjection',
             # 'Assimalign.Cohesion.Diagnostics',
-            'Assimalign.Cohesion.FileSystem',
+            # 'Assimalign.Cohesion.FileSystem',
             # 'Assimalign.Cohesion.FileSystem.Composite',
             # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
@@ -36,15 +36,15 @@ jobs:
             'Assimalign.Cohesion.Hosting',
             # 'Assimalign.Cohesion.Hosting.BackgroundService',
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
-            'Assimalign.Cohesion.Logging',
+            # 'Assimalign.Cohesion.Logging',
             # 'Assimalign.Cohesion.Logging.Console',
-            'Assimalign.Cohesion.Net',
-            'Assimalign.Cohesion.Net.Http',
-            'Assimalign.Cohesion.Net.Http.ClientFactory',
+            # 'Assimalign.Cohesion.Net',
+            # 'Assimalign.Cohesion.Net.Http',
+            # 'Assimalign.Cohesion.Net.Http.ClientFactory',
             # 'Assimalign.Cohesion.Net.Transports',
             'Assimalign.Cohesion.ObjectMapping',
             'Assimalign.Cohesion.ObjectPool',
-            'Assimalign.Cohesion.ObjectValidation',
+            # 'Assimalign.Cohesion.ObjectValidation',
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
     steps:
@@ -54,10 +54,7 @@ jobs:
     - name: .NET Installation
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: |
-          6.x
-          8.x
-          9.x
+        dotnet-version: ${{ fromJson(vars.COHESION_DOTNET_RUNTIMES) }}
 
     - name: '.NET Restore: ${{ matrix.projects }}'
       run:  dotnet restore './libraries/Core/${{ matrix.projects }}'

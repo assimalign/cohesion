@@ -103,7 +103,7 @@ public class ConfigurationRoot : IConfigurationRoot
         return entry switch
         {
             IConfigurationValue value => value.Value,
-            IConfigurationSection section => section.GetValue(),
+            IConfigurationSection section => section.ToValue(),
             _ => null
         };
     }

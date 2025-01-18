@@ -3,7 +3,7 @@
 namespace Assimalign.Cohesion.Configuration;
 
 /// <summary>
-/// <see cref="IConfiguration"/> represents a client for working with all the 
+/// This interface acts as the base client for working with all the 
 /// elements in the configuration tree.
 /// </summary>
 /// <remarks>
@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfiguration : IEnumerable<IConfigurationEntry>
 {
     /// <summary>
-    /// 
+    /// Gets the <see cref="IConfigurationValue.Value"/> if any,
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
