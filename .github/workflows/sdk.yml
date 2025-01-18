@@ -5,7 +5,7 @@ on:
     paths: 
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'sdk/**'
-      - '.github/workflows/lsdk.yml'                 # When Pipeline File Changes
+      - '.github/workflows/sdk.yml'                 # When Pipeline File Changes
 
 jobs:
   build:

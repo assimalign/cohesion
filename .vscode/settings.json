@@ -7,6 +7,9 @@
             "icon": "tools", "extensions": ["tooling"]
         },
         {
+            "icon": "scripts", "extensions": [".scripts"]
+        },
+        {
             "icon": "github", 
             "extensions": [".github"]
         }
