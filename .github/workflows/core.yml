@@ -54,7 +54,7 @@ jobs:
     - name: .NET Installation
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: ${{ fromJson(vars.COHESION_DOTNET_RUNTIMES) }}
+        dotnet-version: ${{ vars.COHESION_DOTNET_RUNTIMES }}
 
     - name: '.NET Restore: ${{ matrix.projects }}'
       run:  dotnet restore './libraries/Core/${{ matrix.projects }}'
