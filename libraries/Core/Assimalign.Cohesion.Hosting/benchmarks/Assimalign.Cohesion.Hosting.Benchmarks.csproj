@@ -1,6 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	
-
-
-	
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<RootNamespace>Assimalign.Cohesion.Hosting</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\src\Assimalign.Cohesion.Hosting.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="BenchmarkDotNet" />
+	</ItemGroup>
 </Project>

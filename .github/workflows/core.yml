@@ -42,8 +42,8 @@ jobs:
             # 'Assimalign.Cohesion.Net.Http',
             # 'Assimalign.Cohesion.Net.Http.ClientFactory',
             # 'Assimalign.Cohesion.Net.Transports',
-            'Assimalign.Cohesion.ObjectMapping',
-            'Assimalign.Cohesion.ObjectPool',
+            # 'Assimalign.Cohesion.ObjectMapping',
+            # 'Assimalign.Cohesion.ObjectPool',
             # 'Assimalign.Cohesion.ObjectValidation',
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
