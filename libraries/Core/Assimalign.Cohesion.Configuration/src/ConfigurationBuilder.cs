@@ -140,7 +140,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
         return Build();
     }
 
-    async ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken = default)
+    async Task<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken = default)
     {
         return await BuildAsync(cancellationToken);
     }

@@ -15,6 +15,8 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     private readonly List<IConfigurationEntry> entries;
     private readonly KeyComparer comparer;
 
+    #region Constructors
+
     /// <summary>
     /// 
     /// </summary>
@@ -31,6 +33,8 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         this.comparer = comparer;
         this.entries = new List<IConfigurationEntry>();
     }
+
+    #endregion
 
     /// <summary>
     /// The provider name if any.
@@ -59,7 +63,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <param name="entry"></param>
     /// <exception cref="ArgumentNullException"></exception>
     /// <exception cref="ArgumentException"></exception>
-    public virtual void Set(IConfigurationEntry? entry)
+    public virtual void Set(IConfigurationEntry entry)
     {
         if (entry is null)
         {

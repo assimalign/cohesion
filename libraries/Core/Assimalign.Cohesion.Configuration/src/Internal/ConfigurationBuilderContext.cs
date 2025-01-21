@@ -9,9 +9,9 @@ internal class ConfigurationBuilderContext : IConfigurationBuilderContext
     public ConfigurationBuilderContext()
     {
         Properties = new Dictionary<string, object>();
-        Providers = new ConcurrentBag<IConfigurationProvider>();
+        Providers ??= new List<IConfigurationProvider>();
     }
 
-    public IDictionary<string, object> Properties { get; } = default!;
-    public IEnumerable<IConfigurationProvider> Providers { get; init; } = default!;
+    public IDictionary<string, object> Properties { get; }
+    public IEnumerable<IConfigurationProvider> Providers { get; init; } 
 }

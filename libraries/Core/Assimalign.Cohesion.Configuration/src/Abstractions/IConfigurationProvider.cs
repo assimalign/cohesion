@@ -26,7 +26,7 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// Sets a configuration value for the specified key.
     /// </summary>
     /// <param name="entry">The value.</param>
-    void Set(IConfigurationEntry? entry);
+    void Set(IConfigurationEntry entry);
 
     /// <summary>
     /// Checks whether the key exists.

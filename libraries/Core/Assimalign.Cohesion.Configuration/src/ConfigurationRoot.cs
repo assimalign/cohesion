@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,36 +33,8 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     /// <returns></returns>
     public object? this[KeyPath path]
     {
-        get
-        {
-            CheckIsDisposed();
-
-            var isLocked = this.isLocked.TryEnterReadLock(1000);
-
-            isLocked.EnterReadLock();
-            try
-            {
-                return GetConfigurationValue(path);
-            }
-            finally
-            {
-                isLocked.ExitReadLock();
-            }
-        }
-        set
-        {
-            CheckIsDisposed();
-
-            isLocked.EnterReadLock();
-            try
-            {
-                SetConfigurationValue(path, value);
-            }
-            finally
-            {
-                isLocked.ExitReadLock();
-            }
-        }
+        get => GetConfigurationValue(path);
+        set => SetConfigurationValue(path, value);
     }
 
     /// <summary>
