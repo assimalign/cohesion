@@ -15,21 +15,22 @@ using Assimalign.Cohesion.Configuration.Internal;
 /// </summary>
 public class ConfigurationBuilder : IConfigurationBuilder
 {
-    private readonly ConfigurationRootOptions options;
-    private readonly IList<Func<IConfigurationBuilderContext, Task>> onAdd;
+    private readonly ConfigurationOptions options;
+    private readonly IList<Func<IConfigurationBuilderContext, Task>> funcs;
 
+    /// <summary>
+    /// 
+    /// </summary>
     public ConfigurationBuilder()
     {
-        this.onAdd = new List<Func<IConfigurationBuilderContext, Task>>();
-        this.options ??= ConfigurationRootOptions.Default;
+        this.funcs = new List<Func<IConfigurationBuilderContext, Task>>();
+        this.options ??= ConfigurationOptions.Default;
     }
 
-    public ConfigurationBuilder(ConfigurationRootOptions options) : this()
+    public ConfigurationBuilder(ConfigurationOptions options) : this()
     {
         this.options = options;
     }
-
-   
 
     /// <summary>
     /// 
@@ -52,11 +53,9 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <returns></returns>
     public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
-        if (configure is null)
-        {
-            ThrowHelper.ThrowArgumentNullException(nameof(configure));
-        }
-        onAdd.Add(async context =>
+        ThrowHelper.ThrowIfNull(configure, nameof(configure));
+
+        this.funcs.Add(async context =>
         {
             var provider = await configure.Invoke(context);
 
@@ -65,7 +64,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
                 ThrowHelper.ThrowInvalidOperationException($"The configuration provider: '{provider.Name}' has already been added.");
             }
 
-            ((ConfigurationContext)context).Add(provider);
+            ((List<IConfigurationProvider>)context.Providers).Add(provider);
         });
         return this;
     }
@@ -78,24 +77,33 @@ public class ConfigurationBuilder : IConfigurationBuilder
     {
         return BuildAsync().GetAwaiter().GetResult();
     }
-    
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async ValueTask<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
+    public async Task<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
     {
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // Set the timeout period for loading the configurations
+        cancellationTokenSource.CancelAfter(options.LoadTimeout);
+
+        // Pass the list<Providers> ref to the builder context
+        var context = new ConfigurationBuilderContext()
+        {
+            Providers = options.Providers
+        };
+
+        foreach (var func in funcs)
+        {
+            await func.Invoke(context);
+        }
+
         
 
-        var context = new ConfigurationContext();
-        var tasks = onAdd.Select(func => func.Invoke(context));
-
-        await Task.WhenAll(tasks);
-
-        return new ConfigurationRoot(context.Providers, options);
+        return new ConfigurationRoot(options);
     }
 
     /// <summary>
@@ -103,11 +111,11 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public static ConfigurationBuilder Create(Action<ConfigurationRootOptions> configure)
+    public static ConfigurationBuilder Create(Action<ConfigurationOptions> configure)
     {
         ThrowHelper.ThrowIfNull(configure, nameof(configure));
 
-        var options = new ConfigurationRootOptions();
+        var options = new ConfigurationOptions();
 
         configure.Invoke(options);
 

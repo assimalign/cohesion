@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 
 namespace Assimalign.Cohesion.Internal;
 
@@ -68,10 +69,14 @@ internal static partial class ThrowHelper
 
     #endregion
 
+    #region Json Serialization
 
+    [DoesNotReturn]
+    internal static void ThrowJsonException(string message) =>
+        throw GetJsonException(message);
 
+    internal static JsonException GetJsonException(string message) =>
+        new JsonException(message);
 
-
-
-
+    #endregion
 }

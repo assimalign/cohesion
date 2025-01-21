@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Configuration;
+﻿using System.Collections.Generic;
+
+namespace Assimalign.Cohesion.Configuration;
 
 /// <summary>
 /// A section represents a composite in the configuration tree.
@@ -6,13 +8,33 @@
 public interface IConfigurationSection : IConfigurationEntry, IConfiguration
 {
     /// <summary>
-    /// The composite path
+    /// The number of entries in the section
     /// </summary>
-    KeyPath Path { get; }
+    int Count { get; }
 
     /// <summary>
-    /// Converts 
+    /// 
     /// </summary>
+    /// <param name="key"></param>
     /// <returns></returns>
-    object? ToValue();
+    IConfigurationEntry this[Key key] { get; set; }
+
+    /// <summary>
+    /// Adds a configuration entry the section.
+    /// </summary>
+    /// <param name="entry"></param>
+    void Add(IConfigurationEntry entry);
+
+    /// <summary>
+    /// Removes an entry from the section
+    /// </summary>
+    /// <param name="entry"></param>
+    void Remove(IConfigurationEntry entry);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    bool ContainsKey(Key key);
 }

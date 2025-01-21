@@ -1,15 +1,15 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
 
-public sealed class ConfigurationRootOptions
+public sealed class ConfigurationOptions
 {
-
     private ConfigurationSetStrategy setStrategy = ConfigurationSetStrategy.ExistingOnly;
 
-    public ConfigurationRootOptions()
+    public ConfigurationOptions()
     {
         
     }
@@ -17,6 +17,7 @@ public sealed class ConfigurationRootOptions
     /// <summary>
     /// 
     /// </summary>
+    /// <exception cref="ArgumentException"></exception>
     public ConfigurationSetStrategy SetStrategy
     {
         get => setStrategy;
@@ -35,6 +36,13 @@ public sealed class ConfigurationRootOptions
     /// </summary>
     public TimeSpan LoadTimeout { get; set; } = TimeSpan.Zero;
 
+    /// <summary>
+    /// A list of providers to use for the configuration root.
+    /// </summary>
+    public List<IConfigurationProvider> Providers { get; } = new List<IConfigurationProvider>();
 
-    public static ConfigurationRootOptions Default { get; } = new();
+    /// <summary>
+    /// The default options
+    /// </summary>
+    public static ConfigurationOptions Default { get; } = new();
 }

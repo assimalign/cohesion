@@ -10,11 +10,11 @@ public interface IConfigurationBuilderContext
 {
     /// <summary>
     /// Gets a key/value collection that can be used to share data between the <see cref="IConfigurationBuilder"/>
-    /// and the registered <see cref="IConfigurationProvider"/>s.
+    /// and the registration of <see cref="IConfigurationProvider"/>s.
     /// </summary>
     IDictionary<string, object> Properties { get; }
     /// <summary>
-    /// A collection of added providers.
+    /// A collection of currently registered providers.
     /// </summary>
     IEnumerable<IConfigurationProvider> Providers { get; }
 }

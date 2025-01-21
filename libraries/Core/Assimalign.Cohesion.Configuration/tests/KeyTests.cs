@@ -70,30 +70,30 @@ public class KeyTests
     //}
 
 
-    //[Theory]
-    //[InlineData("key1", "key1", KeyComparison.Ordinal, true)]
-    //[InlineData("key1", "key2", KeyComparison.Ordinal, false)]
-    //[InlineData("key1", "Key1", KeyComparison.Ordinal, false)]
-    //[InlineData("key1", "Key1", KeyComparison.OrdinalIgnoreCase, true)]
-    //[InlineData("key1[35]", "key1[35]", KeyComparison.Ordinal, true)]
-    //[InlineData("key1[23]", "key1[34]", KeyComparison.Ordinal, false)]
-    //[InlineData("key1[35]", "Key1[35]", KeyComparison.Ordinal, false)]
-    //[InlineData("key1[35]", "Key1[35]", KeyComparison.OrdinalIgnoreCase, true)]
-    //[InlineData("key1$label1", "key1$label1", KeyComparison.Ordinal, true)]
-    //[InlineData("key1$label1", "key1$label2", KeyComparison.Ordinal, false)]
-    //[InlineData("key1$label1", "key1$Label1", KeyComparison.Ordinal, false)]
-    //[InlineData("key1$Label1", "Key1$label1", KeyComparison.OrdinalIgnoreCase, true)]
-    //[InlineData("key1$label1[34]", "key1$label1[34]", KeyComparison.Ordinal, true)]
-    //[InlineData("key1$label1[34]", "key1$label2", KeyComparison.Ordinal, false)]
-    //[InlineData("key1$label1[23]", "key1$Label1[23]", KeyComparison.Ordinal, false)]
-    //[InlineData("key1$Label1[23]", "Key1$label1[23]", KeyComparison.OrdinalIgnoreCase, true)]
-    //public void TestKeySegmentEquality(string left, string right, KeyComparison comparison, bool result)
-    //{
-    //    Assert.Equal(result, KeySegment.Parse(left).Equals(KeySegment.Parse(right), comparison));
-    //}
+    [Theory(DisplayName = "Key Segment Equality")]
+    [InlineData("key1", "key1", KeyComparison.Ordinal, true)]
+    [InlineData("key1", "key2", KeyComparison.Ordinal, false)]
+    [InlineData("key1", "Key1", KeyComparison.Ordinal, false)]
+    [InlineData("key1", "Key1", KeyComparison.OrdinalIgnoreCase, true)]
+    [InlineData("key1[35]", "key1[35]", KeyComparison.Ordinal, true)]
+    [InlineData("key1[23]", "key1[34]", KeyComparison.Ordinal, false)]
+    [InlineData("key1[35]", "Key1[35]", KeyComparison.Ordinal, false)]
+    [InlineData("key1[35]", "Key1[35]", KeyComparison.OrdinalIgnoreCase, true)]
+    [InlineData("key1$label1", "key1$label1", KeyComparison.Ordinal, true)]
+    [InlineData("key1$label1", "key1$label2", KeyComparison.Ordinal, false)]
+    [InlineData("key1$label1", "key1$Label1", KeyComparison.Ordinal, false)]
+    [InlineData("key1$Label1", "Key1$label1", KeyComparison.OrdinalIgnoreCase, true)]
+    [InlineData("key1$label1[34]", "key1$label1[34]", KeyComparison.Ordinal, true)]
+    [InlineData("key1$label1[34]", "key1$label2", KeyComparison.Ordinal, false)]
+    [InlineData("key1$label1[23]", "key1$Label1[23]", KeyComparison.Ordinal, false)]
+    [InlineData("key1$Label1[23]", "Key1$label1[23]", KeyComparison.OrdinalIgnoreCase, true)]
+    public void TestKeySegmentEquality(string left, string right, KeyComparison comparison, bool result)
+    {
+        Assert.Equal(result, Key.Parse(left).Equals(Key.Parse(right), comparison));
+    }
 
 
-    
+
 
     //public void TestKeySegmentEqualityOperators(string left, string right, string opr, bool result)
     //{

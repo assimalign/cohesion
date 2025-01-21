@@ -1,46 +1,139 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
+using Assimalign.Cohesion.Internal;
+
 /// <summary>
 /// Represents a section of application configuration values.
 /// </summary>
+[DebuggerDisplay("{Key}: Count - {Count}")]
 public class ConfigurationSection : IConfigurationSection
 {
-    private readonly object? value;
+    private readonly List<IConfigurationEntry> entries = new();
 
     /// <summary>
-    /// Initializes a new instance.
+    /// 
     /// </summary>
-    /// <param name="root">The configuration root.</param>
-    /// <param name="key">The path to this section.</param>
-    public ConfigurationSection(KeyPath path, object? value)
+    /// <param name="key"></param>
+    public ConfigurationSection(Key key)
     {
-        Key = path.GetLastKey();
-        Path = path;
-        this.value = value;
+        Key = key;
     }
 
-
+    /// <summary>
+    /// 
+    /// </summary>
     public Key Key { get; }
-    public KeyPath Path { get; }
-    public object? this[KeyPath path] 
-    {
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public int Count => entries.Count;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    /// <exception cref="NotImplementedException"></exception>
+    public IConfigurationEntry this[Key key] 
+    { 
         get => throw new NotImplementedException(); 
         set => throw new NotImplementedException(); 
     }
 
-    private object? GetSectionValue(KeyPath path)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    /// <exception cref="NotImplementedException"></exception>
+    public object? this[KeyPath path]
     {
-        Path.Combine(path);
+        get => throw new NotImplementedException();
+        set => throw new NotImplementedException();
     }
 
-    public object? ToValue()
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    /// <exception cref="ArgumentNullException"></exception>
+    public void Add(IConfigurationEntry entry)
+    {
+        ThrowHelper.ThrowIfNull(entry, nameof(entry));
+
+        if (entry is IConfigurationSection section)
+        {
+            bool existing = false;
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var item = entries[i];
+
+                if (!(existing = item.Key == entry.Key))
+                {
+                    continue;
+                }
+                // Switch to composite structure
+                if (item is IConfigurationValue)
+                {
+                    entries.Remove(item);
+                    entries.Add(entry);
+                }
+                if (item is IConfigurationSection)
+                {
+                    // Copy items to existing 
+                    foreach (var child in section)
+                    {
+                        ((IConfigurationSection)item).Add(child);
+                    }
+                }
+                break;
+            }
+            // if no existing value, then simply add
+            if (!existing)
+            {
+                entries.Add(entry);
+            }
+        }
+        else if (entry is IConfigurationValue value)
+        {
+            // Just add or override what is existing
+            entries.Add(value);
+        }
+        else
+        {
+            // Invalid entry
+            throw new Exception();
+        }
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    public void Remove(IConfigurationEntry entry)
+    {
+        ThrowHelper.ThrowIfNull(entry, nameof(entry));
+
+        bool removed = entries.Remove(entry);
+
+        // If removal failed, try brute force. (This is mostly likely due to custom IConfigurationEntry type)
+        if (!removed)
+        {
+            // TODO
+        }
+    }
+
+    public bool ContainsKey(Key key)
     {
         throw new NotImplementedException();
     }
@@ -52,7 +145,7 @@ public class ConfigurationSection : IConfigurationSection
 
     public IEnumerable<IConfigurationValue> GetValues()
     {
-        throw new NotImplementedException();
+        return entries.OfType<IConfigurationValue>();
     }
 
     public IConfigurationSection GetSection(Key key)
@@ -62,107 +155,21 @@ public class ConfigurationSection : IConfigurationSection
 
     public IEnumerable<IConfigurationSection> GetSections()
     {
-        throw new NotImplementedException();
+        return entries.OfType<IConfigurationSection>();
+    }
+
+    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        return entries.GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
     }
 
     public IConfigurationChangeToken GetChangeToken()
     {
         throw new NotImplementedException();
     }
-
-    public IEnumerator<IConfigurationEntry> GetEnumerator()
-    {
-        throw new NotImplementedException();
-    }
-
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        throw new NotImplementedException();
-    }
-
-
-
-
-
-
-    //public Key Key
-    //{
-    //    get { return key; }
-    //}
-    //public IConfigurationEntry this[Key key] 
-    //{ 
-    //    get
-    //    {
-    //        var k = this.key.Combine(key);
-
-    //        return configuration[]
-    //    }
-    //    set => throw new NotImplementedException(); 
-    //}
-    //public IConfigurationEntry Value
-    //{
-    //    get
-    //    {
-    //        return this.key.Concat()
-    //    }
-    //}
-
-    //object? IConfigurationEntry.Value { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-    //IConfiguration IConfigurationSection.Value => throw new NotImplementedException();
-
-    ///// <summary>
-    ///// Gets a configuration sub-section with the specified key.
-    ///// </summary>
-    ///// <param name="key">The key of the configuration section.</param>
-    ///// <returns>The <see cref="IConfigurationSection"/>.</returns>
-    ///// <remarks>
-    /////     This method will never return <c>null</c>. If no matching sub-section is found with the specified key,
-    /////     an empty <see cref="IConfigurationSection"/> will be returned.
-    ///// </remarks>
-    //public IConfigurationSection GetSection(Key key) => throw new NotImplementedException();
-
-    //public IConfigurationChangeToken GetChangeToken()
-    //{
-    //    throw new NotImplementedException();
-    //}
-
-
-    //class Enumerator : IEnumerator<IConfigurationEntry>
-    //{
-    //    private readonly IEnumerator<IConfigurationEntry> enumerator;
-    //    private readonly Key key;
-
-    //    public Enumerator(IEnumerator<IConfigurationEntry> enumerator, Key key)
-    //    {
-    //        this.enumerator = enumerator;
-    //        this.key = key;
-    //    }
-
-    //    public IConfigurationEntry Current { get; private set; }
-    //    object IEnumerator.Current => Current;
-
-    //    public void Dispose()
-    //    {
-    //        enumerator.Dispose();
-    //    }
-
-    //    public bool MoveNext()
-    //    {
-    //        while (enumerator.MoveNext())
-    //        {
-    //            var current = enumerator.Current;
-
-    //            if (current.Key.StartsWith(key))
-    //            {
-    //                return true;
-    //            }
-    //        }
-    //        return false;
-    //    }
-
-    //    public void Reset()
-    //    {
-    //        enumerator.Reset();
-    //    }
 }

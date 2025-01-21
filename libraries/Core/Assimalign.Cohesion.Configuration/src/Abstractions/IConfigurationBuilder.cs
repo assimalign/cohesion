@@ -24,16 +24,17 @@ public interface IConfigurationBuilder
     IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure);
 
     /// <summary>
-    /// Builds an <see cref="IConfiguration"/> with keys and values from the set of sources registered in
-    /// <see cref="Sources"/>.
+    /// Synchronously builds the <see cref="IConfigurationRoot"/> by loading 
+    /// the providers. "<see cref="IConfigurationProvider.Load"/>"
     /// </summary>
     /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered sources.</returns>
     IConfigurationRoot Build();
 
     /// <summary>
-    /// 
+    /// Asynchronously builds the <see cref="IConfigurationRoot"/> by loading 
+    /// the providers. "<see cref="IConfigurationProvider.LoadAsync"/>"
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default);
+    Task<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default);
 }

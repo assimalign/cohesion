@@ -1,13 +1,26 @@
-﻿namespace Assimalign.Cohesion.Configuration;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
-public record class ConfigurationValue : IConfigurationValue
+namespace Assimalign.Cohesion.Configuration;
+
+public class ConfigurationValue : IConfigurationValue
 {
-    public ConfigurationValue(KeyPath path, object? value)
+    public ConfigurationValue(Key key, object? value)
     {
-        Path = path;
+        Key = key;
         Value = value;
     }
-    public Key Key => Path.GetLastKey();
-    public KeyPath Path { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public Key Key { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
     public object? Value { get; }
 }

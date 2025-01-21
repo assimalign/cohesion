@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
@@ -27,5 +28,5 @@ public interface IConfigurationRoot : IConfiguration, IDisposable, IAsyncDisposa
     /// 
     /// </summary>
     /// <returns></returns>
-    Task ReloadAsync();
+    Task ReloadAsync(CancellationToken cancellationToken = default);
 }

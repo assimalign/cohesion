@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Linq;
 using System.Diagnostics;
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -44,6 +43,8 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// </summary>
     /// <param name="value"></param>
     /// <param name="label"></param>
+    /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="ArgumentNullException"></exception>
     public Key(string value, string label) : this(value)
     {
         if (string.IsNullOrEmpty(label))
@@ -77,7 +78,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public string? Label { get; }
 
     /// <summary>
-    /// 
+    /// Checks whether the key is empty.
     /// </summary>
     public bool IsEmpty => string.IsNullOrEmpty(Value);
 
@@ -89,6 +90,32 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     #endregion
 
     #region Methods
+
+    /// <summary>
+    /// Checks whether the key value is of index. '[2]'
+    /// </summary>
+    /// <param name="index"></param>
+    /// <returns></returns>
+    public bool IsIndex(out int index)
+    {
+        index = default;
+
+        if (IsEmpty)
+        {
+            return false;
+        }
+
+        var span = Value.AsSpan();
+
+        if (span[0] != '[' || span.IndexOf(']') != (span.Length - 1))
+        {
+            return false;
+        }
+
+        var value = span.Slice(1, span.Length - 1);
+
+        return int.TryParse(value, out index);
+    }
 
     /// <summary>
     /// 
@@ -345,7 +372,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
 
         public override void Write(Utf8JsonWriter writer, Key value, JsonSerializerOptions options)
         {
-            writer.WriteStringValue(value);
+            writer.WritePropertyName(value);
         }
     }
 

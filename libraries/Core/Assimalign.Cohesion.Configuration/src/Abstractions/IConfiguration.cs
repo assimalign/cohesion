@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -19,14 +21,14 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     object? this[KeyPath path] { get; set; }
 
     /// <summary>
-    /// Gets an <see cref="IConfigurationValue"/> from the <see cref="IConfiguration"/> instance.
+    /// Gets an <see cref="IConfigurationValue"/> instance that has key <see cref="key"/>.
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
     IConfigurationValue GetValue(Key key);
 
     /// <summary>
-    /// Gets all values in the <see cref="IConfiguration"/> instance.
+    /// Gets all <see cref="IConfigurationValue"/> instances.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IConfigurationValue> GetValues();
@@ -48,5 +50,5 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// Gets a change token for the <see cref="IConfiguration"/> instance.
     /// </summary>
     /// <returns></returns>
-    IConfigurationChangeToken GetChangeToken();
+    IConfigurationChangeToken GetChangeToken();   
 }

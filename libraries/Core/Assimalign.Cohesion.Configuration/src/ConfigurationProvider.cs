@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading;
 using System.Diagnostics;
 using System.Collections.Generic;
@@ -6,57 +7,105 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
+using Assimalign.Cohesion.Internal;
+
+[DebuggerDisplay("Configuration Provider: {Name}")]
 public abstract class ConfigurationProvider : IConfigurationProvider
 {
-    protected ConfigurationProvider()
+    private readonly List<IConfigurationEntry> entries;
+    private readonly KeyComparer comparer;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    protected ConfigurationProvider() : this(KeyComparer.Ordinal)
     {
-        Data = new List<IConfigurationEntry>();
     }
 
-    protected virtual KeyComparer Comparer { get; } = KeyComparer.Ordinal;
-    protected virtual List<IConfigurationEntry> Data { get; }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="comparer"></param>
+    protected ConfigurationProvider(KeyComparer comparer)
+    {
+        this.comparer = comparer;
+        this.entries = new List<IConfigurationEntry>();
+    }
+
+    /// <summary>
+    /// The provider name if any.
+    /// </summary>
     public abstract string Name { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException"></exception> 
     public virtual IConfigurationEntry? Get(Key key)
     {
-        for (int i = 0; i < Data.Count; i++)
+        if (key.IsEmpty)
         {
-            var entry = Data[i];
-
-            if (Comparer.Equals(key, entry.Key))
-            {
-                return entry;
-            }
+            throw new ArgumentException();
         }
-        return default;
+
+        return entries.FirstOrDefault(p => comparer.Equals(p.Key, key));
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="ArgumentException"></exception>
     public virtual void Set(IConfigurationEntry? entry)
     {
         if (entry is null)
         {
-            throw new ArgumentNullException(nameof(entry));
+            ThrowHelper.ThrowArgumentNullException(nameof(entry));
         }
 
         if (entry.Key.IsEmpty)
         {
-            throw new ArgumentException("The entry key cannot be empty.");
+            ThrowHelper.ThrowArgumentException("The entry key cannot be empty.");
         }
 
-        IConfigurationEntry? existing = default;
+        var existing = Get(entry.Key);
 
-        if ((existing = Get(entry.Key)) is not null)
+        if (existing is not null)
         {
-            Data.Remove(existing);
-            Data.Add(entry);
+            bool removed = entries.Remove(entry);
+
+            // If removal failed, try brute force
+            if (!removed)
+            {
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var item = entries[i];
+
+                    if (comparer.Equals(item.Key, entry.Key))
+                    {
+                        entries.RemoveAt(i);
+                    }
+                }
+            }
+
+            entries.Add(entry);
         }
         else
         {
-            Data.Add(entry);
+            entries.Add(entry);
         }
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
     public virtual IEnumerable<IConfigurationEntry> GetEntries()
     {
-        return Data;
+        return entries;
     }
 
     public virtual void Load()
@@ -65,7 +114,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     }
 
     public abstract Task LoadAsync(CancellationToken cancellationToken = default);
-    
+
     public void Reload()
     {
         ReloadAsync().GetAwaiter().GetResult();
@@ -73,12 +122,24 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
     public virtual Task ReloadAsync(CancellationToken cancellationToken = default)
     {
-        Data.Clear();
+        entries.Clear();
         return LoadAsync(cancellationToken);
     }
 
     public virtual void Dispose()
     {
-        Data.Clear();
+        entries.Clear();
+    }
+
+    public virtual ValueTask DisposeAsync()
+    {
+        entries.Clear();
+
+        return ValueTask.CompletedTask;
+    }
+
+    public bool ContainsKey(Key key)
+    {
+        return entries.Any(p => comparer.Equals(p.Key, key));
     }
 }

@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -37,6 +39,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// </list>
 /// </summary>
 [DebuggerDisplay("{ToString()}")]
+[JsonConverter(typeof(KeyPathJsonConvertor))]
 public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
 {
     #region Constructors
@@ -70,7 +73,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     public static readonly KeyPath Empty = "";
 
     /// <summary>
-    /// 
+    /// The collection of keys that make up the path.
     /// </summary>
     public Key[] Keys { get; } = [];
 
@@ -78,6 +81,11 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// The number of keys in the path.
     /// </summary>
     public int Count => Keys.Length;
+
+    /// <summary>
+    /// Checks whether the path has any keys.
+    /// </summary>
+    public bool IsEmpty => Keys.Length == 0;
 
     #endregion
 
@@ -96,6 +104,16 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <returns></returns>
     /// <exception cref="IndexOutOfRangeException"></exception>
     public Key GetFirstKey() => Keys[0];
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="index"></param>
+    /// <returns></returns>
+    public Key GetKey(int index)
+    {
+        return Keys[index];
+    }
 
     /// <summary>
     /// 
@@ -151,12 +169,38 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <exception cref="NotImplementedException"></exception>
     public bool Equals(KeyPath other)
     {
-        throw new NotImplementedException();
+        return Equals(other, KeyComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public bool Equals(KeyPath other, KeyComparison comparison)
+    {
+        if (Count != other.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < Count; i++)
+        {
+            var left = Keys[i];
+            var right = other.Keys[i];
+
+            if (!left.Equals(right, comparison))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
     public IEnumerator<Key> GetEnumerator()
     {
-        return (IEnumerator <Key>)Keys.GetEnumerator();
+        return (IEnumerator<Key>)Keys.GetEnumerator();
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -215,7 +259,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     {
         if (span.IsEmpty)
         {
-            return Empty;
+            return new KeyPath([]);
         }
 
         int start = 0;
@@ -325,7 +369,33 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-   // public static bool operator ==(KeyPath left, KeyPath? right) => right.HasValue && left.Equals(right);
+    // public static bool operator ==(KeyPath left, KeyPath? right) => right.HasValue && left.Equals(right);
+
+    #endregion
+
+
+    #region Partials
+
+    partial class KeyPathJsonConvertor : JsonConverter<KeyPath>
+    {
+        public override KeyPath Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String)
+            {
+                throw new JsonException(
+                    $"Unable to parse {nameof(KeyPath)}. The expected token type is string, but current type is {reader.TokenType}");
+            }
+
+            var value = reader.GetString();
+
+            return KeyPath.Parse(value);
+        }
+
+        public override void Write(Utf8JsonWriter writer, KeyPath value, JsonSerializerOptions options)
+        {
+            writer.WritePropertyName(value);
+        }
+    }
 
     #endregion
 }
