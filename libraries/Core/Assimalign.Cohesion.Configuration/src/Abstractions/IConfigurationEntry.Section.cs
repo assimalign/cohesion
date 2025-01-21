@@ -13,13 +13,6 @@ public interface IConfigurationSection : IConfigurationEntry, IConfiguration
     int Count { get; }
 
     /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    IConfigurationEntry this[Key key] { get; set; }
-
-    /// <summary>
     /// Adds a configuration entry the section.
     /// </summary>
     /// <param name="entry"></param>

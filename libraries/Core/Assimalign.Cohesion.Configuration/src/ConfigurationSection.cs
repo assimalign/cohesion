@@ -40,18 +40,6 @@ public class ConfigurationSection : IConfigurationSection
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
-    public IConfigurationEntry this[Key key] 
-    { 
-        get => throw new NotImplementedException(); 
-        set => throw new NotImplementedException(); 
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
     /// <exception cref="NotImplementedException"></exception>
@@ -82,12 +70,14 @@ public class ConfigurationSection : IConfigurationSection
                 {
                     continue;
                 }
+
                 // Switch to composite structure
                 if (item is IConfigurationValue)
                 {
                     entries.Remove(item);
                     entries.Add(entry);
                 }
+
                 if (item is IConfigurationSection)
                 {
                     // Copy items to existing 
@@ -96,8 +86,10 @@ public class ConfigurationSection : IConfigurationSection
                         ((IConfigurationSection)item).Add(child);
                     }
                 }
+
                 break;
             }
+
             // if no existing value, then simply add
             if (!existing)
             {

@@ -39,6 +39,8 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         {
             CheckIsDisposed();
 
+            var isLocked = this.isLocked.TryEnterReadLock(1000);
+
             isLocked.EnterReadLock();
             try
             {
