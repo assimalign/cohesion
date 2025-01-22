@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<None Remove="Boxes\BmffBox.Edit.cs~RF102fefb7.TMP" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.Files.Media\src\Assimalign.Cohesion.Files.Media.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Internal\Extensions\" />
+		<Folder Include="Internal\Iterators\" />
+	</ItemGroup>
+</Project>

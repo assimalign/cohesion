@@ -1,7 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="../../../../Directory.Build.props" />
-	<PropertyGroup>
-		<Description>https://datatracker.ietf.org/doc/html/rfc8794#name-ebml-element-types</Description>
-	</PropertyGroup>
-
-</Project>

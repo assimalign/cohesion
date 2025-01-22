@@ -15,15 +15,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{88DBDD99
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{8156E47B-9E70-4D3C-BD6C-585FF417EB47}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{EDB9E5E0-25F5-4F91-8C4F-851C4088D98E}"
-	ProjectSection(SolutionItems) = preProject
-		..\..\..\.github\workflows\assimalign.cohesion.core.build.yml = ..\..\..\.github\workflows\assimalign.cohesion.core.build.yml
-	EndProjectSection
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".solution", ".solution", "{D737576E-F4A1-41A6-9397-4C4288869DB9}"
-	ProjectSection(SolutionItems) = preProject
-		README.md = README.md
-	EndProjectSection
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".docs", ".docs", "{0D1FA0C7-6213-455B-A238-D9DE247203E3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

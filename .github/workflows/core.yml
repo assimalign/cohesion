@@ -3,7 +3,7 @@ name: Core
 on:
   push:
     paths: 
-      - '**/Directory.Build.props'                                    # When the Global Props File Changes
+      - '**/Directory.Build.props'          # When the Global Props File Changes
       - 'libraries/Core/**'
       - '.github/workflows/core.yml'        # When Pipeline File Changes
 
