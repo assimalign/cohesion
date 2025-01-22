@@ -1,0 +1,22 @@
+{
+    "vsicons.associations.folders": [
+        {
+            "icon": "docs", "extensions": [".docs"]
+        },
+        {
+            "icon": "tools", "extensions": ["tooling"]
+        },
+        {
+            "icon": "scripts", "extensions": [".scripts"]
+        },
+        {
+            "icon": "github", 
+            "extensions": [".github"]
+        }
+    ],
+    "files.associations": {
+        "**/.github/workflows/**/*.yml": "github-actions-workflow"
+    },
+    "dotnet.preferCSharpExtension": true,
+    "dotnet.defaultSolution": "Assimalign.Cohesion.sln"
+}

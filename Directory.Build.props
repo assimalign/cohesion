@@ -1,0 +1,21 @@
+<Project>
+	<!-- Branding -->
+	<PropertyGroup>
+		<Company>Assimalign</Company>
+		<Copyright>© Assimalign LLC $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
+		<RepositoryType>git</RepositoryType>
+		<RepositoryUrl>https://github.com/assimalign-cohesion/cohesion</RepositoryUrl>
+	</PropertyGroup>
+	<!-- Fixed Version Info -->
+	<PropertyGroup>
+		<VersionPrefix>1.0.0</VersionPrefix>
+		<VersionSuffix>pre.1.0.0</VersionSuffix>
+	</PropertyGroup>
+	<PropertyGroup>
+		<TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
+		<TargetFrameworksForLibraries>net6.0;net8.0;$(TargetFrameworkLatest)</TargetFrameworksForLibraries>
+		<TargetFrameworksForBenchmark>$(TargetFrameworkLatest)</TargetFrameworksForBenchmark>
+		<TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
+		<TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
+	</PropertyGroup>
+</Project>

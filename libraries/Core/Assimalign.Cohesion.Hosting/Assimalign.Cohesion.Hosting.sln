@@ -1,0 +1,59 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Hosting.Benchmarks", "benchmarks\Assimalign.Cohesion.Hosting.Benchmarks.csproj", "{E0D958F8-CED0-46EB-B480-2E3B62E78C00}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Hosting", "src\Assimalign.Cohesion.Hosting.csproj", "{6E1816B8-8FDC-4D87-A7C9-4C42305897B3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Hosting.Tests", "tests\Assimalign.Cohesion.Hosting.Tests.csproj", "{302B8F6A-58CC-452B-BE85-5584BEDB7CA7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F497354C-32AE-499D-B08A-7B2F778DB924}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{1DF46022-4EB0-494E-A15C-0835499B1869}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{45C66530-5A98-4373-9C4B-2C71DDE63307}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{2004A865-4B2E-4B7D-A5C2-B5F53E6CFDE9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{6FD45BF1-4244-43E9-A0CE-4BE4A265B53F}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\..\.github\workflows\core.yml = ..\..\..\.github\workflows\core.yml
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E0D958F8-CED0-46EB-B480-2E3B62E78C00}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0D958F8-CED0-46EB-B480-2E3B62E78C00}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0D958F8-CED0-46EB-B480-2E3B62E78C00}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0D958F8-CED0-46EB-B480-2E3B62E78C00}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E1816B8-8FDC-4D87-A7C9-4C42305897B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E1816B8-8FDC-4D87-A7C9-4C42305897B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E1816B8-8FDC-4D87-A7C9-4C42305897B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E1816B8-8FDC-4D87-A7C9-4C42305897B3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{302B8F6A-58CC-452B-BE85-5584BEDB7CA7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{302B8F6A-58CC-452B-BE85-5584BEDB7CA7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{302B8F6A-58CC-452B-BE85-5584BEDB7CA7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{302B8F6A-58CC-452B-BE85-5584BEDB7CA7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E0D958F8-CED0-46EB-B480-2E3B62E78C00} = {45C66530-5A98-4373-9C4B-2C71DDE63307}
+		{6E1816B8-8FDC-4D87-A7C9-4C42305897B3} = {F497354C-32AE-499D-B08A-7B2F778DB924}
+		{302B8F6A-58CC-452B-BE85-5584BEDB7CA7} = {1DF46022-4EB0-494E-A15C-0835499B1869}
+		{0E94E4C1-6E5C-4A9F-9EF0-ECF7497F56B3} = {2004A865-4B2E-4B7D-A5C2-B5F53E6CFDE9}
+	EndGlobalSection
+EndGlobal

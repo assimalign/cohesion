@@ -1,0 +1,41 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+	<PropertyGroup>
+		<!-- 
+		All projects should follow the same directory pattern
+
+		/ Service 
+			/ Library
+				/src
+				/test
+				/benchmarks
+	 -->
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('src'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('benchmarks'))">$(TargetFrameworksForBenchmark)</TargetFrameworks>
+		
+		<Nullable>enable</Nullable>
+		<LangVersion>latest</LangVersion>
+
+		<!-- AOT-->
+		<IsAotCompatible Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">true</IsAotCompatible>
+		<StripSymbols Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols>
+	</PropertyGroup>
+
+	<!-- #region Packaging Props-->
+	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
+		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
+		<PackageLicenseFile Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">LICENSE</PackageLicenseFile>
+	</PropertyGroup>
+	<ItemGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
+		<None Include="..\README.md" Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\..\..\..\LICENSE" Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<!-- #endregion-->
+</Project>

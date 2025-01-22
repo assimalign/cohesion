@@ -1,0 +1,61 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing.Benchmarks", "benchmarks\Assimalign.Cohesion.FileSystem.Globbing.Benchmarks.csproj", "{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing", "src\Assimalign.Cohesion.FileSystem.Globbing.csproj", "{E20798A6-47E2-4C9A-A5A1-31809655B7F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing.Tests", "tests\Assimalign.Cohesion.FileSystem.Globbing.Tests.csproj", "{FD43F175-60A9-442E-990B-BD12559FCFEA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{39F93DCC-B9CA-481F-95D5-B1A6995AFF0D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{DE49E8AB-B627-46FF-A3D6-9D7356E1B483}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{51F15027-D188-4B09-9CA6-B72EBC8E697D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{F764F624-D7C4-422F-8C41-DAE6CE938C46}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{C8C9F8C6-23B8-4836-8CBF-153026292045}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem", "..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj", "{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E20798A6-47E2-4C9A-A5A1-31809655B7F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E20798A6-47E2-4C9A-A5A1-31809655B7F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E20798A6-47E2-4C9A-A5A1-31809655B7F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E20798A6-47E2-4C9A-A5A1-31809655B7F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD43F175-60A9-442E-990B-BD12559FCFEA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD43F175-60A9-442E-990B-BD12559FCFEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD43F175-60A9-442E-990B-BD12559FCFEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD43F175-60A9-442E-990B-BD12559FCFEA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C8C9F8C6-23B8-4836-8CBF-153026292045}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C8C9F8C6-23B8-4836-8CBF-153026292045}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C8C9F8C6-23B8-4836-8CBF-153026292045}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C8C9F8C6-23B8-4836-8CBF-153026292045}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34} = {51F15027-D188-4B09-9CA6-B72EBC8E697D}
+		{E20798A6-47E2-4C9A-A5A1-31809655B7F8} = {39F93DCC-B9CA-481F-95D5-B1A6995AFF0D}
+		{FD43F175-60A9-442E-990B-BD12559FCFEA} = {DE49E8AB-B627-46FF-A3D6-9D7356E1B483}
+		{C8C9F8C6-23B8-4836-8CBF-153026292045} = {F764F624-D7C4-422F-8C41-DAE6CE938C46}
+		{5D8412E4-E0F6-4AAB-A0B7-FEBCA089118A} = {F764F624-D7C4-422F-8C41-DAE6CE938C46}
+	EndGlobalSection
+EndGlobal

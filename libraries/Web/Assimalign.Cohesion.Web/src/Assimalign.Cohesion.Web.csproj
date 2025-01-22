@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Core\Assimalign.Cohesion.Net.Http\src\Assimalign.Cohesion.Net.Http.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Internal\" />
+	</ItemGroup>
+</Project>

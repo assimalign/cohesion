@@ -1,0 +1,10 @@
+{
+  "sdk": {
+    "version": "9.0.100-rc.1.24452.12",
+    "rollForward": "latestMinor",
+    "allowPrerelease": true
+  },
+  "msbuild-sdks": {
+    "Assimalign.Cohesion.Sdk": "0.0.1"
+  }
+}

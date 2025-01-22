@@ -1,0 +1,18 @@
+name: OpenTelemetry
+
+on:
+  push:
+    paths: 
+      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - 'libraries/OpenTelemetry/**'
+      - '.github/workflows/opentelemetry.yml'                 # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v2
+      name: 'Checkout: Cohesion'

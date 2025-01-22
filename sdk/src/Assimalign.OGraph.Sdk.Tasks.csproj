@@ -1,0 +1,54 @@
+<Project>
+    <!-- Shared package properties -->
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <EnableDefaultItems>false</EnableDefaultItems>
+        <GenerateDependencyFile>false</GenerateDependencyFile>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <NoPackageAnalysis>true</NoPackageAnalysis>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+        
+        <!-- MSBuild Task DLLs need to be versioned with every build -->
+        <AutoGenerateAssemblyVersion>true</AutoGenerateAssemblyVersion>
+
+        <OutputPath>$(BaseOutputPath)</OutputPath>
+        <IsPackable>true</IsPackable>
+        <PackageLayoutOutputPath>$(ArtifactsBinDir)$(Configuration)\Sdks\$(PackageId)\</PackageLayoutOutputPath>
+    </PropertyGroup>
+
+
+    <!-- Package Metadata -->
+    <PropertyGroup>
+        <Description>This package contains </Description>
+        <ProjectUrl>https://github.com/assimalign/assimalign-cohesion</ProjectUrl>
+        <PackageTags>Sdk</PackageTags>
+    </PropertyGroup>
+
+
+    <PropertyGroup>
+        <PackageId>Assimalign.Cohesion.Sdk</PackageId>
+        <!-- <OutDirName>$(Configuration)\Sdks\$(PackageId)\tools</OutDirName> -->
+    </PropertyGroup>
+
+    <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+    <PropertyGroup>
+        <TargetFrameworks>$(SdkTargetFramework);net472</TargetFrameworks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <AdditionalContent Include="$(MSBuildThisFileDirectory)\Targets\**\*.*">
+            <Pack>true</Pack>
+            <PackagePath>Targets</PackagePath>
+        </AdditionalContent>
+
+        <AdditionalContent Include="$(MSBuildThisFileDirectory)\Sdk\**\*.*">
+            <Pack>true</Pack>
+            <PackagePath>Sdk</PackagePath>
+        </AdditionalContent>
+    </ItemGroup>
+
+
+    <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

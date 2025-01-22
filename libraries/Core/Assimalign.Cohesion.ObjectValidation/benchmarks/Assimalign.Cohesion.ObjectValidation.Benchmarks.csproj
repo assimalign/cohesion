@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net7.0'">
+		<PublishReadyToRun>true</PublishReadyToRun>
+		<PublishAot>true</PublishAot>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="BenchmarkDotNet" />
+		<PackageReference Include="FluentValidation"/>
+	</ItemGroup>
+	<ItemGroup>
+		<Using Include="Assimalign.Cohesions.ObjectValidation" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\src\Assimalign.Cohesion.ObjectValidation.csproj" />
+	</ItemGroup>
+	
+</Project>

@@ -1,0 +1,45 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.MediaFile.Bmff", "src\Assimalign.Cohesion.MediaFile.Bmff.csproj", "{823BE327-DA03-419D-BE40-084C0AD8DA36}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.MediaFile.Bmff.Tests", "tests\Assimalign.Cohesion.MediaFile.Bmff.Tests.csproj", "{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{72B97593-004E-47FE-9243-815B0D7078C3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{F2226E31-388D-4DD8-914D-CD49F308210C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{539B03F9-C0B8-415C-9B77-B75B4130F480}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.MediaFile", "..\Assimalign.Cohesion.MediaFile\src\Assimalign.Cohesion.MediaFile.csproj", "{A1DA5FF2-85D1-43A1-B258-32250C852741}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{823BE327-DA03-419D-BE40-084C0AD8DA36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{823BE327-DA03-419D-BE40-084C0AD8DA36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{823BE327-DA03-419D-BE40-084C0AD8DA36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{823BE327-DA03-419D-BE40-084C0AD8DA36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1DA5FF2-85D1-43A1-B258-32250C852741}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1DA5FF2-85D1-43A1-B258-32250C852741}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1DA5FF2-85D1-43A1-B258-32250C852741}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1DA5FF2-85D1-43A1-B258-32250C852741}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{823BE327-DA03-419D-BE40-084C0AD8DA36} = {72B97593-004E-47FE-9243-815B0D7078C3}
+		{5B26BAFF-074F-4956-8EAA-BD8AAEE6A4EE} = {539B03F9-C0B8-415C-9B77-B75B4130F480}
+		{A1DA5FF2-85D1-43A1-B258-32250C852741} = {F2226E31-388D-4DD8-914D-CD49F308210C}
+	EndGlobalSection
+EndGlobal

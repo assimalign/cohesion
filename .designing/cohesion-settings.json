@@ -1,0 +1,23 @@
+{
+  "webApi": {
+    "server": {
+      "name": "",
+      "transports": {
+        "http1": {
+          "isEnabled":  true
+        },
+        "http2": {
+
+        },
+        "http3": {
+
+        }
+      },
+      "middleware": [
+        {
+
+        }
+      ]
+    }
+  }
+}

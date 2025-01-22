@@ -1,0 +1,75 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Physical.Benchmarks", "benchmarks\Assimalign.Cohesion.FileSystem.Physical.Benchmarks.csproj", "{7FF00287-4B48-4357-8288-0979B1242CAF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Physical", "src\Assimalign.Cohesion.FileSystem.Physical.csproj", "{79249AEC-3CC6-4548-AF47-31D904A0300F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Physical.Tests", "tests\Assimalign.Cohesion.FileSystem.Physical.Tests.csproj", "{10FABE0F-1937-45A7-B7A7-2D555ECCF66B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F794BC80-0685-4AAF-9D03-AF48037A9CFD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{7E56E15D-1647-416D-8196-AD13C49A0DD8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0ADC8875-7CC9-4E85-81CB-978C4FF30CAD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{FAB38F06-B1DD-4CC6-B92A-5EBCE50566EB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem", "..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj", "{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{5A39D218-CDEC-4802-A041-77EDCE0872B1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing", "..\Assimalign.Cohesion.FileSystem.Globbing\src\Assimalign.Cohesion.FileSystem.Globbing.csproj", "{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{1762EE95-B980-45A2-88C4-0DAD5B97BAA0}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\..\.github\workflows\Core\Assimalign.Cohesion.Core.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.Core.yml
+		..\..\..\.github\workflows\Core\Assimalign.Cohesion.FileSystem.Physical.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.FileSystem.Physical.yml
+		..\..\..\.github\workflows\Core\Assimalign.Cohesion.FileSystem.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.FileSystem.yml
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7FF00287-4B48-4357-8288-0979B1242CAF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7FF00287-4B48-4357-8288-0979B1242CAF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7FF00287-4B48-4357-8288-0979B1242CAF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7FF00287-4B48-4357-8288-0979B1242CAF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{79249AEC-3CC6-4548-AF47-31D904A0300F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{79249AEC-3CC6-4548-AF47-31D904A0300F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{79249AEC-3CC6-4548-AF47-31D904A0300F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{79249AEC-3CC6-4548-AF47-31D904A0300F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10FABE0F-1937-45A7-B7A7-2D555ECCF66B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10FABE0F-1937-45A7-B7A7-2D555ECCF66B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10FABE0F-1937-45A7-B7A7-2D555ECCF66B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10FABE0F-1937-45A7-B7A7-2D555ECCF66B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5A39D218-CDEC-4802-A041-77EDCE0872B1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5A39D218-CDEC-4802-A041-77EDCE0872B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5A39D218-CDEC-4802-A041-77EDCE0872B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A39D218-CDEC-4802-A041-77EDCE0872B1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{7FF00287-4B48-4357-8288-0979B1242CAF} = {FAB38F06-B1DD-4CC6-B92A-5EBCE50566EB}
+		{79249AEC-3CC6-4548-AF47-31D904A0300F} = {F794BC80-0685-4AAF-9D03-AF48037A9CFD}
+		{10FABE0F-1937-45A7-B7A7-2D555ECCF66B} = {0ADC8875-7CC9-4E85-81CB-978C4FF30CAD}
+		{E200E9D7-ED8D-48B8-A8C0-32DB2C50D289} = {7E56E15D-1647-416D-8196-AD13C49A0DD8}
+		{5A39D218-CDEC-4802-A041-77EDCE0872B1} = {7E56E15D-1647-416D-8196-AD13C49A0DD8}
+		{64E127A1-6AE7-48CC-B8AC-3E5E4CB6334B} = {7E56E15D-1647-416D-8196-AD13C49A0DD8}
+	EndGlobalSection
+EndGlobal

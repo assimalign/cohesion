@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Files</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Core\Assimalign.Cohesion.Files.Binary\src\Assimalign.Cohesion.Files.Binary.csproj" />
+	</ItemGroup>
+</Project>

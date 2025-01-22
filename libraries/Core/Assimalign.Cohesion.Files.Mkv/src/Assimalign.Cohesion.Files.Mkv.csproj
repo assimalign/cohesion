@@ -1,0 +1,5 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.Files.Bmff\src\Assimalign.Cohesion.Files.Bmff.csproj" />
+	</ItemGroup>
+</Project>

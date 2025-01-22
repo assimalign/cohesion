@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Remove="Internal\PollingFileChangeToken.cs" />
+		<Compile Remove="Internal\PollingWildCardChangeToken.cs" />
+		<Compile Remove="PhysicalFileWatcher.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
+	</ItemGroup>
+	
+</Project>
