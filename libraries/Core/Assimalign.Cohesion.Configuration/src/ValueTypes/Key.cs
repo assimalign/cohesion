@@ -170,6 +170,11 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public override string ToString()
     {
         // TODO: Look into using String.Create() with span allocation. May be faster.
+        if (string.IsNullOrEmpty(Label))
+        {
+            return Value;
+        }
+
         return string.Join(LabelSeparator, Value, Label);
     }
 

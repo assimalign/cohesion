@@ -1,0 +1,56 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Scheduler.Cron.Benchmarks", "benchmarks\Assimalign.Cohesion.Scheduler.Cron.Benchmarks.csproj", "{1F184749-0B9F-4430-9748-735DA8C22813}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Scheduler.Cron", "src\Assimalign.Cohesion.Scheduler.Cron.csproj", "{6D338220-19FA-4654-A742-3D15DA07591B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Scheduler.Cron.Tests", "tests\Assimalign.Cohesion.Scheduler.Cron.Tests.csproj", "{A974C761-DA1A-4C26-8F45-1376EF4E9059}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{790E1766-2AF5-4535-B447-FEA9BBA34458}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{D36528D5-7913-4B35-8660-C886F43B311E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{D85E78D8-4B0E-4BD6-B537-AAC7CB9BB970}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F0C4FEA1-D238-4A97-BDF7-C5F0BBF47E2F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{0913E128-B85F-4B86-B77D-7806B9F3EAED}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Scheduler", "..\Assimalign.Cohesion.Scheduler\src\Assimalign.Cohesion.Scheduler.csproj", "{256C521A-3F22-40C5-B070-27310DF112BE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F184749-0B9F-4430-9748-735DA8C22813}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F184749-0B9F-4430-9748-735DA8C22813}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F184749-0B9F-4430-9748-735DA8C22813}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F184749-0B9F-4430-9748-735DA8C22813}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D338220-19FA-4654-A742-3D15DA07591B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D338220-19FA-4654-A742-3D15DA07591B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D338220-19FA-4654-A742-3D15DA07591B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D338220-19FA-4654-A742-3D15DA07591B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A974C761-DA1A-4C26-8F45-1376EF4E9059}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A974C761-DA1A-4C26-8F45-1376EF4E9059}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A974C761-DA1A-4C26-8F45-1376EF4E9059}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A974C761-DA1A-4C26-8F45-1376EF4E9059}.Release|Any CPU.Build.0 = Release|Any CPU
+		{256C521A-3F22-40C5-B070-27310DF112BE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{256C521A-3F22-40C5-B070-27310DF112BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{256C521A-3F22-40C5-B070-27310DF112BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{256C521A-3F22-40C5-B070-27310DF112BE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{1F184749-0B9F-4430-9748-735DA8C22813} = {0913E128-B85F-4B86-B77D-7806B9F3EAED}
+		{6D338220-19FA-4654-A742-3D15DA07591B} = {790E1766-2AF5-4535-B447-FEA9BBA34458}
+		{A974C761-DA1A-4C26-8F45-1376EF4E9059} = {D85E78D8-4B0E-4BD6-B537-AAC7CB9BB970}
+		{256C521A-3F22-40C5-B070-27310DF112BE} = {D36528D5-7913-4B35-8660-C886F43B311E}
+	EndGlobalSection
+EndGlobal

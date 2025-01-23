@@ -115,7 +115,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
 
     public IEnumerator<IConfigurationEntry> GetEnumerator()
     {
-        throw new NotImplementedException();
+        return GetEntriesOfType<IConfigurationEntry>().GetEnumerator();
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -130,7 +130,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
 
     public ValueTask DisposeAsync()
     {
-        
+        return ValueTask.CompletedTask;
     }
 
     private IEnumerable<TEntry> GetEntriesOfType<TEntry>()

@@ -43,7 +43,7 @@ public record Either<T1, T2> : IEither
 
     #region IEither Implementation
     int _typeIndex;
-    object _value;
+    object? _value;
 
     int IEither.TypeIndex => _typeIndex;
 

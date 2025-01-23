@@ -135,7 +135,10 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     {
         var buffer = new Key[length];
 
-        Keys.CopyTo(buffer, start);
+        for (int i = 0; i < length; i++)
+        {
+            buffer[i] = Keys[start + i];
+        }
 
         return new KeyPath(buffer);
     }

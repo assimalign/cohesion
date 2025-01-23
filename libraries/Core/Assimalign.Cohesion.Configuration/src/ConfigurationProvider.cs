@@ -75,32 +75,81 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             ThrowHelper.ThrowArgumentException("The entry key cannot be empty.");
         }
 
-        var existing = Get(entry.Key);
-
-        if (existing is not null)
+        if (entry is IConfigurationSection section)
         {
-            bool removed = entries.Remove(entry);
+            bool existing = false;
 
-            // If removal failed, try brute force
-            if (!removed)
+            for (int i = 0; i < entries.Count; i++)
             {
-                for (int i = 0; i < entries.Count; i++)
-                {
-                    var item = entries[i];
+                var item = entries[i];
 
-                    if (comparer.Equals(item.Key, entry.Key))
+                if (!(existing = item.Key == entry.Key))
+                {
+                    continue;
+                }
+
+                // Switch to composite structure
+                if (item is IConfigurationValue)
+                {
+                    entries.Remove(item);
+                    entries.Add(entry);
+                }
+
+                if (item is IConfigurationSection)
+                {
+                    // Copy items to existing 
+                    foreach (var child in section)
                     {
-                        entries.RemoveAt(i);
+                        ((IConfigurationSection)item).Add(child);
                     }
                 }
+
+                break;
             }
 
-            entries.Add(entry);
+            // if no existing value, then simply add
+            if (!existing)
+            {
+                entries.Add(entry);
+            }
+        }
+        else if (entry is IConfigurationValue value)
+        {
+            // Just add or override what is existing
+            entries.Add(value);
         }
         else
         {
-            entries.Add(entry);
+            // Invalid entry
+            throw new Exception();
         }
+
+        //var existing = Get(entry.Key);
+
+        //if (existing is not null)
+        //{
+        //    bool removed = entries.Remove(entry);
+
+        //    // If removal failed, try brute force
+        //    if (!removed)
+        //    {
+        //        for (int i = 0; i < entries.Count; i++)
+        //        {
+        //            var item = entries[i];
+
+        //            if (comparer.Equals(item.Key, entry.Key))
+        //            {
+        //                entries.RemoveAt(i);
+        //            }
+        //        }
+        //    }
+
+        //    entries.Add(entry);
+        //}
+        //else
+        //{
+        //    entries.Add(entry);
+        //}
     }
 
     /// <summary>

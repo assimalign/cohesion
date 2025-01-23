@@ -13,7 +13,7 @@ public interface IValidator
     /// <summary>
     /// The collection of <see cref="IValidationProfile"/>.
     /// </summary>
-    public IEnumerable<IValidationProfile> Profiles { get; }
+    IEnumerable<IValidationProfile> Profiles { get; }
 
     /// <summary>
     /// Validates the <paramref name="instance"/> for each profile that matches the <typeparamref name="T"/>.

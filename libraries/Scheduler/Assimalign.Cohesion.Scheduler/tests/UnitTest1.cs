@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.ObjectPooling.Tests;
+﻿namespace Assimalign.Cohesion.Scheduler.Tests;
 
 public class UnitTest1
 {

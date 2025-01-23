@@ -59,6 +59,8 @@ public class ConfigurationBuilder : IConfigurationBuilder
         {
             var provider = await configure.Invoke(context);
 
+            await provider.LoadAsync();
+
             if (context.Providers.Any(p => p.Name == provider.Name))
             {
                 ThrowHelper.ThrowInvalidOperationException($"The configuration provider: '{provider.Name}' has already been added.");

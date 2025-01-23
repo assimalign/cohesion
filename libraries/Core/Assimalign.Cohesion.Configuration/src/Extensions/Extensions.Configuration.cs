@@ -18,74 +18,74 @@ public static class ConfigurationExtensions
 {
     private const BindingFlags DeclaredOnlyLookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="path"></param>
-    /// <returns></returns>
-    public static T Get<T>(this IConfiguration configuration, KeyPath path)
-    {
-        if (typeof(T) == IConfigurationSection)
-        {
-            var str = new string[0]; 
-        }
+    ///// <summary>
+    ///// 
+    ///// </summary>
+    ///// <typeparam name="T"></typeparam>
+    ///// <param name="path"></param>
+    ///// <returns></returns>
+    //public static T Get<T>(this IConfiguration configuration, KeyPath path)
+    //{
+    //    if (typeof(T) == IConfigurationSection)
+    //    {
+    //        var str = new string[0]; 
+    //    }
 
         
 
-        throw new NotImplementedException();
-    }
+    //    throw new NotImplementedException();
+    //}
 
-    public static object Get(this IConfiguration configuration, Type type, KeyPath path)
-    {
-
-
-        throw new NotImplementedException();
-    }
+    //public static object Get(this IConfiguration configuration, Type type, KeyPath path)
+    //{
 
 
+    //    throw new NotImplementedException();
+    //}
 
-    public IEnumerable<>
+
+
+    //public IEnumerable<>
 
     
    
     
-    private static object? CreateInstance(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
-    {
-        if (type.IsInterface || type.IsAbstract)
-        {
-            throw new InvalidOperationException();// SR.Format(SR.Error_CannotActivateAbstractOrInterface, type));
-        }
+    //private static object? CreateInstance(
+    //    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
+    //{
+    //    if (type.IsInterface || type.IsAbstract)
+    //    {
+    //        throw new InvalidOperationException();// SR.Format(SR.Error_CannotActivateAbstractOrInterface, type));
+    //    }
 
-        if (type.IsAssignableTo(typeof(ICollection)))
-        {
-            if (type.GetArrayRank() > 1)
-            {
-                throw new InvalidOperationException();// SR.Format(SR.Error_UnsupportedMultidimensionalArray, type));
-            }
+    //    if (type.IsAssignableTo(typeof(ICollection)))
+    //    {
+    //        if (type.GetArrayRank() > 1)
+    //        {
+    //            throw new InvalidOperationException();// SR.Format(SR.Error_UnsupportedMultidimensionalArray, type));
+    //        }
 
-            return Array.CreateInstance(type.GetElementType(), 0);
-        }
+    //        return Array.CreateInstance(type.GetElementType(), 0);
+    //    }
 
-        if (!type.IsValueType)
-        {
-            bool hasDefaultConstructor = type.GetConstructors(DeclaredOnlyLookup).Any(ctor => ctor.IsPublic && ctor.GetParameters().Length == 0);
-            if (!hasDefaultConstructor)
-            {
-                throw new InvalidOperationException();// SR.Format(SR.Error_MissingParameterlessConstructor, type));
-            }
-        }
+    //    if (!type.IsValueType)
+    //    {
+    //        bool hasDefaultConstructor = type.GetConstructors(DeclaredOnlyLookup).Any(ctor => ctor.IsPublic && ctor.GetParameters().Length == 0);
+    //        if (!hasDefaultConstructor)
+    //        {
+    //            throw new InvalidOperationException();// SR.Format(SR.Error_MissingParameterlessConstructor, type));
+    //        }
+    //    }
 
-        try
-        {
-            return Activator.CreateInstance(type);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException("");// Resources.ExceptionMessageFailedToActivate);// SR.Format(SR.Error_FailedToActivate, type), ex);
-        }
-    }
+    //    try
+    //    {
+    //        return Activator.CreateInstance(type);
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        throw new InvalidOperationException("");// Resources.ExceptionMessageFailedToActivate);// SR.Format(SR.Error_FailedToActivate, type), ex);
+    //    }
+    //}
 
 
 

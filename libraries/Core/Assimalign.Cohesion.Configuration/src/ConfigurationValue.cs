@@ -1,5 +1,8 @@
-﻿namespace Assimalign.Cohesion.Configuration;
+﻿using System.Diagnostics;
 
+namespace Assimalign.Cohesion.Configuration;
+
+[DebuggerDisplay("{Key}: {Value}")]
 public class ConfigurationValue : IConfigurationValue
 {
     public ConfigurationValue(Key key, object? value)

@@ -35,5 +35,5 @@ public abstract class ValidationException : Exception
     /// <summary>
     /// The source of the exception.
     /// </summary>
-    public override string Source { get; set; }
+    public override string? Source { get; set; }
 }

@@ -1,12 +1,32 @@
-
-
-function Get-RandomForeground {
-    [System.ConsoleColor]$color = 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14 | Get-Random
-    return $color
+function Convert-ArgumentsToHashTable {
+    param (
+        [string[]]$Arguments
+    )
+    $Params = @{}
+    for ($i = 0; $i -lt $Arguments.Length; $i+=2) {
+        $ParamName = $Arguments[$i]
+        $ParamValue = $Arguments[$i + 1]
+        if ($ParamName.StartsWith('-')) {
+            $ParamName = $ParamName.TrimStart('-')
+        }
+        $Params.Add($ParamName, $ParamValue)
+    }
+    return $Params
 }
-
-
-function Install-PowerShellCore {
+function Test-Module {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+    Get-Module -List |
+    ForEach-Object {
+        if ($_.Name -eq $Name) {
+            return $true
+        }
+    }
+    return $false
+}
+function Test-PowerShellCore {
 
     Write-Host "    .. Checking for PowerShell Core"
 
@@ -27,24 +47,8 @@ function Install-PowerShellCore {
             Remove-Item $DownloadTo -Force
         }
     }
+
+    return $IsInstalled
 }
 
-function Install-VisualStudioCode {
-    Write-Host "    .. Checking for Visual Studio Code"
-}
-
-function Install-DotNet {
-    Write-Host "    .. Checking for ,NET"
-}
-
-function Install-Tooling {
-    Write-Host "Installing Tooling" -ForegroundColor (Get-RandomForeground)
-    Install-PowerShellCore
-    Install-DotNet
-    Install-VisualStudioCode
-    Write-Host ""
-
-
-}
-
-Install-Tooling
+Export-ModuleMember -Function Convert-ArgumentsToHashTable, Test-PowerShellCore, Test-Module

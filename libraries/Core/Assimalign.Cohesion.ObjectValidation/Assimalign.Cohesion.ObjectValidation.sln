@@ -20,9 +20,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{7045
 		..\..\..\.github\workflows\Core\Assimalign.Cohesion.ObjectValidation.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.ObjectValidation.yml
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Extensions.ValidationBenchmarks", "benchmarks\Assimalign.Extensions.ValidationBenchmarks.csproj", "{B59D83EF-71A8-42F0-8108-3843999D7869}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{561099A7-4608-4F7F-930F-B6963BE30572}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{0E0FB795-7151-40FD-BE0F-6D9DDB9D0AAC}"
+	ProjectSection(SolutionItems) = preProject
+		docs\design.md = docs\design.md
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectValidation.Benchmarks", "benchmarks\Assimalign.Cohesion.ObjectValidation.Benchmarks.csproj", "{311B1085-79DB-479A-8416-FA7502F20C50}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -38,14 +43,14 @@ Global
 		{B671F352-EDF3-4605-8230-8BAD03A90343}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B671F352-EDF3-4605-8230-8BAD03A90343}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B671F352-EDF3-4605-8230-8BAD03A90343}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B59D83EF-71A8-42F0-8108-3843999D7869}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B59D83EF-71A8-42F0-8108-3843999D7869}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B59D83EF-71A8-42F0-8108-3843999D7869}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B59D83EF-71A8-42F0-8108-3843999D7869}.Release|Any CPU.Build.0 = Release|Any CPU
 		{561099A7-4608-4F7F-930F-B6963BE30572}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{561099A7-4608-4F7F-930F-B6963BE30572}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{561099A7-4608-4F7F-930F-B6963BE30572}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{561099A7-4608-4F7F-930F-B6963BE30572}.Release|Any CPU.Build.0 = Release|Any CPU
+		{311B1085-79DB-479A-8416-FA7502F20C50}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{311B1085-79DB-479A-8416-FA7502F20C50}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{311B1085-79DB-479A-8416-FA7502F20C50}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{311B1085-79DB-479A-8416-FA7502F20C50}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -53,7 +58,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{03628063-FE14-4E9D-AAD0-8B919BB66206} = {A30193A3-9137-400B-B456-02732D9BCDBF}
 		{B671F352-EDF3-4605-8230-8BAD03A90343} = {E2FFA763-C856-4157-BB4B-AA64095B2C9D}
-		{B59D83EF-71A8-42F0-8108-3843999D7869} = {16CF6E27-3DE3-43B2-9C72-B3987A6C9B78}
 		{561099A7-4608-4F7F-930F-B6963BE30572} = {25AA9B77-94FF-4EE1-A662-FE0A048FF361}
+		{311B1085-79DB-479A-8416-FA7502F20C50} = {16CF6E27-3DE3-43B2-9C72-B3987A6C9B78}
 	EndGlobalSection
 EndGlobal

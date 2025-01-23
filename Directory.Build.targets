@@ -23,5 +23,6 @@
 		<PackageReference Update="Zio" Version="0.20.0" />
 		<PackageReference Update="AutoMapper" Version="13.0.1" />
 		<PackageReference Update="TinyMapper" Version="3.0.3" />
+		<PackageReference Update="FluentValidation" Version="11.11.0" />
 	</ItemGroup>
 </Project>

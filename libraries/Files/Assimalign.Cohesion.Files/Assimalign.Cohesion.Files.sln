@@ -13,7 +13,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{003B0085-B
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{601C1822-6D8E-45A2-808E-06D8CD393723}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem", "..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj", "{CF7E9FFC-ABF6-48A4-8D7A-F6EDAD82888A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem", "..\..\Core\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj", "{CF7E9FFC-ABF6-48A4-8D7A-F6EDAD82888A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Files.Media", "..\Assimalign.Cohesion.Files.Media\src\Assimalign.Cohesion.Files.Media.csproj", "{523F11BE-058E-4B96-9AC0-1D760A4AA78D}"
 EndProject
