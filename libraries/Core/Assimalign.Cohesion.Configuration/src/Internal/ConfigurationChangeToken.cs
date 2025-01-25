@@ -8,12 +8,19 @@ namespace Assimalign.Cohesion.Configuration.Internal
 {
     internal class ConfigurationChangeToken : IConfigurationChangeToken
     {
+        private IEnumerable<IConfigurationChangeToken> tokens;
+
+        public ConfigurationChangeToken(IEnumerable<IConfigurationChangeToken> tokens)
+        {
+            
+        }
 
 
 
 
         public IDisposable OnAdd(Action<IConfiguration> action)
         {
+            
             throw new NotImplementedException();
         }
 

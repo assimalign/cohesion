@@ -16,7 +16,12 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     string Name { get; }
 
     /// <summary>
-    /// Get the configuration entry, if existing.
+    /// 
+    /// </summary>
+    //IEnumerable<IConfigurationEntry> Entries { get; }
+
+    /// <summary>
+    /// Get the configuration entry, if exists.
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
@@ -60,7 +65,7 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     Task ReloadAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 
+    /// Returns a collection of entries from the provider.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IConfigurationEntry> GetEntries();

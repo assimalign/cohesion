@@ -28,10 +28,12 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>//, IComparer<K
     {
         return comparer.Compare(left, right);
     }
+
     public bool Equals(Key left, Key right)
     {
         return comparer.Equals(left, right);
     }
+
     public int GetHashCode([DisallowNull] Key obj)
     {
         return obj.GetHashCode();

@@ -28,9 +28,9 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         }
         if (value.ContainsAny(KeyPath.Delimiters))
         {
-            ThrowHelper.ThrowArgumentException("");
+            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', KeyPath.Delimiters)}");
         }
-        if (value.Contains(LabelSeparator))
+        if (value.Contains(LabelDelimiter))
         {
             ThrowHelper.ThrowArgumentException("");
         }
@@ -53,9 +53,9 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         }
         if (label.ContainsAny(KeyPath.Delimiters))
         {
-            ThrowHelper.ThrowArgumentException("");
+            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', KeyPath.Delimiters)}");
         }
-        if (label.Contains(LabelSeparator))
+        if (label.Contains(LabelDelimiter))
         {
             ThrowHelper.ThrowArgumentException($"The parameter {label} cannot contain the '$' ");
         }
@@ -83,16 +83,16 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public bool IsEmpty => string.IsNullOrEmpty(Value);
 
     /// <summary>
-    /// The separator used to identify a labeled segment.
+    /// The delimiter used to identify a labeled segment.
     /// </summary>
-    public const char LabelSeparator = '$';
+    public const char LabelDelimiter = '$';
 
     #endregion
 
     #region Methods
 
     /// <summary>
-    /// Checks whether the key value is of index. '[2]'
+    /// Checks whether the key value is of index. '[int]'
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
@@ -148,15 +148,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <exception cref="ArgumentException"></exception>
     public static bool Equals(Key left, Key right, KeyComparison comparison)
     {
-        var comparer = comparison switch
-        {
-            KeyComparison.Ordinal => StringComparer.Ordinal,
-            KeyComparison.OrdinalIgnoreCase => StringComparer.OrdinalIgnoreCase,
-            _ => throw new ArgumentException()
-        };
-
-        return comparer.Equals(left.Value, right.Value) && 
-            comparer.Equals(left.Label, right.Label);
+        return new KeyComparer(comparison).Equals(left, right);
     }
 
     #endregion
@@ -175,7 +167,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
             return Value;
         }
 
-        return string.Join(LabelSeparator, Value, Label);
+        return string.Join(LabelDelimiter, Value, Label);
     }
 
     /// <summary>

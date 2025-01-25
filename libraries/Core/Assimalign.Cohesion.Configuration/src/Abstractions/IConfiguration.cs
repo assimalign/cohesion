@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -16,37 +17,17 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    object? this[KeyPath path] { get; set; }
+    string? this[KeyPath path] { get; set; }
 
     /// <summary>
-    /// Gets an <see cref="IConfigurationValue"/> instance that has key <see cref="key"/>.
+    /// Adds a configuration entry the section.
     /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    IConfigurationValue GetValue(Key key);
+    /// <param name="entry"></param>
+    void Add(IConfigurationEntry entry);
 
     /// <summary>
-    /// Gets all <see cref="IConfigurationValue"/> instances.
+    /// Removes an entry from the section
     /// </summary>
-    /// <returns></returns>
-    IEnumerable<IConfigurationValue> GetValues();
-
-    /// <summary>
-    /// Returns a section of the <see cref="IConfiguration"/> instance.
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    IConfigurationSection GetSection(Key key);
-
-    /// <summary>
-    /// Gets all sections in the <see cref="IConfiguration"/> instance.
-    /// </summary>
-    /// <returns></returns>
-    IEnumerable<IConfigurationSection> GetSections();
-
-    /// <summary>
-    /// Gets a change token for the <see cref="IConfiguration"/> instance.
-    /// </summary>
-    /// <returns></returns>
-    IConfigurationChangeToken GetChangeToken();   
+    /// <param name="entry"></param>
+    void Remove(IConfigurationEntry entry);
 }

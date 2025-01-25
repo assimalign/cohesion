@@ -13,8 +13,9 @@ public interface IConfigurationBuilderContext
     /// and the registration of <see cref="IConfigurationProvider"/>s.
     /// </summary>
     IDictionary<string, object> Properties { get; }
+
     /// <summary>
-    /// A collection of currently registered providers.
+    /// A collection of registered providers.
     /// </summary>
     IEnumerable<IConfigurationProvider> Providers { get; }
 }

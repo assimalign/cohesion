@@ -6,10 +6,14 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Resources;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
+
+
+public delegate bool ConfigurationFinder(KeyPath path);
 
 /// <summary>
 /// Extension methods for configuration classes./>.
@@ -17,6 +21,10 @@ namespace Assimalign.Cohesion.Configuration;
 public static class ConfigurationExtensions
 {
     private const BindingFlags DeclaredOnlyLookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+
+   
+
 
     ///// <summary>
     ///// 
@@ -31,7 +39,7 @@ public static class ConfigurationExtensions
     //        var str = new string[0]; 
     //    }
 
-        
+
 
     //    throw new NotImplementedException();
     //}
@@ -47,9 +55,9 @@ public static class ConfigurationExtensions
 
     //public IEnumerable<>
 
-    
-   
-    
+
+
+
     //private static object? CreateInstance(
     //    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
     //{
@@ -118,23 +126,97 @@ public static class ConfigurationExtensions
     /// <param name="configuration"></param>
     /// <param name="path"></param>
     /// <returns></returns>
-    public static IConfigurationSection GetSection(this IConfiguration configuration, KeyPath path)
+    public static IConfigurationValue GetValue(this IConfiguration configuration, KeyPath path)
     {
-        var entry = configuration[path];
-
-        if (entry is null)
+        if (path.Count == 1)
         {
-            // TODO: Config exception
+            return configuration.GetValue(path[0]);
         }
 
-        if (entry is not IConfigurationSection section)
+        var section = configuration.GetSection(path.Subpath(0, path.Count - 1));
+        var value = section.GetValue(path[path.Count]);
+
+        return value;
+    }
+
+    public static TValue GetValue<TValue>(this IConfiguration configuration, KeyPath path)
+    {
+        var value = configuration.GetValue(path);
+
+        if (value.Value is TValue t)
         {
-            throw ThrowHelper.GetConfigurationException("");
+            return t;
+        }
+
+
+    }
+
+
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configuration"></param>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    public static IConfigurationSection GetSection(this IConfiguration configuration, KeyPath path)
+    {
+        Key key = path[0];
+        IConfigurationSection? section = configuration.GetSection(key);
+        
+        for (int i = 1; i < path.Count; i++)
+        {
+            if (section is not IConfigurationSection)
+            {
+                throw new Exception();
+            }
+
+            key = path[i];
+            section = section.GetSection(key);
         }
 
         return section;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="configuration"></param>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    public static T GetSection<T>(this IConfiguration configuration, KeyPath path)
+    {
+        return configuration.GetSection(path).Bind<T>();
+    }
+
+
+    public static T Bind<T>(this IConfigurationSection section)
+    {
+        return default;
+    }
+
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    public static IConfigurationEntry Compose(KeyPath path, object? value)
+    {
+        if (path.Count > 1)
+        {
+            return new ConfigurationSection(path[0])
+            {
+                Compose(path.Subpath(1), value)
+            };
+        }
+        else
+        {
+            return new ConfigurationValue(path[0], value);
+        }
+    }
 
     ///// <summary>
     ///// Adds a new configuration source.

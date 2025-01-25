@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -30,7 +31,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// </item>
 /// <item>
 ///     <term>Mixed Format</term>
-///     <description>"/key1.key2\\key3[index]:key4"</description>
+///     <description>"/key1.key2\\key3[index$indexLabel]:key4"</description>
 /// </item>
 /// <item>
 ///     <term>Colon Format (labels)</term>
@@ -58,6 +59,14 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     #region Properties
 
     /// <summary>
+    /// Gets a key at the provided <paramref name="index"/>.
+    /// </summary>
+    /// <param name="index"></param>
+    /// <returns></returns>
+    ///<exception cref="IndexOutOfRangeException"></exception>
+    public Key this[int index] => Keys[index];
+
+    /// <summary>
     /// Returns the default separator used within a composite key.
     /// </summary>
     public const char DefaultDelimiter = ':';
@@ -70,7 +79,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <summary>
     /// Gets an empty key.
     /// </summary>
-    public static readonly KeyPath Empty = "";
+    public static readonly KeyPath Empty = [];
 
     /// <summary>
     /// The collection of keys that make up the path.
@@ -80,58 +89,42 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     /// <summary>
     /// The number of keys in the path.
     /// </summary>
-    public int Count => Keys.Length;
+    public int Count
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Keys.Length;
+    }
 
     /// <summary>
     /// Checks whether the path has any keys.
     /// </summary>
     public bool IsEmpty => Keys.Length == 0;
 
+    /// <summary>
+    /// 
+    /// </summary>
+    public bool IsComposite => Keys.Length > 1;
     #endregion
 
     #region Methods
 
     /// <summary>
-    /// Gets the last key in the path.
-    /// </summary>
-    /// <returns></returns>
-    /// <exception cref="IndexOutOfRangeException"></exception>
-    public Key GetLastKey() => Keys[Keys.Length - 1];
-
-    /// <summary>
-    /// Gets the first key in the path.
-    /// </summary>
-    /// <returns></returns>
-    /// <exception cref="IndexOutOfRangeException"></exception>
-    public Key GetFirstKey() => Keys[0];
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="index"></param>
-    /// <returns></returns>
-    public Key GetKey(int index)
-    {
-        return Keys[index];
-    }
-
-    /// <summary>
-    /// 
+    /// Creates a subpath at the 
     /// </summary>
     /// <param name="start"></param>
     /// <returns></returns>
-    public KeyPath GetSubpath(int start)
+    public KeyPath Subpath(int start)
     {
-        return GetSubpath(start, Keys.Length - start);
+        return Subpath(start, Keys.Length - start);
     }
 
     /// <summary>
-    /// 
+    /// Creates a subpath at a given index for a given length.
     /// </summary>
     /// <param name="start">The starting index to begin.</param>
-    /// <param name="length"></param>
+    /// <param name="length">Then number os keys from the start to include</param>
     /// <returns></returns>
-    public KeyPath GetSubpath(int start, int length)
+    public KeyPath Subpath(int start, int length)
     {
         var buffer = new Key[length];
 
@@ -144,7 +137,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     }
 
     /// <summary>
-    /// 
+    /// Combines the current instance with the provided path.
     /// </summary>
     /// <param name="other"></param>
     /// <returns></returns>
@@ -154,7 +147,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     }
 
     /// <summary>
-    /// 
+    /// Combines the two paths into one.
     /// </summary>
     /// <param name="left"></param>
     /// <param name="right"></param>
@@ -165,11 +158,10 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     }
 
     /// <summary>
-    /// 
+    /// Does a
     /// </summary>
     /// <param name="other"></param>
     /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
     public bool Equals(KeyPath other)
     {
         return Equals(other, KeyComparison.Ordinal);
@@ -201,6 +193,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
 
         return true;
     }
+
     public IEnumerator<Key> GetEnumerator()
     {
         return (IEnumerator<Key>)Keys.GetEnumerator();
@@ -262,7 +255,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     {
         if (span.IsEmpty)
         {
-            return new KeyPath([]);
+            return KeyPath.Empty;
         }
 
         int start = 0;
@@ -302,6 +295,7 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     #endregion
 
     #region Operators
+
     /// <summary>
     /// 
     /// </summary>
@@ -327,12 +321,27 @@ public readonly struct KeyPath : IEquatable<KeyPath>, IEnumerable<Key>
     public static implicit operator KeyPath(Key[] keys) => new KeyPath(keys);
 
     /// <summary>
-    /// 
+    /// Combines two paths together.
     /// </summary>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
     public static KeyPath operator +(KeyPath left, KeyPath right) => Combine(left, right);
+
+    /// <summary>
+    /// Decrements the path from the root.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    public static KeyPath operator --(KeyPath path) => path.Subpath(1, path.Count - 1);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static KeyPath operator +(KeyPath left, Key right) => Combine(left, right);
 
     /// <summary>
     /// 

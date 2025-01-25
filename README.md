@@ -10,7 +10,7 @@ Cohesion is
 - [Repository Structure](#repository-structure)
 
 # Sdk
-![Cohesion SDK](https://github.com/assimalign/cohesion/actions/workflows/sdk.yml/badge.svg?branch=development)
+![SDK](https://github.com/assimalign/cohesion/actions/workflows/sdk.yml/badge.svg?branch=development)
 
 Cohesion is a mono repository 
 

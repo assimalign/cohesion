@@ -32,6 +32,11 @@ public sealed class ConfigurationOptions
     }
 
     /// <summary>
+    /// 
+    /// </summary>
+    public bool LoadProvidersOnBuild { get; set; } = true;
+
+    /// <summary>
     /// The amount of time to wait before canceling the load or reload.
     /// </summary>
     public TimeSpan LoadTimeout { get; set; } = TimeSpan.Zero;
@@ -40,6 +45,8 @@ public sealed class ConfigurationOptions
     /// A list of providers to use for the configuration root.
     /// </summary>
     public List<IConfigurationProvider> Providers { get; } = new List<IConfigurationProvider>();
+
+
 
     /// <summary>
     /// The default options

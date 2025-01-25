@@ -24,8 +24,8 @@ public class MockConfigurationProvider : ConfigurationProvider
         {
             if (path.Count > 1)
             {
-                var subpath = path.GetSubpath(1);
-                var section = new ConfigurationSection(path.GetFirstKey());
+                var subpath = path.Subpath(1);
+                var section = new ConfigurationSection(path[0]);
 
                 var entry = ComposeEntry(subpath, value);
 
@@ -35,7 +35,7 @@ public class MockConfigurationProvider : ConfigurationProvider
             }
             else
             {
-                Set(new ConfigurationValue(path.GetFirstKey(), value));
+                Set(new ConfigurationValue(path[0], value));
             }
         }
 
@@ -43,8 +43,8 @@ public class MockConfigurationProvider : ConfigurationProvider
         {
             if (path.Count > 1)
             {
-                var subpath = path.GetSubpath(1);
-                var section = new ConfigurationSection(path.GetFirstKey());
+                var subpath = path.Subpath(1);
+                var section = new ConfigurationSection(path[0]);
 
                 var entry = ComposeEntry(subpath, value);
 
@@ -54,7 +54,7 @@ public class MockConfigurationProvider : ConfigurationProvider
             }
             else
             {
-                return new ConfigurationValue(path.GetFirstKey(), value);
+                return new ConfigurationValue(path[0], value);
             }
         }
 

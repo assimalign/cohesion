@@ -1,17 +1,28 @@
 {
     "vsicons.associations.folders": [
         {
-            "icon": "docs", "extensions": [".docs"]
+            "icon": "docs",
+            "extensions": [
+                ".docs"
+            ]
         },
         {
-            "icon": "tools", "extensions": ["tooling"]
+            "icon": "tools",
+            "extensions": [
+                "tooling"
+            ]
         },
         {
-            "icon": "scripts", "extensions": [".scripts"]
+            "icon": "scripts",
+            "extensions": [
+                ".scripts"
+            ]
         },
         {
-            "icon": "github", 
-            "extensions": [".github"]
+            "icon": "github",
+            "extensions": [
+                ".github"
+            ]
         }
     ],
     "files.associations": {

@@ -13,13 +13,17 @@ namespace Assimalign.Cohesion.Configuration.Tests
         public void TestSectionExpand()
         {
             var configuration = new ConfigurationBuilder()
-                .AddProvider(context =>
+                .AddProvider(async context =>
                 {
-                    return MockConfigurationProvider.Create(new Dictionary<KeyPath, object>()
+                    var provider =  MockConfigurationProvider.Create(new Dictionary<KeyPath, object>()
                     {
                         { "IsEnabled", true },
                         { "Azure:Identity:ClientId", new Guid("afdc6951-fac8-4e68-8b02-a8acdda7558e") }
                     });
+
+                    await provider.LoadAsync();
+
+                    return provider;
                 })
                 .Build();
 

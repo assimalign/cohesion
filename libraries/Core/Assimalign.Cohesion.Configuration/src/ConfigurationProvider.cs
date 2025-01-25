@@ -15,6 +15,9 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     private readonly List<IConfigurationEntry> entries;
     private readonly KeyComparer comparer;
 
+    private bool isDisposed;
+    private bool isLoaded;
+
     #region Constructors
 
     /// <summary>
@@ -51,7 +54,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException();
+            ThrowHelper.ThrowArgumentException("'key' cannot be empty.");
         }
 
         return entries.FirstOrDefault(p => comparer.Equals(p.Key, key));
@@ -65,92 +68,27 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <exception cref="ArgumentException"></exception>
     public virtual void Set(IConfigurationEntry entry)
     {
-        if (entry is null)
-        {
-            ThrowHelper.ThrowArgumentNullException(nameof(entry));
-        }
+        ThrowHelper.ThrowIfNull(entry, nameof(entry));
 
         if (entry.Key.IsEmpty)
         {
-            ThrowHelper.ThrowArgumentException("The entry key cannot be empty.");
+            ThrowHelper.ThrowArgumentException("'IConfigurationEntry.Key' cannot be empty.");
         }
 
-        if (entry is IConfigurationSection section)
+        for (int i = 0; i < entries.Count; i++)
         {
-            bool existing = false;
-
-            for (int i = 0; i < entries.Count; i++)
+            if (comparer.Equals(entries[i].Key, entry.Key))
             {
-                var item = entries[i];
-
-                if (!(existing = item.Key == entry.Key))
-                {
-                    continue;
-                }
-
-                // Switch to composite structure
-                if (item is IConfigurationValue)
-                {
-                    entries.Remove(item);
-                    entries.Add(entry);
-                }
-
-                if (item is IConfigurationSection)
-                {
-                    // Copy items to existing 
-                    foreach (var child in section)
-                    {
-                        ((IConfigurationSection)item).Add(child);
-                    }
-                }
-
-                break;
-            }
-
-            // if no existing value, then simply add
-            if (!existing)
-            {
-                entries.Add(entry);
+                entries.RemoveAt(i);
             }
         }
-        else if (entry is IConfigurationValue value)
-        {
-            // Just add or override what is existing
-            entries.Add(value);
-        }
-        else
-        {
-            // Invalid entry
-            throw new Exception();
-        }
 
-        //var existing = Get(entry.Key);
-
-        //if (existing is not null)
-        //{
-        //    bool removed = entries.Remove(entry);
-
-        //    // If removal failed, try brute force
-        //    if (!removed)
-        //    {
-        //        for (int i = 0; i < entries.Count; i++)
-        //        {
-        //            var item = entries[i];
-
-        //            if (comparer.Equals(item.Key, entry.Key))
-        //            {
-        //                entries.RemoveAt(i);
-        //            }
-        //        }
-        //    }
-
-        //    entries.Add(entry);
-        //}
-        //else
-        //{
-        //    entries.Add(entry);
-        //}
+        entries.Add(entry);
     }
+
+
+    public abstract Task OnLoadAsync(IDictionary<KeyPath, string?> entries);
+
 
     /// <summary>
     /// 
@@ -161,12 +99,16 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         return entries;
     }
 
-    public virtual void Load()
-    {
-        ReloadAsync().GetAwaiter().GetResult();
-    }
+    public virtual void Load() => ReloadAsync().GetAwaiter().GetResult();
 
-    public abstract Task LoadAsync(CancellationToken cancellationToken = default);
+    public virtual async Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        var entries = new Dictionary<KeyPath, string?>();
+
+        await OnLoadAsync(entries);
+
+
+    }
 
     public void Reload()
     {
@@ -175,6 +117,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
     public virtual Task ReloadAsync(CancellationToken cancellationToken = default)
     {
+
         entries.Clear();
         return LoadAsync(cancellationToken);
     }

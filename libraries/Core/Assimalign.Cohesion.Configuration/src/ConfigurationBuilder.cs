@@ -16,20 +16,30 @@ using Assimalign.Cohesion.Configuration.Internal;
 public class ConfigurationBuilder : IConfigurationBuilder
 {
     private readonly ConfigurationOptions options;
-    private readonly IList<Func<IConfigurationBuilderContext, Task>> funcs;
+    private readonly List<Func<IConfigurationBuilderContext, Task>> builds;
 
     /// <summary>
     /// 
     /// </summary>
     public ConfigurationBuilder()
     {
-        this.funcs = new List<Func<IConfigurationBuilderContext, Task>>();
+        this.builds = new List<Func<IConfigurationBuilderContext, Task>>();
         this.options ??= ConfigurationOptions.Default;
     }
 
     public ConfigurationBuilder(ConfigurationOptions options) : this()
     {
         this.options = options;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    public IConfigurationBuilder AddProvider(IConfigurationProvider provider)
+    {
+        return AddProvider(context => provider);
     }
 
     /// <summary>
@@ -55,11 +65,9 @@ public class ConfigurationBuilder : IConfigurationBuilder
     {
         ThrowHelper.ThrowIfNull(configure, nameof(configure));
 
-        this.funcs.Add(async context =>
+        this.builds.Add(async context =>
         {
             var provider = await configure.Invoke(context);
-
-            await provider.LoadAsync();
 
             if (context.Providers.Any(p => p.Name == provider.Name))
             {
@@ -98,12 +106,18 @@ public class ConfigurationBuilder : IConfigurationBuilder
             Providers = options.Providers
         };
 
-        foreach (var func in funcs)
+        foreach (var func in builds)
         {
             await func.Invoke(context);
         }
 
-        
+        if (options.LoadProvidersOnBuild)
+        {
+            foreach (var provider in context.Providers)
+            {
+                await provider.LoadAsync(cancellationTokenSource.Token);
+            }
+        } 
 
         return new ConfigurationRoot(options);
     }
@@ -147,6 +161,10 @@ public class ConfigurationBuilder : IConfigurationBuilder
         return await BuildAsync(cancellationToken);
     }
 
-    #endregion
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
+    {
+        return AddProvider(provider);
+    }
 
+    #endregion
 }

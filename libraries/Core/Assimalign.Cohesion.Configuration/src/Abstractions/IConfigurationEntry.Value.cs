@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Configuration;
+﻿using System.Runtime.CompilerServices;
+
+namespace Assimalign.Cohesion.Configuration;
 
 
 /// <summary>
@@ -9,5 +11,5 @@ public interface IConfigurationValue : IConfigurationEntry
     /// <summary>
     /// The raw configuration value.
     /// </summary>
-    object? Value { get; }
+    string? Value { get; }
 }

@@ -5,12 +5,49 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
+using Assimalign.Cohesion.Internal;
 
 /// <summary>
 /// Extension methods for <see cref="IConfigurationRoot"/>.
 /// </summary>
 public static class ConfigurationRootExtensions
 {
+
+    /// <summary>
+    /// Gets the named configuration provider.
+    /// </summary>
+    /// <param name="name">The <see cref="IConfigurationProvider.Name"/>.</param>
+    /// <returns></returns>
+    public static IConfigurationProvider GetProvider(this IConfigurationRoot configuration, string name)
+    {
+        return configuration.GetProvider(name, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configuration"></param>
+    /// <param name="name"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentNullException"></exception>
+    /// <exception cref="InvalidOperationException"></exception>
+    public static IConfigurationProvider GetProvider(this IConfigurationRoot configuration, string name, StringComparison comparison)
+    {
+        ThrowHelper.ThrowIfNull(configuration, nameof(configuration));
+        ThrowHelper.ThrowIfNull(name, nameof(name));
+
+        foreach (var provider in configuration.Providers)
+        {
+            if (name.Equals(provider.Name, comparison))
+            {
+                return provider;
+            }
+        }
+
+        throw new InvalidOperationException("");
+    }
+
 
     ///// <summary>
     ///// Gets the immediate children sub-sections of configuration root based on key.

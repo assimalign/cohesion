@@ -10,6 +10,13 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfigurationBuilder
 {
     /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    IConfigurationBuilder AddProvider(IConfigurationProvider provider);
+
+    /// <summary>
     /// Adds a configuration provider to be built.
     /// </summary>
     /// <param name="configure"></param>
