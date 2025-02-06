@@ -2,17 +2,17 @@
 	<Import Project="..\Directory.Build.props" />
 	<PropertyGroup>
 		<!-- 
-		All projects should follow the same directory pattern
+			All projects should follow the same directory pattern
 
-		/ Service 
-			/ Library
-				/src
-				/test
-				/benchmarks
-	 -->
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('src'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('benchmarks'))">$(TargetFrameworksForBenchmark)</TargetFrameworks>
+			/ Service 
+				/ Library
+					/src
+					/test
+					/benchmarks
+		-->
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('src'))">$(TargetFrameworkForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">$(TargetFrameworkForLibraries)</TargetFrameworks>
+		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('benchmarks'))">$(TargetFrameworkForBenchmark)</TargetFrameworks>
 		
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>
@@ -24,6 +24,7 @@
 
 	<!-- #region Packaging Props-->
 	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
+		<GeneratePackageOnBuild Condition="$(Configuration) == 'Release'">true</GeneratePackageOnBuild>
 		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
 		<PackageLicenseFile Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">LICENSE</PackageLicenseFile>
 	</PropertyGroup>

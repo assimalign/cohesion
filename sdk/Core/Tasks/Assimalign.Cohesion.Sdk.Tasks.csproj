@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>$(TargetFrameworkForSdk)</TargetFramework> <!-- Compatible with most .NET versions -->
+        <PackAsTool>true</PackAsTool> <!-- Optional: If the SDK should be distributed as a CLI tool -->
+        <IsPackable>true</IsPackable> <!-- Allows creating NuGet packages -->
+        <PackageTags>Sdk</PackageTags>
+        <Description>This package contains </Description>
+        <ProjectUrl>https://github.com/assimalign/assimalign-cohesion</ProjectUrl>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Build" Version="17.7.0" />
+        <PackageReference Include="Microsoft.Build.Framework" Version="17.7.0" />
+        <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.7.0" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="$(CohesionRepositoryDirectory)\sdk\**\*.targets" Pack="true" PackagePath="$(CohesionRepositoryDirectory)\.build\" />
+        <None Include="$(CohesionRepositoryDirectory)\sdk\**\*.props" Pack="true" PackagePath="$(CohesionRepositoryDirectory)\.build\" />
+    </ItemGroup>
+</Project>

@@ -23,6 +23,12 @@
             "extensions": [
                 ".github"
             ]
+        },
+        {
+            "icon": "services",
+            "extensions": [
+                "libraries"
+            ]
         }
     ],
     "files.associations": {

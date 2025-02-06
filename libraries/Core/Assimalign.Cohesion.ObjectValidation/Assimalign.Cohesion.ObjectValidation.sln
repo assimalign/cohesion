@@ -16,9 +16,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectValidation.Tests", "tests\Assimalign.Cohesion.ObjectValidation.Tests.csproj", "{B671F352-EDF3-4605-8230-8BAD03A90343}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{704571BE-255E-4565-BDB4-4E448B7A9319}"
-	ProjectSection(SolutionItems) = preProject
-		..\..\..\.github\workflows\Core\Assimalign.Cohesion.ObjectValidation.yml = ..\..\..\.github\workflows\Core\Assimalign.Cohesion.ObjectValidation.yml
-	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{561099A7-4608-4F7F-930F-B6963BE30572}"
 EndProject

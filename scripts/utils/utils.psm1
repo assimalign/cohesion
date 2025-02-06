@@ -3,14 +3,45 @@ function Convert-ArgumentsToHashTable {
         [string[]]$Arguments
     )
     $Params = @{}
-    for ($i = 0; $i -lt $Arguments.Length; $i+=2) {
+
+    for ($i = 0; $i -lt $Arguments.Length; ) {
+        
         $ParamName = $Arguments[$i]
-        $ParamValue = $Arguments[$i + 1]
+        $ParamValue = $null
+
+        # Set Parameter Key -{Parameter Key}
         if ($ParamName.StartsWith('-')) {
             $ParamName = $ParamName.TrimStart('-')
         }
-        $Params.Add($ParamName, $ParamValue)
+
+        $HasNext = ($i + 1) -lt $Arguments.Length 
+
+        # If no value is next then assume switch
+        if ($HasNext -eq $false) {
+            $i++;
+            $Params.Add($ParamName, $true)
+            continue
+        }
+
+        # Check for ending ':'
+        if ($ParamName.EndsWith(':')) {
+            $ParamName = $ParamName.TrimEnd(':') 
+        }
+
+        $ParamValue = $Arguments[$i + 1]
+        
+        # If there is next value, but start with '-', then assume current value is switch
+        if ($ParamValue.StartsWith('-')) {
+            $i++;
+            $Params.Add($ParamName, $true)
+            continue
+        }
+        else {
+            $i += 2
+            $Params.Add($ParamName, $ParamValue)
+        }
     }
+    
     return $Params
 }
 function Test-Module {
