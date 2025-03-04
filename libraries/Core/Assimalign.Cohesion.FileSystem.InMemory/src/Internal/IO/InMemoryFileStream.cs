@@ -1,33 +1,33 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Text;
+using System.Diagnostics;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 internal class InMemoryFileStream : Stream
 {
-    private readonly InMemoryFileSystem _fs;
-    private readonly FsFileNode _fileNode;
+    private readonly InMemoryFileSystemFile _file;
     private readonly bool _canRead;
     private readonly bool _canWrite;
     private readonly bool _isExclusive;
     private int _isDisposed;
     private long _position;
-    public InMemoryFileStream(InMemoryFileSystem fs, FsFileNode fileNode, bool canRead, bool canWrite, bool isExclusive)
+
+    public InMemoryFileStream(InMemoryFileSystemFile file, bool canRead, bool canWrite, bool isExclusive)
     {
-        _fs = fs ?? throw new ArgumentNullException(nameof(fs));
-        _fileNode = fileNode ?? throw new ArgumentNullException(nameof(fs));
+        _file = file;
         _canWrite = canWrite;
         _canRead = canRead;
         _isExclusive = isExclusive;
         _position = 0;
-        Debug.Assert(fileNode.IsLocked);
+        Debug.Assert(file.IsLocked);
     }
+    ~InMemoryFileStream()
+    {
+        Dispose(false);
+    }
+
     public override bool CanRead => _isDisposed == 0 && _canRead;
     public override bool CanSeek => _isDisposed == 0;
     public override bool CanWrite => _isDisposed == 0 && _canWrite;
@@ -35,31 +35,27 @@ internal class InMemoryFileStream : Stream
     {
         get
         {
-            CheckNotDisposed();
-            return _fileNode.Content.Length;
+            AssertNotDisposed();
+            return _file.Content.Length;
         }
     }
     public override long Position
     {
         get
         {
-            CheckNotDisposed();
+            AssertNotDisposed();
             return _position;
         }
         set
         {
-            CheckNotDisposed();
+            AssertNotDisposed();
             if (value < 0)
             {
                 throw new ArgumentOutOfRangeException("The position cannot be negative");
             }
             _position = value;
-            _fileNode.Content.SetPosition(_position);
+            _file.Content.SetPosition(_position);
         }
-    }
-    ~InMemoryFileStream()
-    {
-        Dispose(false);
     }
     protected override void Dispose(bool disposing)
     {
@@ -67,31 +63,26 @@ internal class InMemoryFileStream : Stream
         {
             return;
         }
-        if (_isExclusive)
-        {
-            _fs.ExitExclusive(_fileNode);
-        }
-        else
-        {
-            _fs.ExitShared(_fileNode);
-        }
+
+        _file.Close(!_isExclusive);
+
         base.Dispose(disposing);
     }
     public override void Flush()
     {
-        CheckNotDisposed();
+        AssertNotDisposed();
     }
     public override int Read(byte[] buffer, int offset, int count)
     {
-        CheckNotDisposed();
-        int readCount = _fileNode.Content.Read(_position, buffer, offset, count);
+        AssertNotDisposed();
+        int readCount = _file.Content.Read(_position, buffer, offset, count);
         _position += readCount;
-        _fileNode.LastAccessTime = DateTime.Now;
+        _file.AccessedOn = DateTime.Now;
         return readCount;
     }
     public override long Seek(long offset, SeekOrigin origin)
     {
-        CheckNotDisposed();
+        AssertNotDisposed();
         var newPosition = offset;
         switch (origin)
         {
@@ -99,7 +90,7 @@ internal class InMemoryFileStream : Stream
                 newPosition += _position;
                 break;
             case SeekOrigin.End:
-                newPosition += _fileNode.Content.Length;
+                newPosition += _file.Content.Length;
                 break;
         }
         if (newPosition < 0)
@@ -110,22 +101,22 @@ internal class InMemoryFileStream : Stream
     }
     public override void SetLength(long value)
     {
-        CheckNotDisposed();
-        _fileNode.Content.Length = value;
+        AssertNotDisposed();
+        _file.Content.Length = value;
         var time = DateTime.Now;
-        _fileNode.LastAccessTime = time;
-        _fileNode.LastWriteTime = time;
+        _file.AccessedOn = time;
+        _file.UpdatedOn = time;
     }
     public override void Write(byte[] buffer, int offset, int count)
     {
-        CheckNotDisposed();
-        _fileNode.Content.Write(_position, buffer, offset, count);
+        AssertNotDisposed();
+        _file.Content.Write(_position, buffer, offset, count);
         _position += count;
         var time = DateTime.Now;
-        _fileNode.LastAccessTime = time;
-        _fileNode.LastWriteTime = time;
+        _file.AccessedOn = time;
+        _file.UpdatedOn = time;
     }
-    private void CheckNotDisposed()
+    private void AssertNotDisposed()
     {
         if (_isDisposed > 0)
         {

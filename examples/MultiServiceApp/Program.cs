@@ -7,6 +7,10 @@ var builder = HostBuilder.Create();
 builder.AddWebServer(server =>
 {
 
+})
+.AddDnsServer(myserver =>
+{
+    myserver.AddARecord()
 });
 
 

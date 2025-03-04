@@ -25,6 +25,7 @@ public class FileSystemPathTests
     {
         var fsPath = new FileSystemPath(path);
 
+        Assert.False(fsPath.EndsWith("/"));
         Assert.False(fsPath.EndsWith("\\"));
 
         var fileName = fsPath.GetFileName();

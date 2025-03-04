@@ -43,7 +43,7 @@ public readonly struct FileSystemPath :
      */
     //private static readonly string[] RootPaths = ["/", "\\", "//"];
 
-    private readonly string path;
+    
 
     /// <summary>
     /// 
@@ -57,14 +57,10 @@ public readonly struct FileSystemPath :
         {
             ThrowHelper.ThrowArgumentNullException($"path cannot be null or empty.");
         }
-        if (Path.GetInvalidPathChars().Intersect(path).Any())
+        if (System.IO.Path.GetInvalidPathChars().Intersect(path).Any())
         {
             ThrowHelper.ThrowArgumentException($"path contains illegal characters.");
         }
-        //if (path.Length > MaxLength)
-        //{
-        //    ThrowHelper.ThrowArgumentException($"path is too large. Max length is {MaxLength}");
-        //}
 
         int end = path.Length - 1;
         int start = 0;
@@ -94,16 +90,16 @@ public readonly struct FileSystemPath :
                 break;
             }
         }
-        this.path = string.Create((end + 1) - start, path, (span, value) =>
+        this.Path = string.Create((end + 1) - start, path, (span, value) =>
         {
-            // Let's convert all forward slashes to backward slashes
+            // Let's convert all backward slashes to forward slashes
             for (int i = start; i < (end + 1); i++)
             {
                 var c = value[i];
 
-                if (c == '/')
+                if (c == '\\')
                 {
-                    span[i - start] = '\\';
+                    span[i - start] = '/';
                 }
                 else
                 {
@@ -113,77 +109,67 @@ public readonly struct FileSystemPath :
         });
     }
 
-    ///// <summary>
-    ///// The max path length allowed.
-    ///// </summary>
-    //public const int MaxLength = 4096;
     /// <summary>
     /// 
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
-    public char this[int index] => path[index];
+    public char this[int index] => Path[index];
+
+    /// <summary>
+    /// The raw string path.
+    /// </summary>
+    public string Path { get; }
+
     /// <summary>
     /// The length of the path.
     /// </summary>
-    public int Length => path.Length;
+    public int Length => Path.Length;
+
     /// <summary>
     /// An empty path.
     /// </summary>
-    public static FileSystemPath Empty => "\\";
+    public static FileSystemPath Empty => "/";
+
     /// <summary>
     /// The directory separator.
     /// </summary>
-    public static char Separator => Path.DirectorySeparatorChar;
-    ///// <summary>
-    ///// Returns the segments 
-    ///// </summary>
-    ///// <returns></returns>
-    //public IEnumerable<FileSystemPath> GetSegments()
-    //{
-    //    int a = 0;
+    public static char Separator => '/';
 
-        
-    //    for (int i = 0; i < path.Length; i++)
-    //    {
-    //        if (path[i] == '\\')
-    //        {
-    //            var buffer = new char[i - a];
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public string[] Split()
+    {
+        return [..Path.Split(Separator)];
+    }
 
-    //            path.Substring
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public DirectoryName[] GetDirectoryNames()
+    {
+        return [.. Path.Split(Separator)];
+    }
 
-    //            Array.Copy(path, a, buffer, 0, buffer.Length);
-
-    //            yield return new FileSystemPath(buffer);
-
-    //            a = i;
-    //        }
-    //        // Check if at the end
-    //        else if ((i + 1) == chars.Length)
-    //        {
-    //            var buffer = new char[chars.Length - a];
-
-    //            Array.Copy(chars, a, buffer, 0, buffer.Length);
-
-    //            yield return new FileSystemPath(buffer);
-    //        }
-    //    }
-    //}
     /// <summary>
     /// Gets the file name, if any.
     /// </summary>
     /// <returns></returns>
-    public string? GetFileName()
+    public FileName GetFileName()
     {
-        return Path.GetFileName(path);
+        return IO.Path.GetFileName(Path);
     }
+
     /// <summary>
     /// Gets the directory name, if any.
     /// </summary>
     /// <returns></returns>
-    public string? GetDirectoryName()
+    public DirectoryName GetDirectoryName()
     {
-        return Path.GetDirectoryName(path);
+        return IO.Path.GetDirectoryName(Path)!;
     }
     /// <summary>
     /// Combines the provided path to the 
@@ -201,8 +187,9 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public static FileSystemPath Combine(params FileSystemPath[] paths)
     {
-        return Path.Combine([.. paths]);
+        return IO.Path.Combine([.. paths]);
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -210,8 +197,9 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool EndsWith(string value)
     {
-        return path.EndsWith(value);
+        return Path.EndsWith(value);
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -220,8 +208,9 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool EndsWith(string value, StringComparison comparison)
     {
-        return path.EndsWith(value, comparison);
+        return Path.EndsWith(value, comparison);
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -229,8 +218,9 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool StartsWith(string value)
     {
-        return path.StartsWith(value);
+        return Path.StartsWith(value);
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -239,7 +229,7 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool StartsWith(string value, StringComparison comparison)
     {
-        return path.StartsWith(value, comparison);
+        return Path.StartsWith(value, comparison);
     }
 
     #region Overloads
@@ -251,7 +241,7 @@ public readonly struct FileSystemPath :
     /// <inheritdoc />
     public override string ToString()
     {
-        return path;
+        return Path;
     }
     /// <inheritdoc />
     public override int GetHashCode()

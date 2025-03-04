@@ -1,9 +1,10 @@
 ﻿using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
+using System.Collections;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Security.Principal;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -11,241 +12,105 @@ namespace Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
 
-
 [DebuggerDisplay("{Name} - Size: {Size} | Used: {SpaceUsed}")]
 public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
 {
-    private static readonly char[] separators =
-    [
-        System.IO.Path.DirectorySeparatorChar,
-        System.IO.Path.AltDirectorySeparatorChar
-    ];
+    private readonly DriveInfo _driveInfo;
+    private readonly PhysicalFileSystemDirectory _root;
+    private readonly string _name;
+    private bool _isReadOnly;
 
-    private readonly DriveInfo driveInfo;
-    private readonly bool isReadOnly;
-
-    public PhysicalFileSystem(string drive)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="options"></param>
+    public PhysicalFileSystem(PhysicalFileSystemOptions options)
     {
-        this.driveInfo = new DriveInfo(drive);
+        ThrowHelper.ThrowIfNull(options, nameof(options));
+
+        _name = options.Name;
+        _driveInfo = new DriveInfo(options!.Drive!);
+        _root = new PhysicalFileSystemDirectory(_driveInfo.RootDirectory)
+        {
+            FileSystem = this,
+            IgnoreAttributes = options.IgnoreAttributes
+        };
     }
 
-    public string Name => driveInfo.Name;
-    public Size Size => driveInfo.TotalSize;
-    public Size Space => driveInfo.TotalFreeSpace;
-    public Size SpaceUsed => (driveInfo.TotalSize - driveInfo.TotalFreeSpace);
-    public IFileSystemDirectory RootDirectory => new PhysicalFileSystemDirectory(driveInfo.RootDirectory);
+    public string Name => _name;
+    public bool IsReadOnly => _isReadOnly;
+    public Size Size => _driveInfo.TotalSize;
+    public Size SpaceAvailable => _driveInfo.TotalFreeSpace;
+    public Size SpaceUsed => (_driveInfo.TotalSize - _driveInfo.TotalFreeSpace);
+    public IFileSystemDirectory RootDirectory => _root;
+
     public bool Exist(FileSystemPath path)
     {
-        var fullPath = GetFullPath(path);
-
-#if NET7_0_OR_GREATER
-        return System.IO.Path.Exists(fullPath);
-#else
-        if (File.Exists(fullPath) || Directory.Exists(fullPath))
-        {
-            return true;
-        }
-        return false;
-#endif
+        return RootDirectory.Exist(path);
     }
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        CheckIfReadOnly();
-
-        var fullPath = GetFullPath(path);
-
-        try
-        {
-            var directoryInfo = Directory.CreateDirectory(fullPath);
-
-            return new PhysicalFileSystemDirectory(directoryInfo);
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        return RootDirectory.CreateDirectory(path);
     }
     public IFileSystemFile CreateFile(FileSystemPath path)
     {
-        CheckIfReadOnly();
-
-        var fullPath = GetFullPath(path);
-
-        try
-        {
-            File.Create(fullPath).Close();
-
-            var fileInfo = new FileInfo(path);
-
-            return new PhysicalFileSystemFile(fileInfo);
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        return RootDirectory.CreateFile(path);
     }
     public void DeleteDirectory(FileSystemPath path)
     {
-        CheckIfReadOnly();
-
-        var fullPath = GetFullPath(path);
-
-        CheckFileOrDirectoryExist(fullPath);
-
-        try
-        {
-            Directory.Delete(fullPath, true);
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        RootDirectory.DeleteDirectory(path);
     }
     public void DeleteFile(FileSystemPath path)
     {
-        CheckIfReadOnly();
-
-        var fullPath = GetFullPath(path);
-
-        CheckFileOrDirectoryExist(fullPath);
-
-        try
-        {
-            File.Delete(fullPath);
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        RootDirectory.DeleteFile(path);
     }
     public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
-        CheckFileOrDirectoryExist(path);
-
-        return new PhysicalFileSystemDirectory(path);
+        return RootDirectory.GetDirectory(path);
     }
     public IFileSystemFile GetFile(FileSystemPath path)
     {
-        CheckFileOrDirectoryExist(path);
-
-        throw new NotImplementedException();
+        return RootDirectory.GetFile(path);
     }
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
-        CheckIfReadOnly();
-        CheckFileOrDirectoryExist(source);
-
-        File.Copy(source, destination);
+        RootDirectory.Copy(source, destination);
     }
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
-        CheckIfReadOnly();
-
-        try
-        {
-            if (File.Exists(source))
-            {
-                File.Move(source, destination);
-            }
-            else if (Directory.Exists(source))
-            {
-                Directory.Move(source, destination);
-            }
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        RootDirectory.Move(source, destination);
     }
     public IFileSystemChangeToken Watch(string filter)
     {
-        if (filter is null)
-        {
-            ThrowHelper.ThrowArgumentNullException(nameof(filter));
-        }
-        if (PathUtilities.HasInvalidFilterChars(filter))
-        {
-            ThrowHelper.ThrowArgumentException("The provider filter has an invalid character.");
-        }
-
-        // Relative paths starting with leading slashes are okay
-        filter = filter.TrimStart(separators);
-        throw new NotImplementedException();
+        return new PhysicalFileSystemChangeToken(_root, filter);
     }
-    
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {
-        return this.OfType<IFileSystemDirectory>();
+        return RootDirectory.GetDirectories();
     }
     public IEnumerable<IFileSystemFile> GetFiles()
     {
-        return this.OfType<IFileSystemFile>();
+        return RootDirectory.GetFiles();
     }
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
-        return driveInfo.RootDirectory.EnumerateFileSystemInfos("*", new EnumerationOptions()
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = true,
-        })
-            .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
-            {
-                FileInfo info => new PhysicalFileSystemFile(info),
-                DirectoryInfo info => new PhysicalFileSystemDirectory(info),
-                _ => throw new Exception("Invalid object in physical file system.")
-
-            }).GetEnumerator();
+        return RootDirectory.GetEnumerator();
     }
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public void Dispose()
     {
-        throw new NotImplementedException();
+
     }
 
-    private FileSystemPath GetFullPath(FileSystemPath path)
+    public IReadOnlyFileSystem AsReadOnly()
     {
-        return Path.GetFullPath(path, driveInfo.Name);
+        _isReadOnly = true;
+        return this!;
     }
-    private void CheckIfReadOnly()
+
+    public ValueTask DisposeAsync()
     {
-        if (isReadOnly)
-        {
-            ThrowHelper.ThrowFileSystemIsReadOnly();
-        }
+        return ValueTask.CompletedTask;
     }
-    private void CheckFileOrDirectoryExist(FileSystemPath path)
-    {
-        if (!Exist(path))
-        {
-            ThrowHelper.ThrowFileNotExistException(path);
-        }
-    }
-
-
-    public static IReadOnlyFileSystem CreateAsReadOnly()
-    {
-        return default!;
-    }
-
-    
-    //private IEnumerable<TFileSystemInfo> Enumerate<TFileSystemInfo>(IEnumerable<IFileSystemInfo> enumerable)
-    //    where TFileSystemInfo : IFileSystemInfo
-    //{
-    //    foreach (var item in enumerable)
-    //    {
-    //        if (item is TFileSystemInfo fsInfo)
-    //        {
-    //            yield return fsInfo;
-
-    //            if (fsInfo is IEnumerable<IFileSystemInfo> children)
-    //            {
-    //                foreach (var child in Enumerate<TFileSystemInfo>(children))
-    //                {
-    //                    yield return child;
-    //                }
-    //            }
-    //        }
-    //    }
-    //}
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Text.Json;
 
 namespace Assimalign.Cohesion.Internal;
@@ -11,7 +12,7 @@ internal static partial class ThrowHelper
 
     internal static void ThrowIfNull(object? value, string paramName)
     {
-        if (value is null || (value is string str && string.IsNullOrEmpty(str)))
+        if (value is null || (value is string str && string.Empty == str))
         {
             throw GetArgumentNullException(paramName);
         }
@@ -66,6 +67,21 @@ internal static partial class ThrowHelper
 
     internal static ObjectDisposedException GetObjectDisposedException(string objectName, string message) =>
         new ObjectDisposedException(objectName, message);
+
+    #endregion
+
+    #region IO
+
+    [DoesNotReturn]
+    internal static void ThrowEndOfStreamException(string message)
+    {
+        throw GetEndOfStreamException(message);
+    }
+
+    internal static EndOfStreamException GetEndOfStreamException(string message)
+    {
+        return new EndOfStreamException(message);
+    }
 
     #endregion
 

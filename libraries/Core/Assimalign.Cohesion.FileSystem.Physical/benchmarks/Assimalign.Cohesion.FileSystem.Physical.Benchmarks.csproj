@@ -7,5 +7,8 @@
 		<PackageReference Include="BenchmarkDotNet" />
 		<PackageReference Include="Zio" />
 	</ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\src\Assimalign.Cohesion.FileSystem.Physical.csproj" />
+	</ItemGroup>
 	
 </Project>

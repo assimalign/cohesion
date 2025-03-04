@@ -1,5 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
 	</PropertyGroup>
@@ -21,5 +20,4 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
 	</ItemGroup>
-	
 </Project>

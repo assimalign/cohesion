@@ -10,41 +10,48 @@ namespace Assimalign.Cohesion.FileSystem;
 public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystemInfo>
 {
     /// <summary>
-    /// The number of items in the directory.
+    /// The name of the directory.
     /// </summary>
-    //long Count { get; }
+    DirectoryName Name { get; }
+
     /// <summary>
     /// The parent directory.
     /// </summary>
     IFileSystemDirectory? Parent { get; }
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="filter"></param>
     /// <returns></returns>
     IFileSystemChangeToken Watch(string filter);
+
     /// <summary>
     /// Checks whether a relative path from the current directory exists.
     /// </summary>
     /// <param name="path"> a relative path.</param>
     /// <returns></returns>
     bool Exist(FileSystemPath path);
+
     /// <summary>
     /// Gets all the directories contained in the directory.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IFileSystemDirectory> GetDirectories();
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path">A relative path to given directory.</param>
     /// <returns></returns>
     IFileSystemDirectory GetDirectory(FileSystemPath path);
+
     /// <summary>
     /// Get all files in contained in the directory.
     /// </summary>
     /// <returns></returns>
-    IEnumerable<IFileSystemInfo> GetFiles();
+    IEnumerable<IFileSystemFile> GetFiles();
+
     /// <summary>
     ///  Returns the <see cref="IFileSystemInfo"/> for a given file 
     ///  from the current location of a given directory.
@@ -52,4 +59,44 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// <param name="path">The name of the file.</param>
     /// <returns></returns>
     IFileSystemFile GetFile(FileSystemPath path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    IFileSystemDirectory CreateDirectory(FileSystemPath path);
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    IFileSystemFile CreateFile(FileSystemPath path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    void DeleteDirectory(FileSystemPath path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    void DeleteFile(FileSystemPath path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="source"></param>
+    /// <param name="destination"></param>
+    void Copy(FileSystemPath source, FileSystemPath destination);
+
+    /// <summary>
+    /// Moves a directory or file the the provided destination.
+    /// </summary>
+    /// <param name="source"></param>
+    /// <param name="destination"></param>
+    void Move(FileSystemPath source, FileSystemPath destination);
 }

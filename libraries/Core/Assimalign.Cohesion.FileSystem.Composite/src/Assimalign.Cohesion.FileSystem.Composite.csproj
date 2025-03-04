@@ -1,10 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\Assimalign.Cohesion.FileSystem.Globbing\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
+		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
 	</ItemGroup>
-	
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
+	</ItemGroup>
 </Project>

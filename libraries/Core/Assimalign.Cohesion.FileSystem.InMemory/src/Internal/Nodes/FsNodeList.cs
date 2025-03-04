@@ -1,11 +1,12 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-internal class FsNodeList : List<KeyValuePair<Path, FsNode>>, IDisposable
+internal class FsNodeList : List<KeyValuePair<FileSystemPath, FsNode>>, IDisposable
 {
     private readonly InMemoryFileSystem fileSystem;
 

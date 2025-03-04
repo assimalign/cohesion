@@ -15,6 +15,7 @@ public interface IWebServer
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     Task StartAsync(CancellationToken cancellationToken);
+
     /// <summary>
     /// 
     /// </summary>

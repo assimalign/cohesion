@@ -12,15 +12,28 @@ internal class FsNodeLock
 
     public FsNodeLock()
     {
-        
+
     }
 
     public bool IsLocked => count != 0;
-    public void EnterShared(Path context)
+    public void Enter()
     {
-        EnterShared(FileShare.Read, context);
+        Monitor.Enter(this);
+        try
+        {
+            while (count != 0)
+            {
+                Monitor.Wait(this);
+            }
+            count = -1;
+            Monitor.PulseAll(this);
+        }
+        finally
+        {
+            Monitor.Exit(this);
+        }
     }
-    public void EnterShared(FileShare share, Path context)
+    public void Enter(FileShare share)
     {
         Monitor.Enter(this);
         try
@@ -35,7 +48,7 @@ internal class FsNodeLock
                 // The previous share must be a superset of the shared being asked
                 if ((share & currentShare) != share)
                 {
-                    throw new UnauthorizedAccessException($"Cannot access shared resource path `{context}` with shared access`{share}` while current is `{currentShare}`");
+                    throw new UnauthorizedAccessException();// $"Cannot access shared resource path `{context}` with shared access`{share}` while current is `{currentShare}`");
                 }
             }
             else
@@ -50,7 +63,7 @@ internal class FsNodeLock
             Monitor.Exit(this);
         }
     }
-    public void ExitShared()
+    public void Exit()
     {
         Monitor.Enter(this);
         try
@@ -68,7 +81,7 @@ internal class FsNodeLock
             Monitor.Exit(this);
         }
     }
-    public bool TryEnterShared(FileShare share)
+    public bool TryEnter(FileShare share)
     {
         Monitor.Enter(this);
         try
@@ -116,23 +129,7 @@ internal class FsNodeLock
         }
         return true;
     }
-    public void EnterExclusive()
-    {
-        Monitor.Enter(this);
-        try
-        {
-            while (count != 0)
-            {
-                Monitor.Wait(this);
-            }
-            count = -1;
-            Monitor.PulseAll(this);
-        }
-        finally
-        {
-            Monitor.Exit(this);
-        }
-    }
+    
     public void ExitExclusive()
     {
         Monitor.Enter(this);

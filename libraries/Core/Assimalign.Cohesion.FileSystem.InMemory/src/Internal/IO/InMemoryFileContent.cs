@@ -5,16 +5,17 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 internal class InMemoryFileContent
 {
-    private readonly FsFileNode _fileNode;
+    private readonly InMemoryFileSystemFile _file;
     private readonly MemoryStream _stream;
-    public InMemoryFileContent(FsFileNode fileNode)
+
+    public InMemoryFileContent(InMemoryFileSystemFile file)
     {
-        _fileNode = fileNode ?? throw new ArgumentNullException(nameof(fileNode));
+        _file = file;
         _stream = new MemoryStream();
     }
-    public InMemoryFileContent(FsFileNode fileNode, InMemoryFileContent copy)
+    public InMemoryFileContent(InMemoryFileSystemFile file, InMemoryFileContent copy)
     {
-        _fileNode = fileNode ?? throw new ArgumentNullException(nameof(fileNode));
+        _file = file;
         var length = copy.Length;
         _stream = new MemoryStream(length <= int.MaxValue ? (int)length : int.MaxValue);
         CopyFrom(copy);
@@ -52,8 +53,9 @@ internal class InMemoryFileContent
         {
             _stream.Position = position;
             _stream.Write(buffer, offset, count);
+            _file.FileSystem.IncrementSpaceUsed(count);
         }
-        _fileNode.ContentChanged();
+        _file.ContentChanged();
     }
     public void SetPosition(long position)
     {
@@ -75,10 +77,13 @@ internal class InMemoryFileContent
         {
             lock (this)
             {
+                var dif = value - _stream.Length;
+
+                _file.FileSystem.IncrementSpaceUsed(dif);
+
                 _stream.SetLength(value);
             }
-            _fileNode.ContentChanged();
+            _file.ContentChanged();
         }
     }
-    public string DebuggerDisplay() => $"Size = {_stream.Length}";
 }

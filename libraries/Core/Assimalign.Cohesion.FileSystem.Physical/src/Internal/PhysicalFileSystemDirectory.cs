@@ -8,132 +8,230 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Assimalign.Cohesion.System.IO;
+using Assimalign.Cohesion.Internal;
+
+
 using Internal;
 
 /// <summary>
 /// Represents a directory on a physical filesystem
 /// </summary>
 [DebuggerDisplay("{Path}")]
-internal class PhysicalFileSystemDirectory : IFileSystemDirectory
+internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSystemDirectory
 {
-    private readonly string directory;
-    private readonly DirectoryInfo directoryInfo;
-    private readonly ExclusionFilterType directoryInfoFilters;
+    //private readonly string directory;
+    //private readonly ExclusionFilterType directoryInfoFilters;
 
-    private IEnumerable<IFileSystemInfo> files;
+    private readonly DirectoryInfo _directoryInfo;
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="directory"></param>
-    public PhysicalFileSystemDirectory(string directory)
-        : this(directory, ExclusionFilterType.Sensitive) { }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="directory"></param>
-    /// <param name="filters"></param>
-    public PhysicalFileSystemDirectory(string directory, ExclusionFilterType filters)
-        : this(new DirectoryInfo(directory), filters)
+    public PhysicalFileSystemDirectory(DirectoryInfo directoryInfo) 
+        : base(directoryInfo)
     {
-        this.directory = directory;
+        _directoryInfo = directoryInfo;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="directoryInfo"></param>
-    public PhysicalFileSystemDirectory(DirectoryInfo directoryInfo)
-        : this(directoryInfo, ExclusionFilterType.Sensitive) { }
-
-    /// <summary>
-    /// Initializes an instance of <see cref="PhysicalFileSystemDirectory"/> that wraps an instance of <see cref="System.IO.DirectoryInfo"/>
-    /// </summary>
-    /// <param name="info">The directory</param>
-    internal PhysicalFileSystemDirectory(DirectoryInfo directoryInfo, ExclusionFilterType filters)
+    public DirectoryName Name => _directoryInfo.Name.Split(':')[0];
+    public IFileSystemDirectory? Parent
     {
+        get
+        {
+            if (_directoryInfo.Parent is not null)
+            {
+                return new PhysicalFileSystemDirectory(_directoryInfo.Parent);
+            }
 
-        this.directoryInfo = directoryInfo;
+            return null;
+        }
+    }
+    public IFileSystemChangeToken Watch(string filter)
+    {
+        return new PhysicalFileSystemChangeToken(this, filter);
+    }
+    public bool Exist(FileSystemPath path)
+    {
+        var fullPath = GetFullPath(path);
+
+#if NET7_0_OR_GREATER
+        return System.IO.Path.Exists(fullPath);
+#else
+        return File.Exists(fullPath) || Directory.Exists(fullPath);
+#endif
     }
 
-    public string Name => directoryInfo.Name;
-    public Path Path => directoryInfo.FullName;
-    public DateTimeOffset UpdatedOn => directoryInfo.LastWriteTimeUtc;
-    public DateTimeOffset CreatedOn => directoryInfo.CreationTimeUtc;
-    public DateTimeOffset AccessedOn => directoryInfo.LastAccessTimeUtc;
-    public IFileSystemDirectory? Parent => directoryInfo.Parent is null ? null : new PhysicalFileSystemDirectory(directoryInfo.Parent);
-    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
-        return this.OfType<IFileSystemDirectory>();
+        var directoryPath = GetFullPath(path);
+        var directoryInfo = new DirectoryInfo(directoryPath);
+
+        CheckFileOrDirectoryExist(directoryInfo);
+
+        return new PhysicalFileSystemDirectory(directoryInfo)
+        {
+            FileSystem = base.FileSystem,
+            IgnoreAttributes = base.IgnoreAttributes
+        };
     }
+
     public IEnumerable<IFileSystemFile> GetFiles()
     {
-        return this.OfType<IFileSystemFile>();
-    }
-    public IEnumerator<IFileSystemInfo> GetEnumerator()
-    {
-        return directoryInfo.EnumerateFileSystemInfos("*", new EnumerationOptions()
+        return _directoryInfo.EnumerateFiles("*", new EnumerationOptions()
         {
             IgnoreInaccessible = true,
-            RecurseSubdirectories = true,
-            
+            AttributesToSkip = base.IgnoreAttributes
+        })
+            .Select(fileInfo => new PhysicalFileSystemFile(fileInfo)
+            {
+                FileSystem = base.FileSystem
+            });
+    }
+    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    {
+        return _directoryInfo.EnumerateDirectories("*", new EnumerationOptions()
+        {
+            IgnoreInaccessible = true,
+            AttributesToSkip = base.IgnoreAttributes
+        })
+            .Select(directoryInfo => new PhysicalFileSystemDirectory(directoryInfo)
+            {
+                FileSystem = base.FileSystem
+            });
+    }
+    public IFileSystemFile GetFile(FileSystemPath path)
+    {
+        var filePath = GetFullPath(path);
+        var fileInfo = new FileInfo(filePath);
+
+        CheckFileOrDirectoryExist(fileInfo);
+
+        return new PhysicalFileSystemFile(fileInfo)
+        {
+            FileSystem = base.FileSystem,
+            IgnoreAttributes = base.IgnoreAttributes
+        };
+    }
+    public IFileSystemDirectory CreateDirectory(FileSystemPath path)
+    {
+        CheckIfReadOnly();
+
+        var fullPath = GetFullPath(path);
+
+        try
+        {
+            var directoryInfo = Directory.CreateDirectory(fullPath);
+
+            return new PhysicalFileSystemDirectory(directoryInfo);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
+    }
+    public IFileSystemFile CreateFile(FileSystemPath path)
+    {
+        var filePath = GetFullPath(path);
+        var fileInfo = new FileInfo(filePath);
+
+        if (fileInfo.Exists)
+        {
+            throw new IOException("File already exists");
+        }
+
+        using var fileStream = fileInfo.Create();
+
+        return new PhysicalFileSystemFile(fileInfo);
+    }
+    public void DeleteDirectory(FileSystemPath path)
+    {
+        CheckIfReadOnly();
+
+        var directoryPath = GetFullPath(path);
+        var directoryInfo = new DirectoryInfo(directoryPath);
+
+        CheckFileOrDirectoryExist(directoryInfo);
+
+        directoryInfo.Delete();
+    }
+    public void DeleteFile(FileSystemPath path)
+    {
+        CheckIfReadOnly();
+
+        var fullPath = GetFullPath(path);
+        var fileInfo = new FileInfo(fullPath);
+
+        CheckFileOrDirectoryExist(fileInfo);
+
+        fileInfo.Delete();
+    }
+    public void Copy(FileSystemPath source, FileSystemPath destination)
+    {
+        
+        throw new NotImplementedException();
+
+
+    }
+    public void Move(FileSystemPath source, FileSystemPath destination)
+    {
+        CheckIfReadOnly();
+
+        if (File.Exists(source))
+        {
+            File.Move(source, destination);
+        }
+        else if (Directory.Exists(source))
+        {
+            Directory.Move(source, destination);
+        }
+        else
+        {
+            // TODO: throw difference exception
+            throw new IOException("source not found");
+        }
+    }
+
+    public IEnumerator<IFileSystemInfo> GetEnumerator()
+    {
+        return _directoryInfo.EnumerateFileSystemInfos("*", new EnumerationOptions()
+        {
+            IgnoreInaccessible = true,
+            AttributesToSkip = base.IgnoreAttributes,
         })
             .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
             {
-                FileInfo info => new PhysicalFileSystemFile(info),
-                DirectoryInfo info => new PhysicalFileSystemDirectory(info),
+                FileInfo info => new PhysicalFileSystemFile(info)
+                {
+                    FileSystem = base.FileSystem
+                },
+                DirectoryInfo info => new PhysicalFileSystemDirectory(info)
+                {
+                    FileSystem = base.FileSystem
+                },
                 _ => throw new Exception("Invalid object in physical file system.")
 
             }).GetEnumerator();
     }
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-
-    private void EnsureInitialized()
+    IEnumerator IEnumerable.GetEnumerator()
     {
-        try
+        return GetEnumerator();
+    }
+
+    private FileSystemPath GetFullPath(FileSystemPath path)
+    {
+        return System.IO.Path.GetFullPath(path, _directoryInfo.FullName);
+    }
+
+    private void CheckIfReadOnly()
+    {
+        if (FileSystem.IsReadOnly)
         {
-            files = directoryInfo
-                .EnumerateFileSystemInfos()
-                .Where(info => !FileSystemInfoHelper.IsExcluded(info, directoryInfoFilters))
-                .Select<FileSystemInfo, IFileSystemInfo>(info =>
-                {
-                    return info switch
-                    {
-                        FileInfo file => new PhysicalFileSystemFile(file),
-                        DirectoryInfo directory => new PhysicalFileSystemDirectory(directory),
-                    };
-                });
-        }
-        catch (Exception ex) when (ex is DirectoryNotFoundException || ex is IOException)
-        {
-            files = Enumerable.Empty<IFileSystemInfo>();
+            ThrowHelper.ThrowFileSystemIsReadOnly();
         }
     }
-
-  
-
-    
-
-    public bool Exist(Path path)
+    private void CheckFileOrDirectoryExist(FileSystemInfo fileSystemInfo)
     {
-        throw new NotImplementedException();
-    }
-
-    public IFileSystemDirectory GetDirectory(Path path)
-    {
-        throw new NotImplementedException();
-    }
-
-    IEnumerable<IFileSystemInfo> IFileSystemDirectory.GetFiles()
-    {
-        throw new NotImplementedException();
-    }
-
-    public IFileSystemFile GetFile(Path path)
-    {
-        throw new NotImplementedException();
+        if (!fileSystemInfo.Exists)
+        {
+            ThrowHelper.ThrowPathNotExistException(fileSystemInfo.FullName);
+        }
     }
 }

@@ -37,7 +37,7 @@ internal class FsFileNode : FsNode
         //    dispatcher.RaiseChange(path);
         //}
     }
-    private Path GeneratePath()
+    private FileSystemPath GeneratePath()
     {
         //var builder = UPath.GetSharedStringBuilder();
         //FsFileNode node = this;

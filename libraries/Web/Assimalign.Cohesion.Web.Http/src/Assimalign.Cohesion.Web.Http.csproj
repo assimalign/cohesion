@@ -1,3 +1,17 @@
-<Project Sdk="Microsoft.NET.Sdk">
-   
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Remove="Internal\Extensions\HttpStatusCodeExtensions.cs" />
+		<Compile Remove="Internal\Utilities\IntegerDecoder.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Core\Assimalign.Cohesion.Transports\src\Assimalign.Cohesion.Transports.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Server\Internal\" />
+	</ItemGroup>
+	
 </Project>

@@ -14,16 +14,18 @@ public interface IFileSystemChangeToken : IChangeToken<IFileSystemInfo>
     /// <param name="callback"></param>
     /// <returns></returns>
     IDisposable OnCreate(Action<IFileSystemInfo> callback);
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="callback"></param>
     /// <returns></returns>
     IDisposable OnDelete(Action<IFileSystemInfo> callback);
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="callback"></param>
     /// <returns></returns>
-    IDisposable OnRename(Action<IFileSystemInfo> callback);
+    //IDisposable OnRename(Action<IFileSystemInfo> callback);
 }

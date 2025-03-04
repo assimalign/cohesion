@@ -9,7 +9,7 @@ using Assimalign.Cohesion.FileSystem;
 internal static partial class ThrowHelper
 {
     [DoesNotReturn]
-    internal static void ThrowFileNotExistException(FileSystemPath path)
+    internal static void ThrowPathNotExistException(FileSystemPath path)
     {
         throw new FileSystemException($"The given path does not exist: '{path}'.");
     }

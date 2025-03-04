@@ -9,26 +9,36 @@ public interface IFileSystemFile : IFileSystemInfo, IDisposable
     /// The length of the file in bytes, or -1 for  non-existing files.
     /// </summary>
     Size Size { get; }
+
+    /// <summary>
+    /// The name of the file.
+    /// </summary>
+    FileName Name { get; }
+
     /// <summary>
     /// The containing directory of the file.
     /// </summary>
     IFileSystemDirectory Directory { get; }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
     IFileSystemChangeToken Watch();
+
     /// <summary>
     /// Return file content as readonly stream. Caller should dispose stream when complete.
     /// </summary>
     /// <returns>The file stream</returns>
     Stream Open();
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="fileMode"></param>
     /// <returns></returns>
     Stream Open(FileMode fileMode);
+
     /// <summary>
     /// 
     /// </summary>
@@ -36,6 +46,7 @@ public interface IFileSystemFile : IFileSystemInfo, IDisposable
     /// <param name="fileAccess"></param>
     /// <returns></returns>
     Stream Open(FileMode fileMode, FileAccess fileAccess);
+
     /// <summary>
     /// 
     /// </summary>

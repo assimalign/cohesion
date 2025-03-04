@@ -7,20 +7,20 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 internal class FsDirectoryNode : FsNode
 {
-    internal Dictionary<Path, FsNode> _children;
+    internal Dictionary<FileSystemPath, FsNode> _children;
 
     public FsDirectoryNode(InMemoryFileSystem fileSystem) : base(fileSystem, null, null, null)
     {
-        _children = new Dictionary<Path, FsNode>();
+        _children = new Dictionary<FileSystemPath, FsNode>();
         Attributes = FileAttributes.Directory;
     }
     public FsDirectoryNode(InMemoryFileSystem fileSystem, FsDirectoryNode parent, string name) : base(fileSystem, parent, name, null)
     {
         Debug.Assert(parent != null);
-        _children = new Dictionary<Path, FsNode>();
+        _children = new Dictionary<FileSystemPath, FsNode>();
         Attributes = FileAttributes.Directory;
     }
-    public Dictionary<Path, FsNode> Children
+    public Dictionary<FileSystemPath, FsNode> Children
     {
         get
         {
