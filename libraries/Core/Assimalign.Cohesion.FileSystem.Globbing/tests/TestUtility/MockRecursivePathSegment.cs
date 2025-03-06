@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.FileSystem.Globbing.Tests.PatternContexts
 {
     internal class MockRecursivePathSegment : IFilePathSegment
     {
-        public bool CanProduceStem {  get { return false; } }
+        public bool HasStem {  get { return false; } }
 
         public bool Match(string value)
         {

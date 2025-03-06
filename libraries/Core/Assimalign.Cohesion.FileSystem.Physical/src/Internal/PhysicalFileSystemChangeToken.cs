@@ -8,139 +8,122 @@ using Assimalign.Cohesion.Internal;
 
 internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 {
+    // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly FileSystemWatcher _watcher;
+    private readonly PhysicalFileSystemInfo _fileSystemInfo;
+    private readonly List<Subscriber> _subscribers;
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, string? filters = null) : this()
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, string? filters = null)
     {
+        _fileSystemInfo = file;
         _watcher = new FileSystemWatcher(file.Path);
+        _subscribers = new List<Subscriber>();
+        Setup();
     }
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, string? filters = null) : this()
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, string? filters = null)
     {
+        _fileSystemInfo = directory;
         _watcher = new FileSystemWatcher(directory.Path);
+        _subscribers = new List<Subscriber>();
+        Setup();
     }
-
-    private PhysicalFileSystemChangeToken()
-    {
-        _watcher!.EnableRaisingEvents = true;
-        _watcher!.Created += (sender, args) =>
-        {
-            OnChangeSubscribers.ForEach(subscriber => subscriber.Action.Invoke(default!));
-        };
-        _watcher!.Deleted += (sender, args) =>
-        {
-            foreach (var subscriber in OnDeleteSubscribers)
-            {
-                subscriber.Action.Invoke(default!);
-            }
-        };
-        _watcher!.Changed += (sender, args) =>
-        {
-            foreach (var subscriber in OnChangeSubscribers)
-            {
-                subscriber.Action.Invoke(default!);
-            }
-        };
-    }
-
-
-    public List<OnChangeSubscriber> OnChangeSubscribers { get; } = new List<OnChangeSubscriber>();
-    public List<OnDeleteSubscriber> OnDeleteSubscribers { get; } = new List<OnDeleteSubscriber>();
-    public List<OnCreateSubscriber> OnCreateSubscribers { get; } = new List<OnCreateSubscriber>();
 
     public IDisposable OnChange(Action<object> callback)
     {
         return OnChange(state => callback(state));
     }
-
-    public IDisposable OnChange(Action<IFileSystemInfo> callback)
+    public IDisposable OnChange(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new OnChangeSubscriber(this)
+        var disposable = new Subscriber()
         {
-            Action = callback
+            ChangeType = ChangeType.Changed,
+            Callback = callback,
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
         };
 
-        OnChangeSubscribers.Add(disposable);
+        _subscribers.Add(disposable);
 
         return disposable;
     }
-    public IDisposable OnCreate(Action<IFileSystemInfo> callback)
+    public IDisposable OnCreate(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new OnCreateSubscriber(this)
+        var disposable = new Subscriber()
         {
-            Action = callback
+            ChangeType = ChangeType.Created,
+            Callback = callback,
+            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
         };
 
-        OnCreateSubscribers.Add(disposable);
+        _subscribers.Add(disposable);
 
         return disposable;
     }
-
-    public IDisposable OnDelete(Action<IFileSystemInfo> callback)
+    public IDisposable OnDelete(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new OnDeleteSubscriber(this)
+        var disposable = new Subscriber()
         {
-            Action = callback
+            ChangeType = ChangeType.Deleted,
+            Callback = callback,
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
         };
 
-        OnDeleteSubscribers.Add(disposable);
+        _subscribers.Add(disposable);
 
         return disposable;
     }
 
-    public partial class OnChangeSubscriber : IDisposable
+    private void Setup()
     {
-        private readonly PhysicalFileSystemChangeToken _token;
-
-        public OnChangeSubscriber(PhysicalFileSystemChangeToken token)
+        _watcher!.EnableRaisingEvents = true;
+        _watcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
+        _watcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
+        _watcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
+    }
+    private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
+    {
+        foreach (var subscriber in _subscribers)
         {
-            _token = token;
-        }
 
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
-        public void Dispose()
-        {
-            _token.OnChangeSubscribers.Remove(this);
+            if (subscriber.ChangeType == changeType)
+            {
+                subscriber.Invoke(new PhysicalFileSystemChangeContext()
+                {
+                    Path = args.FullPath,
+                    Info = _fileSystemInfo
+                });
+            }
         }
     }
-
-    public partial class OnDeleteSubscriber : IDisposable
+    enum ChangeType
     {
-        private readonly PhysicalFileSystemChangeToken _token;
-
-        public OnDeleteSubscriber(PhysicalFileSystemChangeToken token)
+        Created,
+        Deleted,
+        Changed
+    }
+    partial class Subscriber : IDisposable
+    {
+        public ChangeType ChangeType { get; init; }
+        public Action<Subscriber> OnDispose { get; init; } = default!;
+        public Action<IFileSystemChangeContext> Callback { get; init; } = default!;
+        public void Invoke(IFileSystemChangeContext info)
         {
-            _token = token;
+            Callback.Invoke(info);
         }
-
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
         public void Dispose()
         {
-            _token.OnDeleteSubscribers.Remove(this);
+            OnDispose.Invoke(this);
         }
     }
-    public partial class OnCreateSubscriber : IDisposable
+    partial class PhysicalFileSystemChangeContext : IFileSystemChangeContext
     {
-        private readonly PhysicalFileSystemChangeToken _token;
-
-        public OnCreateSubscriber(PhysicalFileSystemChangeToken token)
-        {
-            _token = token;
-        }
-
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
-        public void Dispose()
-        {
-            _token.OnCreateSubscribers.Remove(this);
-        }
+        public FileSystemPath Path { get; init; }
+        public IFileSystemInfo Info { get; init; } = default!;
     }
 }

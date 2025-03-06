@@ -13,7 +13,6 @@ namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
 
-
 /// <summary>
 /// A case-insensitive representation of a file path.
 /// </summary>
@@ -22,29 +21,17 @@ using Assimalign.Cohesion.Internal;
 /// case-sensitive file system such as linux. The following approach can be 
 /// done with a class, or struct as well.
 /// </remarks>
-[DebuggerDisplay("{ToString()}")]
+[DebuggerDisplay("{Value}")]
 [JsonConverter(typeof(PathJsonConverter))]
-public readonly struct FileSystemPath : 
-    IEquatable<FileSystemPath>, 
-    IEqualityComparer<FileSystemPath>, 
+public readonly struct FileSystemPath :
+    IEquatable<FileSystemPath>,
+    IEqualityComparer<FileSystemPath>,
     IComparable<FileSystemPath>
 #if NET7_0_OR_GREATER
     ,IEqualityOperators<FileSystemPath, FileSystemPath, bool>
     ,IAdditionOperators<FileSystemPath, FileSystemPath, FileSystemPath>
 #endif
 {
-    /* Known Roots:
-     * - /
-     * - //
-     * - \
-     * -\\
-     * - {Drive}:\
-     * - {Drive}:/
-     */
-    //private static readonly string[] RootPaths = ["/", "\\", "//"];
-
-    
-
     /// <summary>
     /// 
     /// </summary>
@@ -53,10 +40,8 @@ public readonly struct FileSystemPath :
     /// <exception cref="ArgumentNullException"></exception>
     public FileSystemPath(string path)
     {
-        if (path is null || path.Length == 0)
-        {
-            ThrowHelper.ThrowArgumentNullException($"path cannot be null or empty.");
-        }
+        ThrowHelper.ThrowIfNullOrEmpty(path, nameof(path));
+
         if (System.IO.Path.GetInvalidPathChars().Intersect(path).Any())
         {
             ThrowHelper.ThrowArgumentException($"path contains illegal characters.");
@@ -68,45 +53,56 @@ public readonly struct FileSystemPath :
 
         for (start = 0; start < path.Length; start++)
         {
-            int num2 = 0;
+            int index = 0;
             char c = path[start];
-            for (num2 = 0; num2 < trimChars.Length && trimChars[num2] != c; num2++)
+            while (index < trimChars.Length && trimChars[index] != c)
             {
+                index++;
             }
-            if (num2 == trimChars.Length)
-            {
-                break;
-            }
+            if (index == trimChars.Length) break;
         }
         for (end = path.Length - 1; end >= start; end--)
         {
-            int num3 = 0;
-            char c2 = path[end];
-            for (num3 = 0; num3 < trimChars.Length && trimChars[num3] != c2; num3++)
+            int index = 0;
+            char c = path[end];
+            while (index < trimChars.Length && trimChars[index] != c)
             {
+                index++;
             }
-            if (num3 == trimChars.Length)
-            {
-                break;
-            }
+            if (index == trimChars.Length) break;
         }
-        this.Path = string.Create((end + 1) - start, path, (span, value) =>
+
+        int resize = 0;
+        char previous = default;
+
+        var value = string.Create((end + 1) - start, path, (span, value) =>
         {
             // Let's convert all backward slashes to forward slashes
             for (int i = start; i < (end + 1); i++)
             {
-                var c = value[i];
+                var current = value[i];
 
-                if (c == '\\')
+                if (current == '\\') current = '/';
+                // Check for excessive slashes
+                if (previous == '/' && current == '/')
                 {
-                    span[i - start] = '/';
+                    resize++;
+                    continue;
                 }
-                else
-                {
-                    span[i - start] = c;
-                }
+
+                previous = current;
+                span[i - start - resize] = current;
             }
         });
+
+        if (resize > 0)
+        {
+            Value = value.Remove(value.Length - resize);
+        }
+        else
+        {
+            Value = value;
+        }
     }
 
     /// <summary>
@@ -114,17 +110,17 @@ public readonly struct FileSystemPath :
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
-    public char this[int index] => Path[index];
+    public char this[int index] => Value[index];
 
     /// <summary>
     /// The raw string path.
     /// </summary>
-    public string Path { get; }
+    public string Value { get; }
 
     /// <summary>
     /// The length of the path.
     /// </summary>
-    public int Length => Path.Length;
+    public int Length => Value.Length;
 
     /// <summary>
     /// An empty path.
@@ -134,43 +130,17 @@ public readonly struct FileSystemPath :
     /// <summary>
     /// The directory separator.
     /// </summary>
-    public static char Separator => '/';
+    public const char Separator = '/';
 
     /// <summary>
-    /// 
+    /// Returns the segments of the path.
     /// </summary>
     /// <returns></returns>
-    public string[] Split()
+    public string[] GetSegments()
     {
-        return [..Path.Split(Separator)];
+        return Value.Split(Separator);
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
-    public DirectoryName[] GetDirectoryNames()
-    {
-        return [.. Path.Split(Separator)];
-    }
-
-    /// <summary>
-    /// Gets the file name, if any.
-    /// </summary>
-    /// <returns></returns>
-    public FileName GetFileName()
-    {
-        return IO.Path.GetFileName(Path);
-    }
-
-    /// <summary>
-    /// Gets the directory name, if any.
-    /// </summary>
-    /// <returns></returns>
-    public DirectoryName GetDirectoryName()
-    {
-        return IO.Path.GetDirectoryName(Path)!;
-    }
     /// <summary>
     /// Combines the provided path to the 
     /// </summary>
@@ -180,6 +150,7 @@ public readonly struct FileSystemPath :
     {
         return Combine([this, path]);
     }
+
     /// <summary>
     /// Combines an array of paths together.
     /// </summary>
@@ -197,7 +168,7 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool EndsWith(string value)
     {
-        return Path.EndsWith(value);
+        return Value.EndsWith(value);
     }
 
     /// <summary>
@@ -208,7 +179,7 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool EndsWith(string value, StringComparison comparison)
     {
-        return Path.EndsWith(value, comparison);
+        return Value.EndsWith(value, comparison);
     }
 
     /// <summary>
@@ -218,7 +189,7 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool StartsWith(string value)
     {
-        return Path.StartsWith(value);
+        return Value.StartsWith(value);
     }
 
     /// <summary>
@@ -229,69 +200,112 @@ public readonly struct FileSystemPath :
     /// <returns></returns>
     public bool StartsWith(string value, StringComparison comparison)
     {
-        return Path.StartsWith(value, comparison);
+        return Value.StartsWith(value, comparison);
     }
 
     #region Overloads
+
     /// <inheritdoc />
     public override bool Equals(object? obj)
     {
-        return obj is FileSystemPath path ? Equals(path) : false;
+        if (ReferenceEquals(null, obj))
+        {
+            return false;
+        }
+        if (obj is FileSystemPath path)
+        {
+            return Equals(path);
+        }
+        return false;
     }
+
     /// <inheritdoc />
     public override string ToString()
     {
-        return Path;
+        return Value;
     }
+
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        int code = ToString().GetHashCode(StringComparison.InvariantCultureIgnoreCase);
+        int code = Value.GetHashCode();
 
         return (int)((uint)code | ((uint)code << 16));
     }
+
     #endregion
 
     #region Interfaces
+
     public bool Equals(FileSystemPath other)
     {
-        return string.Equals(this, other);
+        return Equals(this, other, StringComparison.Ordinal);
     }
+
+    public bool Equals(FileSystemPath other, StringComparison comparison)
+    {
+        return Equals(this, other, comparison);
+    }
+
     public bool Equals(FileSystemPath left, FileSystemPath right)
     {
-        return left.Equals(right);
+        return Equals(left, right, StringComparison.Ordinal);
     }
+
     public int GetHashCode([DisallowNull] FileSystemPath obj)
     {
         return obj.GetHashCode();
     }
+
     public int CompareTo(FileSystemPath other)
     {
-        return string.Compare(this, other);
+        return CompareTo(this, other, StringComparison.Ordinal);
     }
+
+    public int CompareTo(FileSystemPath other, StringComparison comparison)
+    {
+        return CompareTo(this, other, comparison);
+    }
+
+    public static bool Equals(FileSystemPath left, FileSystemPath right, StringComparison comparison)
+    {
+        return StringComparer.FromComparison(comparison).Equals(left.Value, right.Value);
+    }
+
+    public static int CompareTo(FileSystemPath left, FileSystemPath right, StringComparison comparison)
+    {
+        return StringComparer.FromComparison(comparison).Compare(left.Value, right.Value);
+    }
+
     #endregion
 
     #region Operators
+
     public static implicit operator FileSystemPath(string path)
     {
-        return new(path);
+        return new FileSystemPath(path);
     }
+
     public static implicit operator string(FileSystemPath path)
     {
-        return path.ToString();
+        return path.Value;
     }
+
     public static bool operator ==(FileSystemPath left, FileSystemPath right)
     {
         return left.Equals(right);
     }
+
     public static bool operator !=(FileSystemPath left, FileSystemPath right)
     {
         return !left.Equals(right);
     }
+
     public static FileSystemPath operator +(FileSystemPath left, FileSystemPath right)
     {
         return left.Combine(right);
     }
+
     #endregion
 
     #region Converters
@@ -306,9 +320,9 @@ public readonly struct FileSystemPath :
 
             var str = reader.GetString();
 
-            if (str is null || str == string.Empty)
+            if (string.IsNullOrEmpty(str))
             {
-                return FileSystemPath.Empty;
+                return Empty;
             }
 
             return new FileSystemPath(str);

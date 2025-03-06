@@ -6,7 +6,30 @@
 /// </summary>
 public interface IFilePathSegment
 {
-    bool CanProduceStem { get; }
+    /// <summary>
+    /// 
+    /// </summary>
+    bool HasStem { get; }
 
+    /// <summary>
+    /// The kind of segment.
+    /// </summary>
+    SegmentKind Kind { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    /// <returns></returns>
     bool Match(string value);
+}
+
+
+public enum SegmentKind
+{
+    None,
+    Literal,
+    Wildcard,
+    RecursiveWildcard,
+    ParentDirectory,
 }

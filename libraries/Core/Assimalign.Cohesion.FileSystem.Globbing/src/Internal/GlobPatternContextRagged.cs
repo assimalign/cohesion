@@ -1,20 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
 
-public abstract class FilePatternContextRagged : FilePatternContext<FilePatternContextRagged.FrameData>
+internal abstract class GlobPatternContextRagged : GlobPatternContext<GlobPatternContextRagged.FrameData>
 {
-    public FilePatternContextRagged(IFileRaggedPattern pattern)
+    private readonly StringComparison _comparison;
+
+    public GlobPatternContextRagged(IRaggedGlobPattern pattern, StringComparison comparison)
     {
         Pattern = pattern;
+        _comparison = comparison;
     }
 
-    public override FilePatternTestResult Test(IFileSystemFile file)
+    public override GlobPatternTestResult Test(IFileSystemFile file)
     {
         if (IsStackEmpty())
         {
@@ -23,9 +23,9 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
 
         if (!Frame.IsNotApplicable && IsEndingGroup() && TestMatchingGroup(file))
         {
-            return FilePatternTestResult.Success(CalculateStem(file));
+            return GlobPatternTestResult.Success(CalculateStem(file));
         }
-        return FilePatternTestResult.Failed;
+        return GlobPatternTestResult.Failed;
     }
 
     public sealed override void PushDirectory(IFileSystemDirectory directory)
@@ -63,7 +63,7 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
         }
         else if (!IsStartingGroup() && !IsEndingGroup() && TestMatchingGroup(directory))
         {
-            frame.SegmentIndex = Frame.SegmentGroup.Count;
+            frame.SegmentIndex = Frame.SegmentGroup.Length;
             frame.BacktrackAvailable = 0;
         }
         else
@@ -78,12 +78,12 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
         }
 
         while (
-            frame.SegmentIndex == frame.SegmentGroup.Count &&
-            frame.SegmentGroupIndex != Pattern.Contains.Count)
+            frame.SegmentIndex == frame.SegmentGroup.Length &&
+            frame.SegmentGroupIndex != Pattern.Contains.Length)
         {
             frame.SegmentGroupIndex += 1;
             frame.SegmentIndex = 0;
-            if (frame.SegmentGroupIndex < Pattern.Contains.Count)
+            if (frame.SegmentGroupIndex < Pattern.Contains.Length)
             {
                 frame.SegmentGroup = Pattern.Contains[frame.SegmentGroupIndex];
             }
@@ -114,7 +114,7 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
 
         public int SegmentGroupIndex;
 
-        public IList<IFilePathSegment> SegmentGroup;
+        public FileSystemPathSegment[] SegmentGroup;
 
         public int BacktrackAvailable;
 
@@ -129,13 +129,13 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
             get { return _stemItems ?? (_stemItems = new List<string>()); }
         }
 
-        public string Stem
+        public string? Stem
         {
             get { return _stemItems == null ? null : string.Join("/", _stemItems); }
         }
     }
 
-    protected IFileRaggedPattern Pattern { get; }
+    protected IRaggedGlobPattern Pattern { get; }
 
     protected bool IsStartingGroup()
     {
@@ -144,21 +144,21 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
 
     protected bool IsEndingGroup()
     {
-        return Frame.SegmentGroupIndex == Pattern.Contains.Count;
+        return Frame.SegmentGroupIndex == Pattern.Contains.Length;
     }
 
     protected bool TestMatchingSegment(string value)
     {
-        if (Frame.SegmentIndex >= Frame.SegmentGroup.Count)
+        if (Frame.SegmentIndex >= Frame.SegmentGroup.Length)
         {
             return false;
         }
-        return Frame.SegmentGroup[Frame.SegmentIndex].Match(value);
+        return Frame.SegmentGroup[Frame.SegmentIndex].Match(value, _comparison);
     }
 
     protected bool TestMatchingGroup(IFileSystemInfo value)
     {
-        int groupLength = Frame.SegmentGroup.Count;
+        int groupLength = Frame.SegmentGroup.Length;
         int backtrackLength = Frame.BacktrackAvailable + 1;
         if (backtrackLength < groupLength)
         {
@@ -166,27 +166,32 @@ public abstract class FilePatternContextRagged : FilePatternContext<FilePatternC
         }
 
         var scan = value;
+
         for (int index = 0; index != groupLength; ++index)
         {
-            IFilePathSegment segment = Frame.SegmentGroup[groupLength - index - 1];
-            if (!segment.Match(scan.Name))
+            FileSystemPathSegment segment = Frame.SegmentGroup[groupLength - index - 1];
+            if (scan is IFileSystemDirectory dir && !segment.Match(dir.Name, _comparison))
             {
                 return false;
             }
-            if (scan is IFileSystemDirectory dir)
+            if (scan is IFileSystemFile file && !segment.Match(file.Name, _comparison))
             {
-                scan = dir.Parent;
+                return false;
             }
-            if (scan is IFileSystemFile file)
+            if (scan is IFileSystemDirectory dir1)
             {
-                scan = file.Directory.Parent;
+                scan = dir1.Parent;
+            }
+            if (scan is IFileSystemFile file1)
+            {
+                scan = file1.Directory.Parent;
             }
         }
         return true;
     }
 
-    protected string CalculateStem(IFileSystemInfo matchedFile)
+    protected string CalculateStem(IFileSystemFile matchedFile)
     {
-        return FileMatcherContext.CombinePath(Frame.Stem, matchedFile.Name);
+        return GlobMatcherContext.CombinePath(Frame.Stem!, matchedFile.Name);
     }
 }

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections;
+using System.Reflection.Metadata.Ecma335;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
@@ -31,7 +32,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
     public List<InMemoryFileSystemInfo> Children { get; }
     IFileSystemDirectory? IFileSystemDirectory.Parent => Parent;
 
-    public void Copy(FileSystemPath source, FileSystemPath destination)
+    public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
         BeginSharedLock(FileShare.Read);
 
@@ -61,7 +62,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
         {
             InMemoryFileSystemDirectory parent = this;
 
-            var values = Path.Combine(path).GetDirectoryNames();
+            var values = Path.Combine(path).GetSegments();
 
             for (int i = 0; i < values.Length; i++)
             {
@@ -139,7 +140,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
         {
             InMemoryFileSystemDirectory parent = this;
 
-            var values = Path.Combine(path).GetDirectoryNames();
+            var values = Path.Combine(path).GetSegments();
 
             for (int i = 0; i < values.Length; i++)
             {
@@ -209,7 +210,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
         {
             InMemoryFileSystemDirectory parent = this;
 
-            var names = path.GetDirectoryNames();
+            var names = path.GetSegments();
 
             for (int i = 0; i < names.Length; i++)
             {
@@ -251,10 +252,10 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
         return Children.OfType<InMemoryFileSystemFile>();
     }
 
-    public IFileSystemChangeToken Watch(string filter)
+    public IFileSystemChangeToken Watch(FileSystemPath path)
     {
-        // TODO: Apply filtering
-        return GetToken(this);
+        
+        return new InMemoryFileSystemChangeToken(path);
     }
 
     IEnumerator IEnumerable.GetEnumerator()

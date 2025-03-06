@@ -1,15 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-public class FilePatternContextRaggedExclude : FilePatternContextRagged
+internal class GlobPatternContextRaggedExclude : GlobPatternContextRagged
 {
-    public FilePatternContextRaggedExclude(IFileRaggedPattern pattern)
-        : base(pattern)
+    public GlobPatternContextRaggedExclude(IRaggedGlobPattern pattern, StringComparison comparison)
+        : base(pattern, comparison)
     {
     }
 
@@ -31,8 +27,8 @@ public class FilePatternContextRaggedExclude : FilePatternContextRagged
             return true;
         }
 
-        if (Pattern.EndsWith.Count == 0 &&
-            Frame.SegmentGroupIndex == Pattern.Contains.Count - 1 &&
+        if (Pattern.EndsWith.Length == 0 &&
+            Frame.SegmentGroupIndex == Pattern.Contains.Length - 1 &&
             TestMatchingGroup(directory))
         {
             // directory excluded by matching up to final '/**'

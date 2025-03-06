@@ -10,11 +10,6 @@ namespace Assimalign.Cohesion.FileSystem;
 public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsyncDisposable
 {
     /// <summary>
-    /// The name of the file system.
-    /// </summary>
-    string Name { get; }
-
-    /// <summary>
     /// The total size of the file system.
     /// </summary>
     Size Size { get; }
@@ -43,10 +38,17 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
 
     /// <summary>
     /// Creates a <see cref="IFileSystemChangeToken"/> for the specified <paramref name="filter"/>.
+    /// Examples: 
+    /// <list type="bullet">
+    /// <item>
+    ///     <term>C:\Users\johndoe\Documents\**\*.cs</term>
+    ///     <description>test</description>
+    /// </item>
+    /// </list>
     /// </summary>
-    /// <param name="filter">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
+    /// <param name="path">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
     /// <returns>An <see cref="IFileSystemChangeToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
-    IFileSystemChangeToken Watch(string filter);
+    IFileSystemChangeToken Watch(FileSystemPath path);
 
     /// <summary>
     /// Enumerates through all the directories in the file system.

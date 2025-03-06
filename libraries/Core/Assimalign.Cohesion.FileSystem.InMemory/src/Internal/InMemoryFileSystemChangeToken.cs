@@ -1,30 +1,39 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+using Globbing;
 using Assimalign.Cohesion.Internal;
 
-internal class InMemoryFileSystemChangeToken : IFileSystemChangeToken, IDisposable
+internal class InMemoryFileSystemChangeToken : IFileSystemChangeToken
 {
-    private readonly InMemoryFileSystemInfo _fileSystemInfo;
+    private readonly FileSystemPath _path;
+    private readonly List<Subscriber> _subscribers;
+    private readonly FilePatternMatcher _matcher;
 
-    public InMemoryFileSystemChangeToken(InMemoryFileSystemFile file)
+    public InMemoryFileSystemChangeToken(FileSystemPath path)
     {
-        _fileSystemInfo = file;
+        _path = path;
+        _subscribers = new List<Subscriber>();
     }
 
-    public InMemoryFileSystemChangeToken(InMemoryFileSystemDirectory directory)
+    public void NofityChange(InMemoryFileSystemInfo info)
     {
-        _fileSystemInfo = directory;
-    }
+        if (info is InMemoryFileSystemDirectory directory )
+        {
+            if (_matcher.Execute(directory).HasMatches)
+            {
 
-    public List<OnChangeSubscriber> OnChangeSubscribers { get; } = new List<OnChangeSubscriber>();
-    public List<OnCreateSubscriber> OnCreateSubscribers { get; } = new List<OnCreateSubscriber>();
-    public List<OnDeleteSubscriber> OnDeleteSubscribers { get; } = new List<OnDeleteSubscriber>();
-    public void Dispose()
+            }
+        }
+    }
+    public void NofityCreate(InMemoryFileSystemInfo info)
     {
-        _fileSystemInfo.Tokens.Remove(this);
+    }
+    public void NotifyDelete(InMemoryFileSystemInfo info)
+    {
     }
 
     public IDisposable OnChange(Action<object> callback)
@@ -32,80 +41,68 @@ internal class InMemoryFileSystemChangeToken : IFileSystemChangeToken, IDisposab
         return OnChange(info => callback(info));
     }
 
-    public IDisposable OnChange(Action<IFileSystemInfo> callback)
+    public IDisposable OnChange(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new OnChangeSubscriber(this)
+        var disposable = new Subscriber()
         {
-            Action = callback
+            ChangeType = ChangeType.Change,
+            Callback = callback,
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
         };
 
-        OnChangeSubscribers.Add(disposable);
+        _subscribers.Add(disposable);
 
         return disposable;
     }
 
-    public IDisposable OnCreate(Action<IFileSystemInfo> callback)
+    public IDisposable OnCreate(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        throw new NotImplementedException();
+        var disposable = new Subscriber()
+        {
+            ChangeType = ChangeType.Create,
+            Callback = callback,
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
+        };
+
+        _subscribers.Add(disposable);
+
+        return disposable;
     }
 
-    public IDisposable OnDelete(Action<IFileSystemInfo> callback)
+    public IDisposable OnDelete(Action<IFileSystemChangeContext> callback)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        throw new NotImplementedException();
+        var disposable = new Subscriber()
+        {
+            ChangeType = ChangeType.Delete,
+            Callback = callback,
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
+        };
+
+        _subscribers.Add(disposable);
+
+        return disposable;
     }
 
-    public partial class OnChangeSubscriber : IDisposable
+    enum ChangeType
     {
-        private readonly InMemoryFileSystemChangeToken _token;
-
-        public OnChangeSubscriber(InMemoryFileSystemChangeToken token)
-        {
-            _token = token;
-        }
-
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
-        public void Dispose()
-        {
-            _token.OnChangeSubscribers.Remove(this);
-        }
+        Change,
+        Create,
+        Delete
     }
-    public partial class OnDeleteSubscriber : IDisposable
+    partial class Subscriber : IDisposable
     {
-        private readonly InMemoryFileSystemChangeToken _token;
-
-        public OnDeleteSubscriber(InMemoryFileSystemChangeToken token)
-        {
-            _token = token;
-        }
-
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
+        public ChangeType ChangeType { get; init; }
+        public Action<IFileSystemChangeContext> Callback { get; init; } = default!;
+        public Action<Subscriber> OnDispose { get; init; } = default!;
         public void Dispose()
         {
-            _token.OnDeleteSubscribers.Remove(this);
-        }
-    }
-    public partial class OnCreateSubscriber : IDisposable
-    {
-        private readonly InMemoryFileSystemChangeToken _token;
-
-        public OnCreateSubscriber(InMemoryFileSystemChangeToken token)
-        {
-            _token = token;
-        }
-
-        public Action<IFileSystemInfo> Action { get; init; } = default!;
-
-        public void Dispose()
-        {
-            _token.OnCreateSubscribers.Remove(this);
+            OnDispose.Invoke(this);
         }
     }
 }

@@ -11,6 +11,7 @@ public interface IFileSystemFactory
     /// <param name="name"></param>
     /// <returns></returns>
     IFileSystem Create(string name);
+
     /// <summary>
     /// 
     /// </summary>

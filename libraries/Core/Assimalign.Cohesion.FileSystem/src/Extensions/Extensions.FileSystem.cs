@@ -1,21 +1,12 @@
-﻿using Assimalign.Cohesion.Internal;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.FileSystem;
 
+using Assimalign.Cohesion.Internal;
+
 public static class FileSystemExtensions
 {
-    //public static Size GetUsedSpace(this IFileSystem fileSystem)
-    //{
-    //    var size = fileSystem.Size;
-    //    var space = fileSystem.Space;
-
-    //    return (size - space);
-    //}
-
-
-
     /// <summary>
     /// 
     /// </summary>

@@ -10,14 +10,6 @@ namespace System.IO.Tests;
 
 public class FileSystemPathTests
 {
-
-    [Theory()]
-    [InlineData("")]
-    public void ConvertTest(string value)
-    {
-        
-    }
-
     [Theory()]
     [InlineData("C:\\users\\")]
     [InlineData("C:\\users/")]
@@ -27,9 +19,15 @@ public class FileSystemPathTests
 
         Assert.False(fsPath.EndsWith("/"));
         Assert.False(fsPath.EndsWith("\\"));
-
-        var fileName = fsPath.GetFileName();
     }
 
 
+    [Theory]
+    [InlineData("C:/users/dotnetcadet", "C:\\users\\dotnetcadet/")]
+    [InlineData("C:/users/dotnetcadet", "C:\\users\\\\//dotnetcadet////")]
+    [InlineData("users/dotnetcadet", "//\\users\\\\//dotnetcadet////")]
+    public void NormalizeTests(string expected, string path)
+    {
+        Assert.Equal(expected, new FileSystemPath(path).Value);
+    }
 }

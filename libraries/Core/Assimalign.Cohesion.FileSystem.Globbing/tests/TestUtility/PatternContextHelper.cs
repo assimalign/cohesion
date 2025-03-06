@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.FileSystem.Globbing.Tests.TestUtility
 {
     internal static class PatternContextHelper
     {
-        public static void PushDirectory(IFilePatternContext context, params string[] directoryNames)
+        public static void PushDirectory(IGlobPatternContext context, params string[] directoryNames)
         {
             foreach (var each in directoryNames)
             {

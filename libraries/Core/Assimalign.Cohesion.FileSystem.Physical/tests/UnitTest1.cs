@@ -1,42 +1,46 @@
 ﻿namespace Assimalign.Cohesion.FileSystem.Physical.Tests;
 
 
+using FileSystem.Globbing;
+
 
 public class UnitTest1
 {
-    private readonly IFileSystem fileSystem;
+    private readonly IFileSystem _fileSystem;
 
     public UnitTest1()
     {
-        this.fileSystem = new PhysicalFileSystem("C");
+        _fileSystem = new PhysicalFileSystem(new PhysicalFileSystemOptions()
+        {
+            Drive = "C"
+        });
     }
 
     [Fact]
     public void TestFileExists()
     {
-        Assert.False(fileSystem.Exist("/tests"));
+        Assert.False(_fileSystem.Exist("/tests"));
         
-        var directory = fileSystem.CreateDirectory("tests");
+        var directory = _fileSystem.CreateDirectory("tests");
 
-        Assert.True(fileSystem.Exist("/tests"));
+        Assert.True(_fileSystem.Exist("/tests"));
 
-        fileSystem.DeleteDirectory("/tests");
+        _fileSystem.DeleteDirectory("/tests");
     }
-
-
-
-
-    
 
 
 
     [Fact]
     public void Test1()
     {
-        IFileSystem fileSystem = new PhysicalFileSystem("C");
+        var directory = _fileSystem.RootDirectory;
+        var matcher = new GlobPatternMatcher(StringComparison.OrdinalIgnoreCase)
+            .AddInclude("**/*.json");
 
+        //var file = _fileSystem.GetFile("C:/users/chase/.Azure/PSConfig.json");
 
-        fileSystem.CreateDirectory("/Test");
+        var match = matcher.Match(directory);
+
 
     }
 }

@@ -1,19 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-public class FilePatternContextLinearInclude : FilePatternContextLinear
+internal class GlobPatternContextLinearInclude : GlobPatternContextLinear
 {
-    public FilePatternContextLinearInclude(IFileLinearPattern pattern)
-        : base(pattern)
+    public GlobPatternContextLinearInclude(ILinearGlobPattern pattern, StringComparison comparison)
+        : base(pattern, comparison)
     {
     }
 
-    public override void Declare(Action<IFilePathSegment, bool> onDeclare)
+    public override void Declare(Action<FileSystemPathSegment, bool> onDeclare)
     {
         if (IsStackEmpty())
         {
@@ -25,7 +21,7 @@ public class FilePatternContextLinearInclude : FilePatternContextLinear
             return;
         }
 
-        if (Frame.SegmentIndex < Pattern.Segments.Count)
+        if (Frame.SegmentIndex < Pattern.Segments.Length)
         {
             onDeclare(Pattern.Segments[Frame.SegmentIndex], IsLastSegment());
         }

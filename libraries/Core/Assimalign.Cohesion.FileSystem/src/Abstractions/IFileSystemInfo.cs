@@ -24,4 +24,15 @@ public interface IFileSystemInfo
     /// The last time the info was accessed.
     /// </summary>
     DateTime AccessedOn { get; }
+
+    /// <summary>
+    /// The attributes of the file or directory.
+    /// </summary>
+    FileAttributes Attributes { get; }
+
+    /// <summary>
+    /// Adds or updates the file or directory attributes.
+    /// </summary>
+    /// <param name="attributes"></param>
+    void SetAttributes(FileAttributes attributes);
 }

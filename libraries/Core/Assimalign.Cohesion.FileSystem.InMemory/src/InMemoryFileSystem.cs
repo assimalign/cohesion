@@ -15,11 +15,7 @@ public class InMemoryFileSystem : IFileSystem
 {
     // The locking strategy is based on https://www.kernel.org/doc/Documentation/filesystems/directory-locking
 
-    // private readonly object _dispatcherLock;
-    //private FileSystemEventDispatcher<Watcher>? _dispatcher;
-
     private readonly InMemoryFileSystemDirectory _root;
-    private readonly string _name;
     private Size _size;
     private Size _spaceUsed;
 
@@ -27,7 +23,6 @@ public class InMemoryFileSystem : IFileSystem
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
-        _name = options.Name;
         _size = options.Size;
         _root = new InMemoryFileSystemDirectory(options.RootName)
         {
@@ -36,23 +31,6 @@ public class InMemoryFileSystem : IFileSystem
         };
     }
 
-    private StringComparer GetComparer(InMemoryFileSystemOptions options)
-    {
-        var comparer = StringComparer.Ordinal;
-
-        if (options.CultureInfo is not null)
-        {
-            comparer = StringComparer.Create(options.CultureInfo, options.IgnoreCase);
-        }
-        else if (options.IgnoreCase)
-        {
-            comparer = StringComparer.OrdinalIgnoreCase;
-        }
-
-        return comparer;
-    }
-
-    public string Name => _name;
     public Size Size => _size;
     public Size SpaceAvailable => _size - _spaceUsed;
     public Size SpaceUsed => _spaceUsed;
@@ -62,7 +40,7 @@ public class InMemoryFileSystem : IFileSystem
 
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
-        RootDirectory.Copy(source, destination);
+        RootDirectory.CopyFile(source, destination);
     }
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
@@ -108,9 +86,9 @@ public class InMemoryFileSystem : IFileSystem
     {
         RootDirectory.Move(source, destination);
     }
-    public IFileSystemChangeToken Watch(string filter)
+    public IFileSystemChangeToken Watch(FileSystemPath path)
     {
-        return RootDirectory.Watch(filter);
+        return RootDirectory.Watch(path);
     }
     IEnumerator IEnumerable.GetEnumerator()
     {
@@ -133,6 +111,22 @@ public class InMemoryFileSystem : IFileSystem
     internal void DencrementSpaceUsed(Size value)
     {
         _spaceUsed =- value;
+    }
+
+    private StringComparer GetComparer(InMemoryFileSystemOptions options)
+    {
+        var comparer = StringComparer.Ordinal;
+
+        if (options.CultureInfo is not null)
+        {
+            comparer = StringComparer.Create(options.CultureInfo, options.IgnoreCase);
+        }
+        else if (options.IgnoreCase)
+        {
+            comparer = StringComparer.OrdinalIgnoreCase;
+        }
+
+        return comparer;
     }
 
     #endregion

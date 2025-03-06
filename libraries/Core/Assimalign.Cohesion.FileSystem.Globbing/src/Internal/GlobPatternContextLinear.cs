@@ -1,20 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.IO;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-public abstract class FilePatternContextLinear
-   : FilePatternContext<FilePatternContextLinear.FrameData>
+internal abstract class GlobPatternContextLinear
+   : GlobPatternContext<GlobPatternContextLinear.FrameData>
 {
-    public FilePatternContextLinear(IFileLinearPattern pattern)
+    private readonly StringComparison _comparison;
+
+    public GlobPatternContextLinear(ILinearGlobPattern pattern, StringComparison comparison)
     {
         Pattern = pattern;
+        _comparison = comparison;
     }
 
-    public override FilePatternTestResult Test(IFileSystemFile file)
+    protected ILinearGlobPattern Pattern { get; }
+
+    public override GlobPatternTestResult Test(IFileSystemFile file)
     {
         if (IsStackEmpty())
         {
@@ -23,12 +26,11 @@ public abstract class FilePatternContextLinear
 
         if (!Frame.IsNotApplicable && IsLastSegment() && TestMatchingSegment(file.Name))
         {
-            return FilePatternTestResult.Success(CalculateStem(file));
+            return GlobPatternTestResult.Success(CalculateStem(file));
         }
 
-        return FilePatternTestResult.Failed;
+        return GlobPatternTestResult.Failed;
     }
-
     public override void PushDirectory(IFileSystemDirectory directory)
     {
         // copy the current frame
@@ -47,8 +49,8 @@ public abstract class FilePatternContextLinear
         else
         {
             // Determine this frame's contribution to the stem (if any)
-            IFilePathSegment segment = Pattern.Segments[Frame.SegmentIndex];
-            if (frame.InStem || segment.CanProduceStem)
+            FileSystemPathSegment segment = Pattern.Segments[Frame.SegmentIndex];
+            if (frame.InStem || segment.HasStem)
             {
                 frame.InStem = true;
                 frame.StemItems.Add(directory.Name);
@@ -61,7 +63,7 @@ public abstract class FilePatternContextLinear
         PushDataFrame(frame);
     }
 
-    public struct FrameData
+    public partial struct FrameData
     {
         public bool IsNotApplicable;
         public int SegmentIndex;
@@ -73,31 +75,26 @@ public abstract class FilePatternContextLinear
             get { return _stemItems ?? (_stemItems = new List<string>()); }
         }
 
-        public string Stem
+        public string? Stem
         {
             get { return _stemItems == null ? null : string.Join("/", _stemItems); }
         }
     }
-
-    protected IFileLinearPattern Pattern { get; }
-
     protected bool IsLastSegment()
     {
-        return Frame.SegmentIndex == Pattern.Segments.Count - 1;
+        return Frame.SegmentIndex == Pattern.Segments.Length - 1;
     }
-
     protected bool TestMatchingSegment(string value)
     {
-        if (Frame.SegmentIndex >= Pattern.Segments.Count)
+        if (Frame.SegmentIndex >= Pattern.Segments.Length)
         {
             return false;
         }
 
-        return Pattern.Segments[Frame.SegmentIndex].Match(value);
+        return Pattern.Segments[Frame.SegmentIndex].Match(value, _comparison);
     }
-
-    protected string CalculateStem(IFileSystemInfo matchedFile)
+    protected string CalculateStem(IFileSystemFile matchedFile)
     {
-        return FileMatcherContext.CombinePath(Frame.Stem, matchedFile.Name);
+        return GlobMatcherContext.CombinePath(Frame!.Stem!, matchedFile.Name);
     }
 }

@@ -7,40 +7,8 @@ using System.Linq;
 namespace Assimalign.Cohesion.FileSystem.Globbing;
 
 
-public static class FileMatcherExtensions
+public static class GlobPatternMatcherExtensions
 {
-    /// <summary>
-    /// Adds multiple exclude patterns to <see cref="FilePatternMatcher" />. <seealso cref="FilePatternMatcher.AddExclude(string)" />
-    /// </summary>
-    /// <param name="matcher">The matcher to which the exclude patterns are added</param>
-    /// <param name="excludePatternsGroups">A list of globbing patterns</param>
-    public static void AddExcludePatterns(this FilePatternMatcher matcher, params IEnumerable<string>[] excludePatternsGroups)
-    {
-        foreach (IEnumerable<string> group in excludePatternsGroups)
-        {
-            foreach (string pattern in group)
-            {
-                matcher.AddExclude(pattern);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Adds multiple patterns to include in <see cref="FilePatternMatcher" />. See <seealso cref="FilePatternMatcher.AddInclude(string)" />
-    /// </summary>
-    /// <param name="matcher">The matcher to which the include patterns are added</param>
-    /// <param name="includePatternsGroups">A list of globbing patterns</param>
-    public static void AddIncludePatterns(this FilePatternMatcher matcher, params IEnumerable<string>[] includePatternsGroups)
-    {
-        foreach (IEnumerable<string> group in includePatternsGroups)
-        {
-            foreach (string pattern in group)
-            {
-                matcher.AddInclude(pattern);
-            }
-        }
-    }
-
     /// <summary>
     /// Searches the directory specified for all files matching patterns added to this instance of <see cref="FilePatternMatcher" />
     /// </summary>

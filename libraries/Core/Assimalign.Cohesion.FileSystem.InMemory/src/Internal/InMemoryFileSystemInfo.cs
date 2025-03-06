@@ -19,7 +19,7 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
         UpdatedOn = timestamp;
         AccessedOn = timestamp;
 
-        Tokens = new List<InMemoryFileSystemChangeToken>();
+        //Tokens = new List<InMemoryFileSystemChangeToken>();
     }
 
     public bool IsLocked => _count != 0;
@@ -29,19 +29,26 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
     public DateTime CreatedOn { get; }
     public StringComparer Comparer { get; init; } = StringComparer.Ordinal;
     public InMemoryFileSystem FileSystem { get; init; } = default!;
-    public List<InMemoryFileSystemChangeToken> Tokens { get; }
-    protected InMemoryFileSystemChangeToken GetToken(InMemoryFileSystemInfo info)
+    public FileAttributes Attributes { get; internal set; }
+    public void SetAttributes(FileAttributes attributes)
     {
-        var token = info switch
-        {
-            InMemoryFileSystemDirectory directory => new InMemoryFileSystemChangeToken(directory),
-            InMemoryFileSystemFile file => new InMemoryFileSystemChangeToken(file)
-        };
-
-        Tokens.Add(token);
-
-        return token;
+        Attributes = attributes;
     }
+
+    //public List<InMemoryFileSystemChangeToken> Tokens { get; }
+    //protected InMemoryFileSystemChangeToken GetToken(InMemoryFileSystemInfo info)
+    //{
+    //    var token = info switch
+    //    {
+    //        InMemoryFileSystemDirectory directory => new InMemoryFileSystemChangeToken(directory),
+    //        InMemoryFileSystemFile file => new InMemoryFileSystemChangeToken(file),
+    //        _ => throw new Exception()
+    //    };
+
+    //    Tokens.Add(token);
+
+    //    return token;
+    //}
 
     public abstract void Dispose();
 

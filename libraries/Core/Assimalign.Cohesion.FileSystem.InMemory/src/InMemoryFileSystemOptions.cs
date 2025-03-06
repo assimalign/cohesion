@@ -4,13 +4,11 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
+/// <summary>
+/// 
+/// </summary>
 public class InMemoryFileSystemOptions
 {
-    /// <summary>
-    /// The name of the file system. The default is InMemoryFileSystem.
-    /// </summary>
-    public string Name { get; set; } = nameof(InMemoryFileSystem);
-
     /// <summary>
     /// The max size of the in memory file system. The default is 32 MB
     /// </summary>
@@ -22,7 +20,7 @@ public class InMemoryFileSystemOptions
     public CultureInfo? CultureInfo { get; set; }
 
     /// <summary>
-    /// Sets whther the In Memory File System is to be case-insensitive.
+    /// Sets whther the In Memory File System should be case-insensitive.
     /// </summary>
     public bool IgnoreCase { get; set; }
 
@@ -30,4 +28,9 @@ public class InMemoryFileSystemOptions
     /// Set a root directory name.
     /// </summary>
     public DirectoryName RootName { get; set; } = DirectoryName.Empty;
+
+    /// <summary>
+    /// The attributes to ignore when enumerating file system.
+    /// </summary>
+    public FileAttributes IgnoreAttributes { get; set; } = FileAttributes.Hidden | FileAttributes.System;
 }

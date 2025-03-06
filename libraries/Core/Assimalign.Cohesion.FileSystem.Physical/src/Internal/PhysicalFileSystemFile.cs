@@ -5,9 +5,6 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-/// <summary>
-/// Represents a file on a physical file-system
-/// </summary>
 [DebuggerDisplay("{Path}")]
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 {
@@ -42,9 +39,9 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     {
         bool isAllowed = (fileMode != FileMode.Open || fileAccess != FileAccess.Read) && FileSystem.IsReadOnly;
 
-        if (isAllowed)
+        if (!isAllowed)
         {
-
+            // TODO: throw exception
         }
 
         return File.Open(Path, fileMode, fileAccess, fileShare);

@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
 
-[DebuggerDisplay("{Name} - Size: {Size} | Used: {SpaceUsed}")]
-public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
+[DebuggerDisplay("Size: {Size} | Used: {SpaceUsed}")]
+public class PhysicalFileSystem : IFileSystem
 {
     private readonly DriveInfo _driveInfo;
     private readonly PhysicalFileSystemDirectory _root;
@@ -28,7 +28,6 @@ public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
-        _name = options.Name;
         _driveInfo = new DriveInfo(options!.Drive!);
         _root = new PhysicalFileSystemDirectory(_driveInfo.RootDirectory)
         {
@@ -36,8 +35,6 @@ public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
             IgnoreAttributes = options.IgnoreAttributes
         };
     }
-
-    public string Name => _name;
     public bool IsReadOnly => _isReadOnly;
     public Size Size => _driveInfo.TotalSize;
     public Size SpaceAvailable => _driveInfo.TotalFreeSpace;
@@ -74,15 +71,15 @@ public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
     }
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
-        RootDirectory.Copy(source, destination);
+        RootDirectory.CopyFile(source, destination);
     }
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
         RootDirectory.Move(source, destination);
     }
-    public IFileSystemChangeToken Watch(string filter)
+    public IFileSystemChangeToken Watch(FileSystemPath pattern)
     {
-        return new PhysicalFileSystemChangeToken(_root, filter);
+        return new PhysicalFileSystemChangeToken(_root, pattern);
     }
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {
@@ -103,11 +100,11 @@ public class PhysicalFileSystem : IFileSystem, IReadOnlyFileSystem
 
     }
 
-    public IReadOnlyFileSystem AsReadOnly()
-    {
-        _isReadOnly = true;
-        return this!;
-    }
+    //public IReadOnlyFileSystem AsReadOnly()
+    //{
+    //    _isReadOnly = true;
+    //    return this!;
+    //}
 
     public ValueTask DisposeAsync()
     {

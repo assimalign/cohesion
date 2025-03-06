@@ -1,15 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-public class FilePatternContextLinearExclude : FilePatternContextLinear
+internal class GlobPatternContextLinearExclude : GlobPatternContextLinear
 {
-    public FilePatternContextLinearExclude(IFileLinearPattern pattern)
-        : base(pattern)
+    public GlobPatternContextLinearExclude(ILinearGlobPattern pattern, StringComparison comparison)
+        : base(pattern, comparison)
     {
     }
 

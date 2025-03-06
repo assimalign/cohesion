@@ -18,4 +18,9 @@ internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
     public DateTime AccessedOn => _fileSystemInfo.LastAccessTimeUtc;
     public FileAttributes IgnoreAttributes { get; init; }
     public PhysicalFileSystem FileSystem { get; init; } = default!;
+    public FileAttributes Attributes { get; internal set; }
+    public void SetAttributes(FileAttributes attributes)
+    {
+        Attributes = attributes;
+    }
 }

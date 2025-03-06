@@ -20,13 +20,7 @@ public class PhysicalFileSystemOptions
         {
             Drive = "C:/";
         }
-        if (OperatingSystem.IsWindows)
     }
-
-    /// <summary>
-    /// The name of the file system
-    /// </summary>
-    public string Name { get; set; } = nameof(PhysicalFileSystem);
 
     /// <summary>
     /// The drive to initialize the file system from.

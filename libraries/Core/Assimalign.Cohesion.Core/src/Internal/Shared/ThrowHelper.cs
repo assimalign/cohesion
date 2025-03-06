@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Assimalign.Cohesion.Internal;
@@ -10,63 +11,101 @@ internal static partial class ThrowHelper
 {
     #region Arguments
 
-    internal static void ThrowIfNull(object? value, string paramName)
+    internal static void ThrowIfNull(
+        [NotNull]object? argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
     {
-        if (value is null || (value is string str && string.Empty == str))
+        if (argument is null)
         {
-            throw GetArgumentNullException(paramName);
+            ThrowArgumentNullException(paramName);
+        }
+    }
+
+    internal static void ThrowIfNullOrEmpty(
+        [NotNull] string? argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    {
+        if (string.IsNullOrEmpty(argument))
+        {
+            ThrowArgumentNullException(paramName);
         }
     }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentNullException(string paramName) =>
+    internal static void ThrowArgumentNullException(string? paramName)
+    {
         throw GetArgumentNullException(paramName);
+    }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentNullException(string paramName, string message) =>
+    internal static void ThrowArgumentNullException(string paramName, string message)
+    {
         throw GetArgumentNullException(paramName, message);
+    }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentException(string message) =>
+    internal static void ThrowArgumentException(string message)
+    {
         throw GetArgumentException(message);
+    }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentException(string message, string paramName) =>
+    internal static void ThrowArgumentException(string message, string paramName)
+    {
         throw GetArgumentException(message, paramName);
-    
+    }
+
     [DoesNotReturn]
-    internal static void ThrowInvalidOperationException(string message) =>
+    internal static void ThrowInvalidOperationException(string message)
+    {
         throw new InvalidOperationException(message);
-    
-    internal static ArgumentException GetArgumentException(string message) =>
-        new ArgumentException(message);
-    
-    internal static ArgumentException GetArgumentException(string message, string paramName) =>
-        new ArgumentException(message, paramName);
+    }
 
-    internal static ArgumentNullException GetArgumentNullException(string paramName) =>
-        new ArgumentNullException(paramName);
+    internal static ArgumentException GetArgumentException(string message)
+    {
+        return new ArgumentException(message);
+    }
 
-    internal static ArgumentNullException GetArgumentNullException(string paramName, string message) =>
-        new ArgumentNullException(paramName, message);
+    internal static ArgumentException GetArgumentException(string message, string paramName)
+    {
+        return new ArgumentException(message, paramName);
+    }
+
+    internal static ArgumentNullException GetArgumentNullException(string? paramName)
+    {
+        return new ArgumentNullException(paramName);
+    }
+
+    internal static ArgumentNullException GetArgumentNullException(string paramName, string message)
+    {
+        return new ArgumentNullException(paramName, message);
+    }
 
     #endregion
 
     #region Threading
 
     [DoesNotReturn]
-    internal static void ThrowObjectDisposedException(string objectName) =>
+    internal static void ThrowObjectDisposedException(string objectName)
+    {
         throw GetObjectDisposedException(objectName);
+    }
 
     [DoesNotReturn]
-    internal static void ThrowObjectDisposedException(string objectName, string message) =>
+    internal static void ThrowObjectDisposedException(string objectName, string message)
+    {
         throw GetObjectDisposedException(objectName, message);
+    }
 
-    internal static ObjectDisposedException GetObjectDisposedException(string objectName) =>
-        new ObjectDisposedException(objectName);
+    internal static ObjectDisposedException GetObjectDisposedException(string objectName)
+    {
+        return new ObjectDisposedException(objectName);
+    }
 
-    internal static ObjectDisposedException GetObjectDisposedException(string objectName, string message) =>
-        new ObjectDisposedException(objectName, message);
+    internal static ObjectDisposedException GetObjectDisposedException(string objectName, string message)
+    {
+        return new ObjectDisposedException(objectName, message);
+    }
 
     #endregion
 

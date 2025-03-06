@@ -1,19 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-public abstract class FilePatternContext<TFrame> : IFilePatternContext
+internal abstract class GlobPatternContext<TFrame> : IGlobPatternContext
 {
     private Stack<TFrame> _stack = new Stack<TFrame>();
-    protected TFrame Frame;
+    protected TFrame? Frame;
 
-    public virtual void Declare(Action<IFilePathSegment, bool> declare) { }
+    public virtual void Declare(Action<FileSystemPathSegment, bool> declare) { }
 
-    public abstract FilePatternTestResult Test(IFileSystemFile file);
+    public abstract GlobPatternTestResult Test(IFileSystemFile file);
 
     public abstract bool Test(IFileSystemDirectory directory);
 
@@ -26,7 +23,7 @@ public abstract class FilePatternContext<TFrame> : IFilePatternContext
 
     protected void PushDataFrame(TFrame frame)
     {
-        _stack.Push(Frame);
+        _stack.Push(Frame!);
         Frame = frame;
     }
 

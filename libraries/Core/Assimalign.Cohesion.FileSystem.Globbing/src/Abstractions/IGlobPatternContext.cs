@@ -6,15 +6,11 @@ namespace Assimalign.Cohesion.FileSystem.Globbing;
 /// This API supports infrastructure and is not intended to be used
 /// directly from your code. This API may change or be removed in future releases.
 /// </summary>
-public interface IFilePatternContext
+public interface IGlobPatternContext
 {
-    void Declare(Action<IFilePathSegment, bool> onDeclare);
-
+    void Declare(Action<FileSystemPathSegment, bool> onDeclare);
     bool Test(IFileSystemDirectory directory);
-
-    FilePatternTestResult Test(IFileSystemFile file);
-
+    GlobPatternTestResult Test(IFileSystemFile file);
     void PushDirectory(IFileSystemDirectory directory);
-
     void PopDirectory();
 }

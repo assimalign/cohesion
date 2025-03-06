@@ -4,13 +4,11 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
+/// <summary>
+/// 
+/// </summary>
 public interface IReadOnlyFileSystem : IEnumerable<IFileSystemInfo>, IDisposable
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    string Name { get; }
-
     /// <summary>
     /// The total size of the file system.
     /// </summary>

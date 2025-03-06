@@ -364,8 +364,8 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/sub2/bar/baz/three.txt", stem: "sub2/bar/baz/three.txt"),
-                new FilePatternMatch(path: "sub/sub3/sub4/bar/three.txt", stem: "sub3/sub4/bar/three.txt")
+                new GlobPatternMatch(path: "sub/sub2/bar/baz/three.txt", stem: "sub2/bar/baz/three.txt"),
+                new GlobPatternMatch(path: "sub/sub3/sub4/bar/three.txt", stem: "sub3/sub4/bar/three.txt")
             }, scenario.Result.Files.ToArray());
     }
 
@@ -380,9 +380,9 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/one.txt", stem: "one.txt"),
-                new FilePatternMatch(path: "sub/two.txt", stem: "two.txt"),
-                new FilePatternMatch(path: "sub/sub2/three.txt", stem: "sub2/three.txt")
+                new GlobPatternMatch(path: "sub/one.txt", stem: "one.txt"),
+                new GlobPatternMatch(path: "sub/two.txt", stem: "two.txt"),
+                new GlobPatternMatch(path: "sub/sub2/three.txt", stem: "sub2/three.txt")
             }, scenario.Result.Files.ToArray());
     }
 
@@ -397,8 +397,8 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/woah.txt", stem: "woah.txt"),
-                new FilePatternMatch(path: "sub/wow.txt", stem: "wow.txt")
+                new GlobPatternMatch(path: "sub/woah.txt", stem: "woah.txt"),
+                new GlobPatternMatch(path: "sub/wow.txt", stem: "wow.txt")
             }, scenario.Result.Files.ToArray());
     }
 
@@ -413,7 +413,7 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/sub/three.txt", stem: "three.txt"),
+                new GlobPatternMatch(path: "sub/sub/three.txt", stem: "three.txt"),
             }, scenario.Result.Files.ToArray());
     }
 
@@ -428,8 +428,8 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/one.txt", stem: "one.txt"),
-                new FilePatternMatch(path: "sub/two.txt", stem: "two.txt")
+                new GlobPatternMatch(path: "sub/one.txt", stem: "one.txt"),
+                new GlobPatternMatch(path: "sub/two.txt", stem: "two.txt")
             }, scenario.Result.Files.ToArray());
     }
 
@@ -444,8 +444,8 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "sub/one.txt", stem: "one.txt"),
-                new FilePatternMatch(path: "sub/two.txt", stem: "two.txt")
+                new GlobPatternMatch(path: "sub/one.txt", stem: "one.txt"),
+                new GlobPatternMatch(path: "sub/two.txt", stem: "two.txt")
             }, scenario.Result.Files.ToArray());
     }
 
@@ -460,8 +460,8 @@ public class PatternMatchingTests
 
         // Check the stem of the matched items
         Assert.Equal(new[] {
-                new FilePatternMatch(path: "../files/sub/one.txt", stem: "one.txt"),
-                new FilePatternMatch(path: "../files/sub/two.txt", stem: "two.txt")
+                new GlobPatternMatch(path: "../files/sub/one.txt", stem: "one.txt"),
+                new GlobPatternMatch(path: "../files/sub/two.txt", stem: "two.txt")
             }, scenario.Result.Files.ToArray());
     }
 

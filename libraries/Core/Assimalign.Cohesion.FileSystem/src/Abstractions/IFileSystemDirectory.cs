@@ -40,9 +40,9 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     IEnumerable<IFileSystemDirectory> GetDirectories();
 
     /// <summary>
-    /// 
+    /// Gets an existing directory.
     /// </summary>
-    /// <param name="path">A relative path to given directory.</param>
+    /// <param name="path">A relative  or absolute path to given directory.</param>
     /// <returns></returns>
     IFileSystemDirectory GetDirectory(FileSystemPath path);
 
@@ -91,7 +91,7 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// </summary>
     /// <param name="source"></param>
     /// <param name="destination"></param>
-    void Copy(FileSystemPath source, FileSystemPath destination);
+    void CopyFile(FileSystemPath source, FileSystemPath destination);
 
     /// <summary>
     /// Moves a directory or file the the provided destination.

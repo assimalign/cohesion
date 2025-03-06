@@ -1,21 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.PatternContexts;
+namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-using Assimalign.Cohesion.FileSystem.Globbing.PathSegments;
-
-public class FilePatternContextRaggedInclude : FilePatternContextRagged
+internal class GlobPatternContextRaggedInclude : GlobPatternContextRagged
 {
-    public FilePatternContextRaggedInclude(IFileRaggedPattern pattern)
-        : base(pattern)
+    public GlobPatternContextRaggedInclude(IRaggedGlobPattern pattern, StringComparison comparison)
+        : base(pattern, comparison)
     {
     }
 
-    public override void Declare(Action<IFilePathSegment, bool> onDeclare)
+    public override void Declare(Action<FileSystemPathSegment, bool> onDeclare)
     {
         if (IsStackEmpty())
         {
@@ -27,13 +21,13 @@ public class FilePatternContextRaggedInclude : FilePatternContextRagged
             return;
         }
 
-        if (IsStartingGroup() && Frame.SegmentIndex < Frame.SegmentGroup.Count)
+        if (IsStartingGroup() && Frame.SegmentIndex < Frame.SegmentGroup.Length)
         {
             onDeclare(Frame.SegmentGroup[Frame.SegmentIndex], false);
         }
         else
         {
-            onDeclare(FilePathWildcardSegment.MatchAll, false);
+            onDeclare(FileSystemPathSegment.WildcardSegment.MatchAll, false);
         }
     }
 

@@ -31,7 +31,7 @@ public readonly struct FileName :
     /// <exception cref="ArgumentNullException"></exception>
     public FileName(string value)
     {
-        ThrowHelper.ThrowIfNull(value, nameof(value));
+        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
 
         if (value.ContainsAny(Path.GetInvalidFileNameChars(), out var invalid))
         {
@@ -82,6 +82,17 @@ public readonly struct FileName :
     #endregion
 
     #region Methods
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="extension"></param>
+    /// <returns></returns>
+    public bool HasExtension(out string extension)
+    {
+        return (extension = Extension!) is not null;
+    }
+
     public int CompareTo(FileName other)
     {
         return CompareTo(this, other, StringComparison.Ordinal);
