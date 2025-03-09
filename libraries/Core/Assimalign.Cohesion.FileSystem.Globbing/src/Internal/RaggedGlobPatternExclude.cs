@@ -1,11 +1,18 @@
 ﻿using System;
+using System.IO;
+using static System.IO.Glob;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-internal class GlobPatternContextRaggedExclude : GlobPatternContextRagged
+internal class RaggedGlobPatternExclude : RaggedGlobPattern
 {
-    public GlobPatternContextRaggedExclude(IRaggedGlobPattern pattern, StringComparison comparison)
-        : base(pattern, comparison)
+    public RaggedGlobPatternExclude(
+        Glob glob, 
+        Segment[] startsWith, 
+        Segment[][] contains, 
+        Segment[] endsWiths, 
+        StringComparison comparison)
+        : base(glob, startsWith, contains, endsWiths, comparison)
     {
     }
 
@@ -27,8 +34,8 @@ internal class GlobPatternContextRaggedExclude : GlobPatternContextRagged
             return true;
         }
 
-        if (Pattern.EndsWith.Length == 0 &&
-            Frame.SegmentGroupIndex == Pattern.Contains.Length - 1 &&
+        if (EndsWith.Length == 0 &&
+            Frame.SegmentGroupIndex == Contains.Length - 1 &&
             TestMatchingGroup(directory))
         {
             // directory excluded by matching up to final '/**'

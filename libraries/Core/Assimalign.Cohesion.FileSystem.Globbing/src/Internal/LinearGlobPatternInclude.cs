@@ -1,15 +1,17 @@
 ﻿using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-internal class GlobPatternContextLinearInclude : GlobPatternContextLinear
+using static System.IO.Glob;
+
+internal class LinearGlobPatternInclude : LinearGlobPattern
 {
-    public GlobPatternContextLinearInclude(ILinearGlobPattern pattern, StringComparison comparison)
+    public LinearGlobPatternInclude(Glob pattern, StringComparison comparison)
         : base(pattern, comparison)
     {
     }
-
-    public override void Declare(Action<FileSystemPathSegment, bool> onDeclare)
+    public override void Declare(Action<Segment, bool> onDeclare)
     {
         if (IsStackEmpty())
         {
@@ -21,12 +23,11 @@ internal class GlobPatternContextLinearInclude : GlobPatternContextLinear
             return;
         }
 
-        if (Frame.SegmentIndex < Pattern.Segments.Length)
+        if (Frame.SegmentIndex < Glob.Count)
         {
-            onDeclare(Pattern.Segments[Frame.SegmentIndex], IsLastSegment());
+            onDeclare(Glob[Frame.SegmentIndex], IsLastSegment());
         }
     }
-
     public override bool Test(IFileSystemDirectory directory)
     {
         if (IsStackEmpty())

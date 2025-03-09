@@ -1,3 +1,9 @@
-using System;
+using Assimalign.Cohesion.Benchmarks;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Running;
+using System.Reflection;
 
-Console.WriteLine("Benchmark");
+
+
+var summary = BenchmarkRunner.Run<FileSystemPathParsingStrategy>();

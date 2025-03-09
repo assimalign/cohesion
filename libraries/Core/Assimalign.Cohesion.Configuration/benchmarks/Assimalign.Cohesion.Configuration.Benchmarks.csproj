@@ -6,6 +6,7 @@
 		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.Core\benchmarks\Assimalign.Cohesion.Core.Benchmarks.csproj" />
 		<ProjectReference Include="..\src\Assimalign.Cohesion.Configuration.csproj" />
 	</ItemGroup>
 	<ItemGroup>

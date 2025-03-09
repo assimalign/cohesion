@@ -31,6 +31,11 @@ public interface IFileSystemInfo
     FileAttributes Attributes { get; }
 
     /// <summary>
+    /// Returns the file system reference the <see cref="IFileSystemInfo"/> belongs to.
+    /// </summary>
+    IFileSystem FileSystem { get; }
+
+    /// <summary>
     /// Adds or updates the file or directory attributes.
     /// </summary>
     /// <param name="attributes"></param>

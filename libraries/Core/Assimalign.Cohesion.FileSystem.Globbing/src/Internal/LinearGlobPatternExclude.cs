@@ -1,11 +1,14 @@
 ﻿using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-internal class GlobPatternContextLinearExclude : GlobPatternContextLinear
+using static System.IO.Glob;
+
+internal class LinearGlobPatternExclude : LinearGlobPattern
 {
-    public GlobPatternContextLinearExclude(ILinearGlobPattern pattern, StringComparison comparison)
-        : base(pattern, comparison)
+    public LinearGlobPatternExclude(Glob glob, StringComparison comparison)
+        : base(glob, comparison)
     {
     }
 

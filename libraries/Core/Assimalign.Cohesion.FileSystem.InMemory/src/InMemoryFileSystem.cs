@@ -58,11 +58,11 @@ public class InMemoryFileSystem : IFileSystem
     {
         RootDirectory.DeleteFile(path);
     }
-    public bool Exist(FileSystemPath path)
+    public bool Exists(FileSystemPath path)
     {
         return RootDirectory.Exist(path);
     }
-    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    public IEnumerable<IFileSystemDirectory> EnumerateDirectories()
     {
         return RootDirectory.GetDirectories();
     }
@@ -78,17 +78,17 @@ public class InMemoryFileSystem : IFileSystem
     {
         return RootDirectory.GetFile(path);
     }
-    public IEnumerable<IFileSystemFile> GetFiles()
+    public IEnumerable<IFileSystemFile> EnumerateFiles()
     {
         return RootDirectory.GetFiles();
     }
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
-        RootDirectory.Move(source, destination);
+       // RootDirectory.Move(source, destination);
     }
-    public IFileSystemChangeToken Watch(FileSystemPath path)
+    public IFileSystemChangeToken Watch(Glob pattern)
     {
-        return RootDirectory.Watch(path);
+        return RootDirectory.Watch(pattern);
     }
     IEnumerator IEnumerable.GetEnumerator()
     {
@@ -108,7 +108,7 @@ public class InMemoryFileSystem : IFileSystem
         _spaceUsed =+ value;
     }
 
-    internal void DencrementSpaceUsed(Size value)
+    internal void DecrementSpaceUsed(Size value)
     {
         _spaceUsed =- value;
     }

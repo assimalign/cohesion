@@ -39,7 +39,7 @@ public class KeySegmentParsingStrategy
         {
             throw new Exception();
         }
-        if (value.ContainsAny(Key.Delimiters))
+        if (value.ContainsAny([Key.LabelDelimiter]))
         {
             throw new Exception();
         }

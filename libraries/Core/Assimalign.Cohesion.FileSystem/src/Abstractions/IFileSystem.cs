@@ -34,7 +34,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    bool Exist(FileSystemPath path);
+    bool Exists(FileSystemPath path);
 
     /// <summary>
     /// Creates a <see cref="IFileSystemChangeToken"/> for the specified <paramref name="filter"/>.
@@ -46,21 +46,21 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     /// </item>
     /// </list>
     /// </summary>
-    /// <param name="path">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
+    /// <param name="pattern">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
     /// <returns>An <see cref="IFileSystemChangeToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
-    IFileSystemChangeToken Watch(FileSystemPath path);
+    IFileSystemChangeToken Watch(Glob pattern);
 
     /// <summary>
-    /// Enumerates through all the directories in the file system.
+    /// Enumerates through all the directories and sub-directories in the file system.
     /// </summary>
     /// <returns></returns>
-    IEnumerable<IFileSystemDirectory> GetDirectories();
+    IEnumerable<IFileSystemDirectory> EnumerateDirectories();
 
     /// <summary>
-    /// Enumerates all the files in the File System.
+    /// Enumerates all the files in the file system.
     /// </summary>
     /// <returns></returns>
-    IEnumerable<IFileSystemFile> GetFiles();
+    IEnumerable<IFileSystemFile> EnumerateFiles();
 
     /// <summary>
     /// Returns the directory at the given path.

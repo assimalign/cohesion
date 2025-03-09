@@ -1,7 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 #if NET7_0_OR_GREATER
 using System.Numerics;
@@ -10,19 +11,21 @@ using System.Numerics;
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
+using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
 /// 
 /// </summary>
-[DebuggerDisplay("{Value}")]
+[DebuggerDisplay("{_value}")]
 public readonly struct FileName :
     IEquatable<FileName>,
-    IEqualityComparer<FileName>,
     IComparable<FileName>
 #if NET7_0_OR_GREATER
     ,IEqualityOperators<FileName, FileName, bool>
 #endif
 {
+    private readonly string _value;
+
     /// <summary>
     /// 
     /// </summary>
@@ -33,23 +36,94 @@ public readonly struct FileName :
     {
         ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
 
-        if (value.ContainsAny(Path.GetInvalidFileNameChars(), out var invalid))
+        if (value.Length > MaxLength)
         {
-            ThrowHelper.ThrowArgumentException($"The file name has invalid characters `{invalid}`.");
+            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
         }
 
-        Value = value;
+        var error = string.Empty;
+        var (start, end) = GetTrimRange(value);
+
+        _value = string.Create((end + 1) - start, value, (span, value) =>
+        {
+            for (int i = start; i < (end + 1); i++)
+            {
+                var current = value[i];
+
+                if (!IsValidNameChar(current))
+                {
+                    error = $"The file name has an invalid character `{current}`.";
+                    break;
+                }
+
+                span[i - start] = current;
+            }
+        });
+
+        if (error.Length > 0)
+        {
+            ThrowHelper.ThrowArgumentException(error);
+        }
     }
 
     /// <summary>
-    /// The raw name value.
+    /// The maximum length of a file name.
     /// </summary>
-    public string Value { get; }
+    public const int MaxLength = 255;
+
+    #region Methods
 
     /// <summary>
-    /// Gets the file extension, if any.
+    /// 
     /// </summary>
-    public string? Extension => Path.GetExtension(Value);
+    /// <param name="extension"></param>
+    /// <returns></returns>
+    public bool HasExtension(out string extension)
+    {
+        return (extension = Path.GetExtension(_value)!) is not null;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool Equals(FileName other)
+    {
+        return Equals(other, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="cultureInfo"></param>
+    /// <returns></returns>
+    public bool Equals(FileName other, CultureInfo cultureInfo)
+    {
+        return StringComparer.Create(cultureInfo, true).Equals(_value, other._value);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public int CompareTo(FileName other)
+    {
+        return CompareTo(other, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="cultureInfo"></param>
+    /// <returns></returns>
+    public int CompareTo(FileName other, CultureInfo cultureInfo)
+    {
+        return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
+    }
 
     #region Overloads
 
@@ -70,63 +144,16 @@ public readonly struct FileName :
     // <inheritdoc />
     public override string ToString()
     {
-        return Value;
+        return _value;
     }
 
     // <inheritdoc />
     public override int GetHashCode()
     {
-        return Value.GetHashCode();
+        return _value.GetHashCode();
     }
 
     #endregion
-
-    #region Methods
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="extension"></param>
-    /// <returns></returns>
-    public bool HasExtension(out string extension)
-    {
-        return (extension = Extension!) is not null;
-    }
-
-    public int CompareTo(FileName other)
-    {
-        return CompareTo(this, other, StringComparison.Ordinal);
-    }
-
-    public bool Equals(FileName other)
-    {
-        return Equals(this, other, StringComparison.Ordinal);
-    }
-
-    public bool Equals(FileName other, StringComparison comparison)
-    {
-        return Equals(this, other, comparison);
-    }
-
-    public bool Equals(FileName left, FileName right)
-    {
-        return Equals(left, right, StringComparison.Ordinal);
-    }
-
-    public int GetHashCode([DisallowNull] FileName obj)
-    {
-        return obj.GetHashCode();
-    }
-
-    public static bool Equals(FileName left, FileName right, StringComparison comparison)
-    {
-        return StringComparer.FromComparison(comparison).Equals(left.Value, right.Value);
-    }
-
-    public static int CompareTo(FileName left, FileName right, StringComparison comparison)
-    {
-        return StringComparer.FromComparison(comparison).Compare(left.Value, right.Value);
-    }
 
     #endregion
 
@@ -138,14 +165,22 @@ public readonly struct FileName :
         return new FileName(value);
     }
 
+    /// <summary>
+    /// Returns the normalized string
+    /// </summary>
+    /// <param name="name"></param>
     public static implicit operator string(FileName name)
     {
-        return name.Value;
+        return name._value;
     }
 
+    /// <summary>
+    /// Returns a name as a path.
+    /// </summary>
+    /// <param name="name"></param>
     public static implicit operator FileSystemPath(FileName name)
     {
-        return new FileSystemPath("/" + name.Value);
+        return name._value;
     }
 
     public static bool operator ==(FileName left, FileName right)

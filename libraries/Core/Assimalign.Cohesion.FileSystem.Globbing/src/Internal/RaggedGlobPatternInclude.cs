@@ -1,15 +1,21 @@
 ﻿using System;
+using System.IO;
+using static System.IO.Glob;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-internal class GlobPatternContextRaggedInclude : GlobPatternContextRagged
+internal class RaggedGlobPatternInclude : RaggedGlobPattern
 {
-    public GlobPatternContextRaggedInclude(IRaggedGlobPattern pattern, StringComparison comparison)
-        : base(pattern, comparison)
+    public RaggedGlobPatternInclude(Glob glob,
+        Segment[] startsWith,
+        Segment[][] contains,
+        Segment[] endsWiths,
+        StringComparison comparison)
+        : base(glob, startsWith, contains, endsWiths, comparison)
     {
     }
 
-    public override void Declare(Action<FileSystemPathSegment, bool> onDeclare)
+    public override void Declare(Action<Segment, bool> onDeclare)
     {
         if (IsStackEmpty())
         {
@@ -27,7 +33,8 @@ internal class GlobPatternContextRaggedInclude : GlobPatternContextRagged
         }
         else
         {
-            onDeclare(FileSystemPathSegment.WildcardSegment.MatchAll, false);
+            // TODO: Fix
+            //onDeclare(FileSystemPathSegment.WildcardSegment.MatchAll, false);
         }
     }
 

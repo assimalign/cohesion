@@ -2,8 +2,11 @@
 using System.IO;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.ComponentModel.DataAnnotations;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
+
+using Globbing;
 
 [DebuggerDisplay("{Path}")]
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
@@ -21,7 +24,9 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     public IFileSystemDirectory Directory => new PhysicalFileSystemDirectory(_fileInfo.Directory!);
     public IFileSystemChangeToken Watch()
     {
-        return new PhysicalFileSystemChangeToken(this);
+        return new PhysicalFileSystemChangeToken(
+            this,
+            new GlobPatternMatcher().AddInclude(Path));
     }
     public Stream Open()
     {

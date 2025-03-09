@@ -20,21 +20,20 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     IFileSystemDirectory? Parent { get; }
 
     /// <summary>
-    /// 
+    /// Generates a change token for the given glob pattern relative to the current directory.
+    /// <list type="bullet">
+    /// <item>
+    /// <term>"."</term>
+    /// <description>Will watch the current directory</description>
+    /// </item>
+    /// </list>
     /// </summary>
-    /// <param name="filter"></param>
+    /// <param name="pattern"></param>
     /// <returns></returns>
-    IFileSystemChangeToken Watch(string filter);
+    IFileSystemChangeToken Watch(Glob pattern);
 
     /// <summary>
-    /// Checks whether a relative path from the current directory exists.
-    /// </summary>
-    /// <param name="path"> a relative path.</param>
-    /// <returns></returns>
-    bool Exist(FileSystemPath path);
-
-    /// <summary>
-    /// Gets all the directories contained in the directory.
+    /// Gets all the directories relative to the current directory.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IFileSystemDirectory> GetDirectories();
@@ -42,12 +41,12 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// <summary>
     /// Gets an existing directory.
     /// </summary>
-    /// <param name="path">A relative  or absolute path to given directory.</param>
+    /// <param name="name">A relative  or absolute path to given directory.</param>
     /// <returns></returns>
-    IFileSystemDirectory GetDirectory(FileSystemPath path);
+    IFileSystemDirectory GetDirectory(DirectoryName name);
 
     /// <summary>
-    /// Get all files in contained in the directory.
+    /// Gets all the files relative to the current directory.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IFileSystemFile> GetFiles();
@@ -56,47 +55,33 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     ///  Returns the <see cref="IFileSystemInfo"/> for a given file 
     ///  from the current location of a given directory.
     /// </summary>
-    /// <param name="path">The name of the file.</param>
+    /// <param name="name">The name of the file.</param>
     /// <returns></returns>
-    IFileSystemFile GetFile(FileSystemPath path);
+    IFileSystemFile GetFile(FileName name);
 
     /// <summary>
-    /// 
+    /// Creates a directory relative to the current directory.
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="name"></param>
     /// <returns></returns>
-    IFileSystemDirectory CreateDirectory(FileSystemPath path);
+    IFileSystemDirectory CreateDirectory(DirectoryName name);
 
     /// <summary>
-    ///
+    /// Creates a file relative to the current directory.
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="name"></param>
     /// <returns></returns>
-    IFileSystemFile CreateFile(FileSystemPath path);
+    IFileSystemFile CreateFile(FileName name);
 
     /// <summary>
-    /// 
+    /// Deletes a directory relative to the current directory.
     /// </summary>
-    /// <param name="path"></param>
-    void DeleteDirectory(FileSystemPath path);
+    /// <param name="name"></param>
+    void DeleteDirectory(DirectoryName name);
 
     /// <summary>
-    /// 
+    /// Deletes a file relative to the current directory.
     /// </summary>
-    /// <param name="path"></param>
-    void DeleteFile(FileSystemPath path);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="source"></param>
-    /// <param name="destination"></param>
-    void CopyFile(FileSystemPath source, FileSystemPath destination);
-
-    /// <summary>
-    /// Moves a directory or file the the provided destination.
-    /// </summary>
-    /// <param name="source"></param>
-    /// <param name="destination"></param>
-    void Move(FileSystemPath source, FileSystemPath destination);
+    /// <param name="name"></param>
+    void DeleteFile(FileName name);
 }

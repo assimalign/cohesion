@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace System.IO;
+namespace System.IO.Tests;
 
 public class OffsetStreamTests
 {

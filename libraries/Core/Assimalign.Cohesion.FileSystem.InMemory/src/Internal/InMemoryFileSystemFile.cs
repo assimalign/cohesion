@@ -50,7 +50,7 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 
             if (isRemoved)
             {
-                FileSystem.DencrementSpaceUsed(Size);
+                FileSystem.DecrementSpaceUsed(Size);
             }
         }
         finally

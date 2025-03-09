@@ -5,27 +5,31 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
+using Assimalign.Cohesion.FileSystem.Globbing;
 
 internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 {
     // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly FileSystemWatcher _watcher;
+    private readonly GlobPatternMatcher _matcher;
     private readonly PhysicalFileSystemInfo _fileSystemInfo;
     private readonly List<Subscriber> _subscribers;
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, string? filters = null)
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, GlobPatternMatcher matcher)
     {
         _fileSystemInfo = file;
         _watcher = new FileSystemWatcher(file.Path);
         _subscribers = new List<Subscriber>();
+        _matcher = matcher;
         Setup();
     }
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, string? filters = null)
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, GlobPatternMatcher matcher)
     {
         _fileSystemInfo = directory;
         _watcher = new FileSystemWatcher(directory.Path);
         _subscribers = new List<Subscriber>();
+        _matcher = matcher;
         Setup();
     }
 
@@ -88,6 +92,12 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
     }
     private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
     {
+        FileSystemPath path = args.FullPath;
+
+        if(_fileSystemInfo.Path == path && _matcher.IsMatch())
+        {
+
+        }
         foreach (var subscriber in _subscribers)
         {
 

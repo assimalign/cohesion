@@ -9,15 +9,15 @@ namespace Assimalign.Cohesion.FileSystem.Globbing;
 
 using Internal;
 
-public sealed class GlobPatternMatcher
+public sealed class GlobPatternMatcher : IGlobPatternMatcher, IGlobPatternMatcherBuilder
 {
-    private readonly List<IGlobPattern> _includes;
-    private readonly List<IGlobPattern> _excludes;
+    private readonly IEnumerable<GlobPattern> _includes;
+    private readonly IEnumerable<GlobPattern> _excludes;
     private readonly StringComparison _comparison;
 
     #region Constructors
 
-    public GlobPatternMatcher()
+    private GlobPatternMatcher()
     {
         _includes = new List<IGlobPattern>();
         _excludes = new List<IGlobPattern>();
@@ -35,11 +35,9 @@ public sealed class GlobPatternMatcher
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    public GlobPatternMatcher AddInclude(FileSystemPath pattern)
+    public GlobPatternMatcher AddInclude(Glob pattern)
     {
-        var segments = FileSystemPathSegment.Parse(pattern);
-
-        _includes.Add(CreatePattern(segments));
+        _includes.Add(CreatePattern(pattern, true));
 
         return this;
     }
@@ -49,11 +47,9 @@ public sealed class GlobPatternMatcher
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    public GlobPatternMatcher AddExclude(FileSystemPath pattern)
+    public GlobPatternMatcher AddExclude(Glob pattern)
     {
-        var segments = FileSystemPathSegment.Parse(pattern);
-
-        _excludes.Add(CreatePattern(segments));
+        _excludes.Add(CreatePattern(pattern, false));
 
         return this;
     }
@@ -104,31 +100,30 @@ public sealed class GlobPatternMatcher
         return MatchExact(file).HasMatches;
     }
 
-
-    private IGlobPattern CreatePattern(FileSystemPathSegment[] items)
+    private IGlobPattern CreatePattern(Glob pattern, bool include)
     {
-        var segments = new List<FileSystemPathSegment>();
+        var segments = new List<GlobSegment>();
 
-        List<FileSystemPathSegment> startsWith = null!;
-        List<IList<FileSystemPathSegment>> contains = null!;
-        List<FileSystemPathSegment> endsWith = null!;
+        List<GlobSegment> startsWith = null!;
+        List<IList<GlobSegment>> contains = null!;
+        List<GlobSegment> endsWith = null!;
 
-        for (int i = 0; i < items.Length; i++)
+        for (int i = 0; i < pattern.Count; i++)
         {
-            var segment = items[i];
+            var segment = pattern[i];
 
-            if (segment is FileSystemPathSegment.RecursiveWildcardSegment)
+            if (segment.Kind == GlobSegmentKind.RecursiveWildcard)
             {
                 if (startsWith is null)
                 {
-                    startsWith = new List<FileSystemPathSegment>(segments);
-                    endsWith = new List<FileSystemPathSegment>();
-                    contains = new List<IList<FileSystemPathSegment>>();
+                    startsWith = new List<GlobSegment>(segments);
+                    endsWith = new List<GlobSegment>();
+                    contains = new List<IList<GlobSegment>>();
                 }
                 else if (endsWith!.Count != 0)
                 {
                     contains!.Add(endsWith);
-                    endsWith = new List<FileSystemPathSegment>();
+                    endsWith = new List<GlobSegment>();
                 }
             }
             else if (endsWith != null)
@@ -140,15 +135,25 @@ public sealed class GlobPatternMatcher
         }
         if (startsWith == null)
         {
-            return new LinearGlobPattern(segments.ToArray());
+            return include ? 
+                new LinearGlobPatternInclude(pattern, _comparison) : 
+                new LinearGlobPatternExclude(pattern, _comparison);
         }
         else
         {
-            return new RaggedGlobPattern(
-                [.. segments],
-                [.. startsWith],
-                [.. endsWith ?? []],
-                [.. contains.Select(p => p.ToArray())]);
+            return include ?
+                new RaggedGlobPatternInclude(
+                    pattern,
+                    [.. startsWith],
+                    [.. contains.Select(p => p.ToArray())],
+                    [.. endsWith ?? []],
+                    _comparison) :
+                new RaggedGlobPatternExclude(
+                    pattern,
+                    [.. startsWith],
+                    [.. contains.Select(p => p.ToArray())],
+                    [.. endsWith ?? []],
+                    _comparison);
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Linq;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Collections.Generic;
 #if NET7_0_OR_GREATER
 using System.Numerics;
@@ -9,51 +10,75 @@ using System.Numerics;
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
+using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
 /// 
 /// </summary>
-[DebuggerDisplay("{Value}")]
-public readonly struct DirectoryName :
-    IEquatable<DirectoryName>,
-    IEqualityComparer<DirectoryName>,
-    IComparable<DirectoryName>
+[DebuggerDisplay("{_value}")]
+public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<DirectoryName>
 #if NET7_0_OR_GREATER
     ,IEqualityOperators<DirectoryName, DirectoryName, bool>
 #endif
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="value"></param>
+    private readonly string _value;
+
     public DirectoryName(string value)
     {
-        var name = (value ?? string.Empty).Trim('\\', '/');
+        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
 
-        if (name.ContainsAny(Path.GetInvalidFileNameChars(), out var invalid))
+        if (value.Length > MaxLength)
         {
-            ThrowHelper.ThrowArgumentException($"The directory name has an invalid character `{invalid}`.");
+            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
         }
 
-        Value = name;
+        if (value.Length == 1 && IsSeparator(value[0]))
+        {
+            _value = "/";
+            return;
+        }
+
+        var error = string.Empty;
+        var (start, end) = GetTrimRange(value);
+
+        _value = string.Create((end + 2) - start, value, (span, value) =>
+        {
+            for (int i = start; i < (end + 1); i++)
+            {
+                var current = value[i];
+
+                if (!IsValidNameChar(current))
+                {
+                    error = $"The directory name has an invalid character `{current}`.";
+                    break;
+                }
+
+                span[i - start] = current;
+            }
+            // ending slash's indicate directory so lets concat each name with an ending slash
+            span[span.Length - 1] = '/';
+        });
+
+        if (error.Length > 0)
+        {
+            ThrowHelper.ThrowArgumentException(error);
+        }
     }
 
-   
-
     /// <summary>
-    /// The raw name value.
+    /// The max directory name length.
     /// </summary>
-    public string Value { get; }
+    public const int MaxLength = 255;
 
     /// <summary>
     /// 
     /// </summary>
-    public bool IsEmpty => string.IsNullOrEmpty(Value);
+    public bool IsRoot => _value[0] == '/';
 
     /// <summary>
     /// Returns an empty directory name.
     /// </summary>
-    public static DirectoryName Empty { get; } = "";
+    public static DirectoryName Root { get; } = "/";
 
     #region Overloads
 
@@ -72,81 +97,111 @@ public readonly struct DirectoryName :
 
     public override string ToString()
     {
-        return Value;
+        return _value;
     }
 
     public override int GetHashCode()
     {
-        return Value.GetHashCode();
+        return _value.GetHashCode();
     }
 
     #endregion
 
     #region Methods
 
-    public int CompareTo(DirectoryName other)
-    {
-        return CompareTo(this, other, StringComparison.Ordinal);
-    }
-
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
     public bool Equals(DirectoryName other)
     {
-        return Equals(this, other, StringComparison.Ordinal);
+        return Equals(other, CultureInfo.InvariantCulture);
     }
 
-    public bool Equals(DirectoryName other, StringComparison comparison)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="cultureInfo"></param>
+    /// <returns></returns>
+    public bool Equals(DirectoryName other, CultureInfo cultureInfo)
     {
-        return Equals(this, other, comparison);
+        return StringComparer.Create(cultureInfo, true).Equals(_value, other._value);
     }
 
-    public bool Equals(DirectoryName left, DirectoryName right)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public int CompareTo(DirectoryName other)
     {
-        return Equals(left, right, StringComparison.Ordinal);
+        return CompareTo(other, CultureInfo.InvariantCulture);
     }
 
-    public int GetHashCode([DisallowNull] DirectoryName obj)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="cultureInfo"></param>
+    /// <returns></returns>
+    public int CompareTo(DirectoryName other, CultureInfo cultureInfo)
     {
-        return obj.GetHashCode();
-    }
-
-
-    public static bool Equals(DirectoryName left, DirectoryName right, StringComparison comparison)
-    {
-        return StringComparer.FromComparison(comparison).Equals(left.Value, right.Value);
-    }
-
-    public static int CompareTo(DirectoryName left, DirectoryName right, StringComparison comparison)
-    {
-        return StringComparer.FromComparison(comparison).Compare(left.Value, right.Value);
+        return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
     }
 
     #endregion
 
     #region Operators
 
-
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
     public static implicit operator DirectoryName(string value)
     {
         return new DirectoryName(value);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="name"></param>
     public static implicit operator string(DirectoryName name)
     {
-        return name.Value;
-    }
-    public static implicit operator FileSystemPath(DirectoryName name)
-    {
-        return new FileSystemPath("/" + name.Value);
+        return name._value;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="name"></param>
+    public static implicit operator FileSystemPath(DirectoryName name)
+    {
+        return name._value;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator ==(DirectoryName left, DirectoryName right)
     {
         return left.Equals(right);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator !=(DirectoryName left, DirectoryName right)
     {
-        return left.Equals(right);
+        return !left.Equals(right);
     }
 
     #endregion

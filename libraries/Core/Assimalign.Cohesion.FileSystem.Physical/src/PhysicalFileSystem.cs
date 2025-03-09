@@ -41,13 +41,24 @@ public class PhysicalFileSystem : IFileSystem
     public Size SpaceUsed => (_driveInfo.TotalSize - _driveInfo.TotalFreeSpace);
     public IFileSystemDirectory RootDirectory => _root;
 
-    public bool Exist(FileSystemPath path)
+    public bool Exists(FileSystemPath path)
     {
-        return RootDirectory.Exist(path);
+        return RootDirectory.Exists(path);
     }
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        return RootDirectory.CreateDirectory(path);
+        try
+        {
+            var directoryInfo = _driveInfo.RootDirectory;
+            var directoryPath = RootDirectory.Path.Combine(path);
+
+
+
+        }
+        catch (Exception exception) when (exception is not FileSystemException)
+        {
+            throw new FileSystemException("", exception);
+        }
     }
     public IFileSystemFile CreateFile(FileSystemPath path)
     {
@@ -80,6 +91,32 @@ public class PhysicalFileSystem : IFileSystem
     public IFileSystemChangeToken Watch(FileSystemPath pattern)
     {
         return new PhysicalFileSystemChangeToken(_root, pattern);
+    }
+
+    public void CopyFile(FileSystemPath source, FileSystemPath destination)
+    {
+
+        throw new NotImplementedException();
+
+
+    }
+    public void Move(FileSystemPath source, FileSystemPath destination)
+    {
+        CheckIfReadOnly();
+
+        if (File.Exists(source))
+        {
+            File.Move(source, destination);
+        }
+        else if (Directory.Exists(source))
+        {
+            Directory.Move(source, destination);
+        }
+        else
+        {
+            // TODO: throw difference exception
+            throw new IOException("source not found");
+        }
     }
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {

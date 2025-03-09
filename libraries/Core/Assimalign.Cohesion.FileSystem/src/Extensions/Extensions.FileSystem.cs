@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.IO;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -19,48 +20,49 @@ public static class FileSystemExtensions
     }
 
     /// <summary>
-    /// Recursively enumerates through the entire file system.
+    /// 
     /// </summary>
-    /// <param name="fileSystem"></param>
+    /// <param name="directory"></param>
     /// <returns></returns>
-    public static IEnumerable<IFileSystemInfo> EnumerateFileSystemInfo(this IFileSystem fileSystem)
+    public static bool Exists(this IFileSystemDirectory directory, FileSystemPath path)
     {
-        ThrowHelper.ThrowIfNull(fileSystem, nameof(fileSystem));
+        /*
+            TODO: Not sure whether to include this API on IFileSystemDirectory. Will leave as extension method 
+            and reevaluate later
+         */
 
-        foreach (var entry in fileSystem)
+        ThrowHelper.ThrowIfNull(directory, nameof(directory));
+
+        var names = path.GetSegments();
+        
+        IFileSystemDirectory parent = directory;
+
+        for (int i = 0; i < names.Length || parent is null; i++)
         {
-            yield return entry;
+            var hasMore = i + 1 < names.Length;
+            var name = names[i];
 
-            if (entry is IFileSystemDirectory directory)
+            if (parent is null) break;
+
+            foreach (var item in parent)
             {
-                foreach (var child in directory.EnumerateFileSystemInfo())
+                if (item is IFileSystemFile file && !hasMore && file.Name.Equals(name))
                 {
-                    yield return child;
+                    return true;
+                }
+                if (item is IFileSystemDirectory dir && dir.Name.Equals(name))
+                {
+                    if (hasMore)
+                    {
+                        parent = dir;
+                        continue;
+                    }
+
+                    return true;
                 }
             }
         }
-    }
 
-    /// <summary>
-    /// Recursively enumerates through the entire directory.
-    /// </summary>
-    /// <param name="diectory"></param>
-    /// <returns></returns>
-    public static IEnumerable<IFileSystemInfo> EnumerateFileSystemInfo(this IFileSystemDirectory diectory)
-    {
-        ThrowHelper.ThrowIfNull(diectory, nameof(diectory));
-
-        foreach (var entry in diectory)
-        {
-            yield return entry;
-
-            if (entry is IFileSystemDirectory directory1)
-            {
-                foreach (var child in directory1.EnumerateFileSystemInfo())
-                {
-                    yield return child;
-                }
-            }
-        }
+        return false;
     }
 }

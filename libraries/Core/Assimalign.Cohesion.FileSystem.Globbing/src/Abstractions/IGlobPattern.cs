@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.FileSystem.Globbing;
+﻿using System.IO;
+
+namespace Assimalign.Cohesion.FileSystem.Globbing;
 
 /// <summary>
 /// This API supports infrastructure and is not intended to be used
@@ -7,7 +9,28 @@
 public interface IGlobPattern
 {
     /// <summary>
-    /// Gets the segments of the glob pattern.
+    /// 
     /// </summary>
-    FileSystemPathSegment[] Segments { get; }
+    Glob Glob { get; }
+
+    /// <summary>
+    ///
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    bool Test(FileSystemPath path);
+
+    /// <summary>
+    /// Tests whether the glob pattern matches the given file path
+    /// </summary>
+    /// <param name="file"></param>
+    /// <returns></returns>
+    bool Test(IFileSystemFile file);
+
+    /// <summary>
+    /// Tests whether the glob pattern matches the given directory path
+    /// </summary>
+    /// <param name="directory"></param>
+    /// <returns></returns>
+    bool Test(IFileSystemDirectory directory);
 }

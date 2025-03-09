@@ -29,7 +29,7 @@ public class GlobPatternMatchingResult
     public IEnumerable<IFileSystemInfo> Files { get; set; }
 
     /// <summary>
-    /// 
+    /// Returns an empty result set.
     /// </summary>
     public static GlobPatternMatchingResult Empty { get; } = new GlobPatternMatchingResult(Array.Empty<IFileSystemInfo>());
 }

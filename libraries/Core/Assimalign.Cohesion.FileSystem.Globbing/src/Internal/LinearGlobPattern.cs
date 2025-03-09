@@ -4,20 +4,20 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-internal abstract class GlobPatternContextLinear
-   : GlobPatternContext<GlobPatternContextLinear.FrameData>
-{
-    private readonly StringComparison _comparison;
+using static System.IO.Glob;
 
-    public GlobPatternContextLinear(ILinearGlobPattern pattern, StringComparison comparison)
+internal abstract class LinearGlobPattern : GlobPattern<LinearGlobPattern.FrameData>
+{
+    public LinearGlobPattern(Glob glob, StringComparison comparison)
     {
-        Pattern = pattern;
-        _comparison = comparison;
+        Glob = glob;
+        Comparison = comparison;
     }
 
-    protected ILinearGlobPattern Pattern { get; }
 
-    public override GlobPatternTestResult Test(IFileSystemFile file)
+    protected StringComparison Comparison { get; }
+    public override Glob Glob { get; }
+    public override bool Test(IFileSystemFile file)
     {
         if (IsStackEmpty())
         {
@@ -26,10 +26,10 @@ internal abstract class GlobPatternContextLinear
 
         if (!Frame.IsNotApplicable && IsLastSegment() && TestMatchingSegment(file.Name))
         {
-            return GlobPatternTestResult.Success(CalculateStem(file));
+            return true;
         }
 
-        return GlobPatternTestResult.Failed;
+        return false;
     }
     public override void PushDirectory(IFileSystemDirectory directory)
     {
@@ -49,7 +49,8 @@ internal abstract class GlobPatternContextLinear
         else
         {
             // Determine this frame's contribution to the stem (if any)
-            FileSystemPathSegment segment = Pattern.Segments[Frame.SegmentIndex];
+            Segment segment = Glob[Frame.SegmentIndex];
+
             if (frame.InStem || segment.HasStem)
             {
                 frame.InStem = true;
@@ -62,6 +63,8 @@ internal abstract class GlobPatternContextLinear
 
         PushDataFrame(frame);
     }
+
+
 
     public partial struct FrameData
     {
@@ -82,19 +85,15 @@ internal abstract class GlobPatternContextLinear
     }
     protected bool IsLastSegment()
     {
-        return Frame.SegmentIndex == Pattern.Segments.Length - 1;
+        return Frame.SegmentIndex == Glob.Count - 1;
     }
     protected bool TestMatchingSegment(string value)
     {
-        if (Frame.SegmentIndex >= Pattern.Segments.Length)
+        if (Frame.SegmentIndex >= Glob.Count)
         {
             return false;
         }
 
-        return Pattern.Segments[Frame.SegmentIndex].Match(value, _comparison);
-    }
-    protected string CalculateStem(IFileSystemFile matchedFile)
-    {
-        return GlobMatcherContext.CombinePath(Frame!.Stem!, matchedFile.Name);
+        return Glob[Frame.SegmentIndex].IsMatch(value, Comparison);
     }
 }

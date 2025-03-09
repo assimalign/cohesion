@@ -27,7 +27,7 @@ public class InMemoryFileSystemOptions
     /// <summary>
     /// Set a root directory name.
     /// </summary>
-    public DirectoryName RootName { get; set; } = DirectoryName.Empty;
+    public DirectoryName RootName { get; set; } = DirectoryName.Root;
 
     /// <summary>
     /// The attributes to ignore when enumerating file system.

@@ -24,7 +24,13 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
         _directoryInfo = directoryInfo;
     }
 
-    public DirectoryName Name => _directoryInfo.Name.Split(':')[0];
+    public DirectoryName Name
+    {
+        get
+        {
+            if (Path)
+        }
+    }
     public IFileSystemDirectory? Parent
     {
         get
@@ -54,6 +60,7 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
     {
         try
         {
+            var directoryPath = FileSystemPath.Combine(Path, path);
             var directoryInfo = new DirectoryInfo(path);
 
             CheckFileOrDirectoryExist(directoryInfo);
@@ -75,7 +82,8 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
         return _directoryInfo.EnumerateFiles("*", GetEnumerationOptions())
             .Select(fileInfo => new PhysicalFileSystemFile(fileInfo)
             {
-                FileSystem = base.FileSystem
+                FileSystem = base.FileSystem,
+                IgnoreAttributes = base.IgnoreAttributes
             });
     }
     public IEnumerable<IFileSystemDirectory> GetDirectories()
@@ -83,7 +91,8 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
         return _directoryInfo.EnumerateDirectories("*", GetEnumerationOptions())
             .Select(directoryInfo => new PhysicalFileSystemDirectory(directoryInfo)
             {
-                FileSystem = base.FileSystem
+                FileSystem = base.FileSystem,
+                IgnoreAttributes = base.IgnoreAttributes
             });
     }
     public IFileSystemFile GetFile(FileSystemPath path)
@@ -154,31 +163,7 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
 
         fileInfo.Delete();
     }
-    public void CopyFile(FileSystemPath source, FileSystemPath destination)
-    {
-        
-        throw new NotImplementedException();
-
-
-    }
-    public void Move(FileSystemPath source, FileSystemPath destination)
-    {
-        CheckIfReadOnly();
-
-        if (File.Exists(source))
-        {
-            File.Move(source, destination);
-        }
-        else if (Directory.Exists(source))
-        {
-            Directory.Move(source, destination);
-        }
-        else
-        {
-            // TODO: throw difference exception
-            throw new IOException("source not found");
-        }
-    }
+   
 
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
@@ -217,7 +202,6 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
             ThrowHelper.ThrowFileSystemIsReadOnly();
         }
     }
-
     private void CheckFileOrDirectoryExist(FileSystemInfo fileSystemInfo)
     {
         if (!fileSystemInfo.Exists)
@@ -230,7 +214,6 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
             ThrowHelper.ThrowPathNotExistException(fileSystemInfo.FullName);
         }
     }
-
     private EnumerationOptions GetEnumerationOptions()
     {
         return new EnumerationOptions()
