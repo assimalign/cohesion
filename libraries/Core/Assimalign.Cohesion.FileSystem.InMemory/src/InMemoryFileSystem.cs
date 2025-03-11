@@ -31,6 +31,7 @@ public class InMemoryFileSystem : IFileSystem
         };
     }
 
+
     public Size Size => _size;
     public Size SpaceAvailable => _size - _spaceUsed;
     public Size SpaceUsed => _spaceUsed;

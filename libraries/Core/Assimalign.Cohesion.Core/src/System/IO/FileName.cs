@@ -14,12 +14,10 @@ using Assimalign.Cohesion.Internal;
 using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
-/// 
+/// A case insensitive file name.
 /// </summary>
 [DebuggerDisplay("{_value}")]
-public readonly struct FileName :
-    IEquatable<FileName>,
-    IComparable<FileName>
+public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
 #if NET7_0_OR_GREATER
     ,IEqualityOperators<FileName, FileName, bool>
 #endif
@@ -29,24 +27,20 @@ public readonly struct FileName :
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="value"></param>
+    /// <param name="name"></param>
     /// <exception cref="ArgumentException"></exception>
     /// <exception cref="ArgumentNullException"></exception>
-    public FileName(string value)
+    public FileName(string name)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
+        ThrowHelper.ThrowIfNullOrEmpty(name, nameof(name));
 
-        if (value.Length > MaxLength)
+        int start = GetTrimStart(name);
+
+        string error = null!;
+
+        _value = string.Create(name.Length - start, name, (span, value) =>
         {
-            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
-        }
-
-        var error = string.Empty;
-        var (start, end) = GetTrimRange(value);
-
-        _value = string.Create((end + 1) - start, value, (span, value) =>
-        {
-            for (int i = start; i < (end + 1); i++)
+            for (int i = start; i < name.Length; i++)
             {
                 var current = value[i];
 
@@ -60,7 +54,12 @@ public readonly struct FileName :
             }
         });
 
-        if (error.Length > 0)
+        if (_value.Length > MaxLength)
+        {
+            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
+        }
+
+        if (error is not null)
         {
             ThrowHelper.ThrowArgumentException(error);
         }
@@ -125,6 +124,16 @@ public readonly struct FileName :
         return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cultureInfo"></param>
+    /// <returns></returns>
+    public int GetHashCode(CultureInfo cultureInfo)
+    {
+        return StringComparer.Create(cultureInfo, true).GetHashCode(_value);
+    }
+
     #region Overloads
 
     /// <inheritdoc />
@@ -150,7 +159,7 @@ public readonly struct FileName :
     // <inheritdoc />
     public override int GetHashCode()
     {
-        return _value.GetHashCode();
+        return GetHashCode(CultureInfo.InvariantCulture);
     }
 
     #endregion
@@ -183,14 +192,26 @@ public readonly struct FileName :
         return name._value;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator ==(FileName left, FileName right)
     {
         return left.Equals(right);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator !=(FileName left, FileName right)
     {
-        return left.Equals(right);
+        return !left.Equals(right);
     }
 
     #endregion

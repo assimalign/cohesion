@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
@@ -11,7 +12,7 @@ internal static partial class ThrowHelper
 {
     #region Arguments
 
-    internal static void ThrowIfNull(
+    internal static object ThrowIfNull(
         [NotNull]object? argument,
         [CallerArgumentExpression(nameof(argument))] string? paramName = null)
     {
@@ -19,9 +20,11 @@ internal static partial class ThrowHelper
         {
             ThrowArgumentNullException(paramName);
         }
+
+        return argument;
     }
 
-    internal static void ThrowIfNullOrEmpty(
+    internal static string ThrowIfNullOrEmpty(
         [NotNull] string? argument,
         [CallerArgumentExpression(nameof(argument))] string? paramName = null)
     {
@@ -29,6 +32,32 @@ internal static partial class ThrowHelper
         {
             ThrowArgumentNullException(paramName);
         }
+
+        return argument;
+    }
+
+    internal static ICollection<T> ThrowIfNullOrNone<T>(
+        [NotNull] ICollection<T> argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    {
+        if (argument is null || !argument.Any())
+        {
+            ThrowArgumentNullException(paramName);
+        }
+
+        return argument;
+    }
+
+    internal static T[] ThrowIfNullOrNone<T>(
+        [NotNull] T[] argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    {
+        if (argument is null || argument.Length == 0)
+        {
+            ThrowArgumentNullException(paramName);
+        }
+
+        return argument;
     }
 
     [DoesNotReturn]

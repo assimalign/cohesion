@@ -27,6 +27,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
         Parent = parent;
     }
 
+
     public DirectoryName Name { get; } = DirectoryName.Root;
     public InMemoryFileSystemDirectory? Parent { get; }
     public List<InMemoryFileSystemInfo> Children { get; }

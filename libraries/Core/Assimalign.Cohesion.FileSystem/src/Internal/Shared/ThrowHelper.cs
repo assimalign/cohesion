@@ -20,6 +20,11 @@ internal static partial class ThrowHelper
         throw new FileSystemException("The file system is readonly");
     }
 
+    [DoesNotReturn]
+    internal static void ThrowFileSystemException(string message, Exception innerException)
+    {
+        throw new FileSystemException(message, innerException);
+    }
     internal static FileSystemException GetPathNotFoundException(FileSystemPath path)
     {
         return new FileSystemException(string.Format("The provided path does not exist `{0}`.", path));

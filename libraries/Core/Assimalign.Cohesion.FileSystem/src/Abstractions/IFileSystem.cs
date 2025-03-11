@@ -25,6 +25,11 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     Size SpaceUsed { get; }
 
     /// <summary>
+    /// Indicates whether the file system is read only.
+    /// </summary>
+    bool IsReadOnly { get; }
+
+    /// <summary>
     /// The root directory of the file system.
     /// </summary>
     IFileSystemDirectory RootDirectory { get; }
@@ -35,6 +40,14 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     /// <param name="path"></param>
     /// <returns></returns>
     bool Exists(FileSystemPath path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="info"></param>
+    /// <returns></returns>
+    bool TryGetInfo(FileSystemPath path, out IFileSystemInfo? info);
 
     /// <summary>
     /// Creates a <see cref="IFileSystemChangeToken"/> for the specified <paramref name="filter"/>.
@@ -48,19 +61,19 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     /// </summary>
     /// <param name="pattern">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
     /// <returns>An <see cref="IFileSystemChangeToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
-    IFileSystemChangeToken Watch(Glob pattern);
-
-    /// <summary>
-    /// Enumerates through all the directories and sub-directories in the file system.
-    /// </summary>
-    /// <returns></returns>
-    IEnumerable<IFileSystemDirectory> EnumerateDirectories();
+    IFileSystemChangeToken Watch(Glob? pattern);
 
     /// <summary>
     /// Enumerates all the files in the file system.
     /// </summary>
     /// <returns></returns>
     IEnumerable<IFileSystemFile> EnumerateFiles();
+
+    /// <summary>
+    /// Enumerates through all the directories and sub-directories in the file system.
+    /// </summary>
+    /// <returns></returns>
+    IEnumerable<IFileSystemDirectory> EnumerateDirectories();
 
     /// <summary>
     /// Returns the directory at the given path.

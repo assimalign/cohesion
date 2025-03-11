@@ -9,66 +9,57 @@ namespace Assimalign.Cohesion.FileSystem;
 
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
+using System.Security;
+using System.Data.Common;
+using Assimalign.Cohesion.FileSystem.Globbing;
 
 /// <summary>
 /// Represents a directory on a physical filesystem
 /// </summary>
-[DebuggerDisplay("{Path}")]
-internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSystemDirectory
+[DebuggerDisplay("{Name} - {Path}")]
+internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystemDirectory
 {
     private readonly DirectoryInfo _directoryInfo;
 
-    public PhysicalFileSystemDirectory(DirectoryInfo directoryInfo) 
-        : base(directoryInfo)
+    public PhysicalFileSystemDirectory(PhysicalFileSystem fileSystem, DirectoryInfo directoryInfo)
+        : base(fileSystem, directoryInfo)
     {
         _directoryInfo = directoryInfo;
     }
 
-    public DirectoryName Name
-    {
-        get
-        {
-            if (Path)
-        }
-    }
+    public DirectoryName Name => _directoryInfo.Name;
     public IFileSystemDirectory? Parent
     {
         get
         {
             if (_directoryInfo.Parent is not null)
             {
-                return new PhysicalFileSystemDirectory(_directoryInfo.Parent);
+                return new PhysicalFileSystemDirectory(FileSystem, _directoryInfo.Parent)
+                {
+                    IgnoreAttributes = IgnoreAttributes
+                };
             }
 
             return null;
         }
     }
-    public IFileSystemChangeToken Watch(string filter)
+    public IFileSystemChangeToken Watch(Glob pattern)
     {
-        return new PhysicalFileSystemChangeToken(this, filter);
+        return new PhysicalFileSystemChangeToken(
+            this,
+            new GlobPatternMatcher(StringComparison.InvariantCultureIgnoreCase).AddInclude(pattern));
     }
-    public bool Exist(FileSystemPath path)
-    {
-#if NET7_0_OR_GREATER
-        return System.IO.Path.Exists(path);
-#else
-        return File.Exists(path) || Directory.Exists(path);
-#endif
-    }
-
-    public IFileSystemDirectory GetDirectory(FileSystemPath path)
+    public IFileSystemDirectory GetDirectory(DirectoryName name)
     {
         try
         {
-            var directoryPath = FileSystemPath.Combine(Path, path);
-            var directoryInfo = new DirectoryInfo(path);
+            var directoryInfo = new DirectoryInfo(Path.Combine(name));
 
             CheckFileOrDirectoryExist(directoryInfo);
 
-            return new PhysicalFileSystemDirectory(directoryInfo)
+            return new PhysicalFileSystemDirectory(FileSystem, directoryInfo)
             {
-                FileSystem = base.FileSystem,
-                IgnoreAttributes = base.IgnoreAttributes
+                IgnoreAttributes = IgnoreAttributes
             };
         }
         catch (Exception exception) when (exception is not FileSystemException)
@@ -76,58 +67,64 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
             throw ThrowHelper.GetUnhandledFileSystemException(exception);
         }
     }
-
     public IEnumerable<IFileSystemFile> GetFiles()
     {
         return _directoryInfo.EnumerateFiles("*", GetEnumerationOptions())
-            .Select(fileInfo => new PhysicalFileSystemFile(fileInfo)
+            .Select(fileInfo => new PhysicalFileSystemFile(FileSystem, fileInfo)
             {
-                FileSystem = base.FileSystem,
-                IgnoreAttributes = base.IgnoreAttributes
+                IgnoreAttributes = IgnoreAttributes
             });
     }
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {
         return _directoryInfo.EnumerateDirectories("*", GetEnumerationOptions())
-            .Select(directoryInfo => new PhysicalFileSystemDirectory(directoryInfo)
+            .Select(directoryInfo => new PhysicalFileSystemDirectory(FileSystem, directoryInfo)
             {
-                FileSystem = base.FileSystem,
-                IgnoreAttributes = base.IgnoreAttributes
+                IgnoreAttributes = IgnoreAttributes
             });
     }
-    public IFileSystemFile GetFile(FileSystemPath path)
+    public IFileSystemFile GetFile(FileName name)
     {
-        var filePath = GetFullPath(path);
-        var fileInfo = new FileInfo(filePath);
-
-        CheckFileOrDirectoryExist(fileInfo);
-
-        return new PhysicalFileSystemFile(fileInfo)
+        try
         {
-            FileSystem = base.FileSystem,
-            IgnoreAttributes = base.IgnoreAttributes
-        };
+            var info = new FileInfo(Path.Combine(name));
+
+            CheckFileOrDirectoryExist(info);
+
+            return new PhysicalFileSystemFile(FileSystem, info)
+            {
+                IgnoreAttributes = IgnoreAttributes
+            };
+        }
+        catch (Exception exception)
+        when (exception is not FileSystemException)
+        {
+            throw new FileSystemException("", exception);
+        }
     }
-    public IFileSystemDirectory CreateDirectory(FileSystemPath path)
+    public IFileSystemDirectory CreateDirectory(DirectoryName name)
     {
         CheckIfReadOnly();
 
-        var fullPath = GetFullPath(path);
-
         try
         {
-            var directoryInfo = Directory.CreateDirectory(fullPath);
+            var path = Path.Combine(name);
 
-            return new PhysicalFileSystemDirectory(directoryInfo);
+            return new PhysicalFileSystemDirectory(
+                FileSystem,
+                Directory.CreateDirectory(path))
+            {
+                IgnoreAttributes = IgnoreAttributes
+            };
         }
         catch (Exception)
         {
             throw;
         }
     }
-    public IFileSystemFile CreateFile(FileSystemPath path)
+    public IFileSystemFile CreateFile(FileName name)
     {
-        var filePath = GetFullPath(path);
+        var filePath = GetFullPath(name);
         var fileInfo = new FileInfo(filePath);
 
         if (fileInfo.Exists)
@@ -137,14 +134,17 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
 
         using var fileStream = fileInfo.Create();
 
-        return new PhysicalFileSystemFile(fileInfo);
+        return new PhysicalFileSystemFile(FileSystem, fileInfo)
+        {
+            IgnoreAttributes = IgnoreAttributes
+        };
     }
 
-    public void DeleteDirectory(FileSystemPath path)
+    public void DeleteDirectory(DirectoryName name)
     {
         CheckIfReadOnly();
 
-        var directoryPath = GetFullPath(path);
+        var directoryPath = GetFullPath(name);
         var directoryInfo = new DirectoryInfo(directoryPath);
 
         CheckFileOrDirectoryExist(directoryInfo);
@@ -152,33 +152,45 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
         directoryInfo.Delete();
     }
 
-    public void DeleteFile(FileSystemPath path)
+    public void DeleteFile(FileName name)
     {
-        CheckIfReadOnly();
+        try
+        {
+            CheckIfReadOnly();
 
-        var fullPath = GetFullPath(path);
-        var fileInfo = new FileInfo(fullPath);
+            var path = Path.Combine(name);
+            var info = new FileInfo(path);
 
-        CheckFileOrDirectoryExist(fileInfo);
+            CheckFileOrDirectoryExist(info);
 
-        fileInfo.Delete();
+            info.Delete();
+        }
+        catch (IOException exception)
+        {
+
+        }
+        catch (SecurityException excpetion)
+        {
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            ThrowHelper.ThrowFileSystemException("", exception);
+        }
     }
-   
+
 
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
         return _directoryInfo.EnumerateFileSystemInfos("*", GetEnumerationOptions())
             .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
             {
-                FileInfo info => new PhysicalFileSystemFile(info)
+                FileInfo info => new PhysicalFileSystemFile(FileSystem, info)
                 {
-                    FileSystem = base.FileSystem,
-                    IgnoreAttributes = base.IgnoreAttributes
+                    IgnoreAttributes = IgnoreAttributes
                 },
-                DirectoryInfo info => new PhysicalFileSystemDirectory(info)
+                DirectoryInfo info => new PhysicalFileSystemDirectory(FileSystem, info)
                 {
-                    FileSystem = base.FileSystem,
-                    IgnoreAttributes = base.IgnoreAttributes
+                    IgnoreAttributes = IgnoreAttributes
                 },
                 _ => throw new Exception("Invalid object in physical file system.")
 
@@ -219,6 +231,7 @@ internal class PhysicalFileSystemDirectory :  PhysicalFileSystemInfo, IFileSyste
         return new EnumerationOptions()
         {
             IgnoreInaccessible = true,
+
             AttributesToSkip = base.IgnoreAttributes
         };
     }

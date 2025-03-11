@@ -12,7 +12,7 @@ public class UnitTest1
     {
         _fileSystem = new PhysicalFileSystem(new PhysicalFileSystemOptions()
         {
-            Drive = "C"
+            Root = "C"
         });
     }
 

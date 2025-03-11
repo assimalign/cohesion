@@ -1,74 +1,119 @@
 ﻿using System;
-using System.Text;
-using System.Collections;
-using System.Collections.Generic;
+using System.IO;
 using System.Diagnostics;
+using System.Globalization;
 
 namespace System.IO;
 
-using static System.IO.Glob;
-
 using Assimalign.Cohesion.Internal;
-using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
-/// Represents a glob pattern.
+/// 
 /// </summary>
 [DebuggerDisplay("{ToString()}")]
-public sealed class Glob : IEquatable<Glob>, IEnumerable<Segment>
+public sealed partial class Glob 
 {
-    private readonly Segment[] _segments;
+    private static readonly Parser _parser = new Parser();
 
-    private Glob(Segment[] segments)
+    private readonly TokenBase[] _tokens;
+
+    internal Glob(TokenBase[] tokens)
     {
-        _segments = segments;
+        _tokens = ThrowHelper.ThrowIfNullOrNone(tokens);
     }
 
     /// <summary>
-    /// Gets the number of segments in the glob pattern.
+    /// Gets the number of tokens in the glob.
     /// </summary>
-    public int Count => _segments.Length;
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="index"></param>
-    /// <returns></returns>
-    public Segment this[int index] => _segments[index];
+    public int Count => Tokens.Length;
 
     /// <summary>
     /// 
     /// </summary>
+    public Token[] Tokens => _tokens;
+
+
+    #region Methods
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
     /// <returns></returns>
-    public Segment[] GetSegments()
+    public bool IsMatch(FileSystemPath path)
     {
-        return [.. _segments]; // Return a difference reference
+        return IsMatch(path, CultureInfo.InvariantCulture);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="other"></param>
+    /// <param name="path"></param>
+    /// <param name="cultureInfo"></param>
     /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
-    public bool Equals(Glob? other)
+    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo)
     {
-        ThrowHelper.ThrowIfNull(other, nameof(other));
-
-        var left = ToString();
-        var right = other.ToString();
-
-        return string.Equals(left, right);
+        return IsMatch(path, cultureInfo, false);
     }
 
-    public IEnumerator<Segment> GetEnumerator()
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="cultureInfo"></param>
+    /// <param name="matchCase"></param>
+    /// <returns></returns>
+    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo, bool matchCase)
     {
-        return (IEnumerator<Segment>)_segments.GetEnumerator();
-    }
+        bool consumesVariableLength = _tokens.Length == 0;
+        int consumesMinLength = 0;
+        int position = 0;
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
+        for (int i = 0; i < _tokens.Length; i++)
+        {
+            consumesMinLength = consumesMinLength + _tokens[i].ConsumesMinLength;
+
+            if (!consumesVariableLength)
+            {
+                if (_tokens[i].ConsumesVariableLength)
+                {
+                    consumesVariableLength = true;
+                }
+            }
+        }
+
+        if (!consumesVariableLength)
+        {
+            if ((path.Length - position) != consumesMinLength)
+            {
+                // can't possibly match as tokens require a fixed length and the string length is different.
+                return false;
+            }
+        }
+        else if ((path.Length - position) < consumesMinLength)
+        {
+            // can't possibly match as tokens require a minimum length and the string is too short.
+            return false;
+        }
+
+        var span = path.AsSpan();
+
+        for (int i = 0; i < _tokens.Length; i++)
+        {
+            if (!_tokens[i].Test(span, cultureInfo, !matchCase, position, out position))
+            {
+                return false;
+            }
+        }
+
+        // if all tokens matched but still more text then fail!
+        if (position < path.Length - 1)
+        {
+            return false;
+        }
+
+        // Success.
+        return true;
     }
 
     /// <summary>
@@ -76,480 +121,92 @@ public sealed class Glob : IEquatable<Glob>, IEnumerable<Segment>
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    /// <exception cref="Exception"></exception>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="ArgumentNullException"></exception>
     public static Glob Parse(string pattern)
     {
         ThrowHelper.ThrowIfNullOrEmpty(pattern);
 
-        var isParentSegmentLegal = true;
+        var tokens = _parser.Tokenize(pattern);
 
-        var items =  Normalize(pattern).Split(FileSystemPath.Separator);
-
-        var segments = new Segment[items.Length];
-
-        for (int i = 0; i < items.Length; i++)
-        {
-            Segment segment = null!;
-
-            var current = items[i];
-
-            if (current.Contains('?'))
-            {
-                throw new Exception("`?` is not supported. Use `*` instead.");
-            }
-
-            // Convert `*.*` to `*`
-            if (segment is null && current.Length == 3 && current[0] == '*' && current[1] == '.' && current[2] == '*')
-            {
-                current = "*";
-            }
-
-            // Check for `..` or `**`
-            if (segment is null && current.Length == 2)
-            {
-                segment = current switch
-                {
-                    "**" => new RecursiveWildcardSegment(),
-                    ".." when isParentSegmentLegal => new ParentSegment(),
-                    ".." when !isParentSegmentLegal => throw new ArgumentException("\"..\" can be only added at the beginning of the pattern."),
-                    _ => null!
-                };
-            }
-
-            // Check for current segment `.`
-            if (segment is null && current.Length == 1 && current[0] == '.')
-            {
-                segment = new CurrentSegment();
-            }
-
-            // Check for recursive wild card `**.`
-            if (segment is null && current.StartsWith("**."))
-            {
-                segment = new RecursiveWildcardSegment();
-                current = current.Substring(2);
-            }
-
-            if (segment is null)
-            {
-                var beginsWith = string.Empty;
-                var endsWith = string.Empty;
-                var contains = new List<string>();
-
-                var ending = current.Length;
-
-                for (int scanSegment = 0; scanSegment < ending;)
-                {
-                    int beginLiteral = scanSegment;
-                    int endLiteral = NextIndex(current, ['*'], scanSegment, ending);
-
-                    if (beginLiteral == 0)
-                    {
-                        if (endLiteral == ending)
-                        {
-                            // and the only bit
-                            segment = new LiteralSegment(Portion(current, beginLiteral, endLiteral));
-                        }
-                        else
-                        {
-                            // this is the first bit
-                            beginsWith = Portion(pattern, beginLiteral, endLiteral);
-                        }
-                    }
-                    else if (endLiteral == ending)
-                    {
-                        // this is the last bit
-                        endsWith = Portion(current, beginLiteral, endLiteral);
-                    }
-                    else
-                    {
-                        if (beginLiteral != endLiteral)
-                        {
-                            // this is a middle bit
-                            contains.Add(Portion(current, beginLiteral, endLiteral));
-                        }
-                        else
-                        {
-                            // note: NOOP here, adjacent *'s are collapsed when they
-                            // are mixed with literal text in a path segment
-                        }
-                    }
-
-                    scanSegment = endLiteral + 1;
-                }
-
-                if (segment is null)
-                {
-                    segment = new WildcardSegment(beginsWith, contains, endsWith);
-                }
-            }
-
-            if (segment is not ParentSegment)
-            {
-                isParentSegmentLegal = false;
-            }
-            if (segment is CurrentSegment)
-            {
-                continue;
-            }
-
-            segments[i] = segment;
-        }
-
-        return new Glob(segments);
-
-
-        static string Portion(string pattern, int beginIndex, int endIndex)
-        {
-            return pattern.Substring(beginIndex, endIndex - beginIndex);
-        }
-        static int NextIndex(string pattern, char[] anyOf, int beginIndex, int endIndex)
-        {
-            int index = pattern.IndexOfAny(anyOf, beginIndex, endIndex - beginIndex);
-            return index == -1 ? endIndex : index;
-        }
-    }
-
-
-    private static string Normalize(string path)
-    {
-        var (start, end) = GetTrimRange(path);
-
-        int resize = 0;
-
-        var value = string.Create((end + 1) - start, path, (span, value) =>
-        {
-            char previous = default;
-
-            // Let's convert all backward slashes to forward slashes
-            for (int i = start; i < (end + 1); i++)
-            {
-                var current = value[i];
-
-                // Convert back slash to forward slash
-                if (current == '\\')
-                {
-                    current = '/';
-                }
-                // Check for excessive slashes
-                if (previous == '/' && current == '/')
-                {
-                    resize++;
-                    continue;
-                }
-
-                previous = current;
-                span[i - start - resize] = current;
-            }
-        });
-
-        if (resize > 0)
-        {
-            return value.Remove(value.Length - resize);
-        }
-        else
-        {
-            return value;
-        }
+        return new Glob(tokens);
     }
 
     #region Overloads
 
     public override string ToString()
     {
-        return string.Join(FileSystemPath.Separator, [.. _segments]);
+        return base.ToString();
     }
+
+    public override bool Equals(object? obj)
+    {
+        return base.Equals(obj);
+    }
+
+    public override int GetHashCode()
+    {
+        return base.GetHashCode();
+    }
+
+    #endregion
 
     #endregion
 
     #region Operators
 
-    public static implicit operator Glob(string pattern) => Parse(pattern);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="pattern"></param>
+    public static implicit operator Glob(string pattern)
+    {
+        return Parse(pattern);
+    }
 
-    public static implicit operator string(Glob glob) => glob.ToString();
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="glob"></param>
+
+    public static implicit operator string(Glob glob)
+    {
+        return glob.ToString();
+    }
 
     #endregion
 
     #region Partials
 
-    public enum SegmentKind
+    /// <summary>
+    /// 
+    /// </summary>
+    public enum TokenKind
     {
-        /// <summary>
-        /// 
-        /// </summary>
-        Current,
-
-        /// <summary>
-        /// 
-        /// </summary>
         Literal,
-
-        /// <summary>
-        /// * - Matches any character in a filename.
-        /// </summary>
+        CharacterSet,
+        Any,
         Wildcard,
-
-        /// <summary>
-        /// ** - Matches any character in a filename or directory.
-        /// </summary>
-        RecursiveWildcard,
-
-        /// <summary>
-        /// .. - Matches the parent directory.
-        /// </summary>
-        ParentDirectory,
-
-        /// <summary>
-        /// {*.cs,*test} - Matches
-        /// </summary>
-        BraceGrouping,
-
-        /// <summary>
-        /// [abc] or [a-z] or [0-9]
-        /// </summary>
-        CharacterSet
+        WildcardDirectory,
+        Range,
+        PathSeparator,
     }
 
-    public abstract class Segment
+    /// <summary>
+    /// 
+    /// </summary>
+    public abstract class Token
     {
-        // This should be in accessable
-        internal Segment()
-        {
-        }
+        internal Token() { }
 
         /// <summary>
         /// 
-        /// </summary>
-        public abstract bool HasStem { get; }
-
-        /// <summary>
-        /// Teh raw segment value.
         /// </summary>
         public abstract string Value { get; }
 
         /// <summary>
-        /// The kind of segment.
-        /// </summary>
-        public abstract SegmentKind Kind { get; }
-
-        /// <summary>
         /// 
         /// </summary>
-        /// <param name="value"></param>
-        /// <returns></returns>
-        public abstract bool IsMatch(string value, StringComparison comparison);
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="kind"></param>
-        /// <returns></returns>
-        public bool IsKind(SegmentKind kind)
-        {
-            return Kind == kind;
-        }
+        public abstract TokenKind Kind { get; }
     }
-    internal partial class CurrentSegment : Segment
-    {
-        public override bool HasStem => false;
-        public override string Value { get; } = ".";
-        public override SegmentKind Kind => SegmentKind.Current;
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            return false;
-        }
-    }
-    internal partial class LiteralSegment : Segment
-    {
-        public LiteralSegment(string value)
-        {
-            ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
-            Value = value;
-        }
 
-        public override string Value { get; } = "*";
-        public override bool HasStem => false;
-        public override SegmentKind Kind => SegmentKind.Literal;
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            return string.Equals(Value, value, comparison);
-        }
-    }
-    internal partial class ParentSegment : Segment
-    {
-        public override bool HasStem => false;
-        public override string Value { get; } = "..";
-        public override SegmentKind Kind => SegmentKind.ParentDirectory;
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            return string.Equals(Value, value, comparison);
-        }
-    }
-    internal partial class RecursiveWildcardSegment : Segment
-    {
-        public override bool HasStem => true;
-        public override string Value { get; } = "**";
-        public override SegmentKind Kind => SegmentKind.RecursiveWildcard;
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            return false;
-        }
-    }
-    internal partial class WildcardSegment : Segment
-    {
-        public WildcardSegment(string beginsWith, List<string> contains, string endsWith)
-        {
-            BeginsWith = beginsWith;
-            Contains = contains;
-            EndsWith = endsWith;
-        }
-
-        public override bool HasStem => true;
-        public override string Value { get; } = "*";
-        public override SegmentKind Kind => SegmentKind.Wildcard;
-        public string BeginsWith { get; }
-        public string EndsWith { get; }
-        public IReadOnlyList<string> Contains { get; }
-
-        public override string ToString()
-        {
-            var builder = new StringBuilder();
-
-            if (!string.IsNullOrEmpty(BeginsWith))
-            {
-                builder.Append(BeginsWith);
-                builder.Append(Value);
-            }
-
-            if (builder.Length == 0 && Contains.Count > 0)
-            {
-                builder.Append(Value);
-            }
-
-            for (int i = 0; i < Contains.Count; i++)
-            {
-                builder.Append(Contains[i]);
-                builder.Append(Value);
-            }
-
-            if (!string.IsNullOrEmpty(BeginsWith))
-            {
-                builder.Append(BeginsWith);
-            }
-
-            return builder.ToString();
-        }
-
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            WildcardSegment wildcard = this;
-
-            if (value.Length < wildcard.BeginsWith.Length + wildcard.EndsWith.Length)
-            {
-                return false;
-            }
-
-            if (!value.StartsWith(wildcard.BeginsWith, comparison))
-            {
-                return false;
-            }
-
-            if (!value.EndsWith(wildcard.EndsWith, comparison))
-            {
-                return false;
-            }
-
-            int beginRemaining = wildcard.BeginsWith.Length;
-            int endRemaining = value.Length - wildcard.EndsWith.Length;
-            for (int containsIndex = 0; containsIndex != wildcard.Contains.Count; ++containsIndex)
-            {
-                string containsValue = wildcard.Contains[containsIndex];
-                int indexOf = value.IndexOf(
-                    value: containsValue,
-                    startIndex: beginRemaining,
-                    count: endRemaining - beginRemaining,
-                    comparisonType: comparison);
-                if (indexOf == -1)
-                {
-                    return false;
-                }
-
-                beginRemaining = indexOf + containsValue.Length;
-            }
-
-            return true;
-        }
-
-
-        // It doesn't matter which StringComparison type is used in this MatchAll segment because
-        // all comparing are skipped since there is no content in the segment.
-        public static readonly WildcardSegment MatchAll = new WildcardSegment(
-            string.Empty,
-            new List<string>(),
-            string.Empty);
-    }
-    internal partial class BraceGroupingSegment : Segment
-    {
-        public BraceGroupingSegment(string value, Segment[] groupings)
-        {
-            Value = value;
-            Groupings = groupings;
-        }
-
-        public override bool HasStem => false;
-        public override string Value { get; }
-        public Segment[] Groupings { get; }
-        public override SegmentKind Kind => SegmentKind.BraceGrouping;
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            foreach (var segment in Groupings)
-            {
-                if (segment.IsMatch(value, comparison))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        #region Overloads
-        public override string ToString()
-        {
-            var builder = new StringBuilder();
-
-            builder.Append("{");
-
-            for (int i = 0; i < Groupings.Length; i++)
-            {
-                builder.Append(Groupings[i].ToString());
-
-                if (i < Groupings.Length - 1)
-                {
-                    builder.Append(",");
-                }
-            }
-
-            builder.Append("}");
-
-            return builder.ToString();
-        }
-
-        #endregion
-    }
-    internal partial class CharacterSetSegment : Segment
-    {
-        public override bool HasStem => throw new NotImplementedException();
-
-        public override string Value => throw new NotImplementedException();
-
-        public override SegmentKind Kind => SegmentKind.CharacterSet;
-
-        public override bool IsMatch(string value, StringComparison comparison)
-        {
-            throw new NotImplementedException();
-        }
-    }
     #endregion
 }

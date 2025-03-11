@@ -17,8 +17,24 @@ public class PhysicalFileSystem : IFileSystem
 {
     private readonly DriveInfo _driveInfo;
     private readonly PhysicalFileSystemDirectory _root;
-    private readonly string _name;
     private bool _isReadOnly;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="root"></param>
+    public PhysicalFileSystem(FileSystemPath root)
+    {
+        if (!Exists(root))
+        {
+            ThrowHelper.ThrowPathNotExistException(root);
+        }
+        _driveInfo = new DriveInfo(root!);
+        _root = new PhysicalFileSystemDirectory(this, _driveInfo.RootDirectory)
+        {
+            IgnoreAttributes = PhysicalFileSystemOptions.Default.IgnoreAttributes
+        };
+    }
 
     /// <summary>
     /// 
@@ -28,10 +44,9 @@ public class PhysicalFileSystem : IFileSystem
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
-        _driveInfo = new DriveInfo(options!.Drive!);
-        _root = new PhysicalFileSystemDirectory(_driveInfo.RootDirectory)
+        _driveInfo = new DriveInfo(options!.Root!);
+        _root = new PhysicalFileSystemDirectory(this, _driveInfo.RootDirectory)
         {
-            FileSystem = this,
             IgnoreAttributes = options.IgnoreAttributes
         };
     }
@@ -40,69 +55,87 @@ public class PhysicalFileSystem : IFileSystem
     public Size SpaceAvailable => _driveInfo.TotalFreeSpace;
     public Size SpaceUsed => (_driveInfo.TotalSize - _driveInfo.TotalFreeSpace);
     public IFileSystemDirectory RootDirectory => _root;
-
     public bool Exists(FileSystemPath path)
     {
-        return RootDirectory.Exists(path);
+#if NET7_0_OR_GREATER
+        return System.IO.Path.Exists(path);
+#else
+        return File.Exists(path) || Directory.Exists(path);
+#endif
     }
+
+    public bool TryGetInfo(FileSystemPath path, out IFileSystemInfo? info)
+    {
+        info = null!;
+
+        if (File.Exists(path))
+        {
+            info = new PhysicalFileSystemFile(this, new FileInfo(path)) 
+            {
+                IgnoreAttributes = _root.IgnoreAttributes
+            };
+            return true;
+        }
+
+        if (Directory.Exists(path))
+        {
+            info = new PhysicalFileSystemDirectory(this, new DirectoryInfo(path))
+            {
+                IgnoreAttributes = _root.IgnoreAttributes
+            };
+            return true;
+        }
+
+        return false;
+    }
+
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        try
-        {
-            var directoryInfo = _driveInfo.RootDirectory;
-            var directoryPath = RootDirectory.Path.Combine(path);
+        throw new NotImplementedException();
+        //try
+        //{
+        //    var directoryInfo = _driveInfo.RootDirectory;
+        //    var directoryPath = RootDirectory.Path.Combine(path);
 
-
-
-        }
-        catch (Exception exception) when (exception is not FileSystemException)
-        {
-            throw new FileSystemException("", exception);
-        }
+        //    return new PhysicalFileSystemDirectory(
+        //        directoryInfo.CreateSubdirectory(directoryPath));
+        //}
+        //catch (Exception exception) when (exception is not FileSystemException)
+        //{
+        //    throw new FileSystemException("", exception);
+        //}
     }
     public IFileSystemFile CreateFile(FileSystemPath path)
     {
-        return RootDirectory.CreateFile(path);
+        throw new NotImplementedException();
     }
     public void DeleteDirectory(FileSystemPath path)
     {
-        RootDirectory.DeleteDirectory(path);
+        throw new NotImplementedException();
     }
     public void DeleteFile(FileSystemPath path)
     {
-        RootDirectory.DeleteFile(path);
+        throw new NotImplementedException();
+        //RootDirectory.DeleteFile(path);
     }
     public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
-        return RootDirectory.GetDirectory(path);
+        throw new NotImplementedException();
+        //return RootDirectory.GetDirectory(path);
     }
     public IFileSystemFile GetFile(FileSystemPath path)
     {
-        return RootDirectory.GetFile(path);
-    }
-    public void CopyFile(FileSystemPath source, FileSystemPath destination)
-    {
-        RootDirectory.CopyFile(source, destination);
-    }
-    public void Move(FileSystemPath source, FileSystemPath destination)
-    {
-        RootDirectory.Move(source, destination);
-    }
-    public IFileSystemChangeToken Watch(FileSystemPath pattern)
-    {
-        return new PhysicalFileSystemChangeToken(_root, pattern);
-    }
-
-    public void CopyFile(FileSystemPath source, FileSystemPath destination)
-    {
-
         throw new NotImplementedException();
-
-
     }
+    public void CopyFile(FileSystemPath source, FileSystemPath destination)
+    {
+        throw new NotImplementedException();
+    }
+    
+
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
-        CheckIfReadOnly();
+        //CheckIfReadOnly();
 
         if (File.Exists(source))
         {
@@ -118,31 +151,41 @@ public class PhysicalFileSystem : IFileSystem
             throw new IOException("source not found");
         }
     }
-    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    public IFileSystemChangeToken Watch(Glob pattern)
+    {
+        return RootDirectory.Watch(pattern);
+    }
+    public IEnumerable<IFileSystemDirectory> EnumerateDirectories()
     {
         return RootDirectory.GetDirectories();
     }
-    public IEnumerable<IFileSystemFile> GetFiles()
+    public IEnumerable<IFileSystemFile> EnumerateFiles()
     {
-        return RootDirectory.GetFiles();
+        return _driveInfo.RootDirectory
+            .EnumerateFiles("*", _root.GetEnumerationOptions(true))
+            .Select<FileSystemInfo, IFileSystemFile>(item => item switch
+            {
+                FileInfo info => new PhysicalFileSystemFile(this, info)
+                {
+                    IgnoreAttributes = _root.IgnoreAttributes
+                },
+                _ => throw new Exception("Invalid object in physical file system.")
+            });
     }
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
         return RootDirectory.GetEnumerator();
     }
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public void Dispose()
     {
 
     }
-
-    //public IReadOnlyFileSystem AsReadOnly()
-    //{
-    //    _isReadOnly = true;
-    //    return this!;
-    //}
-
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;

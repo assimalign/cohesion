@@ -6,4 +6,4 @@ using System.Reflection;
 
 
 
-var summary = BenchmarkRunner.Run<FileSystemPathParsingStrategy>();
+var summary = BenchmarkRunner.Run<FileSystemPathBenchmarks>();

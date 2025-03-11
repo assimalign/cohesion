@@ -12,23 +12,33 @@ public class PhysicalFileSystemOptions
 {
     public PhysicalFileSystemOptions()
     {
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsIOS() || OperatingSystem.IsMacOS())
         {
-            Drive = "/";
+            Root = "/";
         }
         if (OperatingSystem.IsWindows())
         {
-            Drive = "C:/";
+            Root = "C:/";
         }
     }
 
     /// <summary>
     /// The drive to initialize the file system from.
     /// </summary>
-    public string? Drive { get; set; }
+    public FileSystemPath Root { get; set; }
 
     /// <summary>
     /// The attributes to ignore when enumerating file system.
     /// </summary>
     public FileAttributes IgnoreAttributes { get; set; } = FileAttributes.Hidden | FileAttributes.System;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// Returns the default options.
+    /// </summary>
+    public static PhysicalFileSystemOptions Default { get; } = new PhysicalFileSystemOptions();
 }

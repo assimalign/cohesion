@@ -3,7 +3,7 @@ using Assimalign.Cohesion.FileSystem;
 
 var fileSystem = new PhysicalFileSystem(new PhysicalFileSystemOptions()
 {
-    Drive = "C"
+    Root = "C"
 });
 
 var directory = fileSystem.GetDirectory("C:/users/chase");

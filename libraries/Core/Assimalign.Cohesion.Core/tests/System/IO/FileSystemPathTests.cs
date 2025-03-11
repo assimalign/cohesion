@@ -30,7 +30,6 @@ public class FileSystemPathTests
     [InlineData("C:/users/?test.cs", typeof(ArgumentException))]
     public void ParseExceptionTest(string value, Type exceptionType)
     {
-
         Assert.Throws(exceptionType, () =>
         {
             FileSystemPath.Parse(value);
@@ -80,5 +79,48 @@ public class FileSystemPathTests
     public void DriveTest(string value, bool hasDrive)
     {
         Assert.Equal(hasDrive, FileSystemPath.Parse(value).HasDrive(out var c));
+    }
+
+
+    [Theory]
+    [InlineData("C:/directory", "C:/")]
+    [InlineData("/directory", "/")]
+    [InlineData("//server/directory/some/path", "//server/directory")]
+    public void RootTest(string value, string root)
+    {
+        Assert.True(FileSystemPath.Parse(value).HasRoot(out var r));
+        Assert.Equal(root, r);
+    }
+
+    [Theory]
+    [InlineData("//server/share/directory", 1, "directory")]
+    [InlineData("C:/server/share/directory", 3, "server")]
+    public void SegmentTest(string value, int count, string firstSegment)
+    {
+        var path = FileSystemPath.Parse(value);
+        var segments = path.GetSegments();
+
+        Assert.Equal(count, segments.Length);
+        Assert.Equal(firstSegment, segments[0]);
+    }
+
+    [Theory]
+    [InlineData("C:/users/dotnetcadet", "C:/UseRs\\DoTNetCadET", true)]
+    [InlineData("C:/users/dotnetcadet", "C:/UseRs\\DoTNetCadE", true)]
+    public void EqualityTest(string value1, string value2, bool isEqual)
+    {
+        FileSystemPath path1 = value1;
+        FileSystemPath path2 = value2;
+
+        if (isEqual)
+        {
+            Assert.True(path1 == path2);
+            Assert.False(path1 != path2);
+        }
+        else
+        {
+            Assert.False(path1 == path2);
+            Assert.True(path1 != path2);
+        }
     }
 }

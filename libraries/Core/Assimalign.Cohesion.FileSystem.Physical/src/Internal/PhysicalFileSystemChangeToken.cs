@@ -93,8 +93,16 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
     private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
     {
         FileSystemPath path = args.FullPath;
+        IFileSystem fileSystem = _fileSystemInfo.FileSystem;
 
-        if(_fileSystemInfo.Path == path && _matcher.IsMatch())
+        if (!fileSystem.TryGetInfo(path, out var info))
+        {
+            // TODO: decide what to do. This should not occure
+        }
+
+
+
+        if(_fileSystemInfo.Path == path)
         {
 
         }

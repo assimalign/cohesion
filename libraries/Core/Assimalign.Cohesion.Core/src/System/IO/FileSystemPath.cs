@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 #if NET7_0_OR_GREATER
@@ -9,7 +10,6 @@ using System.Numerics;
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
-using System.Reflection.Metadata.Ecma335;
 using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
@@ -65,36 +65,84 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     #region Methods
 
     /// <summary>
-    /// Returns the segments of the path.
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public ReadOnlySpan<char> AsSpan()
+    {
+        return _value.AsSpan();
+    }
+ 
+    /// <summary>
+    /// Returns the segments of the path relative to the root. The root, if any, is disregarded.
     /// </summary>
     /// <returns></returns>
     public string[] GetSegments()
     {
+        //if (HasRoot(out string root))
+        //{
+        //    return _value.Substring(root.Length).Split(Separator, StringSplitOptions.RemoveEmptyEntries);
+        //}
+
+        //return _value.Split(Separator, StringSplitOptions.RemoveEmptyEntries);
+
+        ReadOnlySpan<char> span = _value.AsSpan();
+
         if (HasRoot(out string root))
         {
-            return _value.Substring(root.Length).Split(Separator, StringSplitOptions.RemoveEmptyEntries);
+            span = span.Slice(root.Length);
         }
 
-        return _value.Split(Separator, StringSplitOptions.RemoveEmptyEntries);
+        var segments = new List<string>();
+        int start = 0;
+
+        for (int i = 0; i < span.Length; i++)
+        {
+            if (span[i] == Separator)
+            {
+                if (i > start)
+                {
+                    segments.Add(span.Slice(start, i - start).ToString());
+                }
+                start = i + 1;
+            }
+        }
+
+        if (start < span.Length)
+        {
+            segments.Add(span.Slice(start).ToString());
+        }
+
+        return segments.ToArray();
     }
 
     /// <summary>
-    /// 
+    /// Checks if the path is rooted.
     /// </summary>
     /// <returns></returns>
     public bool HasRoot()
     {
+        if (IsEmpty)
+        {
+            return false;
+        }
+
         return Path.IsPathRooted(_value);
     }
 
     /// <summary>
-    /// 
+    /// Returns the root of the path, if any.
     /// </summary>
     /// <param name="root"></param>
     /// <returns></returns>
     public bool HasRoot(out string root)
     {
         root = default!;
+
+        if (IsEmpty)
+        {
+            return false;
+        }
 
         var value = Path.GetPathRoot(_value)!;
 
@@ -104,16 +152,17 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             {
                 for (int i = 0; i < item.Length; i++)
                 {
-                    if (span[i] == '\\')
+                    if (item[i] == '\\')
                     {
-                        span[i] = Separator;
+                        span[i] = '/';
                     }
                     else
                     {
-                        span[i] = value[i];
+                        span[i] = item[i];
                     }
                 }
             });
+
             return true;
         }
 
@@ -121,7 +170,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     }
 
     /// <summary>
-    /// If a drive letter
+    /// Checks whether a valid drive letter is Returns the 
     /// </summary>
     /// <param name="drive">The drive letter</param>
     /// <returns></returns>
@@ -132,6 +181,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         if (HasValidDriveLetter(_value))
         {
             drive = _value[0];
+
             return true;
         }
 
@@ -187,7 +237,12 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             return right;
         }
 
-        return string.Join(Separator, left._value, right._value);
+        if (right.HasRoot(out var root) && root.Length != 1 && root[0] != Separator)
+        {
+            ThrowHelper.ThrowArgumentException("The right most path must not be rooted in either '[Drive]:/' or '//[Server]/[share]'.");
+        }
+
+        return string.Join(Separator, left._value, right._value.Trim(Separator));
     }
 
     /// <summary>
@@ -313,13 +368,6 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
     }
 
-    // TODO: Create a more performant parser
-    //public static FileSystemPath Parse(ReadOnlySpan<char> span)
-    //{
-
-    //    return default;
-    //}
-
     /// <summary>
     /// 
     /// </summary>
@@ -370,7 +418,6 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         {
             shift = 1;
         }
-
 
         CalculateTrimRange(value, ref start, ref end);
 
@@ -445,166 +492,6 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         }
 
         return new FileSystemPath(span.ToString());
-
-        // STRATEGY 1
-        //unsafe
-        //{
-        //    fixed (char* value = path)
-        //    {
-        //        var span = new Span<char>(value + start, ((end + 1) - start) + shift);
-
-        //        for (int i = 0; i < shift; i++)
-        //        {
-        //            span[i] = Separator;
-        //        }
-
-        //        char previous = default;
-
-        //        // Let's convert all backward slashes to forward slashes
-        //        for (int i = start; i < (end + 1); i++)
-        //        {
-        //            var current = path[i];
-
-        //            // Convert back slash to forward slash
-        //            if (current == '\\')
-        //            {
-        //                current = Separator;
-        //            }
-
-        //            // Check for excessive slashes
-        //            if (IsSeparator(previous) && IsSeparator(current))
-        //            {
-        //                reduce++;
-        //                continue;
-        //            }
-
-        //            // Check for parent directory globing ".."
-        //            if (IsDot(previous) && IsDot(current))
-        //            {
-        //                // scenario 1: ".." was only passed
-        //                // scenario 2: "{directory}/../{directory}"
-        //                // scenario 3: "../{directory}"
-        //                // scenario 4: "/{directory}/.."
-
-        //                var s = i - 2;
-        //                var e = i + 1;
-
-        //                var hasStart = (s > 0 && IsSeparator(path[s])) || s < 0;
-        //                var hasEnd = (e < end && IsSeparator(path[e])) || e > end;
-
-        //                if ((s < 0 && e > end) || (hasStart && hasEnd))
-        //                {
-        //                    ThrowHelper.ThrowArgumentException("Parent directory globing is not allowed - \"..\". The value must be an absolute or relative path.");
-        //                }
-        //            }
-        //            if (!IsValidPathChar(current))
-        //            {
-        //                ThrowHelper.ThrowArgumentException($"Path contains illegal character '{current}' at index {i}.");
-        //            }
-
-        //            previous = current;
-
-        //            span[(i + shift) - start - reduce] = current;
-        //        }
-
-        //        if (reduce > 0)
-        //        {
-        //            span = span.Slice(0, span.Length - reduce);
-        //        }
-
-        //        return new FileSystemPath(span.ToString());
-        //    }
-        //}
-
-
-        // STRATEGY 2
-        //string? error = null!;
-
-        //var value = string.Create(((end + 1) - start) + shift, path, (span, value) =>
-        //{
-        //    for (int i = 0; i < shift; i++)
-        //    {
-        //        span[i] = Separator;
-        //    }
-
-        //    char previous = default;
-
-        //    // Let's convert all backward slashes to forward slashes
-        //    for (int i = start; i < (end + 1); i++)
-        //    {
-        //        var current = value[i];
-
-        //        // Convert back slash to forward slash
-        //        if (current == '\\')
-        //        {
-        //            current = Separator;
-        //        }
-
-        //        // Check for excessive slashes
-        //        if (IsSeparator(previous) && IsSeparator(current))
-        //        {
-        //            reduce++;
-        //            continue;
-        //        }
-
-        //        // Check for parent directory globbing ".."
-        //        if (IsDot(previous) && IsDot(current))
-        //        {
-        //            // scenario 1: ".." was only passed
-        //            // scenario 2: "{directory}/../{directory}"
-        //            // scenario 3: "../{directory}"
-        //            // scenario 4: "/{directory}/.."
-
-        //            var s = i - 2;
-        //            var e = i + 1;
-
-        //            var hasStart = (s > 0 && IsSeparator(value[s])) || s < 0;
-        //            var hasEnd = (e < end && IsSeparator(value[e])) || e > end;
-
-        //            if ((s < 0 && e > end) || (hasStart && hasEnd))
-        //            {
-        //                error = "Parent directory globbing is not allowed - \"..\". The value must be an absolute or relative path.";
-        //                break;
-        //            }
-        //        }
-        //        if (!IsValidPathChar(current))
-        //        {
-        //            error = $"Path contains illegal character '{current}' at index {i}.";
-        //            break;
-        //        }
-
-        //        previous = current;
-
-        //        span[(i + shift) - start - reduce] = current;
-        //    }
-        //});
-
-        //if (error is not null)
-        //{
-        //    ThrowHelper.ThrowArgumentException(error);
-        //}
-
-        //if (reduce > 0)
-        //{
-        //    return new FileSystemPath(value.Remove(value.Length - reduce));
-        //}
-        //else
-        //{
-        //    return new FileSystemPath(value);
-        //}
-    }
-
-    private static bool HasDrive(string value)
-    {
-        if (value.Length >= 2)
-        {
-            if ((uint)((value[0] | 0x20) - 97) <= 25u && value[1] == ':')
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     #region Overloads
@@ -612,10 +499,6 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <inheritdoc />
     public override bool Equals(object? obj)
     {
-        if (ReferenceEquals(null, obj))
-        {
-            return false;
-        }
         if (obj is FileSystemPath path)
         {
             return Equals(path);
@@ -724,3 +607,151 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     }
     #endregion
 }
+
+
+// STRATEGY 1
+//unsafe
+//{
+//    fixed (char* value = path)
+//    {
+//        var span = new Span<char>(value + start, ((end + 1) - start) + shift);
+
+//        for (int i = 0; i < shift; i++)
+//        {
+//            span[i] = Separator;
+//        }
+
+//        char previous = default;
+
+//        // Let's convert all backward slashes to forward slashes
+//        for (int i = start; i < (end + 1); i++)
+//        {
+//            var current = path[i];
+
+//            // Convert back slash to forward slash
+//            if (current == '\\')
+//            {
+//                current = Separator;
+//            }
+
+//            // Check for excessive slashes
+//            if (IsSeparator(previous) && IsSeparator(current))
+//            {
+//                reduce++;
+//                continue;
+//            }
+
+//            // Check for parent directory globing ".."
+//            if (IsDot(previous) && IsDot(current))
+//            {
+//                // scenario 1: ".." was only passed
+//                // scenario 2: "{directory}/../{directory}"
+//                // scenario 3: "../{directory}"
+//                // scenario 4: "/{directory}/.."
+
+//                var s = i - 2;
+//                var e = i + 1;
+
+//                var hasStart = (s > 0 && IsSeparator(path[s])) || s < 0;
+//                var hasEnd = (e < end && IsSeparator(path[e])) || e > end;
+
+//                if ((s < 0 && e > end) || (hasStart && hasEnd))
+//                {
+//                    ThrowHelper.ThrowArgumentException("Parent directory globing is not allowed - \"..\". The value must be an absolute or relative path.");
+//                }
+//            }
+//            if (!IsValidPathChar(current))
+//            {
+//                ThrowHelper.ThrowArgumentException($"Path contains illegal character '{current}' at index {i}.");
+//            }
+
+//            previous = current;
+
+//            span[(i + shift) - start - reduce] = current;
+//        }
+
+//        if (reduce > 0)
+//        {
+//            span = span.Slice(0, span.Length - reduce);
+//        }
+
+//        return new FileSystemPath(span.ToString());
+//    }
+//}
+
+
+// STRATEGY 2
+//string? error = null!;
+
+//var value = string.Create(((end + 1) - start) + shift, path, (span, value) =>
+//{
+//    for (int i = 0; i < shift; i++)
+//    {
+//        span[i] = Separator;
+//    }
+
+//    char previous = default;
+
+//    // Let's convert all backward slashes to forward slashes
+//    for (int i = start; i < (end + 1); i++)
+//    {
+//        var current = value[i];
+
+//        // Convert back slash to forward slash
+//        if (current == '\\')
+//        {
+//            current = Separator;
+//        }
+
+//        // Check for excessive slashes
+//        if (IsSeparator(previous) && IsSeparator(current))
+//        {
+//            reduce++;
+//            continue;
+//        }
+
+//        // Check for parent directory globbing ".."
+//        if (IsDot(previous) && IsDot(current))
+//        {
+//            // scenario 1: ".." was only passed
+//            // scenario 2: "{directory}/../{directory}"
+//            // scenario 3: "../{directory}"
+//            // scenario 4: "/{directory}/.."
+
+//            var s = i - 2;
+//            var e = i + 1;
+
+//            var hasStart = (s > 0 && IsSeparator(value[s])) || s < 0;
+//            var hasEnd = (e < end && IsSeparator(value[e])) || e > end;
+
+//            if ((s < 0 && e > end) || (hasStart && hasEnd))
+//            {
+//                error = "Parent directory globbing is not allowed - \"..\". The value must be an absolute or relative path.";
+//                break;
+//            }
+//        }
+//        if (!IsValidPathChar(current))
+//        {
+//            error = $"Path contains illegal character '{current}' at index {i}.";
+//            break;
+//        }
+
+//        previous = current;
+
+//        span[(i + shift) - start - reduce] = current;
+//    }
+//});
+
+//if (error is not null)
+//{
+//    ThrowHelper.ThrowArgumentException(error);
+//}
+
+//if (reduce > 0)
+//{
+//    return new FileSystemPath(value.Remove(value.Length - reduce));
+//}
+//else
+//{
+//    return new FileSystemPath(value);
+//}

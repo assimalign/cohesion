@@ -3,11 +3,15 @@
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
+	
 	<ItemGroup>
-		<PackageReference Include="coverlet.collector"/>
+	  <Compile Remove="GeneratorTests.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="coverlet.collector" />
 		<PackageReference Include="Microsoft.NET.Test.Sdk" />
-		<PackageReference Include="xunit"  />
-		<PackageReference Include="xunit.runner.visualstudio"  />
+		<PackageReference Include="xunit" />
+		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\src\Assimalign.Cohesion.FileSystem.Globbing.csproj" />

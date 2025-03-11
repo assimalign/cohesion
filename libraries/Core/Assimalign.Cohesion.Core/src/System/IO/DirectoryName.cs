@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Internal;
 using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
-/// 
+/// A case insensitive directory name.
 /// </summary>
 [DebuggerDisplay("{_value}")]
 public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<DirectoryName>
@@ -27,18 +27,13 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     {
         ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
 
-        if (value.Length > MaxLength)
-        {
-            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
-        }
-
         if (value.Length == 1 && IsSeparator(value[0]))
         {
             _value = "/";
             return;
         }
 
-        var error = string.Empty;
+        string error = null!;
         var (start, end) = GetTrimRange(value);
 
         _value = string.Create((end + 2) - start, value, (span, value) =>
@@ -59,7 +54,12 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
             span[span.Length - 1] = '/';
         });
 
-        if (error.Length > 0)
+        if (_value.Length > MaxLength)
+        {
+            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
+        }
+
+        if (error is not null)
         {
             ThrowHelper.ThrowArgumentException(error);
         }
@@ -79,33 +79,6 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     /// Returns an empty directory name.
     /// </summary>
     public static DirectoryName Root { get; } = "/";
-
-    #region Overloads
-
-    public override bool Equals([NotNullWhen(true)] object? obj)
-    {
-        if (obj is null)
-        {
-            return false;
-        }
-        if (obj is not DirectoryName name)
-        {
-            return false;
-        }
-        return Equals(name);
-    }
-
-    public override string ToString()
-    {
-        return _value;
-    }
-
-    public override int GetHashCode()
-    {
-        return _value.GetHashCode();
-    }
-
-    #endregion
 
     #region Methods
 
@@ -150,6 +123,37 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     {
         return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
     }
+
+    public int GetHashCode(CultureInfo cultureInfo)
+    {
+        return StringComparer.Create(cultureInfo, true).GetHashCode(_value);
+    }
+
+    #region Overloads
+    public override bool Equals([NotNullWhen(true)] object? obj)
+    {
+        if (obj is null)
+        {
+            return false;
+        }
+        if (obj is not DirectoryName name)
+        {
+            return false;
+        }
+        return Equals(name);
+    }
+
+    public override string ToString()
+    {
+        return _value;
+    }
+
+    public override int GetHashCode()
+    {
+        return GetHashCode(CultureInfo.InvariantCulture);
+    }
+
+    #endregion
 
     #endregion
 

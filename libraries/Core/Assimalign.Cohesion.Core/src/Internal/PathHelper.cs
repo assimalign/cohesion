@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 
@@ -9,21 +10,16 @@ internal static class PathHelper
     private const char dot = '.';
     private static readonly char[] _separators = ['/', '\\'];
     private static readonly char[] _invalidFileChars = [.. Path.GetInvalidFileNameChars()];
-    private static readonly char[] _invalidPathChars = [.. Path.GetInvalidPathChars(), '<', '>', '?', '!', ];
+    private static readonly char[] _invalidPathChars = [.. Path.GetInvalidPathChars(), '<', '>', '?' ];
 
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsDot(char value)
     {
         return value == dot;
     }
-
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsSeparator(char value)
     {
         return value == _separators[0] || value == _separators[1];
     }
-
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsValidPathChar(char value)
     {
         for (int i = 0; i < _invalidPathChars.Length; i++)
@@ -36,8 +32,6 @@ internal static class PathHelper
 
         return true;
     }
-
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsValidNameChar(char value)
     {
         for (int i = 0; i < _invalidFileChars.Length; i++)
@@ -51,7 +45,6 @@ internal static class PathHelper
         return true;
     }
 
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool HasValidDriveLetter(string value)
     {
         if (value.Length >= 2)
@@ -65,21 +58,7 @@ internal static class PathHelper
         return false;
     }
 
-    internal static bool HasValidDriveLetter(ref ReadOnlySpan<char> value)
-    {
-        if (value.Length >= 2)
-        {
-            if ((uint)((value[0] | 0x20) - 97) <= 25u && value[1] == ':')
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     // Returns the starting and ending index of where to begin trimming a string
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static (int start, int end) GetTrimRange(string value, int startAt = 0)
     {
         int start = startAt;
@@ -90,7 +69,6 @@ internal static class PathHelper
         return (start, end);
     }
 
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void CalculateTrimRange(string value, ref int start, ref int end)
     {
         // Calculate start of string
@@ -118,8 +96,10 @@ internal static class PathHelper
         }
     }
 
-    internal static void CalculateTrimRange(ref ReadOnlySpan<char> value, ref int start, ref int end)
+    internal static int GetTrimStart(string value)
     {
+        int start = 0;
+
         // Calculate start of string
         for (; start < value.Length; start++)
         {
@@ -132,17 +112,7 @@ internal static class PathHelper
             if (index == _separators.Length) break;
         }
 
-        // Calculate end of string
-        for (; end >= start; end--)
-        {
-            int index = 0;
-            char c = value[end];
-            while (index < _separators.Length && _separators[index] != c)
-            {
-                index++;
-            }
-            if (index == _separators.Length) break;
-        }
+        return start;
     }
 
 

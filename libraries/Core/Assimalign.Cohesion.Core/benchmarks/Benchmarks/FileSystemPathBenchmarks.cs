@@ -13,15 +13,30 @@ namespace Assimalign.Cohesion.Benchmarks;
 
 
 [SimpleJob(RuntimeMoniker.Net90)]
-public class FileSystemPathParsingStrategy
+public class FileSystemPathBenchmarks
 {
-    private static char[] _invalidChars = [.. Path.GetInvalidPathChars(), '*', '?', '!', '<', '>', '^'];
-    private string path = "//test/users\\aas/fasdf\\myfile.txt";
+    private static char[] _invalidChars = [.. System.IO.Path.GetInvalidPathChars(), '*', '?', '!', '<', '>', '^'];
+    private string _value = "//test/users\\aas/fasdf\\myfile.txt";
+
+
+    public FileSystemPath Path { get; set; }
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        Path = _value;
+    }
+
+    //[Benchmark]
+    //public FileSystemPath Parsing()
+    //{
+    //    return FileSystemPath.Parse(_value);
+    //}
 
     [Benchmark]
-    public FileSystemPath Strategy()
+    public string[] GetSegments()
     {
-        return FileSystemPath.Parse(path);
+        return Path.GetSegments();
     }
 
     //[Benchmark]
