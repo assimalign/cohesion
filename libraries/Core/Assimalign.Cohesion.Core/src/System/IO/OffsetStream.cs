@@ -172,7 +172,7 @@ public class OffsetStream : Stream
             SeekOrigin.Begin => _offset + offset,
             SeekOrigin.Current => _stream.Position + offset,
             SeekOrigin.End => (_offset + _length) + offset,
-            _ => throw ThrowHelper.GetArgumentException("Invalid origin")
+            _ => throw new ArgumentException("Invalid Seek Origin")
         };
 
         if (boundary < _offset || boundary > (_offset + _length))

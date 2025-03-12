@@ -1,10 +1,13 @@
-﻿using System.ComponentModel;
+﻿using System.Diagnostics;
 using System.Globalization;
+using System.Reflection.Metadata.Ecma335;
+using System.Text;
 
 namespace System.IO;
 
 public sealed partial class Glob
 {
+    [DebuggerDisplay("{Kind} - {ToString()}")]
     internal abstract class TokenBase : Token
     {
         public abstract int ConsumesMinLength { get; }
@@ -15,6 +18,15 @@ public sealed partial class Glob
             bool ignoreCase,
             int position,
             out int next);
+
+        public override string ToString()
+        {
+            var builder = new StringBuilder();
+
+            Format(builder, this);
+
+            return builder.ToString();
+        }
     }
     internal abstract class NegatableGlobToken : TokenBase
     {
@@ -22,27 +34,27 @@ public sealed partial class Glob
     }
     internal abstract class CompositeGlobToken : TokenBase
     {
-        protected CompositeGlobToken(TokenBase[] children)
+        protected CompositeGlobToken(TokenBase[] tokens)
         {
-            Children = children;
+            Tokens = tokens;
 
-            for (int i = 0; i < children.Length; i++)
+            for (int i = 0; i < tokens.Length; i++)
             {
-                ConsumesMinLength = ConsumesMinLength + children[i].ConsumesMinLength;
+                ConsumesAnyMinLength = ConsumesAnyMinLength + tokens[i].ConsumesMinLength;
 
-                if (!ConsumesVariableLength)
+                if (!ConsumesAnyVariableLength)
                 {
-                    if (children[i].ConsumesVariableLength)
+                    if (tokens[i].ConsumesVariableLength)
                     {
-                        ConsumesVariableLength = true;
+                        ConsumesAnyVariableLength = true;
                     }
                 }
             }
         }
-        public TokenBase[] Children { get; }
-        public override bool ConsumesVariableLength { get; } = true;
-        public override int ConsumesMinLength { get; }
-        public bool TestChildren(
+        public TokenBase[] Tokens { get; }
+        public bool ConsumesAnyVariableLength { get;  }
+        public int ConsumesAnyMinLength { get; } = 0;
+        public bool TestAll(
             ReadOnlySpan<char> path,
             CultureInfo cultureInfo,
             bool ignoreCase,
@@ -51,23 +63,23 @@ public sealed partial class Glob
         {
             next = position;
 
-            if (!ConsumesVariableLength)
+            if (!ConsumesAnyVariableLength)
             {
-                if ((path.Length - position) != ConsumesMinLength)
+                if ((path.Length - position) != ConsumesAnyMinLength)
                 {
                     // can't possibly match as tokens require a fixed length and the string length is different.
                     return false;
                 }
             }
-            else if ((path.Length - position) < ConsumesMinLength)
+            else if ((path.Length - position) < ConsumesAnyMinLength)
             {
                 // can't possibly match as tokens require a minimum length and the string is too short.
                 return false;
             }
 
-            foreach (var child in Children)
+            foreach (var token in Tokens)
             {
-                if (!child.Test(path, cultureInfo, ignoreCase, next, out next))
+                if (!token.Test(path, cultureInfo, ignoreCase, next, out next))
                 {
                     return false;
                 }
@@ -98,11 +110,10 @@ public sealed partial class Glob
             return Lexer.IsPathSeparator(currentChar);
         }
     }
-    internal class AnyCharacterToken : NegatableGlobToken
+    internal class AnyCharacterToken : TokenBase
     {
         public override string Value { get; } = "?";
         public override TokenKind Kind { get; } = TokenKind.Any;
-        public override bool IsNegated { get; } = false;
         public override int ConsumesMinLength => 1;
         public override bool Test(
             ReadOnlySpan<char> path,
@@ -129,16 +140,23 @@ public sealed partial class Glob
         {
             Characters = characters;
             IsNegated = isNegated;
-            Value = string.Create(characters.Length + 2, characters, (span, array) =>
+            Value = string.Create(characters.Length + (isNegated ? 3 : 2), characters, (span, array) =>
             {
+                int start = isNegated ? 2 : 1;
+
                 span[0] = '[';
 
-                for (int i = 1; i < span.Length - 1; i++)
+                if (isNegated)
                 {
-                    span[i] = array[i - 1];
+                    span[1] = '!';
                 }
 
-                span[array.Length - 1] = ']';
+                for (int i = start; i < span.Length - 1; i++)
+                {
+                    span[i] = array[i - start];
+                }
+
+                span[span.Length - 1] = ']';
             });
         }
 
@@ -194,31 +212,33 @@ public sealed partial class Glob
     }
     internal class RangeToken : NegatableGlobToken
     {
-        protected RangeToken(char start, char end)
+        public RangeToken(char start, char end, bool isNegated)
         {
             Start = start;
             End = end;
-        }
-
-        public RangeToken(char start, char end, bool isNegated)
-            : this(start, end)
-        {
             IsNegated = isNegated;
-        }
-
-
-        public override string Value
-        {
-            get
+            Value = string.Create(5 + (isNegated ? 1 : 0), (Start, End), (span, tuple) =>
             {
-                if (IsNegated)
-                {
-                    return $"[!{Start}-{End}]";
-                }
+                span[0] = '[';
 
-                return $"[{Start}-{End}]";
-            }
+                if (isNegated)
+                {
+                    span[1] = '!';
+                    span[2] = tuple.Start;
+                    span[3] = '-';
+                    span[4] = tuple.End;
+                    span[5] = ']';
+                }
+                else
+                {
+                    span[1] = tuple.Start;
+                    span[2] = '-';
+                    span[3] = tuple.End;
+                    span[4] = ']';
+                }
+            });
         }
+        public override string Value { get; }
         public char Start { get; }
         public char End { get; }
         public override bool IsNegated { get; }
@@ -313,7 +333,6 @@ public sealed partial class Glob
             bool isMatch = (currentChar >= lowerStart && currentChar <= lowerEnd)
                 || (currentChar >= upperStart && currentChar <= upperEnd);
 
-
             if (IsNegated)
             {
                 return !isMatch;
@@ -326,11 +345,14 @@ public sealed partial class Glob
     }
     internal class WildcardToken : CompositeGlobToken
     {
-        public WildcardToken(TokenBase[] children) : base(children)
+        public WildcardToken(TokenBase[] tokens) : base(tokens)
         {
         }
+
         public override string Value { get; } = "*";
         public override TokenKind Kind { get; } = TokenKind.Wildcard;
+        public override int ConsumesMinLength => ConsumesAnyMinLength;
+        public override bool ConsumesVariableLength { get; } = true;
         public override bool Test(
             ReadOnlySpan<char> path,
             CultureInfo cultureInfo,
@@ -340,7 +362,7 @@ public sealed partial class Glob
         {
             next = position;
 
-            if (Children.Length == 0) // We are the last token in the pattern
+            if (Tokens.Length == 0) // We are the last token in the pattern
             {
                 // If we have reached the end of the string, then we match.
                 if (position >= path.Length)
@@ -367,13 +389,13 @@ public sealed partial class Glob
 
             // We are not the last token in the pattern, and so the _subEvaluator representing the remaining pattern tokens must also match.
             // Does the sub pattern match a fixed length string, or variable length string?
-            if (!ConsumesVariableLength)
+            if (!ConsumesAnyVariableLength)
             {
                 // The remaining tokens match against a fixed length string, so we can infer that this wildcard **must** match
                 // a fixed amount of characters in order for the subevaluator to match its fixed amount of characters from the remaining portion
                 // of the string. 
                 // So we must match up-to that position. We can't match separators. 
-                var requiredMatchPosition = path.Length - ConsumesMinLength;
+                var requiredMatchPosition = path.Length - ConsumesAnyMinLength;
                 //if (requiredMatchPosition < currentPosition)
                 //{
                 //    return false;
@@ -387,7 +409,7 @@ public sealed partial class Glob
                         return false;
                     }
                 }
-                var isMatch = TestChildren(path, cultureInfo, ignoreCase, requiredMatchPosition, out next);
+                var isMatch = TestAll(path, cultureInfo, ignoreCase, requiredMatchPosition, out next);
 
                 return isMatch;
             }
@@ -404,7 +426,7 @@ public sealed partial class Glob
             for (int i = position; i <= maxPos; i++)
             {
 
-                var isMatch = TestChildren(path, cultureInfo, ignoreCase, i, out next);
+                var isMatch = TestAll(path, cultureInfo, ignoreCase, i, out next);
 
                 if (isMatch)
                 {
@@ -433,16 +455,39 @@ public sealed partial class Glob
         public WildcardDirectoryToken(
             PathSeparatorToken leading,
             PathSeparatorToken trailing,
-            TokenBase[] children) : base(children)
+            TokenBase[] tokens) : base(tokens)
         {
-            Trailing = trailing;
             Leading = leading;
+            Trailing = trailing;
         }
 
-        public override string Value { get; } = "**";
+        public override string Value
+        {
+            get
+            {
+                if (Leading is not null && Trailing is not null)
+                {
+                    return "/**/";
+                }
+                if (Leading is not null)
+                {
+                    return "/**";
+                }
+                if (Trailing is not null)
+                {
+                    return "**/";
+                }
+                else
+                {
+                    return "**";
+                }
+            }
+        }
         public PathSeparatorToken Trailing { get; }
         public PathSeparatorToken Leading { get; }
         public override TokenKind Kind { get; } = TokenKind.WildcardDirectory;
+        public override int ConsumesMinLength => ConsumesAnyMinLength;
+        public override bool ConsumesVariableLength { get; } = true;
         public override bool Test(
             ReadOnlySpan<char> path,
             CultureInfo cultureInfo,
@@ -517,7 +562,7 @@ public sealed partial class Glob
 
             // If all of the remaining tokens have a precise length, we can calculate the exact character that we need to macth to in the string.
             // Otherwise we have to test at multiple character positions until we find a match (less efficient)
-            if (!ConsumesVariableLength)
+            if (!ConsumesAnyVariableLength)
             {
                 // Fixed length.
                 // As we can only match full segments, make sure character before chacracter at max pos is a separator, 
@@ -535,7 +580,7 @@ public sealed partial class Glob
                 // Advance position to max pos.
                 position = maxPos;
 
-                return TestChildren(path, cultureInfo, ignoreCase, position, out next);
+                return TestAll(path, cultureInfo, ignoreCase, position, out next);
             }
             else
             {
@@ -561,7 +606,7 @@ public sealed partial class Glob
                 // We may already be at max pos, if so sub evaluators need to match here in the string otherwise we fail.    
                 if (position == maxPos)
                 {
-                    isMatch = TestChildren(path, cultureInfo, ignoreCase, position, out next);
+                    isMatch = TestAll(path, cultureInfo, ignoreCase, position, out next);
 
                     return isMatch;
                 }
@@ -578,7 +623,7 @@ public sealed partial class Glob
                         }
                     }
 
-                    isMatch = TestChildren(path, cultureInfo, ignoreCase, position, out next);
+                    isMatch = TestAll(path, cultureInfo, ignoreCase, position, out next);
 
                     if (isMatch)
                     {
@@ -633,15 +678,14 @@ public sealed partial class Glob
 
             if (ignoreCase)
             {
-                return TestCaseInSensitive(path, text, position, out next);
+                return TestIgnoreCase(path, text, position, out next);
             }
             else
             {
-                return TestCaseSensitive(path, text, position, out next);
+                return Test(path, position, out next);
             }
         }
-
-        private bool TestCaseSensitive(ReadOnlySpan<char> path, TextInfo text, int position, out int next)
+        private bool Test(ReadOnlySpan<char> path, int position, out int next)
         {
             var counter = 0;
 
@@ -668,7 +712,7 @@ public sealed partial class Glob
 
             return true;
         }
-        private bool TestCaseInSensitive(ReadOnlySpan<char> path, TextInfo text, int position, out int next)
+        private bool TestIgnoreCase(ReadOnlySpan<char> path, TextInfo text, int position, out int next)
         {
             var counter = 0;
 

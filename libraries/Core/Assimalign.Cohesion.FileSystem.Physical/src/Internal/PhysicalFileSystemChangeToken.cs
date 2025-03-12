@@ -11,11 +11,11 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 {
     // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly FileSystemWatcher _watcher;
-    private readonly GlobPatternMatcher _matcher;
+    private readonly GlobMatcherBuilder _matcher;
     private readonly PhysicalFileSystemInfo _fileSystemInfo;
     private readonly List<Subscriber> _subscribers;
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, GlobPatternMatcher matcher)
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, GlobMatcherBuilder matcher)
     {
         _fileSystemInfo = file;
         _watcher = new FileSystemWatcher(file.Path);
@@ -24,7 +24,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
         Setup();
     }
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, GlobPatternMatcher matcher)
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, GlobMatcherBuilder matcher)
     {
         _fileSystemInfo = directory;
         _watcher = new FileSystemWatcher(directory.Path);

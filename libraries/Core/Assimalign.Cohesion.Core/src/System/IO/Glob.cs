@@ -6,6 +6,7 @@ using System.Globalization;
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
+using System.Text;
 
 /// <summary>
 /// 
@@ -28,7 +29,7 @@ public sealed partial class Glob
     public int Count => Tokens.Length;
 
     /// <summary>
-    /// 
+    /// The parsed tokens
     /// </summary>
     public Token[] Tokens => _tokens;
 
@@ -49,6 +50,17 @@ public sealed partial class Glob
     /// 
     /// </summary>
     /// <param name="path"></param>
+    /// <param name="caseInSensitive"></param>
+    /// <returns></returns>
+    public bool IsMatch(FileSystemPath path, bool caseInSensitive)
+    {
+        return IsMatch(path, CultureInfo.InvariantCulture, caseInSensitive);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
     public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo)
@@ -61,9 +73,9 @@ public sealed partial class Glob
     /// </summary>
     /// <param name="path"></param>
     /// <param name="cultureInfo"></param>
-    /// <param name="matchCase"></param>
+    /// <param name="caseInSensitive"></param>
     /// <returns></returns>
-    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo, bool matchCase)
+    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo, bool caseInSensitive)
     {
         bool consumesVariableLength = _tokens.Length == 0;
         int consumesMinLength = 0;
@@ -100,7 +112,7 @@ public sealed partial class Glob
 
         for (int i = 0; i < _tokens.Length; i++)
         {
-            if (!_tokens[i].Test(span, cultureInfo, !matchCase, position, out position))
+            if (!_tokens[i].Test(span, cultureInfo, caseInSensitive, position, out position))
             {
                 return false;
             }
@@ -134,7 +146,31 @@ public sealed partial class Glob
 
     public override string ToString()
     {
-        return base.ToString();
+        var builder = new StringBuilder();
+
+        for(int i = 0; i < _tokens.Length; i++)
+        {
+            Format(builder, _tokens[i]);
+        }
+
+        return builder.ToString();
+    }
+
+    private static StringBuilder Format(StringBuilder builder, TokenBase token)
+    {
+        if (token is CompositeGlobToken composite)
+        {
+            builder.Append(token.Value);
+
+            for (int i = 0; i < composite.Tokens.Length; i++)
+            {
+                Format(builder, composite.Tokens[i]);
+            }
+
+            return builder;
+        }
+
+        return builder.Append(token.Value);
     }
 
     public override bool Equals(object? obj)
@@ -181,13 +217,46 @@ public sealed partial class Glob
     /// </summary>
     public enum TokenKind
     {
+        /// <summary>
+        /// 
+        /// </summary>
         Literal,
+
+        /// <summary>
+        /// '[characters to check]' - 
+        /// </summary>
         CharacterSet,
+
+        /// <summary>
+        /// '?' - 
+        /// </summary>
         Any,
+
+        /// <summary>
+        /// '*' - 
+        /// </summary>
         Wildcard,
+
+        /// <summary>
+        /// '**' - 
+        /// </summary>
         WildcardDirectory,
+
+        /// <summary>
+        /// '[]'
+        /// </summary>
         Range,
+
+        /// <summary>
+        /// '/' - 
+        /// </summary>
         PathSeparator,
+
+        // TODO - Support Brace Grouping
+        /// <summary>
+        /// '{*.cs, *.ts}'
+        /// </summary>
+        //BraceGrouping
     }
 
     /// <summary>
@@ -198,12 +267,12 @@ public sealed partial class Glob
         internal Token() { }
 
         /// <summary>
-        /// 
+        /// The raw token value.
         /// </summary>
         public abstract string Value { get; }
 
         /// <summary>
-        /// 
+        /// The token kind.
         /// </summary>
         public abstract TokenKind Kind { get; }
     }

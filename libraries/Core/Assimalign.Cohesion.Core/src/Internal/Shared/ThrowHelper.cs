@@ -1,10 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Collections;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Internal;
 
@@ -36,52 +35,56 @@ internal static partial class ThrowHelper
         return argument;
     }
 
-    internal static ICollection<T> ThrowIfNullOrNone<T>(
-        [NotNull] ICollection<T> argument,
-        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    internal static T ThrowIfNullOrNone<T>(
+        [NotNull] T argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null) where T : IEnumerable
     {
-        if (argument is null || !argument.Any())
+        switch (argument)
         {
-            ThrowArgumentNullException(paramName);
+            case null:
+            case ICollection collection when collection.Count == 0:
+            case Array array when array.Length == 0:
+                ThrowArgumentNullException(paramName);
+                break;
         }
 
         return argument;
     }
 
-    internal static T[] ThrowIfNullOrNone<T>(
-        [NotNull] T[] argument,
-        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
-    {
-        if (argument is null || argument.Length == 0)
-        {
-            ThrowArgumentNullException(paramName);
-        }
+    //internal static T[] ThrowIfNullOrNone<T>(
+    //    [NotNull] T[] argument,
+    //    [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    //{
+    //    if (argument is null || !argument.Any())
+    //    {
+    //        ThrowArgumentNullException(paramName);
+    //    }
 
-        return argument;
-    }
+    //    return argument;
+    //}
 
     [DoesNotReturn]
     internal static void ThrowArgumentNullException(string? paramName)
     {
-        throw GetArgumentNullException(paramName);
+        throw new ArgumentNullException(paramName);
     }
 
     [DoesNotReturn]
     internal static void ThrowArgumentNullException(string paramName, string message)
     {
-        throw GetArgumentNullException(paramName, message);
+        throw new ArgumentNullException(paramName, message);
     }
 
     [DoesNotReturn]
     internal static void ThrowArgumentException(string message)
     {
-        throw GetArgumentException(message);
+        throw new ArgumentException(message);
     }
 
     [DoesNotReturn]
     internal static void ThrowArgumentException(string message, string paramName)
     {
-        throw GetArgumentException(message, paramName);
+        throw new ArgumentException(message, paramName);
     }
 
     [DoesNotReturn]
@@ -117,23 +120,13 @@ internal static partial class ThrowHelper
     [DoesNotReturn]
     internal static void ThrowObjectDisposedException(string objectName)
     {
-        throw GetObjectDisposedException(objectName);
+        throw new ObjectDisposedException(objectName);
     }
 
     [DoesNotReturn]
     internal static void ThrowObjectDisposedException(string objectName, string message)
     {
-        throw GetObjectDisposedException(objectName, message);
-    }
-
-    internal static ObjectDisposedException GetObjectDisposedException(string objectName)
-    {
-        return new ObjectDisposedException(objectName);
-    }
-
-    internal static ObjectDisposedException GetObjectDisposedException(string objectName, string message)
-    {
-        return new ObjectDisposedException(objectName, message);
+        throw new ObjectDisposedException(objectName, message);
     }
 
     #endregion
@@ -143,12 +136,7 @@ internal static partial class ThrowHelper
     [DoesNotReturn]
     internal static void ThrowEndOfStreamException(string message)
     {
-        throw GetEndOfStreamException(message);
-    }
-
-    internal static EndOfStreamException GetEndOfStreamException(string message)
-    {
-        return new EndOfStreamException(message);
+        throw new EndOfStreamException(message);
     }
 
     #endregion
@@ -156,11 +144,10 @@ internal static partial class ThrowHelper
     #region Json Serialization
 
     [DoesNotReturn]
-    internal static void ThrowJsonException(string message) =>
-        throw GetJsonException(message);
-
-    internal static JsonException GetJsonException(string message) =>
-        new JsonException(message);
+    internal static void ThrowJsonException(string message)
+    {
+        throw new JsonException(message);
+    }
 
     #endregion
 }

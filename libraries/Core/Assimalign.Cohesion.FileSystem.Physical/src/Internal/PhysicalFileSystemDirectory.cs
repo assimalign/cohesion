@@ -47,7 +47,7 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
     {
         return new PhysicalFileSystemChangeToken(
             this,
-            new GlobPatternMatcher(StringComparison.InvariantCultureIgnoreCase).AddInclude(pattern));
+            new GlobMatcherBuilder(StringComparison.InvariantCultureIgnoreCase).AddInclude(pattern));
     }
     public IFileSystemDirectory GetDirectory(DirectoryName name)
     {
@@ -64,7 +64,7 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
         }
         catch (Exception exception) when (exception is not FileSystemException)
         {
-            throw ThrowHelper.GetUnhandledFileSystemException(exception);
+            throw new FileSystemException("", exception);
         }
     }
     public IEnumerable<IFileSystemFile> GetFiles()

@@ -11,7 +11,9 @@ internal static partial class ThrowHelper
     [DoesNotReturn]
     internal static void ThrowPathNotExistException(FileSystemPath path)
     {
-        throw GetArgumentNullException(path);
+        throw new FileSystemException(
+            string.Format("The provided path does not exist `{0}`.", 
+            path));
     }
 
     [DoesNotReturn]
@@ -24,14 +26,5 @@ internal static partial class ThrowHelper
     internal static void ThrowFileSystemException(string message, Exception innerException)
     {
         throw new FileSystemException(message, innerException);
-    }
-    internal static FileSystemException GetPathNotFoundException(FileSystemPath path)
-    {
-        return new FileSystemException(string.Format("The provided path does not exist `{0}`.", path));
-    }
-
-    internal static FileSystemException GetUnhandledFileSystemException(Exception innerException)
-    {
-        return new FileSystemException("", innerException);
     }
 }

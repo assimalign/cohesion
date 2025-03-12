@@ -6,25 +6,25 @@ namespace Assimalign.Cohesion.FileSystem.Globbing;
 /// <summary>
 /// 
 /// </summary>
-public interface IGlobPatternMatcherBuilder
+public interface IGlobMatcherBuilder
 {
     /// <summary>
-    /// 
+    /// Adds a glob pattern to include files/directories that match.
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    IGlobPatternMatcherBuilder AddInclude(Glob pattern);
+    IGlobMatcherBuilder AddInclude(Glob pattern);
 
     /// <summary>
-    /// 
+    /// Adds a glob pattern to excludes files/directories that match.
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    IGlobPatternMatcherBuilder AddExclude(Glob pattern);
+    IGlobMatcherBuilder AddExclude(Glob pattern);
 
     /// <summary>
-    /// 
+    /// Builds the <see cref="IGlobMatcher"/>.
     /// </summary>
     /// <returns></returns>
-    IGlobPatternMatcher Build();
+    IGlobMatcher Build();
 }

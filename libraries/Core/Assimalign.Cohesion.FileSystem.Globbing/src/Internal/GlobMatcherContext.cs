@@ -10,8 +10,8 @@ using Utilities;
 
 internal class GlobMatcherContext
 {
-    private readonly IEnumerable<GlobPattern> _includes;
-    private readonly IEnumerable<GlobPattern> _excludes;
+    private readonly IEnumerable<GlobContext> _includes;
+    private readonly IEnumerable<GlobContext> _excludes;
     private readonly List<IFileSystemInfo> _results { get; }
 
     private readonly HashSet<string> _declaredLiteralFolderSegmentInString;
@@ -22,8 +22,8 @@ internal class GlobMatcherContext
     private bool _declaredWildcardPathSegment;
 
     public GlobMatcherContext(
-        IEnumerable<GlobPattern> includes,
-        IEnumerable<GlobPattern> excludes,
+        IEnumerable<GlobContext> includes,
+        IEnumerable<GlobContext> excludes,
         StringComparison comparison)
     {
         _results = new List<IFileSystemInfo>();
@@ -33,45 +33,45 @@ internal class GlobMatcherContext
             StringComparisonHelper.GetStringComparer(comparison));
     }
 
-    public GlobPatternMatchingResult Match(IFileSystemDirectory directory)
+    public GlobMatchResults Match(IFileSystemDirectory directory)
     {
         _results.Clear();
 
         Execute(directory);
 
-        return new GlobPatternMatchingResult(_results);
+        return new GlobMatchResults(_results);
     }
 
     // tries to match any pattern to the given directory
-    public GlobPatternMatchingResult MatchExact(IFileSystemDirectory directory)
+    public GlobMatchResults MatchExact(IFileSystemDirectory directory)
     {;
         PushDirectory(directory);
         Declare();
 
         if (MatchPatternContexts(directory, (pattern, dir) => pattern.Test((dir as IFileSystemDirectory)!)))
         {
-            return new GlobPatternMatchingResult([directory]);
+            return new GlobMatchResults([directory]);
         }
 
         PopDirectory();
 
-        return GlobPatternMatchingResult.Empty;
+        return GlobMatchResults.Empty;
     }
 
     // tries to match any pattern to the given file
-    public GlobPatternMatchingResult MatchExact(IFileSystemFile file)
+    public GlobMatchResults MatchExact(IFileSystemFile file)
     {
         PushDirectory(file.Directory);
         Declare();
 
         if (MatchPatternContexts(file, (pattern, file) => pattern.Test((file as IFileSystemFile)!)))
         {
-            return new GlobPatternMatchingResult([file]);
+            return new GlobMatchResults([file]);
         }
 
         PopDirectory();
 
-        return GlobPatternMatchingResult.Empty;
+        return GlobMatchResults.Empty;
     }
 
     private void Execute(IFileSystemDirectory directory)
@@ -143,7 +143,7 @@ internal class GlobMatcherContext
         _declaredParentPathSegment = false;
         _declaredWildcardPathSegment = false;
 
-        foreach (GlobPattern include in _includes)
+        foreach (GlobContext include in _includes)
         {
             include.Declare(DeclareInclude);
         }
@@ -184,12 +184,12 @@ internal class GlobMatcherContext
         }
     }
 
-    private bool MatchPatternContexts(IFileSystemInfo fileinfo, Func<GlobPattern, IFileSystemInfo, bool> test)
+    private bool MatchPatternContexts(IFileSystemInfo fileinfo, Func<GlobContext, IFileSystemInfo, bool> test)
     {
         var result = false;
 
         // If the given file/directory matches any including pattern, continues to next step.
-        foreach (GlobPattern pattern in _includes)
+        foreach (GlobContext pattern in _includes)
         {
             var localResult = test(pattern, fileinfo);
             if (localResult)
@@ -206,7 +206,7 @@ internal class GlobMatcherContext
         }
 
         // If the given file/directory matches any excluding pattern, returns false.
-        foreach (GlobPattern pattern in _excludes)
+        foreach (GlobContext pattern in _excludes)
         {
             if (test(pattern, fileinfo))
             {
@@ -230,12 +230,12 @@ internal class GlobMatcherContext
     }
     private void PushDirectory(IFileSystemDirectory directory)
     {
-        foreach (GlobPattern context in _includes)
+        foreach (GlobContext context in _includes)
         {
             context.PushDirectory(directory);
         }
 
-        foreach (GlobPattern context in _excludes)
+        foreach (GlobContext context in _excludes)
         {
             context.PushDirectory(directory);
         }

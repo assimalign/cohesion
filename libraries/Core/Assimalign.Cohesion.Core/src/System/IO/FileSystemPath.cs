@@ -481,6 +481,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             span[(i + shift) - start - reduce] = current;
         }
 
+       // span[span.Length - reduce]
+
         if (reduce > 0)
         {
             span = span.Slice(0, span.Length - reduce);

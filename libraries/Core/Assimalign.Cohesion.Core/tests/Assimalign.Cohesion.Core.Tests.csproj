@@ -11,4 +11,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\src\Assimalign.Cohesion.Core.csproj" />
 	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="System\SumTypes\" />
+	</ItemGroup>
 </Project>

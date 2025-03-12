@@ -166,7 +166,7 @@ public sealed partial class Glob
                 {
                     if (reader.IsBeginningOfRangeOrList)
                     {
-                        tokens.Add(ReadRangeOrListToken(reader));
+                        tokens.Add(ParseRangeOrCharacterSetToken(reader));
                     }
                     else if (reader.IsSingleCharacterMatch)
                     {
@@ -214,7 +214,7 @@ public sealed partial class Glob
             {
                 if (reader.IsBeginningOfRangeOrList)
                 {
-                    tokens.Add(ReadRangeOrListToken(reader));
+                    tokens.Add(ParseRangeOrCharacterSetToken(reader));
                 }
                 else if (reader.IsSingleCharacterMatch)
                 {
@@ -301,7 +301,7 @@ public sealed partial class Glob
 
             return new LiteralToken(GetBufferAndReset());
         }
-        private TokenBase ReadRangeOrListToken(Lexer reader) // Parses a token for a range or list globbing expression.
+        private TokenBase ParseRangeOrCharacterSetToken(Lexer reader) // Parses a token for a range or list globbing expression.
         {
             bool isNegated = false;
             bool isNumberRange = false;
@@ -410,11 +410,19 @@ public sealed partial class Glob
         }
         private void AcceptCurrentChar(Lexer reader)
         {
-            _buffer.Append(reader.CurrentChar);
+            if (reader.CurrentChar == '\\')
+            {
+                _buffer.Append('/'); // Normalize any backslashes to forward slashes
+            }
+            else
+            {
+                _buffer.Append(reader.CurrentChar);
+            }
         }
         private string GetBufferAndReset()
         {
             var text = _buffer.ToString();
+
             _buffer.Clear();
             return text;
         }

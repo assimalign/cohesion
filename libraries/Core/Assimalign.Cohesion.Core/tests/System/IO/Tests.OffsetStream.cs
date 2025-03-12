@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text;
 using Xunit;
 
 namespace System.IO.Tests;
@@ -10,7 +6,7 @@ namespace System.IO.Tests;
 public class OffsetStreamTests
 {
     [Fact]
-    public void Test()
+    public void TestOffsetRead()
     {
         var encoding = Encoding.UTF8;
         var message = encoding.GetBytes("My name is John Doe");

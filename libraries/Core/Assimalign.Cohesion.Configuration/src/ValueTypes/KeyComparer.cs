@@ -19,7 +19,7 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>//, IComparer<K
         {
             KeyComparison.Ordinal => StringComparer.Ordinal,
             KeyComparison.OrdinalIgnoreCase => StringComparer.OrdinalIgnoreCase,
-            _ => throw ThrowHelper.GetArgumentException("")
+            _ => throw new ArgumentException("")
         };
     }
 

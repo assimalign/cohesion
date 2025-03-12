@@ -106,7 +106,7 @@ public class FileSystemPathTests
 
     [Theory]
     [InlineData("C:/users/dotnetcadet", "C:/UseRs\\DoTNetCadET", true)]
-    [InlineData("C:/users/dotnetcadet", "C:/UseRs\\DoTNetCadE", true)]
+    [InlineData("C:/users/dotnetcadet", "C:/UseRs\\DoTNetCadE", false)]
     public void EqualityTest(string value1, string value2, bool isEqual)
     {
         FileSystemPath path1 = value1;

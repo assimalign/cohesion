@@ -34,7 +34,7 @@ public class UnitTest1
     public void Test1()
     {
         var directory = _fileSystem.RootDirectory;
-        var matcher = new GlobPatternMatcher(StringComparison.OrdinalIgnoreCase)
+        var matcher = new GlobMatcherBuilder(StringComparison.OrdinalIgnoreCase)
             .AddInclude("**/*.json");
 
         //var file = _fileSystem.GetFile("C:/users/chase/.Azure/PSConfig.json");

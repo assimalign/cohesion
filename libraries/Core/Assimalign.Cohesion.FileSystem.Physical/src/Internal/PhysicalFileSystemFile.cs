@@ -29,7 +29,7 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
         return new PhysicalFileSystemChangeToken(
             this,
-            new GlobPatternMatcher(StringComparison.InvariantCultureIgnoreCase)
+            new GlobMatcherBuilder(StringComparison.InvariantCultureIgnoreCase)
             .AddInclude(path));
     }
     public Stream Open()

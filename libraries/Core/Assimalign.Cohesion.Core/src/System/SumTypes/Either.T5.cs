@@ -1410,22 +1410,22 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         {
             case 1:
                 @if = AsT1;
-                @else = default;
+                @else = default!;
                 return true;
             case 2:
-                @if = default;
+                @if = default!;
                 @else = AsT2;
                 return false;
             case 3:
-                @if = default;
+                @if = default!;
                 @else = AsT3;
                 return false;
             case 4:
-                @if = default;
+                @if = default!;
                 @else = AsT4;
                 return false;
             case 5:
-                @if = default;
+                @if = default!;
                 @else = AsT5;
                 return false;
             default:
@@ -1438,23 +1438,23 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         switch (_typeIndex)
         {
             case 1:
-                @if = default;
+                @if = default!;
                 @else = AsT1;
                 return false;
             case 2:
                 @if = AsT2;
-                @else = default;
+                @else = default!;
                 return true;
             case 3:
-                @if = default;
+                @if = default!;
                 @else = AsT3;
                 return false;
             case 4:
-                @if = default;
+                @if = default!;
                 @else = AsT4;
                 return false;
             case 5:
-                @if = default;
+                @if = default!;
                 @else = AsT5;
                 return false;
             default:
@@ -1467,23 +1467,23 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         switch (_typeIndex)
         {
             case 1:
-                @if = default;
+                @if = default!;
                 @else = AsT1;
                 return false;
             case 2:
-                @if = default;
+                @if = default!;
                 @else = AsT2;
                 return false;
             case 3:
                 @if = AsT3;
-                @else = default;
+                @else = default!;
                 return true;
             case 4:
-                @if = default;
+                @if = default!;
                 @else = AsT4;
                 return false;
             case 5:
-                @if = default;
+                @if = default!;
                 @else = AsT5;
                 return false;
             default:
@@ -1496,23 +1496,23 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         switch (_typeIndex)
         {
             case 1:
-                @if = default;
+                @if = default!;
                 @else = AsT1;
                 return false;
             case 2:
-                @if = default;
+                @if = default!;
                 @else = AsT2;
                 return false;
             case 3:
-                @if = default;
+                @if = default!;
                 @else = AsT3;
                 return false;
             case 4:
                 @if = AsT4;
-                @else = default;
+                @else = default!;
                 return true;
             case 5:
-                @if = default;
+                @if = default!;
                 @else = AsT5;
                 return false;
             default:
@@ -1525,24 +1525,24 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         switch (_typeIndex)
         {
             case 1:
-                @if = default;
+                @if = default!;
                 @else = AsT1;
                 return false;
             case 2:
-                @if = default;
+                @if = default!;
                 @else = AsT2;
                 return false;
             case 3:
-                @if = default;
+                @if = default!;
                 @else = AsT3;
                 return false;
             case 4:
-                @if = default;
+                @if = default!;
                 @else = AsT4;
                 return false;
             case 5:
                 @if = AsT5;
-                @else = default;
+                @else = default!;
                 return true;
             default:
                 throw new InvalidOperationException();
