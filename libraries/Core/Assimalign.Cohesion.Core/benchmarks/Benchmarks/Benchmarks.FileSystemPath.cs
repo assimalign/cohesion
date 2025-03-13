@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Benchmarks;
 
 
 [SimpleJob(RuntimeMoniker.Net90)]
+[SimpleJob(RuntimeMoniker.Net80)]
+[SimpleJob(RuntimeMoniker.Net60)]
 public class FileSystemPathBenchmarks
 {
     private static char[] _invalidChars = [.. System.IO.Path.GetInvalidPathChars(), '*', '?', '!', '<', '>', '^'];
