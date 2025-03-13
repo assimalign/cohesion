@@ -63,7 +63,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <returns></returns>
     public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
-        ThrowHelper.ThrowIfNull(configure, nameof(configure));
+        ThrowHelper.ThrowIfNull(configure);
 
         this.builds.Add(async context =>
         {

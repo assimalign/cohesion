@@ -98,7 +98,7 @@ public sealed partial class Glob
             var readLine = base.ReadLine();
             if (readLine != null)
                 CurrentIndex += readLine.Length;
-            return readLine;
+            return readLine!;
         }
         public string ReadPathSegment()
         {
@@ -166,19 +166,19 @@ public sealed partial class Glob
                 {
                     if (reader.IsBeginningOfRangeOrList)
                     {
-                        tokens.Add(ParseRangeOrCharacterSetToken(reader));
+                        tokens.Add(ParseRangeOrCharacterSet(reader));
                     }
                     else if (reader.IsSingleCharacterMatch)
                     {
-                        tokens.Add(ReadSingleCharacterMatchToken());
+                        tokens.Add(ParseSingleCharacterMatch());
                     }
                     else if (reader.IsWildcardCharacterMatch)
                     {
-                        tokens.Add(ParseWildcardToken(reader));
+                        tokens.Add(ParseWildcard(reader));
                     }
                     else if (reader.IsPathSeparator())
                     {
-                        var sepToken = ReadPathSeparatorToken(reader);
+                        var sepToken = ParsePathSeparator(reader);
                         tokens.Add(sepToken);
                     }
                     else if (reader.IsBeginningOfDirectoryWildcard)
@@ -188,16 +188,16 @@ public sealed partial class Glob
                             if (tokens[tokens.Count - 1] is PathSeparatorToken lastToken)
                             {
                                 tokens.Remove(lastToken);
-                                tokens.Add(ReadDirectoryWildcardToken(reader, lastToken));
+                                tokens.Add(ParseDirectoryWildcard(reader, lastToken));
                                 continue;
                             }
                         }
 
-                        tokens.Add(ReadDirectoryWildcardToken(reader, null!));
+                        tokens.Add(ParseDirectoryWildcard(reader, null!));
                     }
                     else
                     {
-                        tokens.Add(ParseLiteralToken(reader));
+                        tokens.Add(ParseLiteral(reader));
                     }
                 }
             }
@@ -214,19 +214,19 @@ public sealed partial class Glob
             {
                 if (reader.IsBeginningOfRangeOrList)
                 {
-                    tokens.Add(ParseRangeOrCharacterSetToken(reader));
+                    tokens.Add(ParseRangeOrCharacterSet(reader));
                 }
                 else if (reader.IsSingleCharacterMatch)
                 {
-                    tokens.Add(ReadSingleCharacterMatchToken());
+                    tokens.Add(ParseSingleCharacterMatch());
                 }
                 else if (reader.IsWildcardCharacterMatch)
                 {
-                    tokens.Add(ParseWildcardToken(reader));
+                    tokens.Add(ParseWildcard(reader));
                 }
                 else if (reader.IsPathSeparator())
                 {
-                    var sepToken = ReadPathSeparatorToken(reader);
+                    var sepToken = ParsePathSeparator(reader);
                     tokens.Add(sepToken);
                 }
                 else if (reader.IsBeginningOfDirectoryWildcard)
@@ -236,42 +236,42 @@ public sealed partial class Glob
                         if (tokens[tokens.Count - 1] is PathSeparatorToken lastToken)
                         {
                             tokens.Remove(lastToken);
-                            tokens.Add(ReadDirectoryWildcardToken(reader, lastToken));
+                            tokens.Add(ParseDirectoryWildcard(reader, lastToken));
                             continue;
                         }
                     }
 
-                    tokens.Add(ReadDirectoryWildcardToken(reader, null!));
+                    tokens.Add(ParseDirectoryWildcard(reader, null!));
                 }
                 else
                 {
-                    tokens.Add(ParseLiteralToken(reader));
+                    tokens.Add(ParseLiteral(reader));
                 }
             }
 
             return tokens.ToArray();
         }
-        private TokenBase ReadDirectoryWildcardToken(Lexer reader, PathSeparatorToken leadingPathSeparatorToken)
+        private TokenBase ParseDirectoryWildcard(Lexer reader, PathSeparatorToken leadingPathSeparatorToken)
         {
             reader.TryRead();
 
             if (Lexer.IsPathSeparator(reader.Peek()))
             {
                 reader.TryRead();
-                var trailingSeparator = ReadPathSeparatorToken(reader);
+                var trailingSeparator = ParsePathSeparator(reader);
 
                 return new WildcardDirectoryToken(
                     leadingPathSeparatorToken,
-                    trailingSeparator,
+                    (PathSeparatorToken)trailingSeparator,
                     ParseComposite(reader));
             }
 
             return new WildcardDirectoryToken(
                 leadingPathSeparatorToken,
-                null,
+                null!,
                 ParseComposite(reader)); // this shouldn't happen unless a pattern ends with ** which is weird. **sometext is not legal.
         }
-        private TokenBase ParseLiteralToken(Lexer reader)
+        private TokenBase ParseLiteral(Lexer reader)
         {
             AcceptCurrentChar(reader);
 
@@ -301,7 +301,7 @@ public sealed partial class Glob
 
             return new LiteralToken(GetBufferAndReset());
         }
-        private TokenBase ParseRangeOrCharacterSetToken(Lexer reader) // Parses a token for a range or list globbing expression.
+        private TokenBase ParseRangeOrCharacterSet(Lexer reader) // Parses a token for a range or list globbing expression.
         {
             bool isNegated = false;
             bool isNumberRange = false;
@@ -373,7 +373,7 @@ public sealed partial class Glob
             }
 
             // construct token
-            TokenBase result = null;
+            TokenBase result = null!;
             var value = GetBufferAndReset();
             if (isCharList)
             {
@@ -394,17 +394,17 @@ public sealed partial class Glob
 
             return result;
         }
-        private PathSeparatorToken ReadPathSeparatorToken(Lexer reader)
+        private TokenBase ParsePathSeparator(Lexer reader)
         {
             return new PathSeparatorToken();
         }
-        private TokenBase ParseWildcardToken(Lexer reader)
+        private TokenBase ParseWildcard(Lexer reader)
         {
             var children = ParseComposite(reader);
 
             return new WildcardToken(children);
         }
-        private TokenBase ReadSingleCharacterMatchToken()
+        private TokenBase ParseSingleCharacterMatch()
         {
             return new AnyCharacterToken();
         }

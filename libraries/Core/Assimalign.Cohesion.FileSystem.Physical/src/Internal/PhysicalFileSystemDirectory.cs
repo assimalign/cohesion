@@ -4,19 +4,17 @@ using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Security;
 
 namespace Assimalign.Cohesion.FileSystem;
 
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
-using System.Security;
-using System.Data.Common;
-using Assimalign.Cohesion.FileSystem.Globbing;
 
 /// <summary>
 /// Represents a directory on a physical filesystem
 /// </summary>
-[DebuggerDisplay("{Name} - {Path}")]
+[DebuggerDisplay("[D] - {Path}")]
 internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystemDirectory
 {
     private readonly DirectoryInfo _directoryInfo;
@@ -43,11 +41,13 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
             return null;
         }
     }
-    public IFileSystemChangeToken Watch(Glob pattern)
+    public IFileSystemChangeToken Watch(Glob? pattern)
     {
+        pattern ??= Glob.Parse(Path);
+
         return new PhysicalFileSystemChangeToken(
             this,
-            new GlobMatcherBuilder(StringComparison.InvariantCultureIgnoreCase).AddInclude(pattern));
+            pattern);
     }
     public IFileSystemDirectory GetDirectory(DirectoryName name)
     {

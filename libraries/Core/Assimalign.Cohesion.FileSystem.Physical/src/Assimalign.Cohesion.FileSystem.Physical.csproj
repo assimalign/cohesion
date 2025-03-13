@@ -8,16 +8,6 @@
 		<Compile Remove="PhysicalFileWatcher.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<None Include="README.md">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>
-	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem.Globbing\src\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
-	</ItemGroup>
-	<ItemGroup>
-		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
+		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
 	</ItemGroup>
 </Project>

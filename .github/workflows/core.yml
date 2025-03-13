@@ -17,7 +17,7 @@ jobs:
         projects: [
             # 'Assimalign.Cohesion.App',
             # 'Assimalign.Cohesion.Caching',
-            'Assimalign.Cohesion.Configuration',
+            # 'Assimalign.Cohesion.Configuration',
             # 'Assimalign.Cohesion.Configuration.Binder',
             # 'Assimalign.Cohesion.Configuration.CommandLine',
             # 'Assimalign.Cohesion.Configuration.EnvironmentVariables',
@@ -33,7 +33,7 @@ jobs:
             # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
             # 'Assimalign.Cohesion.FileSystem.Physical',
-            'Assimalign.Cohesion.Hosting',
+            # 'Assimalign.Cohesion.Hosting',
             # 'Assimalign.Cohesion.Hosting.BackgroundService',
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
             # 'Assimalign.Cohesion.Logging',

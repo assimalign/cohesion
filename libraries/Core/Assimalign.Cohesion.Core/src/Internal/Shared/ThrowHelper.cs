@@ -11,8 +11,8 @@ internal static partial class ThrowHelper
 {
     #region Arguments
 
-    internal static object ThrowIfNull(
-        [NotNull]object? argument,
+    internal static T ThrowIfNull<T>(
+        [NotNull]T? argument,
         [CallerArgumentExpression(nameof(argument))] string? paramName = null)
     {
         if (argument is null)
@@ -51,26 +51,17 @@ internal static partial class ThrowHelper
         return argument;
     }
 
-    //internal static T[] ThrowIfNullOrNone<T>(
-    //    [NotNull] T[] argument,
-    //    [CallerArgumentExpression(nameof(argument))] string? paramName = null)
-    //{
-    //    if (argument is null || !argument.Any())
-    //    {
-    //        ThrowArgumentNullException(paramName);
-    //    }
-
-    //    return argument;
-    //}
-
     [DoesNotReturn]
-    internal static void ThrowArgumentNullException(string? paramName)
+    internal static void ThrowArgumentNullException(
+        string? paramName)
     {
         throw new ArgumentNullException(paramName);
     }
 
     [DoesNotReturn]
-    internal static void ThrowArgumentNullException(string paramName, string message)
+    internal static void ThrowArgumentNullException(
+        string paramName, 
+        string message)
     {
         throw new ArgumentNullException(paramName, message);
     }
@@ -91,26 +82,6 @@ internal static partial class ThrowHelper
     internal static void ThrowInvalidOperationException(string message)
     {
         throw new InvalidOperationException(message);
-    }
-
-    internal static ArgumentException GetArgumentException(string message)
-    {
-        return new ArgumentException(message);
-    }
-
-    internal static ArgumentException GetArgumentException(string message, string paramName)
-    {
-        return new ArgumentException(message, paramName);
-    }
-
-    internal static ArgumentNullException GetArgumentNullException(string? paramName)
-    {
-        return new ArgumentNullException(paramName);
-    }
-
-    internal static ArgumentNullException GetArgumentNullException(string paramName, string message)
-    {
-        return new ArgumentNullException(paramName, message);
     }
 
     #endregion

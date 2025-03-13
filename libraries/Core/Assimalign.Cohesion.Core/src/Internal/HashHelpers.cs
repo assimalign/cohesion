@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.FileSystem.Globbing.Internal.Utilities;
+namespace Assimalign.Cohesion.Internal.Utilities;
 
 internal static class HashHelpers
 {

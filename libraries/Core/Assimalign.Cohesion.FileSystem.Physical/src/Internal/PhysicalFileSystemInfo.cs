@@ -30,9 +30,10 @@ internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
         {
             _fileSystemInfo.Attributes = attributes;
         }
-        catch (Exception exception)
+        catch (Exception exception) 
+        when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-
+            FileSystemException.ThrowNotFound(Path, exception);
         }
     }
 

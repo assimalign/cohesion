@@ -20,5 +20,5 @@ public class GlobMatcherOptions
     /// Excludes directories from <see cref="GlobMatchResults"/>. This is used when 
     /// filtering files based on a directory glob pattern.
     /// </summary>
-    public bool ExcludeDirectories { get; set; }
+    public bool ExcludeDirectories { get; set; } = false;
 }

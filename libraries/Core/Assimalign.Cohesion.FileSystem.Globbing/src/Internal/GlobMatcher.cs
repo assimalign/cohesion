@@ -4,11 +4,13 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
+using Cohesion.Internal;
+
 internal class GlobMatcher : IGlobMatcher
 {
     private readonly IEnumerable<IGlobContext> _includes;
     private readonly IEnumerable<IGlobContext> _excludes;
-    private readonly GlobMatcherOptions _options;
+    private readonly bool _excludeDirectories;
 
     public GlobMatcher(
         IEnumerable<IGlobContext> includes,
@@ -17,7 +19,7 @@ internal class GlobMatcher : IGlobMatcher
     {
         _includes = includes;
         _excludes = excludes;
-        _options = options;
+        _excludeDirectories = options.ExcludeDirectories;
     }
 
     public bool IsMatch(FileSystemPath path)
@@ -52,19 +54,19 @@ internal class GlobMatcher : IGlobMatcher
 
     public bool IsMatch(IFileSystemFile file)
     {
-        return IsMatch(file.Path);
+        return IsMatch(ThrowHelper.ThrowIfNull(file).Path);
     }
 
     public bool IsMatch(IFileSystemDirectory directory)
     {
-        return IsMatch(directory.Path);
+        return IsMatch(ThrowHelper.ThrowIfNull(directory).Path);
     }
 
     public GlobMatchResults Match(IFileSystemDirectory directory)
     {
         var matches = new List<IFileSystemInfo>();
 
-        Recurse(directory, matches);
+        Recurse(ThrowHelper.ThrowIfNull(directory), matches);
 
         if (matches.Count > 0)
         {
@@ -76,7 +78,7 @@ internal class GlobMatcher : IGlobMatcher
 
     private void Recurse(IFileSystemDirectory directory, List<IFileSystemInfo> matches)
     {
-        if (IsMatch(directory) && !_options.ExcludeDirectories)
+        if (IsMatch(directory.Path) && !_excludeDirectories)
         {
             matches.Add(directory);
         }
@@ -85,11 +87,11 @@ internal class GlobMatcher : IGlobMatcher
         {
             switch (item)
             {
-                case IFileSystemFile file when IsMatch(file):
+                case IFileSystemFile file when IsMatch(file.Path):
                     matches.Add(file);
                     break;
 
-                case IFileSystemDirectory dir when IsMatch(dir):
+                case IFileSystemDirectory dir when IsMatch(dir.Path):
                     Recurse(dir, matches);
                     break;
             }

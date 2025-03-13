@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace System;
 
-namespace System;
-
-public record Either<T1, T2> : IEither
+public record Either<T1, T2> : Either
 {
     #region Implicit Conversion From Value
     public static implicit operator Either<T1, T2>(T1 value) => new Either<T1, T2>(value);
@@ -17,7 +11,7 @@ public record Either<T1, T2> : IEither
     public static implicit operator Either<T1, T2>(Either<T2, T1> other)
     {
         int[] map = new[] { 2, 1 };
-        return new Either<T1, T2>(map[other._typeIndex - 1], other._value);
+        return new Either<T1, T2>(map[other._typeIndex - 1], other._value!);
     }
     #endregion Implicit Conversion By Type Swap
 
@@ -45,23 +39,22 @@ public record Either<T1, T2> : IEither
     int _typeIndex;
     object? _value;
 
-    int IEither.TypeIndex => _typeIndex;
-
-    Type IEither.Type => _typeIndex switch
+    protected override int TypeIndex => _typeIndex;
+    protected override Type Type => _typeIndex switch
     {
         1 => typeof(T1),
         2 => typeof(T2),
         _ => throw new InvalidOperationException()
     };
 
-    object IEither.Value => _value;
+    protected override object? Value => _value;
 
     Either(int typeIndex, object value) => (_typeIndex, _value) = (typeIndex, value);
     #endregion IEither Implementation
 
     #region Value Casts
-    T1 AsT1 => (T1)_value;
-    T2 AsT2 => (T2)_value;
+    T1 AsT1 => (T1)_value!;
+    T2 AsT2 => (T2)_value!;
     #endregion Value Casts
 
     #region Explicit Casts
@@ -233,12 +226,12 @@ public record Either<T1, T2> : IEither
         switch (_typeIndex)
         {
             case 1:
-                @if = default;
+                @if = default!;
                 @else = AsT1;
                 return false;
             case 2:
                 @if = AsT2;
-                @else = default;
+                @else = default!;
                 return true;
             default:
                 throw new InvalidOperationException();
@@ -247,9 +240,7 @@ public record Either<T1, T2> : IEither
     #endregion If (methods)
 
     #region ToString
-    public override string ToString() => $"{((IEither)this).Type.Name}:{_value}";
+    public override string ToString() => $"{Type.Name}:{_value}";
 
-    // For LINQPad:
-    object ToDump() => new { Type = ((IEither)this).Type, Value = ((IEither)this).Value };
     #endregion ToString
 }

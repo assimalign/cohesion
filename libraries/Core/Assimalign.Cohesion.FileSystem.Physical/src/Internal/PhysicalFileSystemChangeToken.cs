@@ -5,32 +5,26 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.FileSystem.Globbing;
 
 internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 {
     // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
+    private readonly Glob _glob;
     private readonly FileSystemWatcher _watcher;
-    private readonly GlobMatcherBuilder _matcher;
     private readonly PhysicalFileSystemInfo _fileSystemInfo;
     private readonly List<Subscriber> _subscribers;
 
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemFile file, GlobMatcherBuilder matcher)
+    public PhysicalFileSystemChangeToken(PhysicalFileSystemInfo fileSystemInfo, Glob glob)
     {
-        _fileSystemInfo = file;
-        _watcher = new FileSystemWatcher(file.Path);
+        _fileSystemInfo = fileSystemInfo;
+        _glob = glob;
         _subscribers = new List<Subscriber>();
-        _matcher = matcher;
-        Setup();
-    }
-
-    public PhysicalFileSystemChangeToken(PhysicalFileSystemDirectory directory, GlobMatcherBuilder matcher)
-    {
-        _fileSystemInfo = directory;
-        _watcher = new FileSystemWatcher(directory.Path);
-        _subscribers = new List<Subscriber>();
-        _matcher = matcher;
-        Setup();
+        _watcher = new FileSystemWatcher(fileSystemInfo.Path);
+        _watcher.EnableRaisingEvents = true;
+        _watcher.IncludeSubdirectories = true;
+        _watcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
+        _watcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
+        _watcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
     }
 
     public IDisposable OnChange(Action<object> callback)
@@ -82,39 +76,30 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 
         return disposable;
     }
-
-    private void Setup()
-    {
-        _watcher!.EnableRaisingEvents = true;
-        _watcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
-        _watcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
-        _watcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
-    }
     private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
     {
         FileSystemPath path = args.FullPath;
         IFileSystem fileSystem = _fileSystemInfo.FileSystem;
 
+        if (!_glob.IsMatch(path))
+        {
+            return;
+        }
+
         if (!fileSystem.TryGetInfo(path, out var info))
         {
-            // TODO: decide what to do. This should not occure
+            // TODO: decide what to do. This should not occur
+            throw new Exception();
         }
 
-
-
-        if(_fileSystemInfo.Path == path)
-        {
-
-        }
         foreach (var subscriber in _subscribers)
         {
-
             if (subscriber.ChangeType == changeType)
             {
                 subscriber.Invoke(new PhysicalFileSystemChangeContext()
                 {
                     Path = args.FullPath,
-                    Info = _fileSystemInfo
+                    Info = info
                 });
             }
         }

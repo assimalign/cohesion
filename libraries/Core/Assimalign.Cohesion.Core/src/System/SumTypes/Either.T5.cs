@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace System;
 
-namespace System;
-
-public record Either<T1, T2, T3, T4, T5> : IEither
+public record Either<T1, T2, T3, T4, T5> : Either
 {
     #region Implicit Conversion From Value
     public static implicit operator Either<T1, T2, T3, T4, T5>(T1 value) => new Either<T1, T2, T3, T4, T5>(value);
@@ -713,11 +707,11 @@ public record Either<T1, T2, T3, T4, T5> : IEither
     #endregion Implicit Widening Conversions
 
     #region Constructors
-    public Either(T1 value) { _value = value; _typeIndex = 1; }
-    public Either(T2 value) { _value = value; _typeIndex = 2; }
-    public Either(T3 value) { _value = value; _typeIndex = 3; }
-    public Either(T4 value) { _value = value; _typeIndex = 4; }
-    public Either(T5 value) { _value = value; _typeIndex = 5; }
+    public Either(T1 value) { _value = value!; _typeIndex = 1; }
+    public Either(T2 value) { _value = value!; _typeIndex = 2; }
+    public Either(T3 value) { _value = value!; _typeIndex = 3; }
+    public Either(T4 value) { _value = value!; _typeIndex = 4; }
+    public Either(T5 value) { _value = value!; _typeIndex = 5; }
     #endregion Constructors
 
     #region Or methods
@@ -727,9 +721,9 @@ public record Either<T1, T2, T3, T4, T5> : IEither
     int _typeIndex;
     object _value;
 
-    int IEither.TypeIndex => _typeIndex;
+    protected override int TypeIndex => _typeIndex;
 
-    Type IEither.Type => _typeIndex switch
+    protected override Type Type => _typeIndex switch
     {
         1 => typeof(T1),
         2 => typeof(T2),
@@ -739,7 +733,7 @@ public record Either<T1, T2, T3, T4, T5> : IEither
         _ => throw new InvalidOperationException()
     };
 
-    object IEither.Value => _value;
+    protected override object Value => _value;
 
     Either(int typeIndex, object value) => (_typeIndex, _value) = (typeIndex, value);
     #endregion IEither Implementation
@@ -1551,9 +1545,6 @@ public record Either<T1, T2, T3, T4, T5> : IEither
     #endregion If (methods)
 
     #region ToString
-    public override string ToString() => $"{((IEither)this).Type.Name}:{_value}";
-
-    // For LINQPad:
-    object ToDump() => new { Type = ((IEither)this).Type, Value = ((IEither)this).Value };
+    public override string ToString() => $"{Type.Name}:{_value}";
     #endregion ToString
 }

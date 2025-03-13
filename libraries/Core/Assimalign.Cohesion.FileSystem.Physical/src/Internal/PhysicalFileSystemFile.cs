@@ -5,9 +5,7 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-using Globbing;
-
-[DebuggerDisplay("{Path}")]
+[DebuggerDisplay("[F] - {Path}")]
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 {
     private readonly FileInfo _fileInfo;
@@ -29,8 +27,7 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
         return new PhysicalFileSystemChangeToken(
             this,
-            new GlobMatcherBuilder(StringComparison.InvariantCultureIgnoreCase)
-            .AddInclude(path));
+            path);
     }
     public Stream Open()
     {

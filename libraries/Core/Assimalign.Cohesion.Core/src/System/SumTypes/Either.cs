@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace System;
 
-namespace System;
-
-public record class Either
+public abstract record class Either
 {
+    protected virtual Type? Type { get; }
+    protected virtual int TypeIndex { get; }
+    protected virtual object? Value { get; }
 }

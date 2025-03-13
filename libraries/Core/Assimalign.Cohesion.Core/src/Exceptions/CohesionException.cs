@@ -7,9 +7,11 @@ namespace Assimalign.Cohesion;
 /// </summary>
 public abstract class CohesionException : Exception
 {
-    public CohesionException(string message) 
+    protected CohesionException() { }
+
+    protected CohesionException(string message) 
         : base(message) { }
 
-    public CohesionException(string message, Exception innerException) 
+    protected CohesionException(string message, Exception? innerException) 
         : base(message, innerException) { }
 }

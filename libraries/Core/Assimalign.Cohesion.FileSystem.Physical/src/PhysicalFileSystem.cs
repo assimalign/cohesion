@@ -27,7 +27,7 @@ public class PhysicalFileSystem : IFileSystem
     {
         if (!Exists(root))
         {
-            ThrowHelper.ThrowPathNotExistException(root);
+            FileSystemException.ThrowNotFound(root);
         }
         _driveInfo = new DriveInfo(root!);
         _root = new PhysicalFileSystemDirectory(this, _driveInfo.RootDirectory)
@@ -74,19 +74,16 @@ public class PhysicalFileSystem : IFileSystem
             {
                 IgnoreAttributes = _root.IgnoreAttributes
             };
-            return true;
         }
-
         if (Directory.Exists(path))
         {
             info = new PhysicalFileSystemDirectory(this, new DirectoryInfo(path))
             {
                 IgnoreAttributes = _root.IgnoreAttributes
             };
-            return true;
         }
 
-        return false;
+        return (info is not null);
     }
 
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)

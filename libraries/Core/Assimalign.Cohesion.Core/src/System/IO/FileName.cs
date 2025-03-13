@@ -32,9 +32,11 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     /// <exception cref="ArgumentNullException"></exception>
     public FileName(string name)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(name, nameof(name));
+        ThrowHelper.ThrowIfNullOrEmpty(name);
 
-        int start = GetTrimStart(name);
+        int start = 0;
+        
+        CalculateTrimStart(name, ref start);
 
         string error = null!;
 

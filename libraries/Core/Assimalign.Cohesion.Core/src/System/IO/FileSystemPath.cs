@@ -178,7 +178,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     {
         drive = '\0'; // set it too null char
 
-        if (HasValidDriveLetter(_value))
+        if (HasDriveLetter(_value))
         {
             drive = _value[0];
 
@@ -197,7 +197,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     {
         share = null!;
 
-        if (HasRoot(out var root) && root.Length >= 5 && IsSeparator(root[0]) && IsSeparator(root[1]))
+        if (HasRoot(out var root) && root.Length >= 5 && IsPathSeparator(root[0]) && IsPathSeparator(root[1]))
         {
             share = root;
             return true;
@@ -382,7 +382,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         // Check if only root was passed
         if (value.Length == 1)
         {
-            if (IsSeparator(value[0]))
+            if (IsPathSeparator(value[0]))
             {
                 return new FileSystemPath("/");
             }
@@ -397,24 +397,24 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
         int shift = 0;
 
         // Check for current directory syntax "./" and skip over
-        if (value.Length >= 2 && IsDot(value[0]) && IsSeparator(value[1]))
+        if (value.Length >= 2 && IsDot(value[0]) && IsPathSeparator(value[1]))
         {
             start =+ 2;
         }
 
         // Check if path has valid drive, if so disregard shift
-        if (HasValidDriveLetter(value))
+        if (HasDriveLetter(value))
         {
             shift = 0;
         }
 
         // Check for leading slash root  '//' or '\\', or if your a weirdo '/\' '\/'
-        else if (value.Length >= 2 && IsSeparator(value[0]) && IsSeparator(value[1]))
+        else if (value.Length >= 2 && IsPathSeparator(value[0]) && IsPathSeparator(value[1]))
         {
             shift =+ 2;
         }
         // Maintain directory root '/'
-        else if (value.Length >= 2 && IsSeparator(value[0]))
+        else if (value.Length >= 2 && IsPathSeparator(value[0]))
         {
             shift = 1;
         }
@@ -445,7 +445,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             }
 
             // Check for excessive slashes
-            if (IsSeparator(previous) && IsSeparator(current))
+            if (IsPathSeparator(previous) && IsPathSeparator(current))
             {
                 reduce++;
                 continue;
@@ -462,8 +462,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
                 var s = i - 2;
                 var e = i + 1;
 
-                var hasStart = (s > 0 && IsSeparator(value[s])) || s < 0;
-                var hasEnd = (e < end && IsSeparator(value[e])) || e > end;
+                var hasStart = (s > 0 && IsPathSeparator(value[s])) || s < 0;
+                var hasEnd = (e < end && IsPathSeparator(value[e])) || e > end;
 
                 if ((s < 0 && e > end) || (hasStart && hasEnd))
                 {

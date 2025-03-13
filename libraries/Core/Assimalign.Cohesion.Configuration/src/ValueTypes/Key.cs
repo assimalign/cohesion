@@ -22,10 +22,8 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <exception cref="ArgumentNullException"></exception>
     public Key(string value)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            ThrowHelper.ThrowArgumentNullException(nameof(value));
-        }
+        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
+
         if (value.ContainsAny(KeyPath.Delimiters))
         {
             ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', KeyPath.Delimiters)}");

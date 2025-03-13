@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -6,13 +7,34 @@ namespace Assimalign.Cohesion.FileSystem;
 public class FileSystemException : CohesionException
 {
     public FileSystemException(string message) 
-        : base(message)
+        : this(FileSystemErrorCode.Other, message)
     {
     }
 
-    public FileSystemException(string message, Exception innerException) 
+    public FileSystemException(FileSystemErrorCode code, string message) 
+        : base(message)
+    {
+        Code = code;
+    }
+
+    protected FileSystemException(FileSystemErrorCode code, string message, Exception? innerException) 
         : base(message, innerException)
     {
-        
+        Code = code;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public virtual FileSystemErrorCode Code { get; } = FileSystemErrorCode.Other;
+
+
+    [DoesNotReturn]
+    public static FileSystemException ThrowNotFound(FileSystemPath path, Exception? innerException = null)
+    {
+        throw new FileSystemException(
+            FileSystemErrorCode.NotFound,
+            string.Format("The provided path does not exist `{0}`.", path),
+            innerException);
     }
 }

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Runtime.CompilerServices;
+﻿using System.IO;
 
 namespace Assimalign.Cohesion.Internal;
 
@@ -16,7 +13,7 @@ internal static class PathHelper
     {
         return value == dot;
     }
-    internal static bool IsSeparator(char value)
+    internal static bool IsPathSeparator(char value)
     {
         return value == _separators[0] || value == _separators[1];
     }
@@ -44,8 +41,7 @@ internal static class PathHelper
 
         return true;
     }
-
-    internal static bool HasValidDriveLetter(string value)
+    internal static bool HasDriveLetter(string value)
     {
         if (value.Length >= 2)
         {
@@ -57,18 +53,6 @@ internal static class PathHelper
 
         return false;
     }
-
-    // Returns the starting and ending index of where to begin trimming a string
-    internal static (int start, int end) GetTrimRange(string value, int startAt = 0)
-    {
-        int start = startAt;
-        int end = value.Length - 1;
-
-        CalculateTrimRange(value, ref start, ref end);
-
-        return (start, end);
-    }
-
     internal static void CalculateTrimRange(string value, ref int start, ref int end)
     {
         // Calculate start of string
@@ -95,11 +79,8 @@ internal static class PathHelper
             if (index == _separators.Length) break;
         }
     }
-
-    internal static int GetTrimStart(string value)
+    internal static void CalculateTrimStart(string value, ref int start)
     {
-        int start = 0;
-
         // Calculate start of string
         for (; start < value.Length; start++)
         {
@@ -111,8 +92,6 @@ internal static class PathHelper
             }
             if (index == _separators.Length) break;
         }
-
-        return start;
     }
 
 

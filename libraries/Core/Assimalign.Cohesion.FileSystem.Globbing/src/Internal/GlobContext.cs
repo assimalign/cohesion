@@ -4,13 +4,13 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
-using static System.IO.Glob;
+using Cohesion.Internal;
 
 internal class GlobContext : IGlobContext
 {
     public GlobContext(Glob glob)
     {
-        Glob = glob;
+        Glob = ThrowHelper.ThrowIfNull(glob);
     }
 
     public Glob Glob { get; }

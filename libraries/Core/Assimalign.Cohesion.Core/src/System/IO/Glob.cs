@@ -1,12 +1,11 @@
 ﻿using System;
-using System.IO;
+using System.Text;
 using System.Diagnostics;
 using System.Globalization;
 
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
-using System.Text;
 
 /// <summary>
 /// 
@@ -173,14 +172,9 @@ public sealed partial class Glob
         return builder.Append(token.Value);
     }
 
-    public override bool Equals(object? obj)
-    {
-        return base.Equals(obj);
-    }
-
     public override int GetHashCode()
     {
-        return base.GetHashCode();
+        return ToString().GetHashCode();
     }
 
     #endregion

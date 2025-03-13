@@ -181,6 +181,28 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E4EC1217
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{BB08F664-2A37-4958-AB53-EA10F661AB0B}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".solution", ".solution", "{45E1D315-ED50-44C4-BBA3-F3B5F97DA175}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\.editorconfig = ..\..\.editorconfig
+		..\..\.gitignore = ..\..\.gitignore
+		..\..\Directory.Build.props = ..\..\Directory.Build.props
+		..\..\Directory.Build.targets = ..\..\Directory.Build.targets
+		..\..\README.md = ..\..\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "libraries", "libraries", "{5A3A476B-1FCA-44FF-8446-DFEED89A0D49}"
+	ProjectSection(SolutionItems) = preProject
+		..\Directory.Build.props = ..\Directory.Build.props
+		..\Directory.Build.targets = ..\Directory.Build.targets
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{13A28299-BA9D-4564-818A-66C2549F1C22}"
+	ProjectSection(SolutionItems) = preProject
+		Directory.Build.props = Directory.Build.props
+		Directory.Build.targets = Directory.Build.targets
+		README.md = README.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -1314,6 +1336,10 @@ Global
 		{16980CB2-659F-4B46-91E9-6863052EFBAA} = {BB08F664-2A37-4958-AB53-EA10F661AB0B}
 		{8B7CC205-F8E3-466E-B5A1-44ECD20185F5} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{33EDE1D8-F540-42F7-8534-AE183D83C4E5} = {E4EC1217-7565-4903-8241-FB89534954EE}
+		{02EA681E-C7D8-13C7-8484-4AC65E1B71E8} = {13A28299-BA9D-4564-818A-66C2549F1C22}
+		{E4EC1217-7565-4903-8241-FB89534954EE} = {13A28299-BA9D-4564-818A-66C2549F1C22}
+		{BB08F664-2A37-4958-AB53-EA10F661AB0B} = {13A28299-BA9D-4564-818A-66C2549F1C22}
+		{13A28299-BA9D-4564-818A-66C2549F1C22} = {5A3A476B-1FCA-44FF-8446-DFEED89A0D49}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F2DD53C1-D5B1-4C16-800F-3AA8AC8F3BE5}

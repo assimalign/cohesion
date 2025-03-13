@@ -27,14 +27,18 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     {
         ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
 
-        if (value.Length == 1 && IsSeparator(value[0]))
+        if (value.Length == 1 && IsPathSeparator(value[0]))
         {
             _value = "/";
             return;
         }
 
         string error = null!;
-        var (start, end) = GetTrimRange(value);
+
+        int start = 0;
+        int end = value.Length - 1;
+
+        CalculateTrimRange(value, ref start, ref end);
 
         _value = string.Create((end + 2) - start, value, (span, value) =>
         {

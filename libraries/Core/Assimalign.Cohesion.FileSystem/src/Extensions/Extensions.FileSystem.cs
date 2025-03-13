@@ -31,11 +31,9 @@ public static class FileSystemExtensions
             and reevaluate later
          */
 
-        ThrowHelper.ThrowIfNull(directory, nameof(directory));
-
         var names = path.GetSegments();
         
-        IFileSystemDirectory parent = directory;
+        IFileSystemDirectory parent = ThrowHelper.ThrowIfNull(directory); ;
 
         for (int i = 0; i < names.Length || parent is null; i++)
         {
