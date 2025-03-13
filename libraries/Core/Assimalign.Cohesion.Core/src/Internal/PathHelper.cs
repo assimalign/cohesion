@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Internal;
 
@@ -30,6 +32,48 @@ internal static class PathHelper
     {
         return value == _separators[0] || value == _separators[1];
     }
+    internal static bool IsValidDriveChar(char value)
+    {
+        return (uint)((value | 0x20) - 97) <= 25u;
+    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool IsDirectorySeparator(char c)
+    {
+        if (c != '\\')
+        {
+            return c == '/';
+        }
+        return true;
+    }
+    internal static bool IsEffectivelyEmpty(ReadOnlySpan<char> path)
+    {
+        if (path.IsEmpty)
+        {
+            return true;
+        }
+        ReadOnlySpan<char> readOnlySpan = path;
+        for (int i = 0; i < readOnlySpan.Length; i++)
+        {
+            if (readOnlySpan[i] != ' ')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    internal static string GetPathRoot(ReadOnlySpan<char> path)
+    {
+        if (IsEffectivelyEmpty(path))
+        {
+            return string.Empty;
+        }
+        int rootLength = GetRootLength(path);
+        if (rootLength > 0)
+        {
+            return path.Slice(0, rootLength).ToString();
+        }
+        return  string.Empty;
+    }
     internal static bool IsValidPathChar(char value)
     {
         for (int i = 0; i < _invalidPathChars.Length; i++)
@@ -58,13 +102,86 @@ internal static class PathHelper
     {
         if (value.Length >= 2)
         {
-            if ((uint)((value[0] | 0x20) - 97) <= 25u && value[1] == ':')
+            if (IsValidDriveChar(value[0]) && value[1] == ':')
             {
                 return true;
             }
         }
 
         return false;
+    }
+    internal static int GetRootLength(ReadOnlySpan<char> path)
+    {
+        int length = path.Length;
+        int i = 0;
+        bool flag = IsDevice(path);
+        bool flag2 = flag && IsDeviceUNC(path);
+        if ((!flag || flag2) && length > 0 && IsDirectorySeparator(path[0]))
+        {
+            if (flag2 || (length > 1 && IsDirectorySeparator(path[1])))
+            {
+                i = (flag2 ? 8 : 2);
+                int num = 2;
+                for (; i < length; i++)
+                {
+                    if (IsDirectorySeparator(path[i]) && --num <= 0)
+                    {
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                i = 1;
+            }
+        }
+        else if (flag)
+        {
+            for (i = 4; i < length && !IsDirectorySeparator(path[i]); i++)
+            {
+            }
+            if (i < length && i > 4 && IsDirectorySeparator(path[i]))
+            {
+                i++;
+            }
+        }
+        else if (length >= 2 && path[1] == ':' && IsValidDriveChar(path[0]))
+        {
+            i = 2;
+            if (length > 2 && IsDirectorySeparator(path[2]))
+            {
+                i++;
+            }
+        }
+        return i;
+    }
+    internal static bool IsDeviceUNC(ReadOnlySpan<char> path)
+    {
+        if (path.Length >= 8 && IsDevice(path) && IsDirectorySeparator(path[7]) && path[4] == 'U' && path[5] == 'N')
+        {
+            return path[6] == 'C';
+        }
+        return false;
+    }
+    internal static bool IsExtended(ReadOnlySpan<char> path)
+    {
+        if (path.Length >= 4 && path[0] == '\\' && (path[1] == '\\' || path[1] == '?') && path[2] == '?')
+        {
+            return path[3] == '\\';
+        }
+        return false;
+    }
+    internal static bool IsDevice(ReadOnlySpan<char> path)
+    {
+        if (!IsExtended(path))
+        {
+            if (path.Length >= 4 && IsDirectorySeparator(path[0]) && IsDirectorySeparator(path[1]) && (path[2] == '.' || path[2] == '?'))
+            {
+                return IsDirectorySeparator(path[3]);
+            }
+            return false;
+        }
+        return true;
     }
     internal static void CalculateTrimRange(string value, ref int start, ref int end)
     {

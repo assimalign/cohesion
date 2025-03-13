@@ -127,7 +127,18 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             return false;
         }
 
-        return Path.IsPathRooted(_value);
+        ReadOnlySpan<char> path = _value.AsSpan();
+        int length = path.Length;
+
+        if (length < 1 || !IsDirectorySeparator(path[0]))
+        {
+            if (length >= 2 && IsValidDriveChar(path[0]))
+            {
+                return path[1] == ':';
+            }
+            return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -144,7 +155,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             return false;
         }
 
-        var value = Path.GetPathRoot(_value)!;
+        var value = GetPathRoot(_value)!;
 
         if (!string.IsNullOrEmpty(value))
         {
