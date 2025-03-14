@@ -28,12 +28,12 @@ jobs:
             'Assimalign.Cohesion.Core',
             # 'Assimalign.Cohesion.DependencyInjection',
             # 'Assimalign.Cohesion.Diagnostics',
-            # 'Assimalign.Cohesion.FileSystem',
+            'Assimalign.Cohesion.FileSystem',
             # 'Assimalign.Cohesion.FileSystem.Composite',
             # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
             # 'Assimalign.Cohesion.FileSystem.Physical',
-            # 'Assimalign.Cohesion.Hosting',
+            'Assimalign.Cohesion.Hosting',
             # 'Assimalign.Cohesion.Hosting.BackgroundService',
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
             # 'Assimalign.Cohesion.Logging',
@@ -43,8 +43,8 @@ jobs:
             # 'Assimalign.Cohesion.Net.Http.ClientFactory',
             # 'Assimalign.Cohesion.Net.Transports',
             # 'Assimalign.Cohesion.ObjectMapping',
-            # 'Assimalign.Cohesion.ObjectPool',
-            # 'Assimalign.Cohesion.ObjectValidation',
+            'Assimalign.Cohesion.ObjectPool',
+            'Assimalign.Cohesion.ObjectValidation',
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
     steps:

@@ -9,8 +9,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectM
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{6B3176E9-475C-4310-900C-00F5E81DCA13}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{E0EE468C-CFD5-4518-96F2-0163AE4888CA}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{3451B311-667A-44E8-8BFD-B0769B4E2F57}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{2BDE173B-0C63-4FE4-8FA6-61FEF22519EF}"
@@ -26,8 +24,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{CE22
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{E8E94C20-06FB-4E4F-9908-1A7E8C9B1461}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectMapping.Benchmarks", "benchmarks\Assimalign.Cohesion.ObjectMapping.Benchmarks.csproj", "{237FF8B1-21E9-4DB6-A6D5-857BA68EECD8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

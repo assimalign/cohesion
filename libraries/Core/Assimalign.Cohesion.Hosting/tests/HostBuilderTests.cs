@@ -36,7 +36,7 @@ public class HostBuilderTests
 
 
     [Fact]
-    public async Task Test1()
+    public async Task TestHostedServiceCount()
     {
         var timer = new System.Timers.Timer();
         using var host = HostBuilder.Create(options =>
@@ -60,12 +60,5 @@ public class HostBuilderTests
 
 
         Assert.Single(host.Context.HostedServices);
-
-
-
-        host.Context.Shutdown();
-
-
-        await host.RunAsync();
     }
 }

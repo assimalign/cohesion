@@ -3,10 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{66320409-64EC-F7C5-3DEF-65E7510DAAD1}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Net.Http.Benchmarks", "benchmarks\Assimalign.Cohesion.Net.Http.Benchmarks.csproj", "{7218FAD5-FBE6-4072-B989-97D402240CCE}"
-EndProject
+
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Web.Http", "src\Assimalign.Cohesion.Web.Http.csproj", "{9631B7C4-3391-47F0-B334-BA47922A8142}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Net.Http.Tests", "tests\Assimalign.Cohesion.Net.Http.Tests.csproj", "{5AC0166A-5904-4A61-AF3A-BEB1B10449E2}"

@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Assimalign.Cohesion.Configuration.Binder.Benchmarks", "benchmarks\Assimalign.Cohesion.Configuration.Binder.Benchmarks.csproj", "{F46AE9EC-C4F1-4329-8413-FAAE0DA49537}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Assimalign.Cohesion.Configuration.Binder", "src\Assimalign.Cohesion.Configuration.Binder.csproj", "{553ACBB3-CC55-4EBD-93DF-2C676604EA6D}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Assimalign.Cohesion.Configuration.Binder.Tests", "tests\Assimalign.Cohesion.Configuration.Binder.Tests.csproj", "{5809EFD0-1692-4B22-900C-E8EEB2BB6E7A}"
@@ -14,8 +12,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{645DF604-F8F8-4536-AB52-FE6D68B0566E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B21CBEEC-6EFF-4824-BAD1-991E2F556B37}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{CDCAC95E-77DA-4E7F-A549-D92B1B89C067}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Assimalign.Cohesion.Core", "..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj", "{D870863F-9FF2-4EC1-B082-D6E3A44CC3C3}"
 EndProject

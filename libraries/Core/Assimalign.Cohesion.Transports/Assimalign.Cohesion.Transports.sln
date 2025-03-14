@@ -3,10 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{66320409-64EC-F7C5-3DEF-65E7510DAAD1}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Net.Transports.Benchmarks", "benchmarks\Assimalign.Cohesion.Net.Transports.Benchmarks.csproj", "{F7EAC8ED-86FB-4B61-8BB1-B5D38D41DBF2}"
-EndProject
+
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Transports", "src\Assimalign.Cohesion.Transports.csproj", "{053E4088-F7EB-4D5A-B364-C511892C7E04}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Net.Transports.Tests", "tests\Assimalign.Cohesion.Net.Transports.Tests.csproj", "{DCEA3A32-C0C2-4900-A8D9-D06B63C9DC76}"

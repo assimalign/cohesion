@@ -3,15 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.InMemory.Benchmarks", "benchmarks\Assimalign.Cohesion.FileSystem.InMemory.Benchmarks.csproj", "{39CA6E6D-3EE1-4B9E-944E-1BDE1EFED017}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.InMemory", "src\Assimalign.Cohesion.FileSystem.InMemory.csproj", "{4F7FD728-6249-45A0-BFEE-75ED5B9FB73A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.InMemory.Tests", "tests\Assimalign.Cohesion.FileSystem.InMemory.Tests.csproj", "{8D245F1A-9DD0-4AE4-A080-7559AAD0834E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{43062DF7-86FD-4D0F-8FD5-6B04D4FB07FC}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{09DD75F8-FBE8-4D9B-A682-EB45E70333F8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{0A4641BB-17AD-4319-A23F-0E5EB34DB91A}"
 	ProjectSection(SolutionItems) = preProject

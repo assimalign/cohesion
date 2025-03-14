@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json.Benchmarks", "benchmarks\Assimalign.Cohesion.Configuration.Json.Benchmarks.csproj", "{A773504F-93AE-46FC-975E-0DF7847A57A4}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json", "src\Assimalign.Cohesion.Configuration.Json.csproj", "{2A1BA6DC-EEE8-4893-A47C-21BDB2DF4D8B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Json.Tests", "tests\Assimalign.Cohesion.Configuration.Json.Tests.csproj", "{1752DB49-7788-4C89-AC1B-FED677A9CE53}"
@@ -12,8 +10,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{22F81928-620C-4A7D-BB71-BF26CEFB2E4D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{21D68019-5858-4443-B279-6818E5794C17}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{F63F3450-3B43-40C7-9AFB-F882DC007444}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{9132CEFB-9E74-4657-A52F-FDBDD3D93D74}"
 EndProject

@@ -6,7 +6,6 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Transports.Internal;
-using Assimalign.Cohesion.Utilities;
 
 public sealed class TransportMiddlewareBuilder<TContext, TMiddleware> : ITransportMiddlewareBuilder
     where TContext : ITransportContext

@@ -11,8 +11,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectV
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{25AA9B77-94FF-4EE1-A662-FE0A048FF361}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{16CF6E27-3DE3-43B2-9C72-B3987A6C9B78}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectValidation.Tests", "tests\Assimalign.Cohesion.ObjectValidation.Tests.csproj", "{B671F352-EDF3-4605-8230-8BAD03A90343}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{704571BE-255E-4565-BDB4-4E448B7A9319}"
@@ -23,8 +21,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{0E0FB795-7
 	ProjectSection(SolutionItems) = preProject
 		docs\design.md = docs\design.md
 	EndProjectSection
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.ObjectValidation.Benchmarks", "benchmarks\Assimalign.Cohesion.ObjectValidation.Benchmarks.csproj", "{311B1085-79DB-479A-8416-FA7502F20C50}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

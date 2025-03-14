@@ -11,6 +11,21 @@ public static class FileSystemExtensions
     /// <summary>
     /// 
     /// </summary>
+    /// <param name="path"></param>
+    /// <param name="info"></param>
+    /// <returns></returns>
+    //public static bool TryGetFileSystemInfo(this IFileSystem fileSystem, FileSystemPath path, out IFileSystemInfo? info)
+    //{
+    //    ThrowHelper.ThrowIfNull(fileSystem);
+
+    //    if (fileSystem.Exists(path))
+    //    {
+
+    //    }
+    //}
+    /// <summary>
+    /// 
+    /// </summary>
     /// <param name="directory"></param>
     /// <param name="parent"></param>
     /// <returns></returns>

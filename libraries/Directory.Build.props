@@ -1,5 +1,9 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
+	<!-- <PropertyGroup>
+		<SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile>
+	</PropertyGroup> -->
 	<PropertyGroup>
 		<!-- 
 			All projects should follow the same directory pattern
@@ -8,11 +12,9 @@
 				/ Library
 					/src
 					/test
-					/benchmarks
 		-->
 		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('src'))">$(TargetFrameworkForLibraries)</TargetFrameworks>
 		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">$(TargetFrameworkForLibraries)</TargetFrameworks>
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('benchmarks'))">$(TargetFrameworkForBenchmark)</TargetFrameworks>
 		
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>

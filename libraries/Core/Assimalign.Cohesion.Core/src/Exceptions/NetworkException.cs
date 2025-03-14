@@ -15,7 +15,6 @@ public enum NetworkOsiLayer
 
 public abstract class NetworkException  : CohesionException
 {
-
     public NetworkException(string message)
         : base(message) { }
 
@@ -23,6 +22,8 @@ public abstract class NetworkException  : CohesionException
         : base(message, innerException) { }
 
 
-
+    /// <summary>
+    /// 
+    /// </summary>
     public abstract NetworkOsiLayer Layer { get; }
 }

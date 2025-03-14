@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing.Benchmarks", "benchmarks\Assimalign.Cohesion.FileSystem.Globbing.Benchmarks.csproj", "{A6D8B595-6D9D-4AB5-ADB4-525FDD168A34}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing", "src\Assimalign.Cohesion.FileSystem.Globbing.csproj", "{E20798A6-47E2-4C9A-A5A1-31809655B7F8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.FileSystem.Globbing.Tests", "tests\Assimalign.Cohesion.FileSystem.Globbing.Tests.csproj", "{FD43F175-60A9-442E-990B-BD12559FCFEA}"
@@ -12,8 +10,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{39F93DCC-B9CA-481F-95D5-B1A6995AFF0D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{DE49E8AB-B627-46FF-A3D6-9D7356E1B483}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{51F15027-D188-4B09-9CA6-B72EBC8E697D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "refs", "refs", "{F764F624-D7C4-422F-8C41-DAE6CE938C46}"
 EndProject

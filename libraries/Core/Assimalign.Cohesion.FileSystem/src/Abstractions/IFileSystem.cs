@@ -42,14 +42,6 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     bool Exists(FileSystemPath path);
 
     /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="path"></param>
-    /// <param name="info"></param>
-    /// <returns></returns>
-    bool TryGetInfo(FileSystemPath path, out IFileSystemInfo? info);
-
-    /// <summary>
     /// Creates a <see cref="IFileSystemChangeToken"/> for the specified <paramref name="filter"/>.
     /// Examples: 
     /// <list type="bullet">
