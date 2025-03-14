@@ -31,7 +31,7 @@
 	</PropertyGroup>
 	<PropertyGroup Condition="$([System.OperatingSystem]::IsLinux())">
 		<DefineConstants>$(DefineConstants);IS_LINUX</DefineConstants>
-	</PropertyGroup> 
+	</PropertyGroup>
 	<PropertyGroup Condition="$([System.OperatingSystem]::IsMacOS())">
 		<DefineConstants>$(DefineConstants);IS_MAC</DefineConstants>
 	</PropertyGroup>

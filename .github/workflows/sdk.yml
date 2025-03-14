@@ -6,6 +6,8 @@ on:
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'sdk/**'
       - '.github/workflows/sdk.yml'                 # When Pipeline File Changes
+  release: 
+    types: published
 
 jobs:
   build:

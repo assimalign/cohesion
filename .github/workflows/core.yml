@@ -6,6 +6,12 @@ on:
       - '**/Directory.Build.props'          # When the Global Props File Changes
       - 'libraries/Core/**'
       - '.github/workflows/core.yml'        # When Pipeline File Changes
+  pull_request:
+    paths:
+      - '**/Directory.Build.props'          # When the Global Props File Changes
+      - 'libraries/Core/**'
+      - '.github/workflows/core.yml'        # When Pipeline File Changes
+
 
 jobs:
   build:
@@ -38,13 +44,10 @@ jobs:
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
             # 'Assimalign.Cohesion.Logging',
             # 'Assimalign.Cohesion.Logging.Console',
-            # 'Assimalign.Cohesion.Net',
-            # 'Assimalign.Cohesion.Net.Http',
-            # 'Assimalign.Cohesion.Net.Http.ClientFactory',
-            # 'Assimalign.Cohesion.Net.Transports',
             # 'Assimalign.Cohesion.ObjectMapping',
             'Assimalign.Cohesion.ObjectPool',
             'Assimalign.Cohesion.ObjectValidation',
+            'Assimalign.Cohesion.Transports',
             # 'Assimalign.Cohesion.Security.Cryptography'
         ]
     steps:
