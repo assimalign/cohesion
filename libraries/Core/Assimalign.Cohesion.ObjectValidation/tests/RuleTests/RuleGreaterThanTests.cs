@@ -112,6 +112,8 @@ public class RuleGreaterThanTests : RuleBaseTest
         Assert.Single(context.Errors);
     }
 
+#if IS_WINDOWS
+
     [Fact]
     public override void GuidSuccessTest()
     {
@@ -120,6 +122,7 @@ public class RuleGreaterThanTests : RuleBaseTest
         var context = this.RunGreaterThanTest(guid2, guid1);
         Assert.Empty(context.Errors);
     }
+#endif
 
     [Fact]
     public override void Int16FailureTest()

@@ -9,7 +9,12 @@ namespace  Assimalign.Cohesion.ObjectValidation;
 
 public class SequentialGuid
 {
+#if IS_WINDOWS
     [DllImport("rpcrt4.dll", SetLastError = true)]
+#elif IS_LINUX
+
+#endif
+
     static extern int UuidCreateSequential(out Guid guid);
 
     public static Guid New()

@@ -107,7 +107,7 @@ public class RuleLessThanOrEqualToTests : RuleBaseTest
         Assert.Empty(context1.Errors);
         Assert.Empty(context2.Errors);
     }
-
+#if IS_WINDOWS
     [Fact]
     public override void GuidFailureTest()
     {
@@ -116,6 +116,7 @@ public class RuleLessThanOrEqualToTests : RuleBaseTest
         var context = this.RunLessThanOrEqualToTest(guid2, guid1);
         Assert.Single(context.Errors);
     }
+#endif
 
     [Fact]
     public override void GuidSuccessTest()

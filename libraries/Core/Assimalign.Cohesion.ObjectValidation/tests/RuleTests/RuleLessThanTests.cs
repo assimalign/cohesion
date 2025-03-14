@@ -111,6 +111,7 @@ public class RuleLessThanTests : RuleBaseTest
         var context = this.RunLessThanTest(guid, guid);
         Assert.Single(context.Errors);
     }
+#if IS_WINDOWS
 
     [Fact]
     public override void GuidSuccessTest()
@@ -120,6 +121,7 @@ public class RuleLessThanTests : RuleBaseTest
         var context = this.RunLessThanTest(guid1, guid2);
         Assert.Empty(context.Errors);
     }
+#endif
 
     [Fact]
     public override void Int16FailureTest()
