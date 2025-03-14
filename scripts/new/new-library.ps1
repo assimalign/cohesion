@@ -23,7 +23,6 @@ if (-not (Test-Path $Path)) {
 $Items = @(
     @{ Type = 'classlib'; Suffix = $null; Directory = 'src' }
     @{ Type = 'xunit'; Suffix = 'Tests'; Directory = 'tests' }
-    @{ Type = 'console'; Suffix = 'Benchmarks'; Directory = 'benchmarks' }
     @{ Type = 'sln'; Suffix = $null; Directory = $null }
 )
 

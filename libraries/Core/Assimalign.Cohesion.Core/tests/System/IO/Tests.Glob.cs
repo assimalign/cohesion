@@ -19,18 +19,18 @@ public class GlobTests
     [InlineData("*ave*2", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("*ave 12", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     ////[InlineData("*ave 12", "wave 12/")] // This doesn't works as FileSystemPath trims trailing separators
-    [InlineData("C:\\THIS_IS_A_DIR\\**\\somefile.txt", "C:\\THIS_IS_A_DIR\\awesomefile.txt")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/27
-    [InlineData("C:\\name\\**", "C:\\name.ext", "C:\\name_longer.ext")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/29
-    [InlineData("Bumpy/**/AssemblyInfo.cs", "Bumpy.Test/Properties/AssemblyInfo.cs")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/33
-    [InlineData("C:\\sources\\x-y 1\\BIN\\DEBUG\\COMPILE\\**\\MSVC*120.DLL", "C:\\sources\\x-y 1\\BIN\\DEBUG\\COMPILE\\ANTLR3.RUNTIME.DLL")]      // Attempted repro for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/37
-    [InlineData("literal1", "LITERAL1")] // Regression tests for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/41
-    [InlineData("*ral*", "LITERAL1")] // Regression tests for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/41
-    [InlineData("[list]s", "LS", "iS", "Is")] // Regression tests for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/41
-    [InlineData("range/[a-b][C-D]", "range/ac", "range/Ad", "range/BD")] // Regression tests for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/41
+    [InlineData("C:\\THIS_IS_A_DIR\\**\\somefile.txt", "C:\\THIS_IS_A_DIR\\awesomefile.txt")]
+    [InlineData("C:\\name\\**", "C:\\name.ext", "C:\\name_longer.ext")]
+    [InlineData("Bumpy/**/AssemblyInfo.cs", "Bumpy.Test/Properties/AssemblyInfo.cs")]     
+    [InlineData("C:\\sources\\x-y 1\\BIN\\DEBUG\\COMPILE\\**\\MSVC*120.DLL", "C:\\sources\\x-y 1\\BIN\\DEBUG\\COMPILE\\ANTLR3.RUNTIME.DLL")]     
+    [InlineData("literal1", "LITERAL1")] 
+    [InlineData("*ral*", "LITERAL1")] 
+    [InlineData("[list]s", "LS", "iS", "Is")] 
+    [InlineData("range/[a-b][C-D]", "range/ac", "range/Ad", "range/BD")] 
     [InlineData(@"abc/**", @"abcd")]
     [InlineData(@"**\segment1\**\segment2\**", @"C:\test\segment1\src\segment2")]
-    [InlineData(@"**/.*", "foobar.")] // Regression test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/78  
-    [InlineData(@"**/~*", "/")] // Regression test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/82
+    [InlineData(@"**/.*", "foobar.")]
+    [InlineData(@"**/~*", "/")]
     public void TestIsNotMatching(string pattern, params string[] testStrings)
     {
         var glob = Glob.Parse(pattern);
@@ -60,21 +60,21 @@ public class GlobTests
     [InlineData("/**/file.*", "/file.txt")]
     [InlineData("**/file.*", "/file.txt")]
     [InlineData("/*file.txt", "/file.txt")]
-    [InlineData("C:\\THIS_IS_A_DIR\\*", "C:\\THIS_IS_A_DIR\\somefile")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/20
-    [InlineData("/DIR1/*/*", "/DIR1/DIR2/file.txt")]  // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/21
-    [InlineData("~/*~3", "~/abc123~3")]  // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/pull/15
+    [InlineData("C:\\THIS_IS_A_DIR\\*", "C:\\THIS_IS_A_DIR\\somefile")]
+    [InlineData("/DIR1/*/*", "/DIR1/DIR2/file.txt")] 
+    [InlineData("~/*~3", "~/abc123~3")] 
     [InlineData("**\\Shock* 12", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**\\*ave*2", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12.txt")]
-    [InlineData("Stuff, *", "Stuff, x")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/31
-    [InlineData("\"Stuff*", "\"Stuff")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/32
+    [InlineData("Stuff, *", "Stuff, x")]     
+    [InlineData("\"Stuff*", "\"Stuff")]     
     [InlineData("path/**/somefile.txt", "path//somefile.txt")]
-    [InlineData("**/app*.js", "dist/app.js", "dist/app.a72ka8234.js")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/34
-    [InlineData("**/y", "y")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/44      
-    [InlineData("**/gfx/*.gfx", "HKEY_LOCAL_MACHINE\\gfx\\foo.gfx", "HKEY_LOCAL_MACHINE/gfx/foo.gfx")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/46   -  seems to work fine on mixed slashes.   
-    [InlineData("**/gfx/**/*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/46   - only seems to work on paths with forward slashes.
-    [InlineData("**\\gfx\\**\\*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]      // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/46    -  only seems to work on paths with backwards slashes.
+    [InlineData("**/app*.js", "dist/app.js", "dist/app.a72ka8234.js")]     
+    [InlineData("**/y", "y")]     
+    [InlineData("**/gfx/*.gfx", "HKEY_LOCAL_MACHINE\\gfx\\foo.gfx", "HKEY_LOCAL_MACHINE/gfx/foo.gfx")]     
+    [InlineData("**/gfx/**/*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]     
+    [InlineData("**\\gfx\\**\\*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]     
     [InlineData(@"/foo/bar!.baz", @"/foo/bar!.baz")] // match a ! after bar
     [InlineData(@"/foo/bar[!!].baz", @"/foo/bar7.baz")] // anything except an exclaimation mark after bar
     [InlineData(@"/foo/bar[!]].baz", @"/foo/bar9.baz")] // anything except an ] after bar
@@ -93,10 +93,10 @@ public class GlobTests
     [InlineData(@"[#!]*\**", "#this is a comment")]
     [InlineData(@"[#!]*", @"#test3", "#this is a comment")]
     [InlineData(@"abc/**", @"abc/def/hij.txt")]
-    [InlineData(@"a/**/b", "a/b")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/65
-    [InlineData(@"abc/**", "abc/def")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/65
-    [InlineData(@"/some/path/**/some.file*.exe", "/some/path/some.file.exe")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/87
-    [InlineData(@"**/some/path/some.file*.exe", "/some/path/some.file.exe")] // Regression Test for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/87
+    [InlineData(@"a/**/b", "a/b")]
+    [InlineData(@"abc/**", "abc/def")]
+    [InlineData(@"/some/path/**/some.file*.exe", "/some/path/some.file.exe")]
+    [InlineData(@"**/some/path/some.file*.exe", "/some/path/some.file.exe")]
     public void TestIsMatching(string pattern, params string[] testStrings)
     {
         var glob = Glob.Parse(pattern);
@@ -109,7 +109,7 @@ public class GlobTests
         }
     }
 
-    // Regression tests for https://github.com/dazinator/Assimalign.Cohesion.FileSystem.Globbing/issues/41
+    
     [Theory]
     [InlineData("literal1", "LITERAL1", "literal1")]
     [InlineData("*ral*", "LITERAL1", "literal1")]

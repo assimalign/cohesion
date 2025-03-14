@@ -67,5 +67,11 @@ jobs:
       working-directory: './libraries/Core/${{ matrix.projects }}'
 
     - name: '.NET Unit Tests: ${{ matrix.projects }}'
-      run: dotnet test --no-restore --verbosity normal
+      if: hashFiles(format('./libraries/Core/{0}/tests/{1}.Tests.csproj', matrix.projects, matrix.projects)) != ''
+      run: dotnet test --no-restore
       working-directory: './libraries/Core/${{ matrix.projects }}/tests'
+
+    # - name: '.NET Benchmarks: ${{ matrix.projects }}'
+    #   if: hashFiles(format('./libraries/Core/{0}/benchmarks/{1}.Benchmarks.csproj', matrix.projects, matrix.projects)) != ''
+    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" -- 
+    #   working-directory: './libraries/Core/${{ matrix.projects }}'

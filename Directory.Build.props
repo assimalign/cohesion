@@ -16,7 +16,6 @@
 	<PropertyGroup>
 		<TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
 		<TargetFrameworkForLibraries>net6.0;net8.0;$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
-		<TargetFrameworkForBenchmark>$(TargetFrameworkLatest)</TargetFrameworkForBenchmark>
 		<TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
 		<TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
 		<TargetFrameworkForSdk>$(TargetFrameworkLatest)</TargetFrameworkForSdk>
