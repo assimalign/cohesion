@@ -11,10 +11,6 @@ public class SequentialGuid
 {
 #if IS_WINDOWS
     [DllImport("rpcrt4.dll", SetLastError = true)]
-#elif IS_LINUX
-
-#endif
-
     static extern int UuidCreateSequential(out Guid guid);
 
     public static Guid New()
@@ -41,4 +37,5 @@ public class SequentialGuid
         t[15] = s[15];
         return new Guid(t);
     }
+#endif
 }

@@ -111,17 +111,17 @@ public class RuleLessThanTests : RuleBaseTest
         var context = this.RunLessThanTest(guid, guid);
         Assert.Single(context.Errors);
     }
-#if IS_WINDOWS
 
     [Fact]
     public override void GuidSuccessTest()
     {
+#if IS_WINDOWS
         var guid1 = SequentialGuid.New();
         var guid2 = SequentialGuid.New();
         var context = this.RunLessThanTest(guid1, guid2);
         Assert.Empty(context.Errors);
-    }
 #endif
+    }
 
     [Fact]
     public override void Int16FailureTest()

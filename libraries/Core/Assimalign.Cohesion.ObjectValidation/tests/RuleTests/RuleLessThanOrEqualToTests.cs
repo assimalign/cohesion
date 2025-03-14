@@ -107,16 +107,16 @@ public class RuleLessThanOrEqualToTests : RuleBaseTest
         Assert.Empty(context1.Errors);
         Assert.Empty(context2.Errors);
     }
-#if IS_WINDOWS
     [Fact]
     public override void GuidFailureTest()
     {
+#if IS_WINDOWS
         var guid1 = SequentialGuid.New();
         var guid2 = SequentialGuid.New();
         var context = this.RunLessThanOrEqualToTest(guid2, guid1);
         Assert.Single(context.Errors);
-    }
 #endif
+    }
 
     [Fact]
     public override void GuidSuccessTest()
