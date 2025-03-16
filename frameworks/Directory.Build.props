@@ -1,0 +1,8 @@
+<Project>
+    <Import Project="..\Directory.Build.props" />
+    <PropertyGroup>
+        <TargetFrameworks>$(TargetFrameworkForShared)</TargetFrameworks>
+        <GenerateRuntimeConfigurationFiles Condition="'$(Configuration)' == 'Release'">true</GenerateRuntimeConfigurationFiles>
+    </PropertyGroup>
+
+</Project>

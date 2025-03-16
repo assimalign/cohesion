@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<IsPackage>true</IsPackage>
 		<Description>The following library offers an extensive set of fluent APIs for object validation built the unified .NET. NOTE: Any .NET framework below version 5 is NOT supported.</Description>
 	</PropertyGroup>
 	<ItemGroup>

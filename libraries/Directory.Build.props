@@ -20,13 +20,15 @@
 	<!-- #region Packaging Props-->
 	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
 		<PackageVersion>$(CohesionVersion)</PackageVersion>
-		<GeneratePackageOnBuild Condition="$(Configuration) == 'Release'">true</GeneratePackageOnBuild>
-		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
+		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
+		<!-- <GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">true</GeneratePackageOnBuild> -->
 		<PackageLicenseFile Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">LICENSE</PackageLicenseFile>
+		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
+		<PackageOutputPath>$(CohesionOutputPathForLibraries)\$(PackageId)</PackageOutputPath>
 	</PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
-		<SignAssembly>true</SignAssembly>
-		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile>
+		<!-- <SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>
 	<ItemGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
 		<None Include="..\README.md" Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">

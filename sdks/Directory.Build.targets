@@ -1,0 +1,36 @@
+<Project>
+    <ItemGroup>
+        <None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
+        <None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
+    </ItemGroup>
+
+    <!-- #region Copies: Sdk/Sdk.{props, targets} and Targets/{targets}.{props, targets}-->
+    <Target Name="CopyRootSdkRiles" AfterTargets="Build">
+        <ItemGroup>
+            <MySourceFiles Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Sdk\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(MySourceFiles)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Sdk\%(RecursiveDir)" />
+    </Target>
+    <Target Name="CopyTargetSdkFiles" AfterTargets="Build">
+        <ItemGroup>
+            <MySourceFiles Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Targets\**\*.*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(MySourceFiles)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\%(RecursiveDir)" />
+    </Target>
+    <!-- #endregion -->
+
+    <Target Name="CleanOutDir" AfterTargets="Clean">
+        <ItemGroup>
+            <PropsToClean Include="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\**\*.props" />
+            <TargetsToClean Include="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\**\*.targets" />
+        </ItemGroup>
+        <Message Text="Cleaning Props @(PropsToClean)" />
+        <Delete Files="@(PropsToClean)" />
+        <Message Text="Props Cleaned: @(PropsToClean)" />
+
+        <Message Text="Cleaning Targets @(TargetsToClean)" />
+        <Delete Files="@(TargetsToClean)" />
+        <Message Text="Targets Cleaned: @(TargetsToClean)" />
+    </Target>
+    <Import Project="..\Directory.Build.targets" />
+</Project>

@@ -4,8 +4,8 @@
 		<PackageReference Update="Sharprompt" Version="3.0.0" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Update="Microsoft.Build" Version="17.12.6" />
-		<PackageReference Update="Microsoft.Build.Framework" Version="17.12.6" />
+		<PackageReference Update="Microsoft.Build" Version="17.12.6"  />
+		<PackageReference Update="Microsoft.Build.Framework" Version="17.12.6"  />
 		<PackageReference Update="Microsoft.Build.Utilities.Core" Version="17.12.6" />
 	</ItemGroup>
 	<!-- XUnit Test Dependencies-->

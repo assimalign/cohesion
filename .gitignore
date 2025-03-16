@@ -20,6 +20,7 @@ scripts/**/*.txt
 
 # Build output folder
 .out
+_out
 
 # Mono auto generated files
 mono_crash.*

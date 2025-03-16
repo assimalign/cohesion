@@ -4,35 +4,38 @@
 		<Company>Assimalign</Company>
 		<Copyright>© Assimalign $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
 		<RepositoryType>git</RepositoryType>
-		<RepositoryUrl>https://github.com/assimalign-cohesion/cohesion</RepositoryUrl>
+		<RepositoryUrl>https://github.com/assimalign/cohesion</RepositoryUrl>
 	</PropertyGroup>
 	<!-- Fixed Version Info -->
 	<PropertyGroup>
-		<MajorVersion>1</MajorVersion>
+		<!-- Starting with Major version 9 to be inline with the latest .NET release -->
+		<MajorVersion>9</MajorVersion>
 		<MinorVersion>0</MinorVersion>
 		<PatchVersion>0</PatchVersion>
 	</PropertyGroup>
 	<!-- Target Frameworks -->
 	<PropertyGroup>
 		<TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
-		<TargetFrameworkForLibraries>net6.0;net8.0;$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
+		<TargetFrameworkForLibraries>$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
+		<TargetFrameworkForShared>$(TargetFrameworkLatest)</TargetFrameworkForShared>
 		<TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
 		<TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
 		<TargetFrameworkForSdk>$(TargetFrameworkLatest)</TargetFrameworkForSdk>
 	</PropertyGroup>
 	<!-- Cohesion Build Properties -->
-	<PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>none</DebugType>
 		<CohesionVersion>$(MajorVersion).$(MinorVersion).$(PatchVersion)</CohesionVersion>
 		<CohesionRepositoryDirectory>$(MSBuildThisFileDirectory)</CohesionRepositoryDirectory>
+		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
+		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
+		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
+		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
 	</PropertyGroup>
 	<!-- Add Runtime Constants -->
-	<PropertyGroup Condition="$([System.OperatingSystem]::IsWindows())">
-		<DefineConstants>$(DefineConstants);IS_WINDOWS</DefineConstants>
-	</PropertyGroup>
-	<PropertyGroup Condition="$([System.OperatingSystem]::IsLinux())">
-		<DefineConstants>$(DefineConstants);IS_LINUX</DefineConstants>
-	</PropertyGroup>
-	<PropertyGroup Condition="$([System.OperatingSystem]::IsMacOS())">
-		<DefineConstants>$(DefineConstants);IS_MAC</DefineConstants>
+	<PropertyGroup>
+		<DefineConstants Condition="$([System.OperatingSystem]::IsWindows())">$(DefineConstants);IS_WINDOWS</DefineConstants>
+		<DefineConstants Condition="$([System.OperatingSystem]::IsLinux())">$(DefineConstants);IS_LINUX</DefineConstants>
+		<DefineConstants Condition="$([System.OperatingSystem]::IsMacOS())">$(DefineConstants);IS_MAC</DefineConstants>
 	</PropertyGroup>
 </Project>

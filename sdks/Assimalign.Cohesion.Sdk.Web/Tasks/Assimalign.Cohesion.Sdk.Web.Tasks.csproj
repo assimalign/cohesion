@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<PackageId>Assimalign.Cohesion.Sdk.Web</PackageId>
+		<TargetFrameworks>$(TargetFrameworkForSdk)</TargetFrameworks>
+		<PlatformTarget>AnyCPU</PlatformTarget>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Build" ExcludeAssets="Runtime" />
+		<PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="Runtime" />
+		<PackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="Runtime" />
+	</ItemGroup>
+</Project>
