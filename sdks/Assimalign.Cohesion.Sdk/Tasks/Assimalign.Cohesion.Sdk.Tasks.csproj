@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<PackageId>Assimalign.Cohesion.Sdk</PackageId>
-		<PlatformTarget>AnyCPU</PlatformTarget>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 	</PropertyGroup>
 	<ItemGroup>

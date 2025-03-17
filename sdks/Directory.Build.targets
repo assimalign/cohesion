@@ -1,4 +1,5 @@
 <Project>
+    <Import Project="..\Directory.Build.targets" />
     <ItemGroup>
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
@@ -7,15 +8,21 @@
     <!-- #region Copies: Sdk/Sdk.{props, targets} and Targets/{targets}.{props, targets}-->
     <Target Name="CopyRootSdkRiles" AfterTargets="Build">
         <ItemGroup>
-            <MySourceFiles Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Sdk\**\*.*" />
+            <MySourceFiles1 Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Sdk\*.*" />
         </ItemGroup>
-        <Copy SourceFiles="@(MySourceFiles)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Sdk\%(RecursiveDir)" />
+        <Copy SourceFiles="@(MySourceFiles1)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Sdk\" />
     </Target>
     <Target Name="CopyTargetSdkFiles" AfterTargets="Build">
         <ItemGroup>
-            <MySourceFiles Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Targets\**\*.*" />
+            <MySourceFiles2 Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Targets\*.*" />
         </ItemGroup>
-        <Copy SourceFiles="@(MySourceFiles)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\%(RecursiveDir)" />
+        <Copy SourceFiles="@(MySourceFiles2)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\" />
+    </Target>
+    <Target Name="CopyVersionProps" AfterTargets="Build">
+        <ItemGroup>
+            <MySourceFiles3 Include="$([System.IO.Path]::GetFullPath('$(CohesionRepositoryDirectory)'))\Version.props" />
+        </ItemGroup>
+        <Copy SourceFiles="@(MySourceFiles3)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\" />
     </Target>
     <!-- #endregion -->
 
@@ -32,5 +39,4 @@
         <Delete Files="@(TargetsToClean)" />
         <Message Text="Targets Cleaned: @(TargetsToClean)" />
     </Target>
-    <Import Project="..\Directory.Build.targets" />
 </Project>

@@ -2,20 +2,19 @@ name: Core
 
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'          # When the Global Props File Changes
-      - 'libraries/Core/**'
-      - '.github/workflows/core.yml'        # When Pipeline File Changes
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Core/**"
+      - ".github/workflows/core.yml" # When Pipeline File Changes
   pull_request:
     paths:
-      - '**/Directory.Build.props'          # When the Global Props File Changes
-      - 'libraries/Core/**'
-      - '.github/workflows/core.yml'        # When Pipeline File Changes
-
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Core/**"
+      - ".github/workflows/core.yml" # When Pipeline File Changes
 
 jobs:
   build:
-    name: '${{ matrix.projects }} [${{ matrix.os }}]'
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -31,50 +30,50 @@ jobs:
             # 'Assimalign.Cohesion.Configuration.Ini',
             # 'Assimalign.Cohesion.Configuration.Json',
             # 'Assimalign.Cohesion.Configuration.Xml',
-            'Assimalign.Cohesion.Core',
+            "Assimalign.Cohesion.Core",
             # 'Assimalign.Cohesion.DependencyInjection',
             # 'Assimalign.Cohesion.Diagnostics',
-            'Assimalign.Cohesion.FileSystem',
+            "Assimalign.Cohesion.FileSystem",
             # 'Assimalign.Cohesion.FileSystem.Composite',
             # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
             # 'Assimalign.Cohesion.FileSystem.Physical',
-            'Assimalign.Cohesion.Hosting',
+            "Assimalign.Cohesion.Hosting",
             # 'Assimalign.Cohesion.Hosting.BackgroundService',
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
             # 'Assimalign.Cohesion.Logging',
             # 'Assimalign.Cohesion.Logging.Console',
             # 'Assimalign.Cohesion.ObjectMapping',
-            'Assimalign.Cohesion.ObjectPool',
-            'Assimalign.Cohesion.ObjectValidation',
-            'Assimalign.Cohesion.Transports',
+            "Assimalign.Cohesion.ObjectPool",
+            "Assimalign.Cohesion.ObjectValidation",
+            "Assimalign.Cohesion.Transports",
             # 'Assimalign.Cohesion.Security.Cryptography'
-        ]
+          ]
     steps:
-    - uses: actions/checkout@v2
-      name: 'Checkout: ${{ matrix.projects }}'
+      - uses: actions/checkout@v2
+        name: "Checkout: ${{ matrix.projects }}"
 
-    - name: .NET Installation
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: |
-          6.x
-          8.x
-          9.x
+      - name: .NET Installation
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: |
+            6.x
+            8.x
+            9.x
 
-    - name: '.NET Restore: ${{ matrix.projects }}'
-      run:  dotnet restore './libraries/Core/${{ matrix.projects }}'
-    
-    - name: '.NET Build: ${{ matrix.projects }}'
-      run: dotnet build --configuration Release --no-restore
-      working-directory: './libraries/Core/${{ matrix.projects }}'
+      - name: ".NET Restore: ${{ matrix.projects }}"
+        run: dotnet restore './libraries/Core/${{ matrix.projects }}'
 
-    - name: '.NET Unit Tests: ${{ matrix.projects }}'
-      if: hashFiles(format('./libraries/Core/{0}/tests/{1}.Tests.csproj', matrix.projects, matrix.projects)) != ''
-      run: dotnet test --no-restore
-      working-directory: './libraries/Core/${{ matrix.projects }}/tests'
+      - name: ".NET Build: ${{ matrix.projects }}"
+        run: dotnet build --configuration Release --no-restore
+        working-directory: "./libraries/Core/${{ matrix.projects }}"
+
+      - name: ".NET Unit Tests: ${{ matrix.projects }}"
+        if: hashFiles(format('./libraries/Core/{0}/tests/{1}.Tests.csproj', matrix.projects, matrix.projects)) != ''
+        run: dotnet test --no-restore
+        working-directory: "./libraries/Core/${{ matrix.projects }}/tests"
 
     # - name: '.NET Benchmarks: ${{ matrix.projects }}'
     #   if: hashFiles(format('./libraries/Core/{0}/benchmarks/{1}.Benchmarks.csproj', matrix.projects, matrix.projects)) != ''
-    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" -- 
+    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" --
     #   working-directory: './libraries/Core/${{ matrix.projects }}'

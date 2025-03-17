@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Assimalign.Cohesion.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -6,11 +6,5 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
-
-	<ItemGroup>
-		<FrameworkReference Include="..\..\framework\Runtime\Assimalign.Cohesion.App.Runtime\bin\Release\net9.0"/>
-
-		<ProjectReference Include="..\..\libraries\Web\Assimalign.Cohesion.Web.Hosting\src\Assimalign.Cohesion.Web.Hosting.csproj" />
-	</ItemGroup>
 
 </Project>

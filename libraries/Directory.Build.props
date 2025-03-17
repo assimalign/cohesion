@@ -11,9 +11,11 @@
 		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
 		<Nullable>enable</Nullable>
 		<LangVersion>latest</LangVersion>
+		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+		<RollForward>LatestPatch</RollForward>
 		<!-- AOT-->
-		<IsAotCompatible Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">true</IsAotCompatible>
-		<StripSymbols Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols>
+		<IsAotCompatible Condition="$(MSBuildProjectDirectory.EndsWith('src'))">true</IsAotCompatible>
+		<StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols>
 	</PropertyGroup>
 	<!-- #endregion -->
 
@@ -21,10 +23,11 @@
 	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
 		<PackageVersion>$(CohesionVersion)</PackageVersion>
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
-		<!-- <GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">true</GeneratePackageOnBuild> -->
+		<GenerateRuntimeConfigurationFiles Condition="'$(Configuration)' == 'Release'">true</GenerateRuntimeConfigurationFiles>
+		<GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">true</GeneratePackageOnBuild>
 		<PackageLicenseFile Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">LICENSE</PackageLicenseFile>
 		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
-		<PackageOutputPath>$(CohesionOutputPathForLibraries)\$(PackageId)</PackageOutputPath>
+		<!-- <PackageOutputPath>$(CohesionOutputPathForLibraries)\$(PackageId)</PackageOutputPath> -->
 	</PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
 		<!-- <SignAssembly>true</SignAssembly>

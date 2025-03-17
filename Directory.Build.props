@@ -1,17 +1,11 @@
 <Project>
+	<Import Project="Version.props" />
 	<!-- Branding -->
 	<PropertyGroup>
 		<Company>Assimalign</Company>
 		<Copyright>© Assimalign $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
 		<RepositoryType>git</RepositoryType>
 		<RepositoryUrl>https://github.com/assimalign/cohesion</RepositoryUrl>
-	</PropertyGroup>
-	<!-- Fixed Version Info -->
-	<PropertyGroup>
-		<!-- Starting with Major version 9 to be inline with the latest .NET release -->
-		<MajorVersion>9</MajorVersion>
-		<MinorVersion>0</MinorVersion>
-		<PatchVersion>0</PatchVersion>
 	</PropertyGroup>
 	<!-- Target Frameworks -->
 	<PropertyGroup>
@@ -25,7 +19,6 @@
 	<!-- Cohesion Build Properties -->
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
 		<DebugType>none</DebugType>
-		<CohesionVersion>$(MajorVersion).$(MinorVersion).$(PatchVersion)</CohesionVersion>
 		<CohesionRepositoryDirectory>$(MSBuildThisFileDirectory)</CohesionRepositoryDirectory>
 		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
 		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>

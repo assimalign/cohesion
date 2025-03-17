@@ -5,10 +5,6 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Sdk.Tasks", "Assimalign.Cohesion.Sdk\Tasks\Assimalign.Cohesion.Sdk.Tasks.csproj", "{BDDE6E94-CEF2-4E74-AD11-BD6ACEC14E77}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Sdk.Database.Tasks", "Assimalign.Cohesion.Sdk.Database\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.csproj", "{3A33B5B2-1BD8-435A-A75F-09D9607BD9CF}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Sdk.Web.Tasks", "Assimalign.Cohesion.Sdk.Web\Tasks\Assimalign.Cohesion.Sdk.Web.Tasks.csproj", "{5269F32C-85F8-4391-8667-D8C095A80593}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
