@@ -14,7 +14,7 @@
 		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\src\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
+		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

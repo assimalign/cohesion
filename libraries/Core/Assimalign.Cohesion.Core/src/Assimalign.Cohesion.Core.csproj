@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 		<PackageId>Assimalign.Cohesion.Core</PackageId>
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>

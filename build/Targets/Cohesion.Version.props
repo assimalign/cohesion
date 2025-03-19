@@ -1,0 +1,5 @@
+<Project>
+    <PropertyGroup>
+        <CohesionVersion>9.0.0</CohesionVersion> <!-- Starting with Major version 9 to be inline with the latest .NET release -->
+    </PropertyGroup>
+</Project>

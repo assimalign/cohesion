@@ -7,7 +7,7 @@
 		<Description>JSON configuration provider implementation for  Assimalign.Cohesion.Configuration.</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.Configuration\src\Assimalign.Cohesion.Configuration.csproj" />
+		<Reference Include="Assimalign.Cohesion.Configuration" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Include="README.md">

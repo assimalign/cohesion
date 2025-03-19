@@ -1,0 +1,10 @@
+<Project>
+    <PropertyGroup>
+        <TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
+        <TargetFrameworkForLibraries>$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
+        <TargetFrameworkForShared>$(TargetFrameworkLatest)</TargetFrameworkForShared>
+        <TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
+        <TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
+        <TargetFrameworkForSdk>$(TargetFrameworkLatest)</TargetFrameworkForSdk>
+    </PropertyGroup>
+</Project>

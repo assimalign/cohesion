@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	
 	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.Hosting\src\Assimalign.Cohesion.Hosting.csproj" />
+		<Reference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 	
 </Project>

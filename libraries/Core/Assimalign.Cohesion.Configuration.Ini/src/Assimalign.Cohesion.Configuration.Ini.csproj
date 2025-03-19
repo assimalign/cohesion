@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Assimalign.Extensions.Configuration\Assimalign.Extensions.Configuration.csproj" />
+    <Reference Include="Assimalign.Cohesion.Configuration" />
   </ItemGroup>
 
 	

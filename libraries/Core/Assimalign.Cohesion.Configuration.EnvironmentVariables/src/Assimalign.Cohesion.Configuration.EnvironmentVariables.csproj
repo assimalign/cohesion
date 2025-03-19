@@ -11,7 +11,7 @@
 		</None>
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\Assimalign.Cohesion.Configuration\Assimalign.Cohesion.Configuration.csproj" />
+		<Reference Include="Assimalign.Cohesion.Configuration" />
 	</ItemGroup>
 	
 </Project>

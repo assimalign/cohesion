@@ -11,6 +11,6 @@
 		<PackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\src\Assimalign.Cohesion.Hosting.csproj" />
+		<Reference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>

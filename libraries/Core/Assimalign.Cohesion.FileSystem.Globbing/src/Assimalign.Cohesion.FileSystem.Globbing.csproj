@@ -5,6 +5,6 @@
 		</Description>
 	</PropertyGroup>
 	<ItemGroup>
-	  <ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
+	  <Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 </Project>

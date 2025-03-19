@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Assimalign.IO.Ebml\Assimalign.IO.Ebml.csproj" />
+    <Reference Include="Assimalign.IO.Ebml" />
   </ItemGroup>
 
 </Project>

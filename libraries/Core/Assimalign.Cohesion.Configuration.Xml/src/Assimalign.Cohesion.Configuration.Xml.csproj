@@ -11,7 +11,7 @@
 		</None>
 	</ItemGroup>
 	<ItemGroup>
-	  <ProjectReference Include="..\Assimalign.Cohesion.Configuration.FileExtensions\Assimalign.Cohesion.Configuration.FileExtensions.csproj" />
+	  <Reference Include="Assimalign.Cohesion.Configuration.FileExtensions" />
 	</ItemGroup>
 	
 </Project>

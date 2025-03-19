@@ -1,5 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
@@ -10,10 +9,9 @@
 		<PackageReference Include="xunit.runner.visualstudio"/>
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\src\Assimalign.Cohesion.FileSystem.csproj" />
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
 	</ItemGroup>
-	
 </Project>

@@ -12,7 +12,7 @@
 		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem.Globbing\src\Assimalign.Cohesion.FileSystem.Globbing.csproj" />
-		<ProjectReference Include="..\..\Assimalign.Cohesion.FileSystem\src\Assimalign.Cohesion.FileSystem.csproj" />
+		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 </Project>

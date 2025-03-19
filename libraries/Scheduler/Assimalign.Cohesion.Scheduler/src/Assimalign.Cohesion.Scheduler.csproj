@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\Core\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj" />
+		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Extensions\" />

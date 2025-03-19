@@ -1,21 +1,11 @@
 <Project>
-	<Import Project="Version.props" />
-	<!-- Branding -->
 	<PropertyGroup>
-		<Company>Assimalign</Company>
-		<Copyright>© Assimalign $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
-		<RepositoryType>git</RepositoryType>
-		<RepositoryUrl>https://github.com/assimalign/cohesion</RepositoryUrl>
+		<RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
 	</PropertyGroup>
-	<!-- Target Frameworks -->
-	<PropertyGroup>
-		<TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
-		<TargetFrameworkForLibraries>$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
-		<TargetFrameworkForShared>$(TargetFrameworkLatest)</TargetFrameworkForShared>
-		<TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
-		<TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
-		<TargetFrameworkForSdk>$(TargetFrameworkLatest)</TargetFrameworkForSdk>
-	</PropertyGroup>
+	<Import Project="build\Targets\Cohesion.TargetFramework.props" />
+	<Import Project="build\Targets\Cohesion.Version.props" />
+	<Import Project="build\Targets\Cohesion.Constants.props"/>
+	
 	<!-- Cohesion Build Properties -->
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
 		<DebugType>none</DebugType>
@@ -24,11 +14,5 @@
 		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
 		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
 		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
-	</PropertyGroup>
-	<!-- Add Runtime Constants -->
-	<PropertyGroup>
-		<DefineConstants Condition="$([System.OperatingSystem]::IsWindows())">$(DefineConstants);IS_WINDOWS</DefineConstants>
-		<DefineConstants Condition="$([System.OperatingSystem]::IsLinux())">$(DefineConstants);IS_LINUX</DefineConstants>
-		<DefineConstants Condition="$([System.OperatingSystem]::IsMacOS())">$(DefineConstants);IS_MAC</DefineConstants>
 	</PropertyGroup>
 </Project>

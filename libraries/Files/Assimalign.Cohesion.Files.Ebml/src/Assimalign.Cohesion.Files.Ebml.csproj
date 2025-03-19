@@ -1,6 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-	<Import Project="../../../../Directory.Build.props" />
 	<PropertyGroup>
 		<Description>
 			A .NET implementation for working with Extensible Binary Meta Language (EBML) format
@@ -12,13 +10,7 @@
 			RFC Reference: https://datatracker.ietf.org/doc/html/rfc8794
 		</Description>
 	</PropertyGroup>
-
-	<ItemGroup>
-		<ProjectReference Include="..\..\..\Core\src\Assimalign.IO\Assimalign.IO.csproj" />
-	</ItemGroup>
-
 	<ItemGroup>
 	  <Folder Include="Internal\" />
 	</ItemGroup>
-
 </Project>

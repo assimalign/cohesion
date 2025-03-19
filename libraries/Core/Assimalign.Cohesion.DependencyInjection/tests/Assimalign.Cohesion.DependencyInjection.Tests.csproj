@@ -12,7 +12,7 @@
 		<PackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\src\Assimalign.Cohesion.DependencyInjection\Assimalign.Cohesion.DependencyInjection.csproj" />
+		<Reference Include="Assimalign.Cohesion.DependencyInjection" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Spcification\" />

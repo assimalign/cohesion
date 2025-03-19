@@ -14,7 +14,7 @@
 	  <None Remove="Server\**" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\Storage\src\Assimalign.Cohesion.Database.Storage\Assimalign.Cohesion.Database.Storage.csproj" />
+		<Reference Include="Assimalign.Cohesion.Database.Storage" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Storage\Iterators\" />

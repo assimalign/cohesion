@@ -3,10 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.App", "Assimalign.Cohesion.App\src\Assimalign.Cohesion.App.csproj", "{CB40ADF3-ACB6-4897-A174-CD8602B73F09}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.App.Tests", "Assimalign.Cohesion.App\tests\Assimalign.Cohesion.App.Tests.csproj", "{8BB2C59D-76CB-49EE-91F3-1697D421E70E}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Caching", "Assimalign.Cohesion.Caching\src\Assimalign.Cohesion.Caching.csproj", "{D0F03A96-EC06-4C74-81D2-00B49B533DC2}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Caching.Tests", "Assimalign.Cohesion.Caching\tests\Assimalign.Cohesion.Caching.Tests.csproj", "{8065A3BA-5F02-43E0-B518-47FDA1E3F6AC}"
@@ -31,7 +27,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configu
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.FileExtensions.Tests", "Assimalign.Cohesion.Configuration.FileExtensions\tests\Assimalign.Cohesion.Configuration.FileExtensions.Tests.csproj", "{70D0FDA7-6C4E-4B59-BBFC-BA94867AC214}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Extensions.Configuration.Ini", "Assimalign.Cohesion.Configuration.Ini\src\Assimalign.Extensions.Configuration.Ini.csproj", "{43EFECF4-6414-4ECA-8B14-3F1839B7533D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Ini", "Assimalign.Cohesion.Configuration.Ini\src\Assimalign.Cohesion.Configuration.Ini.csproj", "{43EFECF4-6414-4ECA-8B14-3F1839B7533D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.Ini.Tests", "Assimalign.Cohesion.Configuration.Ini\tests\Assimalign.Cohesion.Configuration.Ini.Tests.csproj", "{4165BBA9-64A8-4252-9A99-8508D79F69EE}"
 EndProject
@@ -151,30 +147,6 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|x64.Build.0 = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Debug|x86.Build.0 = Debug|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|x64.ActiveCfg = Release|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|x64.Build.0 = Release|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|x86.ActiveCfg = Release|Any CPU
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09}.Release|x86.Build.0 = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|x64.Build.0 = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Debug|x86.Build.0 = Debug|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|x64.ActiveCfg = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|x64.Build.0 = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|x86.ActiveCfg = Release|Any CPU
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E}.Release|x86.Build.0 = Release|Any CPU
 		{D0F03A96-EC06-4C74-81D2-00B49B533DC2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{D0F03A96-EC06-4C74-81D2-00B49B533DC2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D0F03A96-EC06-4C74-81D2-00B49B533DC2}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -828,8 +800,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{CB40ADF3-ACB6-4897-A174-CD8602B73F09} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
-		{8BB2C59D-76CB-49EE-91F3-1697D421E70E} = {E4EC1217-7565-4903-8241-FB89534954EE}
 		{D0F03A96-EC06-4C74-81D2-00B49B533DC2} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{8065A3BA-5F02-43E0-B518-47FDA1E3F6AC} = {E4EC1217-7565-4903-8241-FB89534954EE}
 		{C062C3B1-8C7A-4351-A6BB-AE71D4F3D9BE} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}

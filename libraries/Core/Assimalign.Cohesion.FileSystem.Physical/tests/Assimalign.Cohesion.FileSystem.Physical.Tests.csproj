@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Assimalign.Cohesion.FileSystem.Physical.csproj" />
+    <Reference Include="Assimalign.Cohesion.FileSystem.Physical" />
   </ItemGroup>
 
   <ItemGroup>

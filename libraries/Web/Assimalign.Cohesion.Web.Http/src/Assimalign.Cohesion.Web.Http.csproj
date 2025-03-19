@@ -8,7 +8,7 @@
 		<Compile Remove="Internal\Utilities\IntegerDecoder.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\Core\Assimalign.Cohesion.Transports\src\Assimalign.Cohesion.Transports.csproj" />
+		<Reference Include="Assimalign.Cohesion.Transports" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Server\Internal\" />

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Assimalign.Cohesion.MediaFile.Bmff.csproj" />
+    <Reference Include="Assimalign.Cohesion.MediaFile.Bmff" />
   </ItemGroup>
 
 </Project>

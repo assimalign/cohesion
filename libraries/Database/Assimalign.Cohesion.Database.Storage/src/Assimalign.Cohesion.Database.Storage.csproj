@@ -1,16 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-
 	<ItemGroup>
-	  <Compile Remove="Internal\**" />
-	  <EmbeddedResource Remove="Internal\**" />
-	  <None Remove="Internal\**" />
+		<Compile Remove="Internal\**" />
+		<EmbeddedResource Remove="Internal\**" />
+		<None Remove="Internal\**" />
 	</ItemGroup>
-
-
 	<ItemGroup>
-	  <ProjectReference Include="..\..\..\..\Core\File\src\Assimalign.Cohesion.FileSystem\Assimalign.Cohesion.FileSystem.csproj" />
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
-
-
 </Project>

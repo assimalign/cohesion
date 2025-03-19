@@ -5,8 +5,6 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="System.IO.Pipelines" />
-	</ItemGroup>
-	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.Core\src\Assimalign.Cohesion.Core.csproj" />
+		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

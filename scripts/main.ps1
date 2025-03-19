@@ -1,6 +1,6 @@
 [CmdletBinding()]
 Param(
-    [ValidateSet('setup', 'new', 'build', 'publish', 'rename')]
+    [ValidateSet('setup', 'new', 'build', 'publish', 'rename', 'update')]
     [Parameter(Mandatory = $false, Position = 0)]
     [string]$Command,
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -17,6 +17,7 @@ $Scripts = @{
     rename  = "$PSScriptRoot/rename/rename.ps1"
     build   = "$PSScriptRoot/build/build.ps1"
     publish = "$PSScriptRoot/publish/publish.ps1"
+    update = "$PSScriptRoot/update/update.ps1"
 }
 
 # Run Command, if any
