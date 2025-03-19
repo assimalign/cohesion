@@ -148,4 +148,9 @@
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Cli.Tests" ProjectPath="$(RepositoryRoot)tooling\Cli\tests\Assimalign.Cohesion.Cli.Tests\Assimalign.Cohesion.Cli.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Portal" ProjectPath="$(RepositoryRoot)tooling\Portal\src\Assimalign.Cohesion.Portal\Assimalign.Cohesion.Portal.csproj" />
   </ItemGroup>
+  <ItemGroup>
+      <Reference Update="@(ProjectReferenceProvider)" ProjectPath="%(ProjectReferenceProvider.ProjectPath)" />
+      <ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')" />
+      <Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
+  </ItemGroup>
 </Project>

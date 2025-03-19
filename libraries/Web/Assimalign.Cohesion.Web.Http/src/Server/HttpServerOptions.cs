@@ -2,7 +2,7 @@
 
 namespace Assimalign.Cohesion.Web.Http;
 
-using Assimalign.Cohesion.Net.Transports;
+using Assimalign.Cohesion.Transports;
 
 public abstract class HttpServerOptions
 {

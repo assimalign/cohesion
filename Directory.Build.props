@@ -2,9 +2,10 @@
 	<PropertyGroup>
 		<RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
 	</PropertyGroup>
-	<Import Project="build\Targets\Cohesion.TargetFramework.props" />
-	<Import Project="build\Targets\Cohesion.Version.props" />
-	<Import Project="build\Targets\Cohesion.Constants.props"/>
+	<Import Project="build\Targets\Branding.props"/>
+	<Import Project="build\Targets\TargetFramework.props" />
+	<Import Project="build\Targets\Version.props" />
+	<Import Project="build\Targets\Constants.props"/>
 	
 	<!-- Cohesion Build Properties -->
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">

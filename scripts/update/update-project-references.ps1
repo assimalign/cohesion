@@ -11,9 +11,14 @@ ForEach-Object {
 }
 
 $Content = $Content + $NewLine + "  </ItemGroup>"
+$Content = $Content + $NewLine + "  <ItemGroup>"
+$Content = $Content + $NewLine + "      <Reference Update=""@(ProjectReferenceProvider)"" ProjectPath=""%(ProjectReferenceProvider.ProjectPath)"" />"
+$Content = $Content + $NewLine + "      <ProjectReference Include=""@(Reference->Distinct()->'%(ProjectPath)')"" />"
+$Content = $Content + $NewLine + "      <Reference Remove=""@(Reference->HasMetadata('ProjectPath'))"" />"
+$Content = $Content + $NewLine + "  </ItemGroup>"
 $Content = $Content + $NewLine + "</Project>"
 
-New-Item "$Path\build\Targets\Cohesion.ProjectReferences.targets" -Value($Content) -Force
+New-Item "$Path\build\Targets\ProjectReferences.targets" -Value($Content) -Force
 
 
 # <ItemGroup>
@@ -28,3 +33,10 @@ New-Item "$Path\build\Targets\Cohesion.ProjectReferences.targets" -Value($Conten
 #         ItemName="ProjectReferenceProvider" />
 # </CreateItem>
 # </Target>
+
+
+# <ItemGroup>
+# 		<Reference Update="@(ProjectReferenceProvider)" ProjectPath="%(ProjectReferenceProvider.ProjectPath)" />
+# 		<ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')" />
+# 		<Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
+# 	</ItemGroup>

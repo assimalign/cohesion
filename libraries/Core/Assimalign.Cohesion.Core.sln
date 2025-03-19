@@ -23,7 +23,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configu
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.EnvironmentVariables.Tests", "Assimalign.Cohesion.Configuration.EnvironmentVariables\tests\Assimalign.Cohesion.Configuration.EnvironmentVariables.Tests.csproj", "{FF63DE6D-B8B3-495D-8312-108CD993E9B3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.FileExtensions", "Assimalign.Cohesion.Configuration.FileExtensions\src\Assimalign.Cohesion.Configuration.FileExtensions.csproj", "{ECEB874D-AA08-4F13-83DA-2EC543EC478E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.FileSystem", "Assimalign.Cohesion.Configuration.FileExtensions\src\Assimalign.Cohesion.Configuration.FileSystem.csproj", "{ECEB874D-AA08-4F13-83DA-2EC543EC478E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Assimalign.Cohesion.Configuration.FileExtensions.Tests", "Assimalign.Cohesion.Configuration.FileExtensions\tests\Assimalign.Cohesion.Configuration.FileExtensions.Tests.csproj", "{70D0FDA7-6C4E-4B59-BBFC-BA94867AC214}"
 EndProject

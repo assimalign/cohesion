@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
-	
 	<ItemGroup>
 	  <Compile Remove="GeneratorTests.cs" />
 	</ItemGroup>
@@ -15,9 +13,9 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
+		<Reference Include="Assimalign.Cohesion.FileSystem.Physical" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
 	</ItemGroup>
-	
 </Project>

@@ -4,6 +4,7 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <!-- <EnableDefaultItems>false</EnableDefaultItems> -->
+    <TargetFrameworks>$(TargetFrameworkForSdk)</TargetFrameworks>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoPackageAnalysis>true</NoPackageAnalysis>
@@ -11,7 +12,6 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <AutoGenerateAssemblyVersion>true</AutoGenerateAssemblyVersion> <!-- MSBuild Task DLLs need to be versioned with every build -->
     <IsPackable>true</IsPackable>
-    <TargetFrameworks>$(TargetFrameworkForSdk)</TargetFrameworks>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
   </PropertyGroup>

@@ -1,10 +1,4 @@
 <Project>
-	<Import Project="build\Targets\Cohesion.PackageReferences.targets" />
-	<Import Project="build\Targets\Cohesion.ProjectReferences.targets" />
-	<!-- This Utilizes the  -->
-	<ItemGroup>
-		<Reference Update="@(ProjectReferenceProvider)" ProjectPath="%(ProjectReferenceProvider.ProjectPath)" />
-		<ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')" />
-		<Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
-	</ItemGroup>
+	<Import Project="build\Targets\PackageReferences.targets" />
+	<Import Project="build\Targets\ProjectReferences.targets" />
 </Project>

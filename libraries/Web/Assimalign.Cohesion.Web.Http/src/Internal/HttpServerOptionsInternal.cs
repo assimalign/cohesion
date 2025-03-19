@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Http.Internal;
 
-using Assimalign.Cohesion.Net.Transports;
+using Assimalign.Cohesion.Transports;
 
 internal sealed class HttpServerOptionsInternal : HttpServerOptions
 {

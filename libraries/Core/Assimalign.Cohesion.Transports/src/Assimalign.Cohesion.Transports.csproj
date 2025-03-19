@@ -4,7 +4,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="System.IO.Pipelines" />
+		<Reference Include="System.IO.Pipelines" />
 		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>
