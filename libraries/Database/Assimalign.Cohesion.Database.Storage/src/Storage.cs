@@ -14,6 +14,8 @@ public abstract class Storage : IStorage
 
     public Name Name => throw new NotImplementedException();
 
+    public abstract StorageStream Stream { get; }
+
     public void Dispose()
     {
         throw new NotImplementedException();

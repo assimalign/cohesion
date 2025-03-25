@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
-public sealed class StorageStream : Stream
+public class StorageStream : Stream
 {
     private readonly Stream innerStream;
 

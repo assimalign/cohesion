@@ -12,5 +12,5 @@ namespace Assimalign.Cohesion.Hosting;
 /// </remarks>
 public interface IManagedHostService : IHostService
 {
-    
+    string Name { get; }
 }

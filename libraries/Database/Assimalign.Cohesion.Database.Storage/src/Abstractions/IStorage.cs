@@ -12,18 +12,22 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// 
     /// </summary>
     StorageId Id { get; }
+
     /// <summary>
     /// 
     /// </summary>
     Name Name { get; }
+
     /// <summary>
     /// Represents the storage model implemented within the storage resource.
     /// </summary>
     StorageModel Model { get; }
+
     /// <summary>
     /// 
     /// </summary>
     StorageStream Stream { get; }
+
     /// <summary>
     /// Gets an iterator which 
     /// </summary>
@@ -32,6 +36,7 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// </remarks>
     /// <returns></returns>
     IStorageUnitIterator GetUnitIterator();
+
     /// <summary>
     /// Gets the root segment iterator for the given storage.
     /// </summary>

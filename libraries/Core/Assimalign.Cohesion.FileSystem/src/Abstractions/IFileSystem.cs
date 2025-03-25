@@ -82,6 +82,14 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     IFileSystemFile GetFile(FileSystemPath path);
 
     /// <summary>
+    /// Returns the base info of either 
+    /// a <see cref="IFileSystemFile"/> or <see cref="IFileSystemDirectory"/>.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    IFileSystemInfo GetInfo(FileSystemPath path);
+
+    /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
@@ -96,13 +104,13 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     IFileSystemFile CreateFile(FileSystemPath path);
 
     /// <summary>
-    /// 
+    /// Deletes a directory from the file system.
     /// </summary>
     /// <param name="path"></param>
     void DeleteDirectory(FileSystemPath path);
 
     /// <summary>
-    /// 
+    /// Deletes a file from the file system.
     /// </summary>
     /// <param name="path"></param>
     void DeleteFile(FileSystemPath path);

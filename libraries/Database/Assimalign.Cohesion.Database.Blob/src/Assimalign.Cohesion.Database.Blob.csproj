@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <Reference Include="Assimalign.Cohesion.Database.Storage" />
-  </ItemGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Database" />
+		<Reference Include="Assimalign.Cohesion.Database.Storage" />
+	</ItemGroup>
 </Project>

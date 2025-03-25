@@ -1,0 +1,18 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.Database;
+
+public interface IDatabaseEngine
+{
+
+    IEnumerable<IDatabase> Databases { get; }
+
+
+    ValueTask StartAsync(CancellationToken cancellationToken);
+
+    ValueTask StopAsync(CancellationToken cancellationToken);
+}

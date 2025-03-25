@@ -31,14 +31,17 @@ public interface IStorageSegment
     /// 
     /// </summary>
     SegmentId Id { get; }
+
     /// <summary>
     /// 
     /// </summary>
     SegmentLock Lock { get; }
+
     /// <summary>
     /// Represents the segment address.
     /// </summary>
     Address Address { get; }
+
     /// <summary>
     /// Retreives a single <see cref="IStorageUnit"/> ursing a raw offset.
     /// </summary>

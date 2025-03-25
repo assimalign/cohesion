@@ -10,4 +10,3 @@ $Path = [System.IO.Path]::GetFullPath("$PSScriptRoot\..\..\libraries\$Name")
 if (-not (Test-Path $Path)) {
     New-Item $Path -ItemType Directory
 }
-

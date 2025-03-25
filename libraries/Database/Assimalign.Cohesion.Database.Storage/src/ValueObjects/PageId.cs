@@ -8,4 +8,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 
 public readonly struct PageId
 {
+    public PageId()
+    {
+        
+    }
 }

@@ -78,19 +78,15 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
     }
     private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
     {
-        FileSystemPath path = args.FullPath;
+        FileSystemPath fileSystemPath = args.FullPath;
         IFileSystem fileSystem = _fileSystemInfo.FileSystem;
 
-        if (!_glob.IsMatch(path))
+        if (!_glob.IsMatch(fileSystemPath))
         {
             return;
         }
 
-        if (!fileSystem.TryGetInfo(path, out var info))
-        {
-            // TODO: decide what to do. This should not occur
-            throw new Exception();
-        }
+        IFileSystemInfo fileSystemInfo = fileSystem.GetInfo(fileSystemPath);
 
         foreach (var subscriber in _subscribers)
         {
@@ -98,8 +94,8 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
             {
                 subscriber.Invoke(new PhysicalFileSystemChangeContext()
                 {
-                    Path = args.FullPath,
-                    Info = info
+                    Path = fileSystemPath,
+                    Info = fileSystemInfo
                 });
             }
         }

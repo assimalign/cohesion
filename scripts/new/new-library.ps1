@@ -55,4 +55,8 @@ Get-ChildItem -Include *.csproj -Recurse -File | ForEach-Object {
 
 New-Item 'README.md' -ItemType File
 
+$UpdateRefs = [System.IO.Path]::GetFullPath("$PSScriptRoot\..\update\update-project-references.ps1")
+
+. $UpdateRefs
+
 Set-Location $MyLocation.Path

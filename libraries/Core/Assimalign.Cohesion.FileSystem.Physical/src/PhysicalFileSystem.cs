@@ -29,6 +29,7 @@ public class PhysicalFileSystem : IFileSystem
         {
             FileSystemException.ThrowNotFound(root);
         }
+       
         _driveInfo = new DriveInfo(root!);
         _root = new PhysicalFileSystemDirectory(this, _driveInfo.RootDirectory)
         {
@@ -45,6 +46,7 @@ public class PhysicalFileSystem : IFileSystem
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
         _driveInfo = new DriveInfo(options!.Root!);
+        _isReadOnly = options.IsReadOnly;
         _root = new PhysicalFileSystemDirectory(this, _driveInfo.RootDirectory)
         {
             IgnoreAttributes = options.IgnoreAttributes
@@ -64,45 +66,59 @@ public class PhysicalFileSystem : IFileSystem
 #endif
     }
 
-    public bool TryGetInfo(FileSystemPath path, out IFileSystemInfo? info)
-    {
-        info = null!;
+    //public bool TryGetInfo(FileSystemPath path, out IFileSystemInfo? info)
+    //{
+    //    info = null!;
 
-        if (File.Exists(path))
-        {
-            info = new PhysicalFileSystemFile(this, new FileInfo(path)) 
-            {
-                IgnoreAttributes = _root.IgnoreAttributes
-            };
-        }
-        if (Directory.Exists(path))
-        {
-            info = new PhysicalFileSystemDirectory(this, new DirectoryInfo(path))
-            {
-                IgnoreAttributes = _root.IgnoreAttributes
-            };
-        }
+    //    if (File.Exists(path))
+    //    {
+    //        info = new PhysicalFileSystemFile(this, new FileInfo(path)) 
+    //        {
+    //            IgnoreAttributes = _root.IgnoreAttributes
+    //        };
+    //    }
+    //    if (Directory.Exists(path))
+    //    {
+    //        info = new PhysicalFileSystemDirectory(this, new DirectoryInfo(path))
+    //        {
+    //            IgnoreAttributes = _root.IgnoreAttributes
+    //        };
+    //    }
 
-        return (info is not null);
-    }
+    //    return (info is not null);
+    //}
 
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        throw new NotImplementedException();
-        //try
-        //{
-        //    var directoryInfo = _driveInfo.RootDirectory;
-        //    var directoryPath = RootDirectory.Path.Combine(path);
+        try
+        {
+            var directoryInfo = _driveInfo.RootDirectory;
+            var directoryPath = RootDirectory.Path.Combine(path);
 
-        //    return new PhysicalFileSystemDirectory(
-        //        directoryInfo.CreateSubdirectory(directoryPath));
-        //}
-        //catch (Exception exception) when (exception is not FileSystemException)
-        //{
-        //    throw new FileSystemException("", exception);
-        //}
+            return new PhysicalFileSystemDirectory(
+                this,
+                directoryInfo.CreateSubdirectory(directoryPath));
+        }
+        catch (PathTooLongException exception)
+        {
+            throw new FileSystemException(
+                FileSystemErrorCode.PathTooLong,
+                "The path was too long",
+                exception);
+        }
+        catch (Exception exception)
+        {
+            throw new FileSystemException(
+                FileSystemErrorCode.Other, 
+                "", 
+                exception);
+        }
     }
     public IFileSystemFile CreateFile(FileSystemPath path)
+    {
+        throw new NotImplementedException();
+    }
+    public IFileSystemInfo GetInfo(FileSystemPath path)
     {
         throw new NotImplementedException();
     }

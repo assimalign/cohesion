@@ -1,9 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Net" />
-	</ItemGroup>
-	<ItemGroup>
-	  <Folder Include="Client\" />
-	  <Folder Include="Server\" />
+		<Reference Include="Assimalign.Cohesion.Transports" />
 	</ItemGroup>
 </Project>

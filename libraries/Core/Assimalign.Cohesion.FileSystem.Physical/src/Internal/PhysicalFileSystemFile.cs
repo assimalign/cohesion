@@ -9,18 +9,20 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 {
     private readonly FileInfo _fileInfo;
+    private readonly PhysicalFileSystemDirectory _directory;
 
-    public PhysicalFileSystemFile(PhysicalFileSystem fileSystem, FileInfo fileInfo) 
+    public PhysicalFileSystemFile(PhysicalFileSystem fileSystem, FileInfo fileInfo)
         : base(fileSystem, fileInfo)
     {
         _fileInfo = fileInfo;
+        _directory = new PhysicalFileSystemDirectory(
+            fileSystem,
+            _fileInfo.Directory!);
     }
 
     public FileName Name => _fileInfo.Name;
     public Size Size => _fileInfo.Length;
-    public IFileSystemDirectory Directory => new PhysicalFileSystemDirectory(
-        FileSystem, 
-        _fileInfo.Directory!);
+    public IFileSystemDirectory Directory => _directory;
     public IFileSystemChangeToken Watch()
     {
         string path = Path;

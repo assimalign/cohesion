@@ -28,10 +28,12 @@ public sealed class SegmentStream : Stream
     /// Represents the starting stream position
     /// </summary>
     public long Offset { get; }
+
     /// <summary>
     /// The allowed limit of bytes that can be read and written to the stream.
     /// </summary>
     public long Limit { get; }
+
     /// <summary>
     /// 
     /// </summary>

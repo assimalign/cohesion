@@ -13,6 +13,7 @@ public interface IHost : IDisposable
     /// The Host Context.
     /// </summary>
     IHostContext Context { get; }
+
     /// <summary>
     /// Starts all the services in the host
     /// </summary>

@@ -1,7 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 
 namespace Assimalign.Cohesion.FileSystem;
 
@@ -12,13 +10,13 @@ public class PhysicalFileSystemOptions
 {
     public PhysicalFileSystemOptions()
     {
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsIOS() || OperatingSystem.IsMacOS())
-        {
-            Root = "/";
-        }
         if (OperatingSystem.IsWindows())
         {
             Root = "C:/";
+        }
+        else
+        {
+            Root = "/";
         }
     }
 
@@ -33,7 +31,7 @@ public class PhysicalFileSystemOptions
     public FileAttributes IgnoreAttributes { get; set; } = FileAttributes.Hidden | FileAttributes.System;
 
     /// <summary>
-    /// 
+    /// Sets the file system to be read-only. The default is false.
     /// </summary>
     public bool IsReadOnly { get; set; }
 

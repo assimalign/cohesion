@@ -33,7 +33,7 @@ public interface IFileSystemChangeContext
     FileSystemPath Path { get; }
 
     /// <summary>
-    /// The file system info the 
+    /// The effected file system info.
     /// </summary>
     IFileSystemInfo Info { get; }
 }

@@ -17,7 +17,7 @@ public class FileSystemException : CohesionException
         Code = code;
     }
 
-    protected FileSystemException(FileSystemErrorCode code, string message, Exception? innerException) 
+    public FileSystemException(FileSystemErrorCode code, string message, Exception? innerException) 
         : base(message, innerException)
     {
         Code = code;

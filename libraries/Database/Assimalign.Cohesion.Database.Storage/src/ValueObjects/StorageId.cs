@@ -6,6 +6,12 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
-public readonly struct StorageId
+public readonly unsafe struct StorageId
 {
+    public StorageId()
+    {
+        
+    }
+
+   
 }

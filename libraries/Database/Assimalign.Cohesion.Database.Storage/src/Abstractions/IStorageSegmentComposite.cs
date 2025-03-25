@@ -16,11 +16,13 @@ public interface IStorageSegmentComposite : IStorageSegment
     /// </summary>
     /// <param name="units"></param>
     void ShiftUp(int units);
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="units"></param>
     void ShiftDown(int units);
+
     /// <summary>
     /// 
     /// </summary>
