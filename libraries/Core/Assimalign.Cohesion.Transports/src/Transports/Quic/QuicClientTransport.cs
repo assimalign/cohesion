@@ -21,7 +21,7 @@ public sealed class QuicClientTransport : ClientTransport
     {
             
     }
-    public override ProtocolType ProtocolType => throw new NotImplementedException();
+    public override ProtocolType Protocol => throw new NotImplementedException();
 
     public override TransportMiddlewareHandler Middleware => throw new NotImplementedException();
 

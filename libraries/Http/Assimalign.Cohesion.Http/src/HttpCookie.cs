@@ -4,8 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 public class HttpCookie
 {
+    public HttpCookie()
+    {
+        
+    }
 }

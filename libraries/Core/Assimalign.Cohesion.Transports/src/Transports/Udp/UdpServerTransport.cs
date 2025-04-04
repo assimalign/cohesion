@@ -44,7 +44,7 @@ public sealed class UdpServerTransport : ServerTransport
     }
 
     public IReadOnlyCollection<ITransportConnection> Connections => this.connections;
-    public override ProtocolType ProtocolType => ProtocolType.Udp;
+    public override ProtocolType Protocol => ProtocolType.Udp;
     public override TransportMiddlewareHandler Middleware { get; }
     public override async Task<ITransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {

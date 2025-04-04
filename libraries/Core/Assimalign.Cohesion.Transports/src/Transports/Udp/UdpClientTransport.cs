@@ -43,7 +43,7 @@ public sealed class UdpClientTransport : ClientTransport
         this.Middleware = options.Middleware;
     }
 
-    public override ProtocolType ProtocolType => ProtocolType.Udp;
+    public override ProtocolType Protocol => ProtocolType.Udp;
 
     public override TransportMiddlewareHandler Middleware { get; }
 

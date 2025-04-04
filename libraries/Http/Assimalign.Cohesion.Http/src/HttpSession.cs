@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 public abstract class HttpSession
 {

@@ -17,20 +17,19 @@ public interface ITransport : IDisposable
     /// <summary>
     /// Specifies whether the transport is a client or server.
     /// </summary>
-    TransportType TransportType { get; }
+    TransportKind Kind { get; }
+
     /// <summary>
     /// The underlying network protocol of the transport.
     /// </summary>
-    ProtocolType ProtocolType { get; }
-    /// <summary>
-    /// Middleware to be executed on initialization.
-    /// </summary>
-    TransportMiddlewareHandler Middleware { get; }
+    ProtocolType Protocol { get; }
+
     /// <summary>
     /// Either accepts incoming connection or connects to remote host.
     /// </summary>
     /// <returns><see cref="ITransportConnection"/></returns>
     ITransportConnection Initialize();
+
     /// <summary>
     /// 
     /// </summary>

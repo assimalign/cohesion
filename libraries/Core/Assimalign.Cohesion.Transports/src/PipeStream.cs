@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
 /// <summary>
@@ -18,14 +19,16 @@ public sealed class PipeStream : Stream
 {
     private readonly bool throwOnCanceled;
     private volatile bool isCancelCalled;
-    private readonly PipeReader input;
-    private readonly PipeWriter output;
+
+    private readonly PipeReader _input;
+    private readonly PipeWriter _output;
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="pipe"></param>
-    public PipeStream(ITransportConnectionPipe pipe) : this(pipe.Input, pipe.Output) 
+    public PipeStream(ITransportConnectionPipe pipe) 
+        : this(pipe.Input, pipe.Output) 
     {
 
     }
@@ -37,16 +40,8 @@ public sealed class PipeStream : Stream
     /// <exception cref="ArgumentNullException"></exception>
     public PipeStream(PipeReader input, PipeWriter output)
     {
-        if (input is null)
-        {
-            throw new ArgumentNullException(nameof(input));
-        }
-        if (output is null)
-        {
-            throw new ArgumentNullException(nameof(output));
-        }
-        this.input = input;
-        this.output = output;
+        _input = ThrowHelper.ThrowIfNull(input);
+        _output = ThrowHelper.ThrowIfNull(output);
         this.throwOnCanceled = false;
     }
 
@@ -54,19 +49,23 @@ public sealed class PipeStream : Stream
     /// Always returns true.
     /// </summary>
     public override bool CanRead => true;
+
     /// <summary>
     /// Always returns false
     /// </summary>
     public override bool CanSeek => false;
+
     /// <summary>
     /// Always return true.
     /// </summary>
     public override bool CanWrite => true;
+
     /// <summary>
     /// Not Supported.
     /// </summary>
     /// <exception cref="NotSupportedException"></exception>
     public override long Length => throw new NotSupportedException();
+
     /// <summary>
     /// Not Supported.
     /// </summary>
@@ -105,24 +104,24 @@ public sealed class PipeStream : Stream
     public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count).GetAwaiter().GetResult();
     public override Task WriteAsync(byte[]? buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        return output.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).GetAsTask();
+        return _output.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).GetAsTask();
     }
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
-        return output.WriteAsync(source, cancellationToken).GetAsValueTask();
+        return _output.WriteAsync(source, cancellationToken).GetAsValueTask();
     }
     public override void Flush()
     {
         FlushAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
-    public override Task FlushAsync(CancellationToken cancellationToken) => output.FlushAsync(cancellationToken).GetAsTask();
+    public override Task FlushAsync(CancellationToken cancellationToken) => _output.FlushAsync(cancellationToken).GetAsTask();
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<int> ReadAsyncInternal(Memory<byte> destination, CancellationToken cancellationToken)
     {
         while (true)
         {
-            var result = await input.ReadAsync(cancellationToken);
+            var result = await _input.ReadAsync(cancellationToken);
             var readableBuffer = result.Buffer;
             try
             {
@@ -148,7 +147,7 @@ public sealed class PipeStream : Stream
             }
             finally
             {
-                input.AdvanceTo(readableBuffer.End, readableBuffer.End);
+                _input.AdvanceTo(readableBuffer.End, readableBuffer.End);
             }
         }
     }

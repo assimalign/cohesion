@@ -6,52 +6,59 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
-public sealed class TcpServerTransport : ServerTransport
+[DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
+public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 {
-    private readonly TcpServerTransportOptions options;
-    private readonly SocketTransportConnectionSettings[] settings;
-    private readonly int count;
-    private long index; // long to prevent overflow
-    private Socket? listener;
+    private readonly TcpServerTransportOptions _options;
+    private readonly SocketTransportConnectionSettings[] _settings;
+    private readonly TransportTrace? _trace;
+    private readonly TransportMiddleware? _middleware;
+    private readonly int _count;
+    private long _index; // long to prevent overflow
+    private Socket? _listener;
 
-    private readonly List<ITransportConnection> connections = new();
+    private readonly List<TcpTransportConnection> _connections = new();
 
-    public TcpServerTransport() : this(new()) { }
+    public TcpServerTransport() : this(TcpServerTransportOptions.Default)
+    {
+    }
 
     public TcpServerTransport(TcpServerTransportOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
-        this.options = options;
-        this.count = options.IOQueueCount > 0 ? options.IOQueueCount : 1;
-        this.settings = SocketTransportConnectionSettings.GetIOQueueSettings(
-            count,
+        _options = ThrowHelper.ThrowIfNull(options);
+        _count = options.IOQueueCount > 0 ? options.IOQueueCount : 1;
+        _trace = options.Trace;
+        _settings = SocketTransportConnectionSettings.GetIOQueueSettings(
+            _count,
             options.UnsafePreferInLineScheduling,
             options.WaitForDataBeforeAllocatingBuffer,
             options.MaxReadBufferSize,
             options.MaxWriteBufferSize,
-            options.OnTrace);
-
-        this.Middleware = options.Middleware;
+            _trace);
+        _middleware = options.Middleware;
     }
 
-    public IReadOnlyCollection<ITransportConnection> Connections => this.connections.AsReadOnly();
-    public override ProtocolType ProtocolType => ProtocolType.Tcp;
-    public override TransportMiddlewareHandler Middleware { get; }
-    public override async Task<ITransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
+    public override ProtocolType Protocol => ProtocolType.Tcp;
+
+    /// <summary>
+    /// The number of connections that are open.
+    /// </summary>
+    public IReadOnlyCollection<TcpTransportConnection> Connections => _connections.AsReadOnly();
+    
+    public override async Task<TcpTransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
-        if (listener is null)
+        if (_listener is null)
         {
-            listener = options.EndPoint switch
+            _listener = _options.EndPoint switch
             {
-                UnixDomainSocketEndPoint        => new Socket(options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
+                UnixDomainSocketEndPoint        => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
                 /* 
                     We're passing "ownsHandle: true" here even though we don't necessarily
                     own the handle because Socket.Dispose will clean-up everything safely.
@@ -64,47 +71,57 @@ public sealed class TcpServerTransport : ServerTransport
                     when it attempts to stop.
                 */
                 FileHandleEndPoint fileHandle   => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
-                _                               => new Socket(options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
+                _                               => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
             };
-            if (options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
+            if (_options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
             {
-                listener.DualMode = true;
+                _listener.DualMode = true;
             }
-            listener.Bind(options.EndPoint);
-            listener.Listen(options.Backlog);
+            _listener.Bind(_options.EndPoint);
+            _listener.Listen(_options.Backlog);
         }
+
         while (true)
         {
             try
             {
-                var socket = await listener.AcceptAsync(cancellationToken);
-                var settings = this.settings[Interlocked.Increment(ref index) % count];
+                var socket = await _listener.AcceptAsync(cancellationToken);
+                var settings = this._settings[Interlocked.Increment(ref _index) % _count];
 
                 if (socket.LocalEndPoint is IPEndPoint)
                 {
-                    socket.NoDelay = options.NoDelay;
+                    socket.NoDelay = _options.NoDelay;
                 }
 
                 settings.Socket = socket;
 
-                var connection =  new SocketTransportConnection(settings);
+                var socketConnection = new SocketTransportConnection(settings)
+                {
+                    Protocol = ProtocolType.Tcp
+                };
+
+                var connection = new TcpTransportConnection(socketConnection);
 
                 if (!ThreadPool.UnsafeQueueUserWorkItem(connection, false))
                 {
                     throw new Exception();
                 }
 
-                connections.Add(connection);
+                _connections.Add(connection);
 
-                connection.OnDispose = () =>
+                socketConnection.OnDispose = () =>
                 {
-                    connections.Remove(connection);
+                    _connections.Remove(connection);
                 };
 
-                await Middleware.Invoke(new TcpServerTransportContext(connection));
+                var task = _middleware?.Invoke(new TcpTransportContext(socketConnection));
+
+                if (task is not null)
+                {
+                    await task;
+                }
 
                 return connection;
-
             }
             catch (ObjectDisposedException)
             {
@@ -128,8 +145,8 @@ public sealed class TcpServerTransport : ServerTransport
     }
     public override void Dispose()
     {
-        listener?.Close();
-        listener?.Dispose();
+        _listener?.Close();
+        _listener?.Dispose();
     }
 
 
@@ -139,17 +156,19 @@ public sealed class TcpServerTransport : ServerTransport
     /// <param name="configure"></param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
-    public static TcpServerTransport Create(Action<TcpServerTransportOptions> configure)
+    public static TcpServerTransportBuilder CreateBuilder(Action<TcpServerTransportOptions> configure)
     {
-        if (configure is null)
+        ThrowHelper.ThrowIfNull(configure);
+
+        return new TcpServerTransportBuilder(middleware =>
         {
-            throw new ArgumentNullException(nameof(configure));
-        }
+            var options = new TcpServerTransportOptions();
 
-        var options = new TcpServerTransportOptions();
+            configure.Invoke(options);
 
-        configure.Invoke(options);
+            options.Middleware = middleware;
 
-        return new TcpServerTransport(options);
+            return new TcpServerTransport(options);
+        });
     }
 }

@@ -4,9 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.NotificationHub.Abstractions
+namespace Assimalign.Cohesion.NotificationHub;
+
+public interface INotificationHub
 {
-    interface INotificationHub
-    {
-    }
 }

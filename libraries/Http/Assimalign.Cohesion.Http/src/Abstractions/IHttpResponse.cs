@@ -2,7 +2,7 @@
 using System.IO;
 using System.Net;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 public interface IHttpResponse
 {

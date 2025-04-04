@@ -10,13 +10,10 @@ namespace Assimalign.Cohesion.Transports;
 public abstract class ClientTransport : ITransport
 {
     /// <inheritdoc />
-    public TransportType TransportType => TransportType.Client;
+    public TransportKind Kind => TransportKind.Client;
 
     /// <inheritdoc />
-    public abstract ProtocolType ProtocolType { get; }
-
-    /// <inheritdoc />
-    public abstract TransportMiddlewareHandler Middleware { get; }
+    public abstract ProtocolType Protocol { get; }
 
     /// <summary>
     /// A method that connects to a remote host (server) and returns a <see cref="ITransportConnection"/> object.
@@ -30,5 +27,5 @@ public abstract class ClientTransport : ITransport
 
 
     ITransportConnection ITransport.Initialize() => ConnectAsync().GetAwaiter().GetResult();
-    async Task<ITransportConnection> ITransport.InitializeAsync(CancellationToken cancellationToken) => await ConnectAsync(cancellationToken);    
+    async Task<ITransportConnection> ITransport.InitializeAsync(CancellationToken cancellationToken) => await ConnectAsync(cancellationToken);
 }

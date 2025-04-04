@@ -3,10 +3,6 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Remove="Internal\Extensions\HttpStatusCodeExtensions.cs" />
-		<Compile Remove="Internal\Utilities\IntegerDecoder.cs" />
-	</ItemGroup>
-	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Transports" />
+		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

@@ -15,8 +15,6 @@ namespace Assimalign.Cohesion.Transports.Tests;
 public class TcpTransportServerClientRepsponseTests
 {
 
-
-
     [Fact]
     public void TestRequestResponse()
     {
@@ -51,25 +49,25 @@ public class TcpTransportServerClientRepsponseTests
     {
         return new Thread(async () =>
         {
-            using var transport = TcpClientTransport.Create(options =>
+            var builder = TcpClientTransport.CreateBuilder(options =>
             {
                 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
-                options.AddMiddleware(builder =>
-                {
-                    builder.UseNext(async (context, next) =>
-                    {
-                        var pipe = context.Connection.Pipe;
-                        var stream = pipe.GetStream();
-                        var sslStream = new SslStream(stream, true);
-
-                        await sslStream.AuthenticateAsClientAsync("localhost");
-
-                        context.SetPipe(new TransportConnectionPipe(sslStream));
-
-                        await next.Invoke(context);
-                    });
-                });
             });
+
+            builder.Use(async (context, next) =>
+            {
+                var pipe = context.Connection.Pipe;
+                var stream = pipe.GetStream();
+                var sslStream = new SslStream(stream, true);
+
+                await sslStream.AuthenticateAsClientAsync("localhost");
+
+                context.SetPipe(new TransportConnectionPipe(sslStream));
+
+                await next.Invoke(context);
+            });
+
+            using var transport = builder.Build();
 
             var connection = await transport.ConnectAsync();
 
@@ -89,26 +87,26 @@ public class TcpTransportServerClientRepsponseTests
     {
         return new Thread(async () =>
         {
-            using var transport = TcpServerTransport.Create(options =>
+            var builder = TcpServerTransport.CreateBuilder(options =>
             {
                 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
-                options.AddMiddleware(builder =>
-                {
-                    builder.UseNext(async (context, next) =>
-                    {
-                        var pipe = context.Connection.Pipe;
-                        var stream = pipe.GetStream();
-                        var sslStream = new SslStream(stream);
-                        var certificate = GetSelfSignedCertificate();
-
-                        await sslStream.AuthenticateAsServerAsync(certificate);
-
-                        context.SetPipe(new TransportConnectionPipe(sslStream));
-
-                        await next.Invoke(context);
-                    });
-                });
             });
+
+            builder.Use(async (context, next) =>
+            {
+                var pipe = context.Connection.Pipe;
+                var stream = pipe.GetStream();
+                var sslStream = new SslStream(stream);
+                var certificate = GetSelfSignedCertificate();
+
+                await sslStream.AuthenticateAsServerAsync(certificate);
+
+                context.SetPipe(new TransportConnectionPipe(sslStream));
+
+                await next.Invoke(context);
+            });
+
+            using var transport = builder.Build();
 
             var connection = await transport.AcceptOrListenAsync();
             var result = await connection.Pipe.ReadAsync();

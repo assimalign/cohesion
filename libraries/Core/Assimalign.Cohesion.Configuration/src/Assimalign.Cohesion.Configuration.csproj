@@ -6,7 +6,6 @@
 	  <None Remove="Utilities\**" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Compile Remove="ConfigurationManager.cs" />
 	  <Compile Remove="ConfigurationPathHelper.cs" />
 	  <Compile Remove="ConfigurationReloadToken.cs" />
 	  <Compile Remove="ConfigurationStrategy.cs" />

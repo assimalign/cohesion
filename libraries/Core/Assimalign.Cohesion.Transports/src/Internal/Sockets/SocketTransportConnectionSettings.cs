@@ -18,7 +18,7 @@ internal sealed class SocketTransportConnectionSettings
     public PipeScheduler ReceiverScheduler { get; init; } = default!;
     public PipeScheduler SenderScheduler { get; init; } = default!;
     public bool WaitForDataBeforeAllocatingBuffer { get; set; }
-    public TransportTraceHandler OnTrace { get; set; } = default!;
+    public TransportTrace? Trace { get; set; } = default!;
 
 
 
@@ -28,7 +28,7 @@ internal sealed class SocketTransportConnectionSettings
         bool waitForDataBeforeAllocatingBuffer = false,
         long? maxReadBufferSize = 0,
         long? maxWriteBufferSize = 0,
-        TransportTraceHandler onTrace = default!)
+        TransportTrace? trace = default!)
     {
         var options = new SocketTransportConnectionSettings[count];
         var memoryPool = PipelineMemoryPool.Create();
@@ -64,7 +64,7 @@ internal sealed class SocketTransportConnectionSettings
                     maxWriteBufferSize ?? 0 / 2,
                     useSynchronizationContext: false),
                 WaitForDataBeforeAllocatingBuffer = waitForDataBeforeAllocatingBuffer,
-                OnTrace = onTrace
+                Trace = trace is null ? (a,b,c) => { } : trace
             };
         }
 

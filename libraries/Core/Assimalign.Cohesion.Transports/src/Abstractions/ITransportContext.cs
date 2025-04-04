@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Transports;
+﻿using System;
+
+namespace Assimalign.Cohesion.Transports;
 
 /// <summary>
 /// 
@@ -9,4 +11,9 @@ public interface ITransportContext
     /// 
     /// </summary>
     ITransportConnection Connection { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    IServiceProvider? ServiceProvider { get; }
 }

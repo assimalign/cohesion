@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Web.Http;
+﻿namespace Assimalign.Cohesion.Http;
 
 public enum HttpScheme
 {

@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Http" />
+		<Reference Include="Assimalign.Cohesion.Transports" />
+	</ItemGroup>
+</Project>

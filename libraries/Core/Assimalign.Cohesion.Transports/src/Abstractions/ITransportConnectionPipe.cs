@@ -18,11 +18,13 @@ public interface ITransportConnectionPipe : IDuplexPipe
     /// </summary>
     /// <returns></returns>
     Stream GetStream();
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
     ValueTask<ReadResult> ReadAsync();
+
     /// <summary>
     /// 
     /// </summary>

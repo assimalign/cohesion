@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 
@@ -13,7 +13,7 @@ public interface IHttpContext : IAsyncDisposable
     HttpVersion Version { get; }
 
     /// <summary>
-    /// 
+    /// Returns the session of the underlying connection.
     /// </summary>
     IHttpSession Session { get; }
 
@@ -32,4 +32,9 @@ public interface IHttpContext : IAsyncDisposable
     /// The actual reading and writing of the response will be done internally.
     /// </remarks>
     IHttpResponse Response { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    IHttpConnectionInfo ConnectionInfo { get; }
 }

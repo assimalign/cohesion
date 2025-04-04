@@ -3,6 +3,7 @@
     <ItemGroup>
         <PackageReferenceProvider Include="System.IO.Pipelines" Version="9.0.3" />
         <PackageReferenceProvider Include="Sharprompt" Version="3.0.0" />
+        <PackageReferenceProvider Include="KubernetesClient" Version="16.0.2" />
     </ItemGroup>
     <ItemGroup>
         <PackageReferenceProvider Include="Microsoft.Build" Version="17.12.6" />

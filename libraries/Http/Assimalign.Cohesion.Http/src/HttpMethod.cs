@@ -1,68 +1,120 @@
 ﻿using System;
 using System.Linq;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
-using Assimalign.Cohesion.Web.Http.Internal;
+using Assimalign.Cohesion.Internal;
 
-public readonly struct HttpMethod
+[DebuggerDisplay("{Value}")]
+public readonly struct HttpMethod : IEquatable<HttpMethod>
 {
+    const int _length = 16;
+
+    #region Constructors
+
+    /// <summary>
+    /// The default constructor
+    /// </summary>
+    /// <param name="value"></param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public HttpMethod(string value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (value.Length > _length)
         {
-            throw new ArgumentNullException(nameof(value));
+            ThrowHelper.ThrowArgumentException($"The method is too long. Must be under {_length} characters.");
         }
-        if (value.Any(x=> !char.IsLetterOrDigit(x)))
+
+        ReadOnlySpan<char> source = ThrowHelper.ThrowIfNullOrEmpty(value);
+        Span<char> destination = stackalloc char[source.Length];
+
+        for (int i = 0; i < source.Length; i++)
         {
-            ThrowUtility.InvalidHttpMethod(value);
+            var c = source[i];
+
+            if (!char.IsLetterOrDigit(c))
+            {
+                ThrowHelper.InvalidHttpMethod(value);
+            }
+            if (char.IsLower(c))
+            {
+                c = char.ToUpper(c);
+            }
+            destination[i] = c;
         }
-        this.Value = value.ToUpper();
+
+        Value = destination.ToString();
     }
 
-    public string Value { get; }
+    #endregion
 
-    public override string ToString()
-    {
-        return $"Method: {Value}";
-    }
+    #region Properties
+
+    /// <summary>
+    /// The raw http value.
+    /// </summary>
+    public string? Value { get; } 
 
     /// <summary>
     /// HTTP "CONNECT" method.
     /// </summary>
-    public static readonly string Connect = "CONNECT";
+    public static readonly HttpMethod Connect = "CONNECT";
+
     /// <summary>
     /// HTTP "DELETE" method.
     /// </summary>
-    public static readonly string Delete = "DELETE";
+    public static readonly HttpMethod Delete = "DELETE";
+
     /// <summary>
     /// HTTP "GET" method.
     /// </summary>
-    public static readonly string Get = "GET";
+    public static readonly HttpMethod Get = "GET";
+
     /// <summary>
     /// HTTP "HEAD" method.
     /// </summary>
-    public static readonly string Head = "HEAD";
+    public static readonly HttpMethod Head = "HEAD";
+
     /// <summary>
     /// HTTP "OPTIONS" method.
     /// </summary>
-    public static readonly string Options = "OPTIONS";
+    public static readonly HttpMethod Options = "OPTIONS";
+
     /// <summary>
     /// HTTP "PATCH" method.
     /// </summary>
-    public static readonly string Patch = "PATCH";
+    public static readonly HttpMethod Patch = "PATCH";
+
     /// <summary>
     /// HTTP "POST" method.
     /// </summary>
-    public static readonly string Post = "POST";
+    public static readonly HttpMethod Post = "POST";
+
     /// <summary>
     /// HTTP "PUT" method.
     /// </summary>
-    public static readonly string Put = "PUT";
+    public static readonly HttpMethod Put = "PUT";
+
     /// <summary>
     /// HTTP "TRACE" method.
     /// </summary>
-    public static readonly string Trace = "TRACE";
+    public static readonly HttpMethod Trace = "TRACE";
+
+    #endregion
+
+    #region Methods
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool Equals(HttpMethod other)
+    {
+        return Equals(this, other);
+    }
 
     /// <summary>
     /// Returns a value that indicates if the HTTP request method is CONNECT.
@@ -178,7 +230,7 @@ public readonly struct HttpMethod
     /// </summary>
     /// <param name="method"></param>
     /// <returns></returns>
-    public static string GetCanonicalizedValue(string method) => method switch
+    public static HttpMethod GetCanonicalizedValue(string method) => method switch
     {
         string _ when IsGet(method) => Get,
         string _ when IsPost(method) => Post,
@@ -205,19 +257,76 @@ public readonly struct HttpMethod
         return object.ReferenceEquals(methodA, methodB) || StringComparer.OrdinalIgnoreCase.Equals(methodA, methodB);
     }
 
+    #endregion
+
+    #region Overloads
+
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        return Value;
+    }
+
+    /// <inheritdoc />
+    public override bool Equals([NotNullWhen(true)] object? obj)
+    {
+        if (obj is HttpMethod method)
+        {
+            return Equals(method);
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        return Value.GetHashCode();
+    }
+
+    #endregion
+
+    #region Operators
+
+    /// <summary>
+    /// Implicit conversion from string to HttpMethod.
+    /// </summary>
+    /// <param name="method"></param>
     public static implicit operator HttpMethod(string method)
     {
         return new HttpMethod(method);
     }
 
+    /// <summary>
+    /// Implicit conversion from HttpMethod to string.
+    /// </summary>
+    /// <param name="method"></param>
+    public static implicit operator string(HttpMethod method)
+    {
+        return method.Value;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator ==(HttpMethod left, HttpMethod right)
     {
         return Equals(left, right);
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator !=(HttpMethod left, HttpMethod right)
     {
         return !Equals(left, right);
     }
 
-
+    #endregion
 }

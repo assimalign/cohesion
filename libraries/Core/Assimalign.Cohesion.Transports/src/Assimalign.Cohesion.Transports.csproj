@@ -4,6 +4,17 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
+	  <Compile Remove="Internal\Quic\**" />
+	  <Compile Remove="Transports\Quic\**" />
+	  <Compile Remove="Transports\Udp\**" />
+	  <EmbeddedResource Remove="Internal\Quic\**" />
+	  <EmbeddedResource Remove="Transports\Quic\**" />
+	  <EmbeddedResource Remove="Transports\Udp\**" />
+	  <None Remove="Internal\Quic\**" />
+	  <None Remove="Transports\Quic\**" />
+	  <None Remove="Transports\Udp\**" />
+	</ItemGroup>
+	<ItemGroup>
 		<Reference Include="System.IO.Pipelines" />
 		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>

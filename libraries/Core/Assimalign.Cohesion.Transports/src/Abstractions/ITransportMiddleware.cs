@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -12,7 +13,7 @@ public interface ITransportMiddleware
     /// 
     /// </summary>
     /// <param name="context"></param>
-    /// <param name="next"></param>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task InvokeAsync(ITransportContext context, TransportMiddlewareHandler next);
+    Task InvokeAsync(ITransportContext context, CancellationToken cancellationToken = default);
 }

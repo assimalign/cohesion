@@ -1,6 +1,10 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 	<Import Sdk="Microsoft.NET.Sdk" Project="Sdk.props" />
 	<Import Project="../Targets/Version.props" />
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Assimalign.Cohesion.App" Version="$(CohesionVersion)" />
 	</ItemGroup>

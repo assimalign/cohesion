@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 {
@@ -57,6 +57,11 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 
     public int Count => store?.Count ?? 0;
     public bool IsReadOnly { get; set; }
+
+    public void Add(ref HttpHeaderKey key, ref HttpHeaderValue value)
+    {
+
+    }
 
     public void Add(HttpHeaderKey key, HttpHeaderValue value)
     {
@@ -296,15 +301,16 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     public HttpHeaderValue? XUACompatible => throw new NotImplementedException();
     public HttpHeaderValue? XXSSProtection => throw new NotImplementedException();
 
-    private HttpHeaderValue? GetHeaderValue(string key)
+    private ref HttpHeaderValue? GetHeaderValue(string key)
     {
         var value = this[key];
 
-        if (value.IsEmpty)
-        {
-            return null;
-        }
 
-        return value;
+
+        return ref value;
+    }
+    private void SetHeaderValue(string key, ref HttpHeaderValue value)
+    {
+        
     }
 }

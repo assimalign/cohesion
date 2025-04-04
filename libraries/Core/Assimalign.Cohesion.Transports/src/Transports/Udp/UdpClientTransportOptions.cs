@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Transports;
 
 public sealed class UdpClientTransportOptions
 {
-	private TransportTraceHandler onTrace = (code, data, message) => { };
+	private TransportTracer onTrace = (code, data, message) => { };
 	private TransportMiddlewareHandler middleware = context => Task.CompletedTask;
 
 	/// <summary>
@@ -58,14 +58,14 @@ public sealed class UdpClientTransportOptions
 	/// <summary>
 	/// The trace handler for the transport.
 	/// </summary>
-	public TransportTraceHandler OnTrace => this.onTrace;
+	public TransportTracer OnTrace => this.onTrace;
 
 	/// <summary>
 	/// Sets a raw trace handler.
 	/// </summary>
 	/// <param name="onTrace"></param>
 	/// <exception cref="ArgumentNullException"></exception>
-	public void AddTraceHandler(TransportTraceHandler onTrace)
+	public void AddTraceHandler(TransportTracer onTrace)
 	{
 		if (onTrace is null)
 		{

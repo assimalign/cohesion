@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 public abstract class HttpException : Exception
 {

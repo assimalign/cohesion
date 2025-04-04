@@ -3,16 +3,16 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 
 /// </summary>
 [DebuggerDisplay("{Value}")]
-public readonly partial struct HttpQueryValue : 
-    IEquatable<HttpQueryValue>, 
-    IEqualityComparer<HttpQueryValue>
+public readonly partial struct HttpQueryValue : IEquatable<HttpQueryValue>
 {
+    #region Constructors
+
     /// <summary>
     /// The default constructor.
     /// </summary>
@@ -22,130 +22,235 @@ public readonly partial struct HttpQueryValue :
         this.Value = value;
     }
 
+    #endregion
+
+    #region Properties
+
     /// <summary>
     /// 
     /// </summary>
     public string Value { get; }
 
+    #endregion
+
+    #region Methods
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public short GetInt16() => short.Parse(this.Value);
+    public short GetInt16()
+    {
+        return short.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public int GetInt32() => int.Parse(this.Value);
+    public int GetInt32()
+    {
+        return int.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public long GetInt64() => long.Parse(this.Value);
+    public long GetInt64()
+    {
+        return long.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public decimal GetDecimal() => decimal.Parse(this.Value);
+    public decimal GetDecimal()
+    {
+        return decimal.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public double GetDouble() => double.Parse(this.Value);
+    public double GetDouble()
+    {
+        return double.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public float GetFloat() => float.Parse(this.Value);
+    public float GetFloat()
+    {
+        return float.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public bool GetBoolean() => bool.Parse(this.Value);
+    public bool GetBoolean()
+    {
+        return bool.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public DateOnly GetDate() => DateOnly.Parse(this.Value);
+    public DateOnly GetDate()
+    {
+        return DateOnly.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public DateTime GetDateTime() => DateTime.Parse(this.Value);
+    public DateTime GetDateTime()
+    {
+        return DateTime.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public DateTimeOffset GetDateTimeOffset() => DateTimeOffset.Parse(this.Value);
+    public DateTimeOffset GetDateTimeOffset()
+    {
+        return DateTimeOffset.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public TimeOnly GetTime() => TimeOnly.Parse(this.Value);
+    public TimeOnly GetTime()
+    {
+        return TimeOnly.Parse(Value);
+    }
+
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public TimeSpan GetTimeSpan() => TimeSpan.Parse(this.Value);
+    public TimeSpan GetTimeSpan()
+    {
+        return TimeSpan.Parse(this.Value);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool Equals(HttpQueryValue other)
+    {
+        return Equals(this, other, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public bool Equals(HttpQueryValue other, StringComparison comparison)
+    {
+        return Equals(this, other, comparison);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool Equals(HttpQueryValue left, HttpQueryValue right)
+    {
+        return Equals(left, right, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public static bool Equals(HttpQueryValue left, HttpQueryValue right, StringComparison comparison)
+    {
+        return StringComparer.FromComparison(comparison).Equals(left.Value, right.Value);
+    }
+
+    #endregion
+
+    #region Overloads
+
+    public override bool Equals([NotNullWhen(true)] object? obj)
+    {
+        if (obj is null)
+        {
+            return false;
+        }
+        if (obj is not HttpQueryValue value)
+        {
+            return false;
+        }
+        return Equals(value);
+    }
 
     public override string ToString()
     {
         return Value;
     }
 
-    public bool TryGetInt16(out short value)
-    {
-        value = 0;
-
-        if (short.TryParse(this.Value, out short v))
-        {
-            value = v;
-            return true;
-        }
-        return false;
-    }
-
-
     public override int GetHashCode()
     {
         return this.Value.ToLower().GetHashCode() ^ this.Value.ToLower().GetHashCode();
     }
-    bool IEquatable<HttpQueryValue>.Equals(HttpQueryValue other) => this.Value.Equals(other.Value, StringComparison.InvariantCultureIgnoreCase);
-    bool IEqualityComparer<HttpQueryValue>.Equals(HttpQueryValue left, HttpQueryValue right) => left.Equals(right);
-    int IEqualityComparer<HttpQueryValue>.GetHashCode([DisallowNull] HttpQueryValue instance) => instance.GetHashCode();
-    //public override string ToString() => string.Format("{0}={1}", this.Key, this.Value);
 
-    public static implicit operator short(HttpQueryValue query) => query.GetInt16();
-    public static implicit operator int(HttpQueryValue query) => query.GetInt32();
-    public static implicit operator long(HttpQueryValue query) => query.GetInt64();
-    public static implicit operator bool(HttpQueryValue query) => query.GetBoolean();
-    public static implicit operator DateOnly(HttpQueryValue query) => query.GetDate();
-    public static implicit operator DateTime(HttpQueryValue query) => query.GetDateTime();
-    public static implicit operator DateTimeOffset(HttpQueryValue query) => query.GetDateTimeOffset();
-    public static implicit operator TimeOnly(HttpQueryValue query) => query.GetTime();
-    public static implicit operator TimeSpan(HttpQueryValue query) => query.GetTimeSpan();
+    #endregion
 
+    #region Operators
 
-    public static implicit operator HttpQueryValue(string value) => new HttpQueryValue(value);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    public static implicit operator HttpQueryValue(string value)
+    {
+        return new HttpQueryValue(value);
+    }
 
-
-    public static HttpQueryValue Empty => new HttpQueryValue("");
-
-
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator ==(HttpQueryValue left, HttpQueryValue right)
     {
         return Equals(left, right);
     }
 
-
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
     public static bool operator !=(HttpQueryValue left, HttpQueryValue right)
     {
         return !Equals(left, right);
     }
 
-    public static bool Equals(HttpQueryValue left, HttpQueryValue right)
-    {
-        return left.Value == right.Value;
-    }
+    #endregion
+
+    public static HttpQueryValue Empty => new HttpQueryValue("");
+
 }

@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using System.Security.Claims;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 
@@ -19,7 +19,7 @@ public interface IHttpRequest
     HttpPath Path { get; }
 
     /// <summary>
-    /// 
+    /// Returns the HTTP Method.
     /// </summary>
     HttpMethod Method { get; }
 

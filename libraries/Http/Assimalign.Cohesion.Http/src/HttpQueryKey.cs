@@ -2,21 +2,16 @@
 using System.Diagnostics;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
-using Assimalign.Cohesion.Web.Http.Internal;
+using Assimalign.Cohesion.Internal;
 
 /// <summary>
 /// 
 /// </summary>
 [DebuggerDisplay("{Value}")]
-public readonly struct HttpQueryKey : 
-    IEquatable<HttpQueryKey>,
-    IEqualityComparer<HttpQueryKey>,
-    IComparable<HttpQueryKey>
+public readonly struct HttpQueryKey : IEquatable<HttpQueryKey>, IComparable<HttpQueryKey>
 {
-    private const StringComparison comparison = StringComparison.OrdinalIgnoreCase;
-
     /// <summary>
     /// The default constructor.
     /// </summary>
@@ -24,11 +19,7 @@ public readonly struct HttpQueryKey :
     /// <exception cref="ArgumentNullException"></exception>
     public HttpQueryKey(string value)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            ThrowUtility.ThrowArgumentNullException(nameof(value));
-        }
-        Value = value;
+        Value = ThrowHelper.ThrowIfNullOrEmpty(value);
     }
 
     /// <summary>
@@ -39,28 +30,17 @@ public readonly struct HttpQueryKey :
     /// <inheritdoc />
     public bool Equals(HttpQueryKey other)
     {
-       return string.Equals(Value, other.Value, comparison);
-    }
-
-    /// <inheritdoc />
-    public bool Equals(HttpQueryKey left, HttpQueryKey right)
-    {
-        return left.Equals(right);
-    }
-
-    /// <inheritdoc />
-    public int GetHashCode(HttpQueryKey obj)
-    {
-        return obj.GetHashCode();
+        return StringComparer.OrdinalIgnoreCase.Equals(other);
     }
 
     /// <inheritdoc />
     public int CompareTo(HttpQueryKey other)
     {
-        return string.Compare(Value, other.Value, comparison);
+        return StringComparer.OrdinalIgnoreCase.Compare(this, other);
     }
 
     #region Overloads
+
     /// <inheritdoc />
     public override bool Equals(object? obj)
     {
@@ -74,7 +54,7 @@ public readonly struct HttpQueryKey :
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return string.GetHashCode(Value, comparison);
+        return StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
     }
 
     /// <inheritdoc />
@@ -82,13 +62,50 @@ public readonly struct HttpQueryKey :
     {
         return Value;
     }
+
     #endregion
 
     #region Operators
-    public static implicit operator HttpQueryKey(string value) => new HttpQueryKey(value);
 
-    public static implicit operator string(HttpQueryKey key) => key.Value;
-    public static bool operator ==(HttpQueryKey left, HttpQueryKey right) => left.Equals(right);
-    public static bool operator !=(HttpQueryKey left, HttpQueryKey right) => !left.Equals(right);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    public static implicit operator HttpQueryKey(string value)
+    {
+        return new HttpQueryKey(value);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    public static implicit operator string(HttpQueryKey key)
+    {
+        return key.Value;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool operator ==(HttpQueryKey left, HttpQueryKey right)
+    {
+        return left.Equals(right);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static bool operator !=(HttpQueryKey left, HttpQueryKey right)
+    {
+        return !left.Equals(right);
+    }
+
     #endregion
 }

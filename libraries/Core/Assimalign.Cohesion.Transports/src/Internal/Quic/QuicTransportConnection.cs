@@ -28,6 +28,8 @@ internal class QuicTransportConnection : ITransportConnection
 
     public EndPoint RemoteEndPoint => throw new NotImplementedException();
 
+    public ProtocolType Protocol => throw new NotImplementedException();
+
     public void Execute()
     {
         throw new NotImplementedException();

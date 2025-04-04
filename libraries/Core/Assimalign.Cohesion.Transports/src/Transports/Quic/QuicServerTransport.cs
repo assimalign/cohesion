@@ -39,7 +39,7 @@ public sealed class QuicServerTransport : ServerTransport, IAsyncDisposable
     }
 
     public IReadOnlyCollection<ITransportConnection> Connections => connections.AsReadOnly();
-    public override ProtocolType ProtocolType => ProtocolType.Quic;
+    public override ProtocolType Protocol => ProtocolType.Quic;
     public override TransportMiddlewareHandler Middleware { get; }
     public override async Task<ITransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {

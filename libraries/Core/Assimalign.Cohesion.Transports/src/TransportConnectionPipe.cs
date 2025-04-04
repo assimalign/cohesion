@@ -1,14 +1,20 @@
 ﻿using System;
-using System.Buffers;
 using System.IO;
 using System.IO.Pipelines;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Internal;
+
+/// <summary>
+/// A generic connection pipe which data is read and written to.
+/// </summary>
 public sealed class TransportConnectionPipe : ITransportConnectionPipe
 {
-    private readonly Stream stream;
+    private readonly Stream _stream;
+    private readonly PipeReader _input;
+    private readonly PipeWriter _output;
 
     /// <summary>
     /// Creates a <see cref="ITransportConnectionPipe"/> from a stream.
@@ -17,14 +23,11 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     /// <exception cref="ArgumentNullException"></exception>
     public TransportConnectionPipe(Stream stream)
     {
-        if (stream is null)
-        {
-            throw new ArgumentNullException(nameof(stream));
-        }
-        this.stream = stream;
-        this.Input = PipeReader.Create(stream);
-        this.Output = PipeWriter.Create(stream);
+        _stream = ThrowHelper.ThrowIfNull(stream);
+        _input = PipeReader.Create(stream);
+        _output = PipeWriter.Create(stream);
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -33,24 +36,16 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     /// <exception cref="ArgumentNullException"></exception>
     public TransportConnectionPipe(PipeReader input, PipeWriter output)
     {
-        if (input is null)
-        {
-            throw new ArgumentNullException(nameof(input));
-        }
-        if (output is null)
-        {
-            throw new ArgumentNullException(nameof(output));
-        }
-        Input = input;
-        Output = output;
-        stream = new PipeStream(this);
+        _input = ThrowHelper.ThrowIfNull(input);
+        _output = ThrowHelper.ThrowIfNull(output);
+        _stream = new PipeStream(this);
     }
 
-    public PipeReader Input { get; }
-    public PipeWriter Output { get; }
-    public Stream GetStream() => stream;
+    public PipeReader Input => _input;
 
+    public PipeWriter Output => _output;
 
+    public Stream GetStream() => _stream;
 
     public async ValueTask<ReadResult> ReadAsync()
     {

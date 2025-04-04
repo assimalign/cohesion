@@ -6,8 +6,7 @@ namespace Assimalign.Cohesion.Transports;
 
 public sealed class TcpClientTransportOptions
 {
-	private TransportTraceHandler onTrace = (code, data, message) => { };
-	private TransportMiddlewareHandler middleware = context => Task.CompletedTask;
+	private TransportTrace onTrace = (code, data, message) => { };
 
 	/// <summary>
 	/// The endpoint in which the socket should listen on.
@@ -30,7 +29,6 @@ public sealed class TcpClientTransportOptions
 	/// Defaults to true.
 	/// </remarks>
 	public bool NoDelay { get; set; } = true;
-
 
 	/// <summary>
 	/// Gets or sets the maximum unconsumed incoming bytes the transport will buffer.
@@ -70,67 +68,12 @@ public sealed class TcpClientTransportOptions
 	public bool WaitOnPacketIngestion { get; set; } = true;
 
 	/// <summary>
-	/// The Middleware Chain to be executed on initialization.
+	/// 
 	/// </summary>
-	public TransportMiddlewareHandler Middleware => this.middleware;
+    public TransportMiddleware? Middleware { get; set; }
 
-	/// <summary>
-	/// The trace handler for the transport.
-	/// </summary>
-	public TransportTraceHandler OnTrace => this.onTrace;
-
-	/// <summary>
-	/// Sets a raw trace handler.
-	/// </summary>
-	/// <param name="onTrace"></param>
-	/// <exception cref="ArgumentNullException"></exception>
-	public void AddTraceHandler(TransportTraceHandler onTrace)
-	{
-		if (onTrace is null)
-		{
-			throw new ArgumentNullException(nameof(onTrace));
-		}
-
-		this.onTrace = onTrace;
-	}
-
-	/// <summary>
-	/// Sets the trace handler for the transport.
-	/// </summary>
-	/// <typeparam name="TConnectionData">Any connection data set during middleware invocation.</typeparam>
-	/// <param name="onTrace"></param>
-	/// <exception cref="ArgumentNullException"></exception>
-	public void AddTraceHandler<TConnectionData>(Action<TcpConnectionTraceCode, TConnectionData, string?> onTrace)
-	{
-		if (onTrace is null)
-		{
-			throw new ArgumentNullException(nameof(onTrace));
-		}
-		this.onTrace = (data, code, message) =>
-		{
-			if (data is TConnectionData connectionData && code is not null)
-			{
-				onTrace.Invoke((TcpConnectionTraceCode)code, connectionData, message);
-			}
-		};
-	}
-
-	/// <summary>
-	/// Configures a Middleware chain.
-	/// </summary>
-	/// <param name="configure"></param>
-	/// <exception cref="ArgumentNullException"></exception>
-	public void AddMiddleware(Action<TransportMiddlewareBuilder<TcpClientTransportContext, TcpClientTransportMiddleware>> configure)
-	{
-		if (configure is null)
-		{
-			throw new ArgumentNullException(nameof(configure));
-		}
-
-		var builder = new TransportMiddlewareBuilder<TcpClientTransportContext, TcpClientTransportMiddleware>();
-
-		configure.Invoke(builder);
-
-		middleware = builder.Build();
-	}
+    /// <summary>
+    /// The trace handler for the transport.
+    /// </summary>
+    public TransportTrace Trace { get; set; } = (a, b, c) => { };
 }

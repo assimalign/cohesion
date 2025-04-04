@@ -4,8 +4,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
+[DebuggerDisplay("{Value}")]
 public readonly partial struct HttpHeaderValue :
     IList<string?>,
     IReadOnlyList<string?>,
@@ -13,15 +14,9 @@ public readonly partial struct HttpHeaderValue :
     IEquatable<string?>,
     IEquatable<string?[]?>
 {
-    /// <summary>
-    /// A readonly instance of the <see cref="HttpHeaderValue"/> struct whose value is an empty string array.
-    /// </summary>
-    /// <remarks>
-    /// In application code, this field is most commonly used to safely represent a <see cref="HttpHeaderValue"/> that has null string values.
-    /// </remarks>
-    public static readonly HttpHeaderValue Empty = new HttpHeaderValue(Array.Empty<string>());
-
     private readonly object? _values;
+
+    #region Constructors
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HttpHeaderValue"/> structure using the specified string.
@@ -41,26 +36,19 @@ public readonly partial struct HttpHeaderValue :
         _values = values;
     }
 
+    #endregion
+
+    #region Properties
 
     /// <summary>
     /// 
     /// </summary>
-    public string Value
+    public string? Value => _values switch
     {
-        get
-        {
-            if (_values is string str)
-            {
-                return str;
-            }
-            if (_values is string[] strArr)
-            {
-                return string.Join(';', strArr);
-            }
-
-            return null;
-        }
-    }
+        string str => str,
+        string[] strArr => string.Join(';', strArr),
+        _ => null
+    };
 
     public bool IsEmpty
     {
@@ -81,45 +69,6 @@ public readonly partial struct HttpHeaderValue :
 
             return false;
         }
-    }
-
-    /// <summary>
-    /// Defines an implicit conversion of a given string to a <see cref="HttpHeaderValue"/>.
-    /// </summary>
-    /// <param name="value">A string to implicitly convert.</param>
-    public static implicit operator HttpHeaderValue(string? value)
-    {
-        return new HttpHeaderValue(value);
-    }
-
-    /// <summary>
-    /// Defines an implicit conversion of a given string array to a <see cref="HttpHeaderValue"/>.
-    /// </summary>
-    /// <param name="values">A string array to implicitly convert.</param>
-    public static implicit operator HttpHeaderValue(string?[]? values)
-    {
-        return new HttpHeaderValue(values);
-    }
-
-    /// <summary>
-    /// Defines an implicit conversion of a given <see cref="HttpHeaderValue"/> to a string, with multiple values joined as a comma separated string.
-    /// </summary>
-    /// <remarks>
-    /// Returns <c>null</c> where <see cref="HttpHeaderValue"/> has been initialized from an empty string array or is <see cref="HttpHeaderValue.Empty"/>.
-    /// </remarks>
-    /// <param name="values">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
-    public static implicit operator string?(HttpHeaderValue values)
-    {
-        return values.GetStringValue();
-    }
-
-    /// <summary>
-    /// Defines an implicit conversion of a given <see cref="HttpHeaderValue"/> to a string array.
-    /// </summary>
-    /// <param name="value">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
-    public static implicit operator string?[]?(HttpHeaderValue value)
-    {
-        return value.GetArrayValue();
     }
 
     /// <summary>
@@ -191,19 +140,22 @@ public readonly partial struct HttpHeaderValue :
         }
     }
 
+    /// <summary>
+    /// A readonly instance of the <see cref="HttpHeaderValue"/> struct whose value is an empty string array.
+    /// </summary>
+    /// <remarks>
+    /// In application code, this field is most commonly used to safely represent a <see cref="HttpHeaderValue"/> that has null string values.
+    /// </remarks>
+    public static readonly HttpHeaderValue Empty = new HttpHeaderValue(Array.Empty<string>());
+
+    #endregion
+
+    #region Methods
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static string OutOfBounds()
     {
         return Array.Empty<string>()[0]; // throws
-    }
-
-    /// <summary>
-    /// Converts the value of the current <see cref="HttpHeaderValue"/> object to its equivalent string representation, with multiple values joined as a comma separated string.
-    /// </summary>
-    /// <returns>A string representation of the value of the current <see cref="HttpHeaderValue"/> object.</returns>
-    public override string ToString()
-    {
-        return GetStringValue() ?? string.Empty;
     }
 
     private string? GetStringValue()
@@ -409,25 +361,6 @@ public readonly partial struct HttpHeaderValue :
 
     void ICollection<string?>.Clear() => throw new NotSupportedException();
 
-    /// <summary>Retrieves an object that can iterate through the individual strings in this <see cref="HttpHeaderValue" />.</summary>
-    /// <returns>An enumerator that can be used to iterate through the <see cref="HttpHeaderValue" />.</returns>
-    public Enumerator GetEnumerator()
-    {
-        return new Enumerator(_values);
-    }
-
-    /// <inheritdoc cref="GetEnumerator()" />
-    IEnumerator<string?> IEnumerable<string?>.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-
-    /// <inheritdoc cref="GetEnumerator()" />
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-
     /// <summary>
     /// Indicates whether the specified <see cref="HttpHeaderValue"/> contains no string values.
     /// </summary>
@@ -560,28 +493,6 @@ public readonly partial struct HttpHeaderValue :
     }
 
     /// <summary>
-    /// Determines whether two specified <see cref="HttpHeaderValue"/> have the same values.
-    /// </summary>
-    /// <param name="left">The first <see cref="HttpHeaderValue"/> to compare.</param>
-    /// <param name="right">The second <see cref="HttpHeaderValue"/> to compare.</param>
-    /// <returns><c>true</c> if the value of <paramref name="left"/> is the same as the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
-    public static bool operator ==(HttpHeaderValue left, HttpHeaderValue right)
-    {
-        return Equals(left, right);
-    }
-
-    /// <summary>
-    /// Determines whether two specified <see cref="HttpHeaderValue"/> have different values.
-    /// </summary>
-    /// <param name="left">The first <see cref="HttpHeaderValue"/> to compare.</param>
-    /// <param name="right">The second <see cref="HttpHeaderValue"/> to compare.</param>
-    /// <returns><c>true</c> if the value of <paramref name="left"/> is different to the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
-    public static bool operator !=(HttpHeaderValue left, HttpHeaderValue right)
-    {
-        return !Equals(left, right);
-    }
-
-    /// <summary>
     /// Determines whether this instance and another specified <see cref="HttpHeaderValue"/> object have the same values.
     /// </summary>
     /// <param name="other">The string to compare to this instance.</param>
@@ -634,8 +545,98 @@ public readonly partial struct HttpHeaderValue :
     /// <returns><c>true</c> if the value of <paramref name="other"/> is the same as this instance; otherwise, <c>false</c>.</returns>
     public bool Equals(string?[]? other) => Equals(this, new HttpHeaderValue(other));
 
+
+    /// <summary>Retrieves an object that can iterate through the individual strings in this <see cref="HttpHeaderValue" />.</summary>
+    /// <returns>An enumerator that can be used to iterate through the <see cref="HttpHeaderValue" />.</returns>
+    public Enumerator GetEnumerator()
+    {
+        return new Enumerator(_values);
+    }
+
+    /// <inheritdoc cref="GetEnumerator()" />
+    IEnumerator<string?> IEnumerable<string?>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    /// <inheritdoc cref="GetEnumerator()" />
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    #endregion
+
+    #region Operators
+
+    /// <summary>
+    /// Defines an implicit conversion of a given string to a <see cref="HttpHeaderValue"/>.
+    /// </summary>
+    /// <param name="value">A string to implicitly convert.</param>
+    public static implicit operator HttpHeaderValue(string? value)
+    {
+        return new HttpHeaderValue(value);
+    }
+
+    /// <summary>
+    /// Defines an implicit conversion of a given string array to a <see cref="HttpHeaderValue"/>.
+    /// </summary>
+    /// <param name="values">A string array to implicitly convert.</param>
+    public static implicit operator HttpHeaderValue(string?[]? values)
+    {
+        return new HttpHeaderValue(values);
+    }
+
+    /// <summary>
+    /// Defines an implicit conversion of a given <see cref="HttpHeaderValue"/> to a string, with multiple values joined as a comma separated string.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> where <see cref="HttpHeaderValue"/> has been initialized from an empty string array or is <see cref="HttpHeaderValue.Empty"/>.
+    /// </remarks>
+    /// <param name="values">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
+    public static implicit operator string?(HttpHeaderValue values)
+    {
+        return values.GetStringValue();
+    }
+
+    /// <summary>
+    /// Defines an implicit conversion of a given <see cref="HttpHeaderValue"/> to a string array.
+    /// </summary>
+    /// <param name="value">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
+    public static implicit operator string?[]?(HttpHeaderValue value)
+    {
+        return value.GetArrayValue();
+    }
+
+    /// <summary>
+    /// Determines whether two specified <see cref="HttpHeaderValue"/> have the same values.
+    /// </summary>
+    /// <param name="left">The first <see cref="HttpHeaderValue"/> to compare.</param>
+    /// <param name="right">The second <see cref="HttpHeaderValue"/> to compare.</param>
+    /// <returns><c>true</c> if the value of <paramref name="left"/> is the same as the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
+    public static bool operator ==(HttpHeaderValue left, HttpHeaderValue right)
+    {
+        return Equals(left, right);
+    }
+
+    /// <summary>
+    /// Determines whether two specified <see cref="HttpHeaderValue"/> have different values.
+    /// </summary>
+    /// <param name="left">The first <see cref="HttpHeaderValue"/> to compare.</param>
+    /// <param name="right">The second <see cref="HttpHeaderValue"/> to compare.</param>
+    /// <returns><c>true</c> if the value of <paramref name="left"/> is different to the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
+    public static bool operator !=(HttpHeaderValue left, HttpHeaderValue right)
+    {
+        return !Equals(left, right);
+    }
+
+
+
     /// <inheritdoc cref="Equals(HttpHeaderValue, string)" />
-    public static bool operator ==(HttpHeaderValue left, string? right) => Equals(left, new HttpHeaderValue(right));
+    public static bool operator ==(HttpHeaderValue left, string? right)
+    {
+        return Equals(left, new HttpHeaderValue(right));
+    }
 
     /// <summary>
     /// Determines whether the specified <see cref="HttpHeaderValue"/> and <see cref="string"/> objects have different values.
@@ -643,10 +644,16 @@ public readonly partial struct HttpHeaderValue :
     /// <param name="left">The <see cref="HttpHeaderValue"/> to compare.</param>
     /// <param name="right">The <see cref="string"/> to compare.</param>
     /// <returns><c>true</c> if the value of <paramref name="left"/> is different to the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
-    public static bool operator !=(HttpHeaderValue left, string? right) => !Equals(left, new HttpHeaderValue(right));
+    public static bool operator !=(HttpHeaderValue left, string? right)
+    {
+        return !Equals(left, new HttpHeaderValue(right));
+    }
 
     /// <inheritdoc cref="Equals(string, HttpHeaderValue)" />
-    public static bool operator ==(string? left, HttpHeaderValue right) => Equals(new HttpHeaderValue(left), right);
+    public static bool operator ==(string? left, HttpHeaderValue right)
+    {
+        return Equals(new HttpHeaderValue(left), right);
+    }
 
     /// <summary>
     /// Determines whether the specified <see cref="string"/> and <see cref="HttpHeaderValue"/> objects have different values.
@@ -654,10 +661,16 @@ public readonly partial struct HttpHeaderValue :
     /// <param name="left">The <see cref="string"/> to compare.</param>
     /// <param name="right">The <see cref="HttpHeaderValue"/> to compare.</param>
     /// <returns><c>true</c> if the value of <paramref name="left"/> is different to the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
-    public static bool operator !=(string left, HttpHeaderValue right) => !Equals(new HttpHeaderValue(left), right);
+    public static bool operator !=(string left, HttpHeaderValue right)
+    {
+        return !Equals(new HttpHeaderValue(left), right);
+    }
 
     /// <inheritdoc cref="Equals(HttpHeaderValue, string[])" />
-    public static bool operator ==(HttpHeaderValue left, string?[]? right) => Equals(left, new HttpHeaderValue(right));
+    public static bool operator ==(HttpHeaderValue left, string?[]? right)
+    {
+        return Equals(left, new HttpHeaderValue(right));
+    }
 
     /// <summary>
     /// Determines whether the specified <see cref="HttpHeaderValue"/> and string array have different values.
@@ -665,7 +678,10 @@ public readonly partial struct HttpHeaderValue :
     /// <param name="left">The <see cref="HttpHeaderValue"/> to compare.</param>
     /// <param name="right">The string array to compare.</param>
     /// <returns><c>true</c> if the value of <paramref name="left"/> is different to the value of <paramref name="right"/>; otherwise, <c>false</c>.</returns>
-    public static bool operator !=(HttpHeaderValue left, string?[]? right) => !Equals(left, new HttpHeaderValue(right));
+    public static bool operator !=(HttpHeaderValue left, string?[]? right)
+    {
+        return !Equals(left, new HttpHeaderValue(right));
+    }
 
     /// <inheritdoc cref="Equals(string[], HttpHeaderValue)" />
     public static bool operator ==(string?[]? left, HttpHeaderValue right) => Equals(new HttpHeaderValue(left), right);
@@ -712,6 +728,19 @@ public readonly partial struct HttpHeaderValue :
     /// <param name="right">The <see cref="HttpHeaderValue"/> to compare.</param>
     /// <returns><c>true</c> if the <paramref name="left"/> object is equal to the <paramref name="right"/>; otherwise, <c>false</c>.</returns>
     public static bool operator !=(object? left, HttpHeaderValue right) => !right.Equals(left);
+
+    #endregion
+
+    #region Overloads
+
+    /// <summary>
+    /// Converts the value of the current <see cref="HttpHeaderValue"/> object to its equivalent string representation, with multiple values joined as a comma separated string.
+    /// </summary>
+    /// <returns>A string representation of the value of the current <see cref="HttpHeaderValue"/> object.</returns>
+    public override string ToString()
+    {
+        return GetStringValue() ?? string.Empty;
+    }
 
     /// <summary>
     /// Determines whether this instance and a specified object have the same value.
@@ -770,6 +799,10 @@ public readonly partial struct HttpHeaderValue :
             return Unsafe.As<string>(value)?.GetHashCode() ?? Count.GetHashCode();
         }
     }
+
+    #endregion
+
+    #region Partials
 
     /// <summary>
     /// Enumerates the string values of a <see cref="HttpHeaderValue" />.
@@ -837,4 +870,6 @@ public readonly partial struct HttpHeaderValue :
         {
         }
     }
+
+    #endregion
 }

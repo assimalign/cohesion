@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Hosting</RootNamespace>
-	</PropertyGroup>
-	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Hosting" />
-	</ItemGroup>
-</Project>

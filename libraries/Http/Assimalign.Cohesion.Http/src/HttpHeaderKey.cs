@@ -2,20 +2,17 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
-using Assimalign.Cohesion.Web.Http.Internal;
+using Assimalign.Cohesion.Internal;
 
 /// <summary>
 /// 
 /// </summary>
 [DebuggerDisplay("{Value}")]
-public readonly struct HttpHeaderKey :
-    IEquatable<HttpHeaderKey>,
-    IEqualityComparer<HttpHeaderKey>,
-    IComparable<HttpHeaderKey>
+public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<HttpHeaderKey>
 {
-    private const StringComparison comparison = StringComparison.OrdinalIgnoreCase;
+    #region Constructor
 
     /// <summary>
     /// The default constructor.
@@ -24,29 +21,55 @@ public readonly struct HttpHeaderKey :
     /// <exception cref="ArgumentNullException"></exception>
     public HttpHeaderKey(string value)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            ThrowUtility.ThrowArgumentNullException(nameof(value));
-        }
-        this.Value = value;
+        Value = ThrowHelper.ThrowIfNullOrEmpty(value);
     }
+
+    #endregion
+
+    #region Properties
 
     /// <summary>
     /// The raw query key.
     /// </summary>
     public string Value { get; }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    public bool IsEmpty => string.IsNullOrEmpty(Value);
+
+    #endregion
+
+    #region Methods 
+
+    /// <inheritdoc />
+    public bool Equals(HttpHeaderKey other)
+    {
+        return StringComparer.OrdinalIgnoreCase.Equals(this, other);
+    }
+
+    /// <inheritdoc />
+    public int CompareTo(HttpHeaderKey other)
+    {
+        return StringComparer.OrdinalIgnoreCase.Compare(this, other);
+    }
+
+    #endregion
+
     #region Overloads
+
     /// <inheritdoc />
     public override string ToString()
     {
         return Value;
     }
+
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return string.GetHashCode(Value, comparison);
+        return StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
     }
+
     /// <inheritdoc />
     public override bool Equals(object? instance)
     {
@@ -59,37 +82,27 @@ public readonly struct HttpHeaderKey :
     }
     #endregion
 
-    #region Explicit Implementations
-    /// <inheritdoc />
-    bool IEquatable<HttpHeaderKey>.Equals(HttpHeaderKey other)
+    #region Operators
+
+    public static implicit operator HttpHeaderKey(string key)
     {
-        return Value.Equals(other.Value, comparison);
+        return new HttpHeaderKey(key);
     }
 
-    /// <inheritdoc />
-    int IComparable<HttpHeaderKey>.CompareTo(HttpHeaderKey other)
+    public static implicit operator string(HttpHeaderKey key)
     {
-        return string.Compare(Value, other.Value, comparison);
+        return key.Value;
     }
 
-    /// <inheritdoc />
-    bool IEqualityComparer<HttpHeaderKey>.Equals(HttpHeaderKey left, HttpHeaderKey right)
+    public static bool operator ==(HttpHeaderKey left, HttpHeaderKey right)
     {
         return left.Equals(right);
     }
 
-    /// <inheritdoc />
-    int IEqualityComparer<HttpHeaderKey>.GetHashCode(HttpHeaderKey obj)
+    public static bool operator !=(HttpHeaderKey left, HttpHeaderKey right)
     {
-        return obj.GetHashCode();
+        return !left.Equals(right);
     }
-    #endregion
 
-    #region Operators
-    public static implicit operator HttpHeaderKey(string key) => new HttpHeaderKey(key);
-
-    public static implicit operator string(HttpHeaderKey key) => key.Value;
-    public static bool operator ==(HttpHeaderKey left, HttpHeaderKey right) => left.Equals(right);
-    public static bool operator !=(HttpHeaderKey left, HttpHeaderKey right) => !left.Equals(right);
     #endregion
 }

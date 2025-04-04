@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Transports;
 
 public sealed class QuicServerTransportOptions
 {
-    private TransportTraceHandler onTrace = (code, data, message) => { };
+    private TransportTracer onTrace = (code, data, message) => { };
     private TransportMiddlewareHandler middleware = context => Task.CompletedTask;
 
     /// <summary>
@@ -31,7 +31,7 @@ public sealed class QuicServerTransportOptions
     /// <summary>
     /// The trace handler for the transport.
     /// </summary>
-    public TransportTraceHandler OnTrace => this.onTrace;
+    public TransportTracer OnTrace => this.onTrace;
 
 
     /// <summary>

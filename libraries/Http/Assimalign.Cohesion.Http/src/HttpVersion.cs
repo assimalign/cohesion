@@ -1,8 +1,8 @@
-﻿namespace Assimalign.Cohesion.Web.Http;
+﻿namespace Assimalign.Cohesion.Http;
 
 public enum HttpVersion
 {
     Http11 = 1,
-    Http12 = 2,
-    Http13 = 3
+    Http20 = 2,
+    Http30 = 3
 }

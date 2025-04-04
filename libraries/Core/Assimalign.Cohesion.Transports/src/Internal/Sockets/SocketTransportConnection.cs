@@ -11,7 +11,7 @@ internal class SocketTransportConnection : ITransportConnection
 {
     private readonly CancellationTokenSource connectionClosedTokenSource = new CancellationTokenSource();
     private readonly TaskCompletionSource connectionClosingProcess = new TaskCompletionSource();
-    private readonly TransportTraceHandler trace;
+    private readonly TransportTrace trace;
 
     private volatile bool isSocketDisposed;
     private bool isConnectionClosed;
@@ -49,7 +49,7 @@ internal class SocketTransportConnection : ITransportConnection
             this.Output = clientPipe.Writer;
         }
 
-        this.trace = settings.OnTrace;
+        this.trace = settings.Trace;
         this.Socket = settings.Socket;
         this.LocalEndPoint = settings?.Socket.LocalEndPoint!;
         this.RemoteEndPoint = settings?.Socket.RemoteEndPoint!;
@@ -57,7 +57,7 @@ internal class SocketTransportConnection : ITransportConnection
         this.Receiver = new SocketPipeReceiver(settings.ReceiverScheduler);
     }
 
-
+    public ProtocolType Protocol { get; init; }
     public bool IsConnected => RemoteEndPoint is not null;
     public object? ConnectionData { get; set; }
     public ConnectionState State => this.state;

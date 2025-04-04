@@ -3,14 +3,14 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
-using Assimalign.Cohesion.Web.Http.Internal;
+using Assimalign.Cohesion.Internal;
 
 [DebuggerDisplay("{ToString()}")]
 public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 {
-    private static ReadOnlySpan<KeyValuePair<int, string>> statusCodes => new KeyValuePair<int, string>[]
+    private static ReadOnlySpan<KeyValuePair<int, string>> _statusCodes => new KeyValuePair<int, string>[]
     {
         // 1xx Information
         new (100, "Continue"), 
@@ -88,7 +88,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     {
         if (!IsValid(statusCode))
         {
-            ThrowUtility.ThrowArgumentException($"The provided status code is invalid: '{statusCode}'");
+            ThrowHelper.ThrowArgumentException($"The provided status code is invalid: '{statusCode}'");
         }
         Value = statusCode;
     }
@@ -111,9 +111,9 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     {
         var value = string.Empty;
 
-        for (int i = 0; i < statusCodes.Length; i++)
+        for (int i = 0; i < _statusCodes.Length; i++)
         {
-            var statusCode = statusCodes[i];
+            var statusCode = _statusCodes[i];
 
             if (statusCode.Key == Value)
             {
@@ -141,10 +141,26 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     }
     #endregion
 
-    #region Operatos
-    public static implicit operator HttpStatusCode(int statusCode) => new HttpStatusCode(statusCode);
+    #region Operators
 
-    public static implicit operator int(HttpStatusCode statusCode) => statusCode.Value;
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="statusCode"></param>
+    public static implicit operator HttpStatusCode(int statusCode)
+    {
+        return new HttpStatusCode(statusCode);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="statusCode"></param>
+    public static implicit operator int(HttpStatusCode statusCode)
+    {
+        return statusCode.Value;
+    }
+
     #endregion
 
     #region Static Helpers
@@ -217,14 +233,13 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsValid(int statusCode)
     {
-        for (int i = 0; i < statusCodes.Length; i++)
+        for (int i = 0; i < _statusCodes.Length; i++)
         {
-            if (statusCodes[i].Key == statusCode)
+            if (_statusCodes[i].Key == statusCode)
             {
                 return true;
             }
         }
         return false;
     }
-
 }

@@ -1,7 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Web.Http;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 
@@ -9,7 +10,7 @@ namespace Assimalign.Cohesion.Web.Http;
 /// <code>
 /// await foreach (var received in ReceiveAsync().WithCancellation(cancellationToken))
 /// {
-///     // TODO: Add execution code
+///     // TODO: Add HTTP Application code to execute
 ///     
 ///     await foreach (var sent in SendAsync(received).WithCancellation(cancellationToken))
 ///     {
@@ -19,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Http;
 /// </code>
 /// 
 /// </summary>
-public interface IHttpConnection
+public interface IHttpConnection : IDisposable
 {
     /// <summary>
     /// 

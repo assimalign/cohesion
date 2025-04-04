@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Configuration" />
+		<Reference Include="Assimalign.Cohesion.Hosting" />
+		<Reference Include="Assimalign.Cohesion.DependencyInjection" />
+		<Reference Include="Assimalign.Cohesion.Http" />
+		<Reference Include="Assimalign.Cohesion.Logging" />
+	</ItemGroup>
+</Project>

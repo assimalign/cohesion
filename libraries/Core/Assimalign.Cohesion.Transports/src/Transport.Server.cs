@@ -4,16 +4,16 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
+/// <summary>
+/// 
+/// </summary>
 public abstract class ServerTransport : ITransport
 {
     /// <inheritdoc />
-    public TransportType TransportType => TransportType.Server;
+    public TransportKind Kind => TransportKind.Server;
 
     /// <inheritdoc />
-    public abstract ProtocolType ProtocolType { get; }
-
-    /// <inheritdoc />
-    public abstract TransportMiddlewareHandler Middleware { get; }
+    public abstract ProtocolType Protocol { get; }
 
     /// <summary>
     /// Accepts or Listens for incoming connections.
@@ -24,7 +24,6 @@ public abstract class ServerTransport : ITransport
     /// </remarks>
     /// <returns></returns>
     public abstract Task<ITransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default);
-
 
     /// <inheritdoc />
     public abstract void Dispose();

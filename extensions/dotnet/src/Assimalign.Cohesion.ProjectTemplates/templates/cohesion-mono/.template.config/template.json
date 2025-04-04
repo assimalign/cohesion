@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/template",
+  "name": "Cohesion Mono App",
+  "shortName": "Mono App",
+  "author": "Assimalign",
+  "identity": "Assimalign.Cohesion.CSharp.9.0",
+  "preferNameDirectory": false,
+  "classifications": [
+    "Service"
+  ],
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net8.0",
+          "description": "Target net8.0"
+        },
+        {
+          "choice": "net9.0",
+          "description": "Target net9.0"
+        }
+      ]
+    },
+    "UseDirectoryPropsAndTargets": {
+      "type": "parameter",
+      "allowMultipleValues": true,
+    }
+  }
+  //"postActions": [
+  //  {
+  //    "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+  //    ""
+  //  }
+  //]
+}
