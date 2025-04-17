@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Web;
 
 /// <summary>
-/// 
+/// Represents an abstraction of a web server.
 /// </summary>
-public interface IWebApplication : IDisposable
+public interface IWebApplication 
 {
     /// <summary>
     /// 

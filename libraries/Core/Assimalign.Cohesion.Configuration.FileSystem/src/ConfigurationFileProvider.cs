@@ -113,7 +113,7 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
     }
 
     /// <summary>
-    /// Loads the contents of the file at <see cref="Path"/>.
+    /// Loads the contents of the file at <see cref="System.IO.Path"/>.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException">If Optional is <c>false</c> on the source and part of a file or
     /// or directory cannot be found at the specified Path.</exception>

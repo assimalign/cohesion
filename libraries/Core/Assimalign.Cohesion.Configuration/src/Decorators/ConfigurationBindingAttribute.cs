@@ -14,7 +14,7 @@ public class ConfigurationBindingAttribute : Attribute
         Type = type;
     }
 
-    public Type Type { get; set; }
+    public Type Type { get; }
 }
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]

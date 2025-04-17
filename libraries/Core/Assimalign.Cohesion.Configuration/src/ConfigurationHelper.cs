@@ -17,7 +17,7 @@ public static class ConfigurationHelperConfigurationHelper
     /// <param name="path"></param>
     /// <param name="value"></param>
     /// <returns></returns>
-    public static IConfigurationEntry Compose(KeyPath path, string? value)
+    public static IConfigurationEntry Compose(Path path, string? value)
     {
         if (path.IsComposite)
         {

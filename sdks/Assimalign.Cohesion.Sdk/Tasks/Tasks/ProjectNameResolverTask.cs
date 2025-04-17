@@ -22,7 +22,7 @@ public class ProjectNameResolverTask : Task
     public override bool Execute()
     {
         var item = new TaskItem("ProjectReferenceProvider");
-        
-        throw new System.NotImplementedException();
+
+        return true;
     }
 }

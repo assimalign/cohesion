@@ -17,13 +17,20 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    string? this[KeyPath path] { get; set; }
+    string? this[in Path path] { get; set; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    IConfigurationEntry? Get(Key key);
 
     /// <summary>
     /// Adds a configuration entry the section.
     /// </summary>
     /// <param name="entry"></param>
-    void Add(IConfigurationEntry entry);
+    void Set(IConfigurationEntry entry);
 
     /// <summary>
     /// Removes an entry from the section

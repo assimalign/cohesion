@@ -67,11 +67,6 @@ public sealed class TcpClientTransportOptions
 	/// </remarks>
 	public bool WaitOnPacketIngestion { get; set; } = true;
 
-	/// <summary>
-	/// 
-	/// </summary>
-    public TransportMiddleware? Middleware { get; set; }
-
     /// <summary>
     /// The trace handler for the transport.
     /// </summary>

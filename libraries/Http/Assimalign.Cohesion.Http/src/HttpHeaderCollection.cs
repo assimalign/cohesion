@@ -7,29 +7,35 @@ namespace Assimalign.Cohesion.Http;
 
 public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 {
-    private static readonly HttpHeaderKey[] EmptyKeys = Array.Empty<HttpHeaderKey>();
-    private static readonly HttpHeaderValue[] EmptyValues = Array.Empty<HttpHeaderValue>();
     private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> EmptyIEnumeratorType = default(Enumerator);
     private static readonly IEnumerator EmptyIEnumerator = default(Enumerator);
 
-    private Dictionary<HttpHeaderKey, HttpHeaderValue>? store;
+    private Dictionary<HttpHeaderKey, HttpHeaderValue> _store;
 
-    public HttpHeaderCollection() { }
+    #region Constructors
+
+    public HttpHeaderCollection()
+    {
+        _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>();
+    }
     public HttpHeaderCollection(int capacity)
     {
-        EnsureStore(capacity);
+        _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>(capacity);
     }
     public HttpHeaderCollection(Dictionary<HttpHeaderKey, HttpHeaderValue>? store)
     {
-        this.store = store;
+        _store = store ?? new Dictionary<HttpHeaderKey, HttpHeaderValue>();
     }
 
+    #endregion
+
+    #region Properties
 
     public HttpHeaderValue this[HttpHeaderKey key]
     {
         get
         {
-            if (store == null)
+            if (_store == null)
             {
                 return HttpHeaderValue.Empty;
             }
@@ -44,127 +50,121 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
             ThrowIfReadOnly();
             if (value.Count == 0)
             {
-                store?.Remove(key);
+                _store?.Remove(key);
                 return;
             }
             EnsureStore(1);
-            store![key] = value;
+            _store![key] = value;
         }
     }
+    public int Count => _store.Count;
+    public bool IsReadOnly { get; }
 
-    public ICollection<HttpHeaderKey> Keys => store == null ? EmptyKeys : store!.Keys;
-    public ICollection<HttpHeaderValue> Values => store == null ? EmptyValues : store!.Values;
-
-    public int Count => store?.Count ?? 0;
-    public bool IsReadOnly { get; set; }
-
-    public void Add(ref HttpHeaderKey key, ref HttpHeaderValue value)
-    {
-
-    }
+    #endregion
 
     public void Add(HttpHeaderKey key, HttpHeaderValue value)
     {
         ThrowIfReadOnly();
         EnsureStore(1);
-        store!.Add(key, value);
+        _store!.Add(key, value);
     }
-    public void Add(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
+    public void Remove(HttpHeaderKey key)
     {
         ThrowIfReadOnly();
-        EnsureStore(1);
-        store!.Add(item.Key, item.Value);
+        //if (_store == null)
+        //{
+        //    return false;
+        //}
+        _store!.Remove(key);
     }
     public void Clear()
     {
         ThrowIfReadOnly();
-        store?.Clear();
-    }
-    public bool Contains(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
-    {
-        if (store == null || !store!.TryGetValue(item.Key, out var value) || !HttpHeaderValue.Equals(value, item.Value))
-        {
-            return false;
-        }
-        return true;
+        _store?.Clear();
     }
     public bool ContainsKey(HttpHeaderKey key)
     {
-        if (store == null)
+        if (_store == null)
         {
             return false;
         }
-        return store!.ContainsKey(key);
-    }
-    public void CopyTo(KeyValuePair<HttpHeaderKey, HttpHeaderValue>[] array, int arrayIndex)
-    {
-        if (store == null)
-        {
-            return;
-        }
-        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> item in store!)
-        {
-            var keyValuePair = (array[arrayIndex] = item);
-            arrayIndex++;
-        }
-    }  
-    public bool Remove(HttpHeaderKey key)
-    {
-        ThrowIfReadOnly();
-        if (store == null)
-        {
-            return false;
-        }
-        return store!.Remove(key);
-    }
-    public bool Remove(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
-    {
-        ThrowIfReadOnly();
-        if (store == null)
-        {
-            return false;
-        }
-        if (store!.TryGetValue(item.Key, out var value) && HttpHeaderValue.Equals(item.Value, value))
-        {
-            return store!.Remove(item.Key);
-        }
-        return false;
+        return _store!.ContainsKey(key);
     }
     public bool TryGetValue(HttpHeaderKey key, [MaybeNullWhen(false)] out HttpHeaderValue value)
     {
-        if (store == null)
+        if (_store == null)
         {
             value = default(HttpHeaderValue);
             return false;
         }
-        return store!.TryGetValue(key, out value);
+        return _store!.TryGetValue(key, out value);
     }
-    
-    
+    //public void Add(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
+    //{
+    //    ThrowIfReadOnly();
+    //    EnsureStore(1);
+    //    _store!.Add(item.Key, item.Value);
+    //}
+    //public bool Contains(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
+    //{
+    //    if (_store == null || !_store!.TryGetValue(item.Key, out var value) || !HttpHeaderValue.Equals(value, item.Value))
+    //    {
+    //        return false;
+    //    }
+    //    return true;
+    //}
+    //public void CopyTo(KeyValuePair<HttpHeaderKey, HttpHeaderValue>[] array, int arrayIndex)
+    //{
+    //    if (_store == null)
+    //    {
+    //        return;
+    //    }
+    //    foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> item in _store!)
+    //    {
+    //        var keyValuePair = (array[arrayIndex] = item);
+    //        arrayIndex++;
+    //    }
+    //}  
+
+    //public bool Remove(KeyValuePair<HttpHeaderKey, HttpHeaderValue> item)
+    //{
+    //    ThrowIfReadOnly();
+    //    if (_store == null)
+    //    {
+    //        return false;
+    //    }
+    //    if (_store!.TryGetValue(item.Key, out var value) && HttpHeaderValue.Equals(item.Value, value))
+    //    {
+    //        return _store!.Remove(item.Key);
+    //    }
+    //    return false;
+    //}
+
+
+
     public IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> GetEnumerator()
     {
-        if (store == null || store!.Count == 0)
+        if (_store == null || _store!.Count == 0)
         {
             return default(Enumerator);
         }
-        return new Enumerator(store!.GetEnumerator());
+        return new Enumerator(_store!.GetEnumerator());
     }
     IEnumerator IEnumerable.GetEnumerator()
     {
-        if (store == null || store!.Count == 0)
+        if (_store == null || _store!.Count == 0)
         {
             return EmptyIEnumerator;
         }
-        return store!.GetEnumerator();
+        return _store!.GetEnumerator();
     }
 
 
-    [MemberNotNull("store")]
     private void EnsureStore(int capacity)
     {
-        if (store == null)
+        if (_store == null)
         {
-            store = new Dictionary<HttpHeaderKey, HttpHeaderValue>(capacity);
+            _store = new Dictionary<HttpHeaderKey, HttpHeaderValue>(capacity);
         }
     }
     private void ThrowIfReadOnly()
@@ -175,7 +175,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         }
     }
 
-
+    #region Partials
     private struct Enumerator : IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>>, IEnumerator, IDisposable
     {
         private Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator enumerator;
@@ -210,107 +210,472 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         }
     }
 
-    public HttpHeaderValue? Accepts => GetHeaderValue(HttpHeader.Accept);
-    public HttpHeaderValue? ContentType => GetHeaderValue(HttpHeader.ContentType);
-    public HttpHeaderValue? ContentLength => GetHeaderValue(HttpHeader.ContentLength);
-    public HttpHeaderValue? TransferEncoding => GetHeaderValue(HttpHeader.TransferEncoding);
-    public HttpHeaderValue? Connection => GetHeaderValue(HttpHeader.Connection);
-    public HttpHeaderValue? AcceptCharset => GetHeaderValue(HttpHeader.AcceptCharset);
-    public HttpHeaderValue? AcceptEncoding => GetHeaderValue(HttpHeader.AcceptEncoding);
-    public HttpHeaderValue? AcceptLanguage => GetHeaderValue(HttpHeader.AcceptLanguage);
-    public HttpHeaderValue? AcceptRanges => GetHeaderValue(HttpHeader.AcceptRanges);
-    public HttpHeaderValue? AccessControlAllowCredentials => GetHeaderValue(HttpHeader.AccessControlAllowCredentials);
-    public HttpHeaderValue? AccessControlAllowHeaders => GetHeaderValue(HttpHeader.AccessControlAllowHeaders);
-    public HttpHeaderValue? AccessControlAllowMethods => GetHeaderValue(HttpHeader.AccessControlAllowMethods);
-    public HttpHeaderValue? AccessControlAllowOrigin => GetHeaderValue(HttpHeader.AccessControlAllowOrigin);
-    public HttpHeaderValue? AccessControlExposeHeaders => GetHeaderValue(HttpHeader.AccessControlExposeHeaders);
-    public HttpHeaderValue? AccessControlMaxAge => GetHeaderValue(HttpHeader.AccessControlMaxAge);
-    public HttpHeaderValue? AccessControlRequestHeaders => GetHeaderValue(HttpHeader.AccessControlRequestHeaders);
-    public HttpHeaderValue? AccessControlRequestMethod => throw new NotImplementedException();
-    public HttpHeaderValue? Age => throw new NotImplementedException();
-    public HttpHeaderValue? Allow => throw new NotImplementedException();
-    public HttpHeaderValue? AltSvc => throw new NotImplementedException();
-    public HttpHeaderValue? Authorization => throw new NotImplementedException();
-    public HttpHeaderValue? Baggage => throw new NotImplementedException();
-    public HttpHeaderValue? CacheControl => throw new NotImplementedException();
-    public HttpHeaderValue? ContentDisposition => throw new NotImplementedException();
-    public HttpHeaderValue? ContentEncoding => throw new NotImplementedException();
-    public HttpHeaderValue? ContentLanguage => throw new NotImplementedException();
-    public HttpHeaderValue? ContentLocation => throw new NotImplementedException();
-    public HttpHeaderValue? ContentMD5 => throw new NotImplementedException();
-    public HttpHeaderValue? ContentRange => throw new NotImplementedException();
-    public HttpHeaderValue? ContentSecurityPolicy => throw new NotImplementedException();
-    public HttpHeaderValue? ContentSecurityPolicyReportOnly => throw new NotImplementedException();
-    public HttpHeaderValue? CorrelationContext => throw new NotImplementedException();
-    public HttpHeaderValue? Cookie => throw new NotImplementedException();
-    public HttpHeaderValue? Date => throw new NotImplementedException();
-    public HttpHeaderValue? ETag => throw new NotImplementedException();
-    public HttpHeaderValue? Expires => throw new NotImplementedException();
-    public HttpHeaderValue? Expect => throw new NotImplementedException();
-    public HttpHeaderValue? From => throw new NotImplementedException();
-    public HttpHeaderValue? GrpcAcceptEncoding => throw new NotImplementedException();
-    public HttpHeaderValue? GrpcEncoding => throw new NotImplementedException();
-    public HttpHeaderValue? GrpcMessage => throw new NotImplementedException();
-    public HttpHeaderValue? GrpcStatus => throw new NotImplementedException();
-    public HttpHeaderValue? GrpcTimeout => throw new NotImplementedException();
-    public HttpHeaderValue? Host => throw new NotImplementedException();
-    public HttpHeaderValue? KeepAlive => throw new NotImplementedException();
-    public HttpHeaderValue? IfMatch => throw new NotImplementedException();
-    public HttpHeaderValue? IfModifiedSince => throw new NotImplementedException();
-    public HttpHeaderValue? IfNoneMatch => throw new NotImplementedException();
-    public HttpHeaderValue? IfRange => throw new NotImplementedException();
-    public HttpHeaderValue? IfUnmodifiedSince => throw new NotImplementedException();
-    public HttpHeaderValue? LastModified => throw new NotImplementedException();
-    public HttpHeaderValue? Link => throw new NotImplementedException();
-    public HttpHeaderValue? Location => throw new NotImplementedException();
-    public HttpHeaderValue? MaxForwards => throw new NotImplementedException();
-    public HttpHeaderValue? Origin => throw new NotImplementedException();
-    public HttpHeaderValue? Pragma => throw new NotImplementedException();
-    public HttpHeaderValue? ProxyAuthenticate => throw new NotImplementedException();
-    public HttpHeaderValue? ProxyAuthorization => throw new NotImplementedException();
-    public HttpHeaderValue? ProxyConnection => throw new NotImplementedException();
-    public HttpHeaderValue? Range => throw new NotImplementedException();
-    public HttpHeaderValue? Referer => throw new NotImplementedException();
-    public HttpHeaderValue? RetryAfter => throw new NotImplementedException();
-    public HttpHeaderValue? RequestId => throw new NotImplementedException();
-    public HttpHeaderValue? SecWebSocketAccept => throw new NotImplementedException();
-    public HttpHeaderValue? SecWebSocketKey => throw new NotImplementedException();
-    public HttpHeaderValue? SecWebSocketProtocol => throw new NotImplementedException();
-    public HttpHeaderValue? SecWebSocketVersion => throw new NotImplementedException();
-    public HttpHeaderValue? SecWebSocketExtensions => throw new NotImplementedException();
-    public HttpHeaderValue? Server => throw new NotImplementedException();
-    public HttpHeaderValue? SetCookie => throw new NotImplementedException();
-    public HttpHeaderValue? StrictTransportSecurity => throw new NotImplementedException();
-    public HttpHeaderValue? TE => throw new NotImplementedException();
-    public HttpHeaderValue? Trailer => throw new NotImplementedException();
-    public HttpHeaderValue? Translate => throw new NotImplementedException();
-    public HttpHeaderValue? TraceParent => throw new NotImplementedException();
-    public HttpHeaderValue? TraceState => throw new NotImplementedException();
-    public HttpHeaderValue? Upgrade => throw new NotImplementedException();
-    public HttpHeaderValue? UpgradeInsecureRequests => throw new NotImplementedException();
-    public HttpHeaderValue? UserAgent => throw new NotImplementedException();
-    public HttpHeaderValue? Vary => throw new NotImplementedException();
-    public HttpHeaderValue? Via => throw new NotImplementedException();
-    public HttpHeaderValue? Warning => throw new NotImplementedException();
-    public HttpHeaderValue? WebSocketSubProtocols => throw new NotImplementedException();
-    public HttpHeaderValue? WWWAuthenticate => throw new NotImplementedException();
-    public HttpHeaderValue? XContentTypeOptions => throw new NotImplementedException();
-    public HttpHeaderValue? XFrameOptions => throw new NotImplementedException();
-    public HttpHeaderValue? XPoweredBy => throw new NotImplementedException();
-    public HttpHeaderValue? XRequestedWith => throw new NotImplementedException();
-    public HttpHeaderValue? XUACompatible => throw new NotImplementedException();
-    public HttpHeaderValue? XXSSProtection => throw new NotImplementedException();
+    #endregion
 
-    private ref HttpHeaderValue? GetHeaderValue(string key)
+    private HttpHeaderValue? GetHeaderValue(ref HttpHeaderKey key)
     {
-        var value = this[key];
-
-
-
-        return ref value;
+        return this[key];
     }
-    private void SetHeaderValue(string key, ref HttpHeaderValue value)
+    private void SetHeaderValue(HttpHeaderKey key, HttpHeaderValue? value)
     {
-        
+        if (value.HasValue)
+        {
+            this[key] = value.Value;
+        }
+        Remove(key);
     }
+
+
+
+    public HttpHeaderValue? Accepts 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Accepts); 
+        set => SetHeaderValue(HttpHeaderKey.Accepts, value); 
+    }
+    public HttpHeaderValue? ContentType 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentType); 
+        set => SetHeaderValue(HttpHeaderKey.ContentType, value); 
+    }
+    public HttpHeaderValue? ContentLength 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentLength); 
+        set => SetHeaderValue(HttpHeaderKey.ContentLength, value); 
+    }
+    public HttpHeaderValue? TransferEncoding 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.TransferEncoding); 
+        set => SetHeaderValue(HttpHeaderKey.TransferEncoding, value); 
+    }
+    public HttpHeaderValue? Connection 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Connection); 
+        set => SetHeaderValue(HttpHeaderKey.Connection, value); 
+    }
+    public HttpHeaderValue? AcceptCharset 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AcceptCharset); 
+        set => SetHeaderValue(HttpHeaderKey.AcceptCharset, value); 
+    }
+    public HttpHeaderValue? AcceptEncoding 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AcceptEncoding); 
+        set => SetHeaderValue(HttpHeaderKey.AcceptEncoding, value); 
+    }
+    public HttpHeaderValue? AcceptLanguage 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AcceptLanguage); 
+        set => SetHeaderValue(HttpHeaderKey.AcceptLanguage, value); 
+    }
+    public HttpHeaderValue? AcceptRanges 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AcceptRanges); 
+        set => SetHeaderValue(HttpHeaderKey.AcceptRanges, value); 
+    }
+    public HttpHeaderValue? AccessControlAllowCredentials 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlAllowCredentials); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlAllowCredentials, value); 
+    }
+    public HttpHeaderValue? AccessControlAllowHeaders 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlAllowHeaders); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlAllowHeaders, value); 
+    }
+    public HttpHeaderValue? AccessControlAllowMethods 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlAllowMethods); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlAllowMethods, value); 
+    }
+    public HttpHeaderValue? AccessControlAllowOrigin 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlAllowOrigin); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlAllowOrigin, value); 
+    }
+    public HttpHeaderValue? AccessControlExposeHeaders 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlExposeHeaders); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlExposeHeaders, value); 
+    }
+    public HttpHeaderValue? AccessControlMaxAge 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlMaxAge); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlMaxAge, value); 
+    }
+    public HttpHeaderValue? AccessControlRequestHeaders 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlRequestHeaders); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlRequestHeaders, value); 
+    }
+    public HttpHeaderValue? AccessControlRequestMethod 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AccessControlRequestMethod); 
+        set => SetHeaderValue(HttpHeaderKey.AccessControlRequestMethod, value); 
+    }
+    public HttpHeaderValue? Age 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Age); 
+        set => SetHeaderValue(HttpHeaderKey.Age, value);
+    }
+    public HttpHeaderValue? Allow 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Allow); 
+        set => SetHeaderValue(HttpHeaderKey.Allow, value);
+    }
+    public HttpHeaderValue? AltSvc 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.AltSvc); 
+        set => SetHeaderValue(HttpHeaderKey.AltSvc, value);
+    }
+    public HttpHeaderValue? Authorization 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Authorization); 
+        set => SetHeaderValue(HttpHeaderKey.Authorization, value);
+    }
+    public HttpHeaderValue? Baggage 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Baggage); 
+        set => SetHeaderValue(HttpHeaderKey.Baggage, value);
+    }
+    public HttpHeaderValue? CacheControl 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.CacheControl); 
+        set => SetHeaderValue(HttpHeaderKey.CacheControl, value);
+    }
+    public HttpHeaderValue? ContentDisposition 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentDisposition); 
+        set => SetHeaderValue(HttpHeaderKey.ContentDisposition, value);
+    }
+    public HttpHeaderValue? ContentEncoding 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentEncoding); 
+        set => SetHeaderValue(HttpHeaderKey.ContentEncoding, value);
+    }
+    public HttpHeaderValue? ContentLanguage 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentLanguage); 
+        set => SetHeaderValue(HttpHeaderKey.ContentLanguage, value);
+    }
+    public HttpHeaderValue? ContentLocation 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentLocation); 
+        set => SetHeaderValue(HttpHeaderKey.ContentLocation, value);
+    }
+    public HttpHeaderValue? ContentMD5 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentMD5); 
+        set => SetHeaderValue(HttpHeaderKey.ContentMD5, value);
+    }
+    public HttpHeaderValue? ContentRange 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentRange); 
+        set => SetHeaderValue(HttpHeaderKey.ContentRange, value);
+    }
+    public HttpHeaderValue? ContentSecurityPolicy 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentSecurityPolicy); 
+        set => SetHeaderValue(HttpHeaderKey.ContentSecurityPolicy, value);
+    }
+    public HttpHeaderValue? ContentSecurityPolicyReportOnly 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ContentSecurityPolicyReportOnly); 
+        set => SetHeaderValue(HttpHeaderKey.ContentSecurityPolicyReportOnly, value);
+    }
+    public HttpHeaderValue? CorrelationContext 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.CorrelationContext); 
+        set => SetHeaderValue(HttpHeaderKey.CorrelationContext, value);
+    }
+    public HttpHeaderValue? Cookie 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Cookie); 
+        set => SetHeaderValue(HttpHeaderKey.Cookie, value);
+    }
+    public HttpHeaderValue? Date 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Date); 
+        set => SetHeaderValue(HttpHeaderKey.Date, value);
+    }
+    public HttpHeaderValue? ETag 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ETag); 
+        set => SetHeaderValue(HttpHeaderKey.ETag, value);
+    }
+    public HttpHeaderValue? Expires 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Expires); 
+        set => SetHeaderValue(HttpHeaderKey.Expires, value);
+    }
+    public HttpHeaderValue? Expect 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Expect); 
+        set => SetHeaderValue(HttpHeaderKey.Expect, value);
+    }
+    public HttpHeaderValue? From 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.From); 
+        set => SetHeaderValue(HttpHeaderKey.From, value);
+    }
+    public HttpHeaderValue? GrpcAcceptEncoding 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.GrpcAcceptEncoding); 
+        set => SetHeaderValue(HttpHeaderKey.GrpcAcceptEncoding, value);
+    }
+    public HttpHeaderValue? GrpcEncoding 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.GrpcEncoding); 
+        set => SetHeaderValue(HttpHeaderKey.GrpcEncoding, value);
+    }
+    public HttpHeaderValue? GrpcMessage 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.GrpcMessage); 
+        set => SetHeaderValue(HttpHeaderKey.GrpcMessage, value);
+    }
+    public HttpHeaderValue? GrpcStatus 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.GrpcStatus); 
+        set => SetHeaderValue(HttpHeaderKey.GrpcStatus, value);
+    }
+    public HttpHeaderValue? GrpcTimeout 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.GrpcTimeout); 
+        set => SetHeaderValue(HttpHeaderKey.GrpcTimeout, value);
+    }
+    public HttpHeaderValue? Host 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Host); 
+        set => SetHeaderValue(HttpHeaderKey.Host, value);
+    }
+    public HttpHeaderValue? KeepAlive 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.KeepAlive); 
+        set => SetHeaderValue(HttpHeaderKey.KeepAlive, value);
+    }
+    public HttpHeaderValue? IfMatch 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.IfMatch); 
+        set => SetHeaderValue(HttpHeaderKey.IfMatch, value);
+    }
+    public HttpHeaderValue? IfModifiedSince 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.IfModifiedSince); 
+        set => SetHeaderValue(HttpHeaderKey.IfModifiedSince, value);
+    }
+    public HttpHeaderValue? IfNoneMatch 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.IfNoneMatch); 
+        set => SetHeaderValue(HttpHeaderKey.IfNoneMatch, value);
+    }
+    public HttpHeaderValue? IfRange 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.IfRange); 
+        set => SetHeaderValue(HttpHeaderKey.IfRange, value); 
+    }
+    public HttpHeaderValue? IfUnmodifiedSince 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.IfUnmodifiedSince); 
+        set => SetHeaderValue(HttpHeaderKey.IfUnmodifiedSince, value); 
+    }
+    public HttpHeaderValue? LastModified 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.LastModified); 
+        set => SetHeaderValue(HttpHeaderKey.LastModified, value); 
+    }
+    public HttpHeaderValue? Link 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Link); 
+        set => SetHeaderValue(HttpHeaderKey.Link, value); 
+    }
+    public HttpHeaderValue? Location 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Location); 
+        set => SetHeaderValue(HttpHeaderKey.Location, value); 
+    }
+    public HttpHeaderValue? MaxForwards 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.MaxForwards); 
+        set => SetHeaderValue(HttpHeaderKey.MaxForwards, value); 
+    }
+    public HttpHeaderValue? Origin 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Origin); 
+        set => SetHeaderValue(HttpHeaderKey.Origin, value); 
+    }
+    public HttpHeaderValue? Pragma 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Pragma); 
+        set => SetHeaderValue(HttpHeaderKey.Pragma, value); 
+    }
+    public HttpHeaderValue? ProxyAuthenticate 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ProxyAuthenticate); 
+        set => SetHeaderValue(HttpHeaderKey.ProxyAuthenticate, value); 
+    }
+    public HttpHeaderValue? ProxyAuthorization 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ProxyAuthorization); 
+        set => SetHeaderValue(HttpHeaderKey.ProxyAuthorization, value); 
+    }
+    public HttpHeaderValue? ProxyConnection 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.ProxyConnection); 
+        set => SetHeaderValue(HttpHeaderKey.ProxyConnection, value); 
+    }
+    public HttpHeaderValue? Range 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Range); 
+        set => SetHeaderValue(HttpHeaderKey.Range, value); 
+    }
+    public HttpHeaderValue? Referer 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Referer); 
+        set => SetHeaderValue(HttpHeaderKey.Referer, value); 
+    }
+    public HttpHeaderValue? RetryAfter 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.RetryAfter); 
+        set => SetHeaderValue(HttpHeaderKey.RetryAfter, value); 
+    }
+    public HttpHeaderValue? RequestId 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.RequestId); 
+        set => SetHeaderValue(HttpHeaderKey.RequestId, value); 
+    }
+    public HttpHeaderValue? SecWebSocketAccept 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SecWebSocketAccept); 
+        set => SetHeaderValue(HttpHeaderKey.SecWebSocketAccept, value); 
+    }
+    public HttpHeaderValue? SecWebSocketKey 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SecWebSocketKey); 
+        set => SetHeaderValue(HttpHeaderKey.SecWebSocketKey, value); 
+    }
+    public HttpHeaderValue? SecWebSocketProtocol 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SecWebSocketProtocol); 
+        set => SetHeaderValue(HttpHeaderKey.SecWebSocketProtocol, value); 
+    }
+    public HttpHeaderValue? SecWebSocketVersion 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SecWebSocketVersion); 
+        set => SetHeaderValue(HttpHeaderKey.SecWebSocketVersion, value); 
+    }
+    public HttpHeaderValue? SecWebSocketExtensions 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SecWebSocketExtensions); 
+        set => SetHeaderValue(HttpHeaderKey.SecWebSocketExtensions, value); 
+    }
+    public HttpHeaderValue? Server 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Server); 
+        set => SetHeaderValue(HttpHeaderKey.Server, value); 
+    }
+    public HttpHeaderValue? SetCookie 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.SetCookie); 
+        set => SetHeaderValue(HttpHeaderKey.SetCookie, value); 
+    }
+    public HttpHeaderValue? StrictTransportSecurity 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.StrictTransportSecurity); 
+        set => SetHeaderValue(HttpHeaderKey.StrictTransportSecurity, value); 
+    }
+    public HttpHeaderValue? TE 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.TE); 
+        set => SetHeaderValue(HttpHeaderKey.TE, value); 
+    }
+    public HttpHeaderValue? Trailer 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Trailer); 
+        set => SetHeaderValue(HttpHeaderKey.Trailer, value); 
+    }
+    public HttpHeaderValue? Translate 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Translate); 
+        set => SetHeaderValue(HttpHeaderKey.Translate, value); 
+    }
+    public HttpHeaderValue? TraceParent 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.TraceParent); 
+        set => SetHeaderValue(HttpHeaderKey.TraceParent, value); 
+    }
+    public HttpHeaderValue? TraceState 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.TraceState); 
+        set => SetHeaderValue(HttpHeaderKey.TraceState, value); 
+    }
+    public HttpHeaderValue? Upgrade 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Upgrade); 
+        set => SetHeaderValue(HttpHeaderKey.Upgrade, value); 
+    }
+    public HttpHeaderValue? UpgradeInsecureRequests 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.UpgradeInsecureRequests); 
+        set => SetHeaderValue(HttpHeaderKey.UpgradeInsecureRequests, value); 
+    }
+    public HttpHeaderValue? UserAgent 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.UserAgent); 
+        set => SetHeaderValue(HttpHeaderKey.UserAgent, value); 
+    }
+    public HttpHeaderValue? Vary 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Vary); 
+        set => SetHeaderValue(HttpHeaderKey.Vary, value); 
+    }
+    public HttpHeaderValue? Via 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Via); 
+        set => SetHeaderValue(HttpHeaderKey.Via, value); 
+    }
+    public HttpHeaderValue? Warning 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.Warning); 
+        set => SetHeaderValue(HttpHeaderKey.Warning, value); 
+    }
+    public HttpHeaderValue? WebSocketSubProtocols 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.WebSocketSubProtocols); 
+        set => SetHeaderValue(HttpHeaderKey.WebSocketSubProtocols, value); 
+    }
+    public HttpHeaderValue? WWWAuthenticate 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.WWWAuthenticate); 
+        set => SetHeaderValue(HttpHeaderKey.WWWAuthenticate, value); 
+    }
+    public HttpHeaderValue? XContentTypeOptions 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XContentTypeOptions); 
+        set => SetHeaderValue(HttpHeaderKey.XContentTypeOptions, value); 
+    }
+    public HttpHeaderValue? XFrameOptions 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XFrameOptions); 
+        set => SetHeaderValue(HttpHeaderKey.XFrameOptions, value); 
+    }
+    public HttpHeaderValue? XPoweredBy 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XPoweredBy); 
+        set => SetHeaderValue(HttpHeaderKey.XPoweredBy, value); 
+    }
+    public HttpHeaderValue? XRequestedWith 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XRequestedWith); 
+        set => SetHeaderValue(HttpHeaderKey.XRequestedWith, value); 
+    }
+    public HttpHeaderValue? XUACompatible 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XUACompatible); 
+        set => SetHeaderValue(HttpHeaderKey.XUACompatible, value); 
+    }
+    public HttpHeaderValue? XXSSProtection 
+    { 
+        get => GetHeaderValue(ref HttpHeaderKey.XXSSProtection); 
+        set => SetHeaderValue(HttpHeaderKey.XXSSProtection, value); 
+    }
+
 }

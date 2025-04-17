@@ -1,0 +1,5 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+    <PropertyGroup>
+        <CohesionResourceType>Web</CohesionResourceType>
+    </PropertyGroup>
+</Project>

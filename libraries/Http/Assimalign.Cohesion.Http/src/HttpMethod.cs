@@ -252,7 +252,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// <returns>
     /// <see langword="true" /> if the methods are the same; otherwise, <see langword="false" />.
     /// </returns>
-    private static bool Equals(string methodA, string methodB)
+    private static bool Equals(string? methodA, string? methodB)
     {
         return object.ReferenceEquals(methodA, methodB) || StringComparer.OrdinalIgnoreCase.Equals(methodA, methodB);
     }
@@ -262,7 +262,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     #region Overloads
 
     /// <inheritdoc />
-    public override string ToString()
+    public override string? ToString()
     {
         return Value;
     }
@@ -281,7 +281,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return Value.GetHashCode();
+        return Value?.GetHashCode() ?? string.Empty.GetHashCode();
     }
 
     #endregion
@@ -301,7 +301,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// Implicit conversion from HttpMethod to string.
     /// </summary>
     /// <param name="method"></param>
-    public static implicit operator string(HttpMethod method)
+    public static implicit operator string?(HttpMethod method)
     {
         return method.Value;
     }
@@ -314,7 +314,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// <returns></returns>
     public static bool operator ==(HttpMethod left, HttpMethod right)
     {
-        return Equals(left, right);
+        return Equals(left!, right!);
     }
 
     /// <summary>
@@ -325,7 +325,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// <returns></returns>
     public static bool operator !=(HttpMethod left, HttpMethod right)
     {
-        return !Equals(left, right);
+        return !Equals(left!, right!);
     }
 
     #endregion

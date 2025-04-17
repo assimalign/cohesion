@@ -52,6 +52,11 @@ public interface IHttpHeaderCollection : IEnumerable<KeyValuePair<HttpHeaderKey,
     void Remove(HttpHeaderKey key);
 
     /// <summary>
+    /// 
+    /// </summary>
+    void Clear();
+
+    /// <summary>
     /// Gets or sets the Accepts header value.
     /// </summary>
     HttpHeaderValue? Accepts { get; set; }

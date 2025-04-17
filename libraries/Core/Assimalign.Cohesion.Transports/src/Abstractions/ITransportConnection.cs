@@ -49,12 +49,12 @@ public interface ITransportConnection : IThreadPoolWorkItem, IDisposable
     EndPoint RemoteEndPoint { get; }
 
     /// <summary>
-    /// 
+    /// Aborts the connection.
     /// </summary>
     void Abort();
 
     /// <summary>
-    /// 
+    /// Asynchronously aborts the connection.
     /// </summary>
     /// <returns></returns>
     ValueTask AbortAsync();

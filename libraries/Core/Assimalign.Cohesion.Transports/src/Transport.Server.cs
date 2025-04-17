@@ -28,7 +28,6 @@ public abstract class ServerTransport : ITransport
     /// <inheritdoc />
     public abstract void Dispose();
 
-
     ITransportConnection ITransport.Initialize() => AcceptOrListenAsync().GetAwaiter().GetResult();
     async Task<ITransportConnection> ITransport.InitializeAsync(CancellationToken cancellationToken) => await AcceptOrListenAsync(cancellationToken);
 }

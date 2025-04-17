@@ -1,11 +1,13 @@
 <Project>
 	<PropertyGroup>
 		<RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
+		<ValueObjectsOutputPath>$(MSBuildProjectDirectory)\.CodeGeneration</ValueObjectsOutputPath>
 	</PropertyGroup>
 	<Import Project="build\Targets\Branding.props"/>
 	<Import Project="build\Targets\TargetFramework.props" />
 	<Import Project="build\Targets\Version.props" />
 	<Import Project="build\Targets\Constants.props"/>
+	<Import Project="build\Build.props"  Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'"/>
 	
 	<!-- Cohesion Build Properties -->
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">

@@ -9,9 +9,9 @@ namespace Assimalign.Cohesion.Configuration;
 
 internal class ConfigurationJsonSection : ConfigurationJsonEntry, IConfigurationSection
 {
-    public object? this[KeyPath path] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+    public object? this[Path path] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
 
-    public KeyPath Path => throw new NotImplementedException();
+    public Path Path => throw new NotImplementedException();
 
     public override Key Key => throw new NotImplementedException();
 

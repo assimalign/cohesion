@@ -2,12 +2,13 @@
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
-
 
 /// <summary>
 /// Represents a section of application configuration values.
@@ -15,7 +16,9 @@ using Assimalign.Cohesion.Internal;
 [DebuggerDisplay("{Key}: {Count}")]
 public class ConfigurationSection : IConfigurationSection
 {
-    private readonly List<IConfigurationEntry> entries = new();
+    private readonly Key _key;
+    private readonly KeyComparer _comparer = KeyComparer.Ordinal;
+    private readonly List<IConfigurationEntry> _entries = new List<IConfigurationEntry>();
 
     #region Constructors
 
@@ -25,7 +28,17 @@ public class ConfigurationSection : IConfigurationSection
     /// <param name="key"></param>
     public ConfigurationSection(Key key) 
     {
-        Key = key;
+        _key = key;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="comparer"></param>
+    public ConfigurationSection(Key key, KeyComparer comparer) : this(key)
+    {
+        _comparer = comparer;
     }
 
     #endregion
@@ -37,43 +50,53 @@ public class ConfigurationSection : IConfigurationSection
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
-    public string? this[KeyPath path]
+    public string? this[in Path path]
     {
         get => GetConfigurationValue(path);
-        set => throw new NotImplementedException();
+        set => SetConfigurationValue(path, value);
     }
 
     /// <summary>
     /// The entry key.
     /// </summary>
-    public Key Key { get; }
+    public Key Key => _key;
 
     /// <summary>
     /// The total number entries in the section.
     /// </summary>
-    public int Count => entries.Count;
+    public int Count => _entries.Count;
 
     #endregion
 
+    #region Methods
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    public IConfigurationEntry Get(Key key)
+    {
+        return default;
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="entry"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public void Add(IConfigurationEntry entry)
+    public void Set(IConfigurationEntry entry)
     {
         ThrowHelper.ThrowIfNull(entry, nameof(entry));
 
-        var existing = entries.Find(p => p.Key == entry.Key);
+        var existing = _entries.Find(p => _comparer.Equals(p.Key, entry.Key));
 
         if (existing is not null)
         {
             Remove(existing);
         }
 
-        entries.Add(entry);
+        _entries.Add(entry);
     }
 
     /// <summary>
@@ -84,7 +107,7 @@ public class ConfigurationSection : IConfigurationSection
     {
         ThrowHelper.ThrowIfNull(entry, nameof(entry));
 
-        bool removed = entries.Remove(entry);
+        bool removed = _entries.Remove(entry);
 
         if (removed)
         {
@@ -94,11 +117,11 @@ public class ConfigurationSection : IConfigurationSection
         IConfigurationEntry? existing = null;
 
         // If removal failed, try brute force. (This is mostly likely due to custom IConfigurationEntry type)
-        for (int i = 0; i < entries.Count; i++)
+        for (int i = 0; i < _entries.Count; i++)
         {
-            if ((existing = entries[i]).Key == entry.Key)
+            if (_comparer.Equals((existing = _entries[i]).Key, entry.Key))
             {
-                entries.RemoveAt(i);
+                _entries.RemoveAt(i);
             }
         }
     }
@@ -108,44 +131,63 @@ public class ConfigurationSection : IConfigurationSection
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
-    public IConfigurationValue? GetValue(Key key) => GetEntry<IConfigurationValue>(key);
+    public IConfigurationValue? GetValue(Key key)
+    {
+        return GetEntry<IConfigurationValue>(key);
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public IEnumerable<IConfigurationValue> GetValues() => entries.OfType<IConfigurationValue>();
+    public IEnumerable<IConfigurationValue> GetValues()
+    {
+        return _entries.OfType<IConfigurationValue>();
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="key"></param>
     /// <returns></returns>
-    public IConfigurationSection? GetSection(Key key) => GetEntry<IConfigurationSection>(key);
+    public IConfigurationSection? GetSection(Key key)
+    {
+        return GetEntry<IConfigurationSection>(key);
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public IEnumerable<IConfigurationSection> GetSections() => entries.OfType<IConfigurationSection>();
+    public IEnumerable<IConfigurationSection> GetSections()
+    {
+        return _entries.OfType<IConfigurationSection>();
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public IEnumerator<IConfigurationEntry> GetEnumerator() => entries.GetEnumerator();
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        return _entries.GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public IConfigurationChangeToken GetChangeToken()
     {
         throw new NotImplementedException();
     }
 
-    private TEntry? GetEntry<TEntry>(Key key) where TEntry : IConfigurationEntry
+    private TEntry? GetEntry<TEntry>(in Key key) where TEntry : IConfigurationEntry
     {
-        for (int i = 0; i < entries.Count; i++)
+        for (int i = 0; i < _entries.Count; i++)
         {
-            if (entries[i] is TEntry entry && entry.Key == key)
+            if (_entries[i] is TEntry entry && _comparer.Equals(key, entry.Key))
             {
                 return (TEntry)entry;
             }
@@ -153,13 +195,13 @@ public class ConfigurationSection : IConfigurationSection
 
         return default;
     }
-
-
-    private string? GetConfigurationValue(KeyPath path)
+    private string? GetConfigurationValue(in Path path)
     {
-        if (path.IsComposite)
+        Key key = path[0];
+
+        if (!path.IsComposite)
         {
-            return GetValue(path[0])?.Value;
+            return GetValue(key)?.Value;
         }
 
         IConfiguration? configuration = this;
@@ -184,4 +226,38 @@ public class ConfigurationSection : IConfigurationSection
 
         return value?.Value;
     }
+
+    private void SetConfigurationValue(in Path path, string? value)
+    {
+        Key key = path[0];
+
+        if (path.IsEmpty)
+        {
+            ThrowHelper.ThrowInvalidOperationException("");
+        }
+
+        if (!path.IsComposite)
+        {
+            Set(new ConfigurationValue(key, value));
+            return;
+        }
+
+        IConfigurationEntry? existing = GetEntry<IConfigurationEntry>(key);
+
+        if (existing is null)
+        {
+            existing = new ConfigurationSection(key, _comparer);
+        }
+        // Check if changing from a leaf to a composite
+        else if (existing is IConfigurationValue)
+        {
+            Remove(existing);
+        }
+
+        (existing as ConfigurationSection)![path.Subpath(1)] = value;
+
+        Set(existing);
+    }
+
+    #endregion
 }

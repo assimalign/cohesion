@@ -177,6 +177,7 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     #endregion
 
     #region Operators
+
     public static implicit operator long(Size fileSize)
     {
         return fileSize.Length;
@@ -228,6 +229,11 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
 
         return value;
     }
+
+    //public static Size operator ++(Size value)
+    //{
+    //    return ++value;
+    //}
     #endregion
 
     #region Helpers

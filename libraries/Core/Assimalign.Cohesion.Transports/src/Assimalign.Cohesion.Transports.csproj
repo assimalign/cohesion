@@ -15,7 +15,6 @@
 	  <None Remove="Transports\Udp\**" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="System.IO.Pipelines" />
 		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

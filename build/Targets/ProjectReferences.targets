@@ -1,16 +1,17 @@
 <Project>
   <ItemGroup>
-      <ProjectReferenceProvider Include="Assimalign.Cohesion.Build.Tasks" ProjectPath="$(RepositoryRoot)build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj" />
+      <ProjectReferenceProvider Include="project-template" ProjectPath="$(RepositoryRoot).designing\project-template.csproj" />
+      <AnalyzerReferenceProvider Include="Assimalign.Cohesion.SourceGeneration" ProjectPath="$(RepositoryRoot)analyzers\Core\Assimalign.Cohesion.SourceGeneration\src\Assimalign.Cohesion.SourceGeneration.csproj" />
+      <BuildReferenceProvider Include="Assimalign.Cohesion.Build.Tasks" ProjectPath="$(RepositoryRoot)build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj" />
       <ProjectReferenceProvider Include="SingleHostApp" ProjectPath="$(RepositoryRoot)examples\SingleHostApp\SingleHostApp.csproj" />
-      <ProjectReferenceProvider Include="Cohesion.ConfigurationStore" ProjectPath="$(RepositoryRoot)extensions\dotnet\src\Assimalign.Cohesion.ProjectTemplates\obj\Debug\net9.0\content\templates\cohesion-configurationstore\9.2\Cohesion.ConfigurationStore.csproj" />
       <ProjectReferenceProvider Include="Cohesion.ConfigurationStore" ProjectPath="$(RepositoryRoot)extensions\dotnet\src\Assimalign.Cohesion.ProjectTemplates\templates\cohesion-configurationstore\9.2\Cohesion.ConfigurationStore.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ProjectTemplates" ProjectPath="$(RepositoryRoot)extensions\dotnet\src\Assimalign.Cohesion.ProjectTemplates\Assimalign.Cohesion.ProjectTemplates.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion" ProjectPath="$(RepositoryRoot)extensions\VisualStudio\src\Assimalign.Cohesion\Assimalign.Cohesion.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ApiManager" ProjectPath="$(RepositoryRoot)libraries\ApiManager\Assimalign.Cohesion.ApiManager\src\Assimalign.Cohesion.ApiManager.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ApiManager.Hosting" ProjectPath="$(RepositoryRoot)libraries\ApiManager\Assimalign.Cohesion.ApiManager.Hosting\src\Assimalign.Cohesion.ApiManager.Hosting.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.ApplicationModel" ProjectPath="$(RepositoryRoot)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\src\Assimalign.Cohesion.ApplicationModel.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.ApplicationModel.Tests" ProjectPath="$(RepositoryRoot)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\tests\Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ConfigurationStore" ProjectPath="$(RepositoryRoot)libraries\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore\src\Assimalign.Cohesion.ConfigurationStore.csproj" />
-      <ProjectReferenceProvider Include="Assimalign.Cohesion.App" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.App\src\Assimalign.Cohesion.App.csproj" />
-      <ProjectReferenceProvider Include="Assimalign.Cohesion.App.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.App\tests\Assimalign.Cohesion.App.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Caching" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Caching\src\Assimalign.Cohesion.Caching.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Caching.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Caching\tests\Assimalign.Cohesion.Caching.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Configuration" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Configuration\src\Assimalign.Cohesion.Configuration.csproj" />
@@ -123,6 +124,8 @@
       <ProjectReferenceProvider Include="Assimalign.Cohesion.App.Runtime" ProjectPath="$(RepositoryRoot)libraries\Frameworks\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Http" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http\src\Assimalign.Cohesion.Http.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Http.Tests" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http\tests\Assimalign.Cohesion.Http.Tests.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Http.ClientFactory" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http.ClientFactory\src\Assimalign.Cohesion.Http.ClientFactory.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Http.ClientFactory.Tests" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http.ClientFactory\tests\Assimalign.Cohesion.Http.ClientFactory.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Http.Connection" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http.Connection\src\Assimalign.Cohesion.Http.Connection.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Http.Connection.Tests" ProjectPath="$(RepositoryRoot)libraries\Http\Assimalign.Cohesion.Http.Connection\tests\Assimalign.Cohesion.Http.Connection.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.IdentityHub" ProjectPath="$(RepositoryRoot)libraries\IdentityHub\Assimalign.Cohesion.IdentityHub\src\Assimalign.Cohesion.IdentityHub.csproj" />
@@ -158,19 +161,25 @@
       <ProjectReferenceProvider Include="Assimalign.Cohesion.SecretStore.Client.Tests" ProjectPath="$(RepositoryRoot)libraries\SecretStore\Assimalign.Cohesion.SecretStore.Client\tests\Assimalign.Cohesion.SecretStore.Client.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara\src\Assimalign.Cohesion.Synthara.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Tests" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara\tests\Assimalign.Cohesion.Synthara.Tests.csproj" />
-      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.ControlPlane" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.ControlPlane\src\Assimalign.Cohesion.Synthara.ControlPlane.csproj" />
-      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.ControlPlane.Tests" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.ControlPlane\tests\Assimalign.Cohesion.Synthara.ControlPlane.Tests.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Discovery" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Discovery\src\Assimalign.Cohesion.Synthara.Discovery.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Discovery.Tests" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Discovery\tests\Assimalign.Cohesion.Synthara.Discovery.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Kubernetes" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Kubernetes\src\Assimalign.Cohesion.Synthara.Kubernetes.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Kubernetes.Tests" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Kubernetes\tests\Assimalign.Cohesion.Synthara.Kubernetes.Tests.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Local" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Local\src\Assimalign.Cohesion.Synthara.Local.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Synthara.Local.Tests" ProjectPath="$(RepositoryRoot)libraries\Synthara\Assimalign.Cohesion.Synthara.Local\tests\Assimalign.Cohesion.Synthara.Local.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web\src\Assimalign.Cohesion.Web.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Tests" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web\tests\Assimalign.Cohesion.Web.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Api" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Api\src\Assimalign.Cohesion.Web.Api.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.ApplicationModel" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.ApplicationModel\src\Assimalign.Cohesion.Web.ApplicationModel.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.ApplicationModel.Tests" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.ApplicationModel\tests\Assimalign.Cohesion.Web.ApplicationModel.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Authentication" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Authentication\src\Assimalign.Cohesion.Web.Authentication.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Authorization" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Authorization\src\Assimalign.Cohesion.Web.Authorization.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.CookiePolicy" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.CookiePolicy\src\Assimalign.Cohesion.Web.CookiePolicy.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Cors" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Cors\src\Assimalign.Cohesion.Web.Cors.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Functions" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Functions\src\Assimalign.Cohesion.Web.Functions.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Hosting" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Hosting\src\Assimalign.Cohesion.Web.Hosting.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Routing" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Routing\src\Assimalign.Cohesion.Web.Routing.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Web.Routing.Tests" ProjectPath="$(RepositoryRoot)libraries\Web\Assimalign.Cohesion.Web.Routing\tests\Assimalign.Cohesion.Web.Routing.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Sdk.Tasks" ProjectPath="$(RepositoryRoot)sdks\Assimalign.Cohesion.Sdk\Tasks\Assimalign.Cohesion.Sdk.Tasks.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Cli" ProjectPath="$(RepositoryRoot)tooling\Cli\src\Assimalign.Cohesion.Cli\Assimalign.Cohesion.Cli.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Cli.Tests" ProjectPath="$(RepositoryRoot)tooling\Cli\tests\Assimalign.Cohesion.Cli.Tests\Assimalign.Cohesion.Cli.Tests.csproj" />
@@ -179,6 +188,22 @@
   <ItemGroup>
       <Reference Update="@(ProjectReferenceProvider)" ProjectPath="%(ProjectReferenceProvider.ProjectPath)" />
       <ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')" />
+      <Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
+  </ItemGroup>
+  <ItemGroup>
+      <Reference Update="@(BuildReferenceProvider)" ProjectPath="%(BuildReferenceProvider.ProjectPath)" />
+      <ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')">
+          <PrivateAssets>all</PrivateAssets>
+      </ProjectReference>
+      <Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
+  </ItemGroup>
+  <ItemGroup>
+      <Reference Update="@(AnalyzerReferenceProvider)" ProjectPath="%(AnalyzerReferenceProvider.ProjectPath)" />
+      <ProjectReference Include="@(Reference->Distinct()->'%(ProjectPath)')">
+          <PrivateAssets>all</PrivateAssets>
+          <OutputItemType>Analyzer</OutputItemType>
+          <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      </ProjectReference>
       <Reference Remove="@(Reference->HasMetadata('ProjectPath'))" />
   </ItemGroup>
 </Project>

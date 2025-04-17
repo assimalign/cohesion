@@ -1,17 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Assimalign.Cohesion.Configuration;
+﻿namespace Assimalign.Cohesion.Configuration;
 
 public enum ConfigurationSetStrategy
 {
     /// <summary>
-    /// Only sets configuration values with existing keys
+    /// Only sets the <see cref="IConfigurationValue"/> or <see cref="IConfigurationSection"/>
+    /// where a key already exists.
     /// </summary>
     ExistingOnly,
+
     /// <summary>
     /// Sets the <see cref="IConfigurationEntry"/>
     /// </summary>

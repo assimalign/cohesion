@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.ApplicationModel" />
+		<Reference Include="Assimalign.Cohesion.Web" />
+		<Reference Include="Assimalign.Cohesion.Http.Connection" />
+		<Reference Include="Assimalign.Cohesion.Transports" />
+		<Reference Include="Assimalign.Cohesion.DependencyInjection" />
+		<Reference Include="Assimalign.Cohesion.Hosting" />
+		<Reference Include="Assimalign.Cohesion.Configuration" />
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
+		<Reference Include="Assimalign.Cohesion.Logging" />
+	</ItemGroup>
+</Project>

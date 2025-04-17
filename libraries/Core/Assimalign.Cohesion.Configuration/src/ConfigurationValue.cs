@@ -10,10 +10,19 @@ namespace Assimalign.Cohesion.Configuration;
 [DebuggerDisplay("{Key}: {Value}")]
 public class ConfigurationValue : IConfigurationValue
 {
+    private Key _key;
+    private string? _value;
+    private IConfigurationProvider _provider;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="value"></param>
     public ConfigurationValue(Key key, string? value)
     {
-        Key = key;
-        Value = value;
+        _key = key;
+        _value = value;
     }
 
     #region Properties
@@ -21,13 +30,19 @@ public class ConfigurationValue : IConfigurationValue
     /// <summary>
     /// The configuration key.
     /// </summary>
-    public Key Key { get; }
+    public Key Key => _key;
 
     /// <summary>
     /// The raw configuration value.
     /// </summary>
-    public string? Value { get; set; }
-
+    public string? Value
+    {
+        get => _value;
+        set
+        {
+            _value = value;
+        }
+    }
     #endregion
 
     #region Methods 

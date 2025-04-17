@@ -82,17 +82,12 @@ public sealed class TcpServerTransportOptions
 	public bool WaitOnPacketIngestion { get; set; } = true;
 
 	/// <summary>
-	/// 
-	/// </summary>
-	public TransportMiddleware? Middleware { get; set; }
-
-	/// <summary>
 	/// The trace handler for the transport.
 	/// </summary>
 	public TransportTrace? Trace { get; set; }
 
 	/// <summary>
-	/// 
+	/// The default options.
 	/// </summary>
 	public static TcpServerTransportOptions Default { get; } = new TcpServerTransportOptions();
 }

@@ -4,34 +4,25 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Configuration.Internal
+namespace Assimalign.Cohesion.Configuration.Internal;
+
+internal class ConfigurationChangeToken : IConfigurationChangeToken
 {
-    internal class ConfigurationChangeToken : IConfigurationChangeToken
+    private IEnumerable<IConfigurationChangeToken> _tokens;
+
+    public ConfigurationChangeToken(IEnumerable<IConfigurationChangeToken> tokens)
     {
-        private IEnumerable<IConfigurationChangeToken> tokens;
-
-        public ConfigurationChangeToken(IEnumerable<IConfigurationChangeToken> tokens)
-        {
-            
-        }
+        
+    }
 
 
+    public IDisposable OnChange(Action<IConfiguration> callback)
+    {
+        throw new NotImplementedException();
+    }
 
-
-        public IDisposable OnAdd(Action<IConfiguration> action)
-        {
-            
-            throw new NotImplementedException();
-        }
-
-        public IDisposable OnChange(Action<IConfiguration> callback)
-        {
-            throw new NotImplementedException();
-        }
-
-        public IDisposable OnChange(Action<object> callback)
-        {
-            throw new NotImplementedException();
-        }
+    public IDisposable OnChange(Action<object> callback)
+    {
+        return OnChange(state => callback(state));
     }
 }

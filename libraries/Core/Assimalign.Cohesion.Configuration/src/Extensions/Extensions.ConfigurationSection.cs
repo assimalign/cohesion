@@ -16,6 +16,6 @@ public static class ConfigurationSectionExtensions
             throw new Exception();
         }
 
-
+        return default;
     }
 }

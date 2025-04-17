@@ -3,9 +3,11 @@ using System.Net;
 
 namespace Assimalign.Cohesion.Http;
 
+/// <summary>
+/// 
+/// </summary>
 public interface IHttpConnectionInfo
 {
-
     /// <summary>
     /// 
     /// </summary>

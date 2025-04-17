@@ -1,31 +1,43 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
 
 internal sealed class HostContext : IHostContext
 {
-    private object stateLock = new object();
-    private HostState state;
+    private Lock _lock = new Lock();
+    private HostState _state;
 
+    public HostContext()
+    {
+        _state = HostState.Unknown;
+    }
 
     public HostState State
     {
         get
         {
-            lock (stateLock)
+            lock (_lock)
             {
-                return state;
+                return _state;
             }
         }
-        set => state = value;
+        set
+        {
+            lock(_lock)
+            {
+                _state = value;
+            }
+        }
     }
     public Action? ShutdownCallback { get; set; }
-    public string? ContentRootPath { get; set; }
+    public FileSystemPath? ContentRootPath { get; set; }
     public IHostEnvironment Environment { get; init; } = default!;
     public IServiceProvider? ServiceProvider { get; set; }
     public List<IHostService> HostedServices { get; init; } = new();
-    IEnumerable<IHostService> IHostContext.HostedServices => HostedServices;
+    IEnumerable<IHostService> IHostContext.HostedServices => HostedServices.AsReadOnly();
 
     public void Shutdown()
     {

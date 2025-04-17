@@ -9,9 +9,9 @@ namespace Assimalign.Cohesion.Configuration.Tests;
 
 public class MockConfigurationProvider : ConfigurationProvider
 {
-    private readonly IDictionary<KeyPath, object> data;
+    private readonly IDictionary<Path, object> data;
 
-    public MockConfigurationProvider(IDictionary<KeyPath, object> data)
+    public MockConfigurationProvider(IDictionary<Path, object> data)
     {
         this.data = data;
     }
@@ -29,7 +29,7 @@ public class MockConfigurationProvider : ConfigurationProvider
 
                 var entry = ComposeEntry(subpath, value);
 
-                section.Add(entry);
+                section.Set(entry);
 
                 Set(section);
             }
@@ -39,7 +39,7 @@ public class MockConfigurationProvider : ConfigurationProvider
             }
         }
 
-        IConfigurationEntry ComposeEntry(KeyPath path, object value)
+        IConfigurationEntry ComposeEntry(Path path, object value)
         {
             if (path.Count > 1)
             {
@@ -48,7 +48,7 @@ public class MockConfigurationProvider : ConfigurationProvider
 
                 var entry = ComposeEntry(subpath, value);
 
-                section.Add(entry);
+                section.Set(entry);
 
                 return section;
             }
@@ -62,7 +62,7 @@ public class MockConfigurationProvider : ConfigurationProvider
         return Task.CompletedTask;
     }
 
-    public static IConfigurationProvider Create(IDictionary<KeyPath, object> data)
+    public static IConfigurationProvider Create(IDictionary<Path, object> data)
     {
         return new MockConfigurationProvider(data);
     }

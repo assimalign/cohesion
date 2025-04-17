@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+	  <ProjectReference Include="..\..\Assimalign.Cohesion.Synthara.Discovery\tests\Assimalign.Cohesion.Synthara.Discovery.Tests.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Synthara" />
+	</ItemGroup>
+</Project>

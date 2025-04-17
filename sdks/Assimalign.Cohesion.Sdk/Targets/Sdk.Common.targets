@@ -1,0 +1,9 @@
+<Project>
+	<!--<PropertyGroup>
+		
+	</PropertyGroup>
+	
+    <Target Name="CopyAppSettings" AfterTargets="Build">
+        
+    </Target>-->
+</Project>

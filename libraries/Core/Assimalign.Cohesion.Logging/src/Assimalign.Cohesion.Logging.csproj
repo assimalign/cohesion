@@ -1,5 +1,30 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\LogId.generated.cs">
+			<Name>LogId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<Namespace>Assimalign.Cohesion.Logging</Namespace>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+	</ItemGroup>
 
 	
+	
+	<!--<UsingTask TaskName="Assimalign.Cohesion.Build.Tasks.GenerateValueObject" AssemblyFile="C:\Source\repos\assimalign\cohesion\build\Tasks\bin\Debug\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll" />
+	<Target Name="GenValueObjects" BeforeTargets="CoreCompile">
+		<GenerateValueObject Path="$(MSBuildProjectDirectory)" />-->
+		<!--Our generated file is included to be compiled--><!--
+		<ItemGroup>
+			<Compile Remove="$(SettingClassFileName)" />
+			<Compile Include="$(SettingClassFileName)" />
+		</ItemGroup>-->
+	<!--</Target>-->
+
+	<!--The generated file is deleted after a general clean. It will force the regeneration on rebuild-->
+	<!--<Target Name="AfterClean">
+		<Delete Files="$(RootFolder)\$(SettingClass).generated.cs" />
+	</Target>-->
 </Project>

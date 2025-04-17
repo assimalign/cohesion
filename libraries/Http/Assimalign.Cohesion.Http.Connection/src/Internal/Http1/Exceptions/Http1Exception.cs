@@ -20,7 +20,7 @@ internal class Http1Exception : HttpException
     {
         return new Http1Exception("The HTTP request could not be parsed", inner)
         {
-            Code = HttpExceptionCode.ReadingError
+            Code = HttpErrorCode.ReadingError
         };
     }
 }

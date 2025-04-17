@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net9.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="coverlet.collector" />
+		<Reference Include="Microsoft.NET.Test.Sdk" />
+		<Reference Include="xunit" />
+		<Reference Include="xunit.runner.visualstudio" />
+		<Reference Include="Assimalign.Cohesion.Synthara.Local" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+
+</Project>

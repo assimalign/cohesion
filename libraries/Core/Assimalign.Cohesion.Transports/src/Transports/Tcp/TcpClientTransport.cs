@@ -4,22 +4,25 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
-public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
+[DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
+public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>, ITransportPipelineBuilder
 {
     private readonly TcpClientTransportOptions _options;
     private readonly SocketTransportConnectionSettings _settings;
-    private readonly TransportMiddleware? _middleware;
     private readonly TransportTrace _trace;
+    private TransportPipeline? _pipeline;
     private Socket? _socket;
     private bool _isDisposed;
 
-    private readonly List<TcpTransportConnection> _connections = new();
+    private readonly List<TcpTransportConnection> _connections;
+    private readonly List<Func<TransportMiddleware, TransportMiddleware>> _middleware;
 
     public TcpClientTransport(TcpClientTransportOptions? options)
     {
@@ -31,9 +34,11 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
             options.MaxReadBufferSize,
             options.MaxWriteBufferSize,
             options.Trace)[0];
-        _middleware = options.Middleware;
         _trace = options.Trace;
+        _connections = new List<TcpTransportConnection>();
+        _middleware = new List<Func<TransportMiddleware, TransportMiddleware>>();
     }
+
     public override ProtocolType Protocol => ProtocolType.Tcp;
 
     /// <summary>
@@ -43,11 +48,15 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
 
     public override async Task<TcpTransportConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (_pipeline is null)
+        {
+            _pipeline = (TransportPipeline)(this as ITransportPipelineBuilder).Build();
+        }
         if (_socket is null)
         {
             _socket = _options.EndPoint switch
             {
-                UnixDomainSocketEndPoint        => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
+                UnixDomainSocketEndPoint => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
                 /* 
                     We're passing "ownsHandle: true" here even though we don't necessarily
                     own the handle because Socket.Dispose will clean-up everything safely.
@@ -59,8 +68,8 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
                     the underlying socket is never closed and the transport manager can hang
                     when it attempts to stop.
                 */
-                FileHandleEndPoint fileHandle   => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
-                _                               => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
+                FileHandleEndPoint fileHandle => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
+                _ => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
             };
             if (_options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
             {
@@ -97,7 +106,7 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
                     _connections.Remove(connection);
                 };
 
-                var task = _middleware?.Invoke(new TcpTransportContext(socketConnection));
+                var task = _pipeline?.ExecuteAsync(new TcpTransportContext(socketConnection), cancellationToken);
 
                 if (task is not null)
                 {
@@ -126,6 +135,48 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
         }
     }
 
+    public TcpClientTransport Use(Func<TcpTransportContext, TransportMiddleware, Task> middleware)
+    {
+        ThrowHelper.ThrowIfNull(middleware);
+
+        Func<TcpTransportContext, TransportMiddleware, Task> middleware2 = middleware;
+
+        (this as ITransportPipelineBuilder).Use((TransportMiddleware next) => (ITransportContext c) =>
+        {
+            if (c is TcpTransportContext context)
+            {
+                return middleware2.Invoke(context, next);
+            }
+
+            return Task.CompletedTask;
+        });
+
+        return this;
+    }
+
+    ITransportPipelineBuilder ITransportPipelineBuilder.Use(Func<TransportMiddleware, TransportMiddleware> middleware)
+    {
+        ThrowHelper.ThrowIfNull(middleware);
+
+        _middleware.Add(middleware);
+
+        return this;
+    }
+
+    ITransportPipeline ITransportPipelineBuilder.Build()
+    {
+        var middleware = new TransportMiddleware(context =>
+        {
+            return Task.CompletedTask;
+        });
+
+        for (int i = _middleware.Count - 1; i >= 0; i--)
+        {
+            middleware = _middleware[i].Invoke(middleware);
+        }
+
+        return new TransportPipeline(middleware);
+    }
 
     /// <summary>
     /// 
@@ -133,19 +184,12 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
     /// <param name="configure"></param>
     /// <returns></returns>
     /// <exception cref="ArgumentNullException"></exception>
-    public static TcpClientTransportBuilder CreateBuilder(Action<TcpClientTransportOptions> configure)
+    public static TcpClientTransport Create(Action<TcpClientTransportOptions> configure)
     {
-        ThrowHelper.ThrowIfNull(configure);
+        var options = new TcpClientTransportOptions();
 
-        return new TcpClientTransportBuilder(middleware =>
-        {
-            var options = new TcpClientTransportOptions();
+        ThrowHelper.ThrowIfNull(configure).Invoke(options);
 
-            configure.Invoke(options);
-
-            options.Middleware = middleware;
-
-            return new TcpClientTransport(options);
-        });
+        return new TcpClientTransport(options);
     }
 }

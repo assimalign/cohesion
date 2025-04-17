@@ -12,6 +12,11 @@ public interface IConfigurationEntry
     /// </summary>
     Key Key { get; }
 
+    ///// <summary>
+    ///// 
+    ///// </summary>
+    //IConfigurationProvider Provider { get; }
+
     /// <summary>
     /// Get a change token for entry
     /// </summary>

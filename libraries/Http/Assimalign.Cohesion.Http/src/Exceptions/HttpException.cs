@@ -2,11 +2,26 @@
 
 namespace Assimalign.Cohesion.Http;
 
-public abstract class HttpException : Exception
+/// <summary>
+/// 
+/// </summary>
+public abstract class HttpException : NetworkException
 {
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="message"></param>
     public HttpException(string message) : base(message) { }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="message"></param>
+    /// <param name="inner"></param>
     public HttpException(string message, Exception inner) : base(message, inner) { }
 
-
-    public HttpExceptionCode Code { get; init; }
+    /// <summary>
+    /// 
+    /// </summary>
+    public HttpErrorCode Code { get; init; }
 }

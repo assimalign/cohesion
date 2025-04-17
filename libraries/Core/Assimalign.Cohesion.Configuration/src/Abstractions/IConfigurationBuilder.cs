@@ -21,14 +21,14 @@ public interface IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns>The same instance of <see cref="IConfigurationBuilder"/>.</returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure);
+    IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure);
+    IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure);
 
     /// <summary>
     /// Synchronously builds the <see cref="IConfigurationRoot"/> by loading 

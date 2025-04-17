@@ -11,4 +11,6 @@ internal class HttpInvalidMethodException : HttpException
     public HttpInvalidMethodException(string message) : base(message)
     {
     }
+
+    public override NetworkOsiLayer Layer => throw new NotImplementedException();
 }

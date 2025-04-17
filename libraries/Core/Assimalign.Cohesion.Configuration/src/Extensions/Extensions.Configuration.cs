@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Configuration;
 
 
-public delegate bool ConfigurationFinder(KeyPath path);
+public delegate bool ConfigurationFinder(Path path);
 
 /// <summary>
 /// Extension methods for configuration classes./>.
@@ -126,7 +126,7 @@ public static class ConfigurationExtensions
     /// <param name="configuration"></param>
     /// <param name="path"></param>
     /// <returns></returns>
-    public static IConfigurationValue GetValue(this IConfiguration configuration, KeyPath path)
+    public static IConfigurationValue GetValue(this IConfiguration configuration, Path path)
     {
         if (path.Count == 1)
         {
@@ -139,17 +139,17 @@ public static class ConfigurationExtensions
         return value;
     }
 
-    public static TValue GetValue<TValue>(this IConfiguration configuration, KeyPath path)
-    {
-        var value = configuration.GetValue(path);
+    //public static TValue GetValue<TValue>(this IConfiguration configuration, KeyPath path)
+    //{
+    //    var value = configuration.GetValue(path);
 
-        if (value.Value is TValue t)
-        {
-            return t;
-        }
+    //    if (value.Value is TValue t)
+    //    {
+    //        return t;
+    //    }
 
 
-    }
+    //}
 
 
 
@@ -159,7 +159,7 @@ public static class ConfigurationExtensions
     /// <param name="configuration"></param>
     /// <param name="path"></param>
     /// <returns></returns>
-    public static IConfigurationSection GetSection(this IConfiguration configuration, KeyPath path)
+    public static IConfigurationSection GetSection(this IConfiguration configuration, Path path)
     {
         Key key = path[0];
         IConfigurationSection? section = configuration.GetSection(key);
@@ -185,7 +185,7 @@ public static class ConfigurationExtensions
     /// <param name="configuration"></param>
     /// <param name="path"></param>
     /// <returns></returns>
-    public static T GetSection<T>(this IConfiguration configuration, KeyPath path)
+    public static T GetSection<T>(this IConfiguration configuration, Path path)
     {
         return configuration.GetSection(path).Bind<T>();
     }
@@ -203,20 +203,20 @@ public static class ConfigurationExtensions
     /// <param name="path"></param>
     /// <param name="value"></param>
     /// <returns></returns>
-    public static IConfigurationEntry Compose(KeyPath path, object? value)
-    {
-        if (path.Count > 1)
-        {
-            return new ConfigurationSection(path[0])
-            {
-                Compose(path.Subpath(1), value)
-            };
-        }
-        else
-        {
-            return new ConfigurationValue(path[0], value);
-        }
-    }
+    //public static IConfigurationEntry Compose(KeyPath path, object? value)
+    //{
+    //    if (path.Count > 1)
+    //    {
+    //        return new ConfigurationSection(path[0])
+    //        {
+    //            Compose(path.Subpath(1), value)
+    //        };
+    //    }
+    //    else
+    //    {
+    //        return new ConfigurationValue(path[0], value);
+    //    }
+    //}
 
     ///// <summary>
     ///// Adds a new configuration source.

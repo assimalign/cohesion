@@ -1,11 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-
+	<PropertyGroup>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Core"/>
+		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
-
+	<ItemGroup>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\AccountId.generated.cs">
+			<Name>AccountId</Name>
+			<RuntimeType>string</RuntimeType>
+			<Namespace>Assimalign.Cohesion.Synthara</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\AccountName.generated.cs">
+			<Name>AccountName</Name>
+			<RuntimeType>string</RuntimeType>
+			<Namespace>Assimalign.Cohesion.Synthara</Namespace>
+			<IncludeIsValidMethod>true</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+	</ItemGroup>
 </Project>

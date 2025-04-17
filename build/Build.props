@@ -1,0 +1,3 @@
+<Project>
+	<UsingTask TaskName="Assimalign.Cohesion.Build.Tasks.GenerateValueObject" AssemblyFile="Tasks\bin\$(Configuration)\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll"/>
+</Project>

@@ -2,5 +2,4 @@
 	<ItemGroup>
 		<Reference Include="KubernetesClient"/>
 	</ItemGroup>
-
 </Project>

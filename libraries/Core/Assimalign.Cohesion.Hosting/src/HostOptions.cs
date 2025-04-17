@@ -11,14 +11,17 @@ public sealed class HostOptions
     /// Specify whether the services should be started concurrently.
     /// </summary>
     public bool StartServicesConcurrently { get; set; }
+
     /// <summary>
     /// Specify the timeout for each service startup. Default is 0.
     /// </summary>
     public TimeSpan? ServiceStartupTimeout { get; set; }
+
     /// <summary>
     /// 
     /// </summary>
     public TimeSpan? ServiceShutdownTimeout { get; set; }
+
     /// <summary>
     /// Sets the environment name of
     /// </summary>
@@ -28,6 +31,7 @@ public sealed class HostOptions
     public string? Environment { get; set; } = AppEnvironment.GetEnvironmentName();
 
     internal Action<IHostContext> Trace { get; set; } = trace => { };
+
     /// <summary>
     /// Sets a trace handler.
     /// </summary>

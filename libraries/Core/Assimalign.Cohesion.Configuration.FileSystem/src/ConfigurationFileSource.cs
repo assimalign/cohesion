@@ -20,7 +20,7 @@ public abstract class ConfigurationFileSource : IConfigurationSource
     /// <summary>
     /// The path to the file.
     /// </summary>
-    public Path Path { get; set; }
+    public System.IO.Path Path { get; set; }
 
     /// <summary>
     /// Determines if loading the file is optional.

@@ -46,8 +46,6 @@ public sealed class ConfigurationOptions
     /// </summary>
     public List<IConfigurationProvider> Providers { get; } = new List<IConfigurationProvider>();
 
-
-
     /// <summary>
     /// The default options
     /// </summary>

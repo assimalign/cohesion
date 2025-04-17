@@ -16,11 +16,6 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     string Name { get; }
 
     /// <summary>
-    /// 
-    /// </summary>
-    //IEnumerable<IConfigurationEntry> Entries { get; }
-
-    /// <summary>
     /// Get the configuration entry, if exists.
     /// </summary>
     /// <param name="key"></param>
@@ -32,6 +27,12 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="entry">The value.</param>
     void Set(IConfigurationEntry entry);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="IConfigurationEntry"></param>
+    void Remove(IConfigurationEntry entry);
 
     /// <summary>
     /// Checks whether the key exists.

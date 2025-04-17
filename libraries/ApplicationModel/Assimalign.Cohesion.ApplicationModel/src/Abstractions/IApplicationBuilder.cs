@@ -1,0 +1,44 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.ApplicationModel;
+
+using Hosting;
+using Logging;
+using Configuration;
+using DependencyInjection;
+
+/// <summary>
+/// 
+/// </summary>
+public interface IApplicationBuilder
+{
+    /// <summary>
+    /// 
+    /// </summary>
+    IHostBuilder Host { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    ILoggerFactoryBuilder Logging { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    IConfigurationManager Configuration { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    IServiceProviderBuilder Services { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    IApplication Build();
+}

@@ -51,6 +51,19 @@ internal static partial class ThrowHelper
         return argument;
     }
 
+
+    internal static T ThrowIfNotDefined<T>(
+        [NotNull] T argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null) where T : struct, Enum
+    {
+        if (!Enum.IsDefined(argument))
+        {
+            throw new ArgumentException($"The integral value does not exist in {typeof(T).Name}");
+        }
+
+        return argument;
+    }
+
     [DoesNotReturn]
     internal static void ThrowArgumentNullException(
         string? paramName)

@@ -10,5 +10,5 @@ public interface IConfigurationChangeToken : IChangeToken<IConfiguration>
     /// </summary>
     /// <param name="action"></param>
     /// <returns></returns>
-    IDisposable OnAdd(Action<IConfiguration> action);
+    //IDisposable OnAdd(Action<IConfiguration> action);
 }

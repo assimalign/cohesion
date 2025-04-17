@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -7,14 +8,14 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
-using System.Linq;
 
 public class ConfigurationRoot : IConfigurationRoot, IDisposable
 {
-    private readonly ConfigurationSetStrategy setStrategy;
-    private readonly IList<IConfigurationProvider> providers;
+    private readonly ConfigurationSetStrategy _setStrategy;
+    private readonly IList<IConfigurationProvider> _providers;
 
-    private bool isDisposed;
+    private bool _disposed;
+    private bool _isDisposing;
 
     /// <summary>
     /// 
@@ -24,8 +25,8 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
-        this.providers = options.Providers.AsReadOnly();
-        this.setStrategy = options.SetStrategy;
+        _providers = options.Providers;
+        _setStrategy = options.SetStrategy;
     }
 
     /// <summary>
@@ -33,16 +34,89 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    public object? this[KeyPath path]
+    public string? this[in Path path]
     {
-        get => GetConfigurationValue(path);
-        set => SetConfigurationValue(path, value);
+        get => GetConfigurationValue(path, this);
+        set => SetConfigurationValue(path, value, this);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    public IConfigurationEntry? Get(Key key)
+    {
+        for (int i = _providers.Count - 1; i >= 0; i--)
+        {
+            IConfigurationProvider provider = _providers[i];
+            IConfigurationEntry? entry = provider.Get(key);
+
+            if (entry is not null)
+            {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    /// <exception cref="ArgumentNullException"></exception>
+    public void Set(IConfigurationEntry entry)
+    {
+        ThrowHelper.ThrowIfNull(entry);
+
+        if (_setStrategy == ConfigurationSetStrategy.ExistingOnly)
+        {
+            Key key = entry.Key;
+
+            for (int i = _providers.Count - 1; i >= 0; i--)
+            {
+                IConfigurationProvider provider = _providers[i];
+
+                if (provider.ContainsKey(key))
+                {
+                    provider.Set(entry);
+                    return;
+                }
+            }
+        }
+        else
+        {
+            for (int i = _providers.Count - 1; i >= 0; i--)
+            {
+                IConfigurationProvider provider = _providers[i];
+
+                provider.Set(entry);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    /// <exception cref="ArgumentNullException"></exception>
+    public void Remove(IConfigurationEntry entry)
+    {
+        ThrowHelper.ThrowIfNull(entry);
+
+        for (int i = _providers.Count - 1; i >= 0; i--)
+        {
+            IConfigurationProvider provider = _providers[i];
+
+            provider.Remove(entry);
+        }
     }
 
     /// <summary>
     /// Returns a readonly collection of providers.
     /// </summary>
-    public IEnumerable<IConfigurationProvider> Providers => this.providers;
+    public IEnumerable<IConfigurationProvider> Providers => _providers.AsReadOnly();
 
     /// <summary>
     /// 
@@ -50,7 +124,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     /// <returns></returns>
     public IConfigurationChangeToken GetChangeToken()
     {
-        CheckIsDisposed();
+        CheckIfDisposedOrDisposing();
 
         throw new NotImplementedException();
     }
@@ -61,23 +135,33 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     public IEnumerable<IConfigurationValue> GetValues() => GetEntriesOf<IConfigurationValue>();
     public IEnumerator<IConfigurationEntry> GetEnumerator() => GetEntriesOf<IConfigurationEntry>().GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-    public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
+    public void Dispose()
+    {
+        CheckIfDisposedOrDisposing();
+
+        foreach(var provider in _providers)
+        {
+            provider.Dispose();
+        }
+
+        _disposed = true;
+    }
 
     public async ValueTask DisposeAsync()
     {
-        CheckIsDisposed();
+        CheckIfDisposedOrDisposing();
 
-        foreach (var provider in providers)
+        foreach (var provider in _providers)
         {
             await provider.DisposeAsync();
         }
 
-        isDisposed = true;  
+        _disposed = true;  
     }
 
-    private void CheckIsDisposed()
+    private void CheckIfDisposedOrDisposing()
     {
-        if (isDisposed)
+        if (_disposed || _isDisposing)
         {
             ThrowHelper.ThrowObjectDisposedException(nameof(ConfigurationRoot));
         }
@@ -86,13 +170,13 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
 
     private TEntry? GetEntry<TEntry>(Key key)
     {
-        CheckIsDisposed();
+        CheckIfDisposedOrDisposing();
 
         IConfigurationEntry? entry = null;
 
-        for (int i = 0; i < providers.Count; i++)
+        for (int i = 0; i < _providers.Count; i++)
         {
-            if ((entry = providers[i].Get(key)) is not null && entry is TEntry)
+            if ((entry = _providers[i].Get(key)) is not null && entry is TEntry)
             {
                 return (TEntry)entry;
             }
@@ -102,13 +186,13 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     }
     private IEnumerable<TEntry> GetEntriesOf<TEntry>()
     {
-        CheckIsDisposed();
+        CheckIfDisposedOrDisposing();
 
         IConfigurationProvider? provider = null;
 
-        for (int i = 0; i < providers.Count; i++)
+        for (int i = 0; i < _providers.Count; i++)
         {
-            provider = providers[i];
+            provider = _providers[i];
 
             var entries = provider.GetEntries();
 
@@ -122,196 +206,60 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         }
     }
 
-
-
-    private object? GetConfigurationValue(KeyPath path)
+    internal static string? GetConfigurationValue(in Path path, IConfigurationRoot root)
     {
-        if (path.IsComposite)
-        {
-            return GetValue(path[0])?.Value;
-        }
+        Key key = path[0];
+        IList<IConfigurationProvider> providers = root.Providers.ToList();
 
-        IConfiguration? configuration = this;
-        IConfigurationValue? value = null;
-
-        for (int i = 0; i < path.Count - 1; i++)
+        for (int i = providers.Count - 1; i >= 0; i--)
         {
-            if (configuration is not null)
+            IConfigurationProvider provider = providers[i];
+            IConfigurationEntry? entry = provider.Get(key);
+
+            if (entry is null)
             {
-                configuration = configuration.GetSection(path[i]);
+                continue;
             }
-            else
+
+            if (entry.IsValue(out IConfigurationValue? value))
             {
-                break;
-            }
-        }
-
-        if (configuration is not null)
-        {
-            value = configuration.GetValue(path[path.Count]);
-        }
-
-        return value?.Value;
-    }
-
-    private void SetConfigurationValue(KeyPath path, object? value)
-    {
-        // Compose an entry from the path and value
-        var entry = Compose(path, value);
-        var key = path[0];
-
-        for (int i = 0; i < providers.Count; i++)
-        {
-            var provider = providers[i];
-
-            if (provider.ContainsKey(key))
-            {
-                var existing = provider.Get(key);
-
-                if (entry is IConfigurationValue)
+                if (path.IsComposite)
                 {
-                    provider.Set(entry);
+                    continue;
                 }
-                if (existing is IConfigurationSection section1 && entry is IConfigurationSection section2)
-                {
-                    var merge = section1.Merge(section2);
 
-                    provider.Set(merge);
-                }
+                return value!.Value;
             }
-            else if (setStrategy == ConfigurationSetStrategy.Distributed)
+
+            // This would be weird if this happened
+            if (entry is not IConfigurationSection section)
             {
-                provider.Set(entry);
+                continue;
             }
+
+            Path subpath = path.Subpath(1);
+
+            return section[subpath];
         }
 
-        //if (entry is IConfigurationSection section)
-        //{
-        //    bool existing = false;
-
-        //    for (int i = 0; i < entries.Count; i++)
-        //    {
-        //        var item = entries[i];
-
-        //        if (!(existing = item.Key == entry.Key))
-        //        {
-        //            continue;
-        //        }
-
-        //        // Switch to composite structure
-        //        if (item is IConfigurationValue)
-        //        {
-        //            entries.Remove(item);
-        //            entries.Add(entry);
-        //        }
-
-        //        if (item is IConfigurationSection)
-        //        {
-        //            // Copy items to existing 
-        //            foreach (var child in section)
-        //            {
-        //                ((IConfigurationSection)item).Add(child);
-        //            }
-        //        }
-
-        //        break;
-        //    }
-
-        //    // if no existing value, then simply add
-        //    if (!existing)
-        //    {
-        //        entries.Add(entry);
-        //    }
-        //}
-        //else if (entry is IConfigurationValue value)
-        //{
-        //    // Just add or override what is existing
-        //    entries.Add(value);
-        //}
-        //else
-        //{
-        //    // Invalid entry
-        //    throw new Exception();
-        //}
-        //Key key = path[0];
-
-        //IConfigurationProvider? provider = null;
-
-        //for (int i = 0; i < providers.Count; i++)
-        //{
-        //    provider = providers[i];
-
-        //    if (provider.ContainsKey(key))
-        //    {
-        //        entry = provider.Get(key);
-        //        break;
-        //    }
-        //}
-
-        //if (provider is null)
-        //{
-        //    throw new Exception();
-        //}
-
-        //IConfigurationEntry entry = provider.Get(key);
-
-        //if (entry is null)
-        //{
-        //    throw new Exception();
-        //}
-
-
-
-        //for (int k = 1; k < path.Count; k++)
-        //{
-        //    var subpath = path.Subpath(k);
-
-        //    if (entry is IConfigurationSection section)
-        //    {
-
-        //        entry = section[subpath];
-        //    }
-
-        //    if ((entry is null || entry is IConfigurationValue) && path.Count)
-        //    {
-
-        //    }
-
-        //}
-
-
-        //for (int i = 0; i < providers.Count; i++)
-        //{
-        //    provider = providers[i];
-
-        //    if (provider.ContainsKey(key))
-        //    {
-        //        break;
-        //    }
-        //}
-
-        //if (provider is null)
-        //{
-        //    throw new Exception();
-        //}
-
-        //var compose = Compose(path, value);
-
-        //provider.Set(compose);
+        return null;
     }
-
-    public static IConfigurationEntry Compose(KeyPath path, object? value)
+    internal static void SetConfigurationValue(in Path path, string? value, IConfigurationRoot root)
     {
-        if (path.IsComposite)
+        Key key = path[0];
+        IConfigurationEntry? entry = default;
+
+        if (!path.IsComposite)
         {
-            return new ConfigurationSection(path[0])
-            {
-                Compose(path.Subpath(1), value)
-            };
+            entry = new ConfigurationValue(key, value);
         }
         else
         {
-            return new ConfigurationValue(path[0], value);
+            var section = new ConfigurationSection(key);
+            section[path.Subpath(1)] = value;
+            entry = section;
         }
+
+        root.Set(entry);
     }
 }

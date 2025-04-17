@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<Reference Include="coverlet.collector"/>
+		<Reference Include="Microsoft.NET.Test.Sdk" />
+		<Reference Include="xunit" />
+		<Reference Include="xunit.runner.visualstudio" />
+		<Reference Include="Assimalign.Cohesion.Web.ApplicationModel" />
+	</ItemGroup>
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+	
+</Project>

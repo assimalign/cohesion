@@ -1,15 +1,16 @@
-﻿using Assimalign.Cohesion.Transports;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System;
 
 namespace Assimalign.Cohesion.Web;
 
+/// <summary>
+/// 
+/// </summary>
 public interface IWebApplicationBuilder
 {
 
-    IWebApplicationBuilder UseTransport(ITransport transport);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
     IWebApplication Build();
 }

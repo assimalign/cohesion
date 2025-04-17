@@ -1,15 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
-	<ItemGroup>
-	  <Compile Remove="Utilities\**" />
-	  <EmbeddedResource Remove="Utilities\**" />
-	  <None Remove="Utilities\**" />
-	</ItemGroup>
-	<ItemGroup>
-	  <Compile Remove="ConfigurationPathHelper.cs" />
-	  <Compile Remove="ConfigurationReloadToken.cs" />
-	  <Compile Remove="ConfigurationStrategy.cs" />
-	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>

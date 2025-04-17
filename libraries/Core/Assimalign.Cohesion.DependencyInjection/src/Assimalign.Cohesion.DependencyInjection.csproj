@@ -15,7 +15,7 @@
 	</PropertyGroup>
 	
 	<ItemGroup>
-	  <Reference Include="Assimalign.Cohesion.FileSystem" />
+	  <Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 
 	<ItemGroup>

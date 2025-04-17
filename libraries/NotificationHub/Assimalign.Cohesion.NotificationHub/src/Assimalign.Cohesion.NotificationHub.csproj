@@ -1,1 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk" />
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="ValueObjects\" />
+	</ItemGroup>
+</Project>

@@ -109,6 +109,7 @@ public sealed class HostBuilder : IHostBuilder
     /// 
     /// </summary>
     public static IHostBuilder Create() => new HostBuilder(new());
+
     /// <summary>
     /// 
     /// </summary>

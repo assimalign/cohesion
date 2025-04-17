@@ -1,0 +1,7 @@
+<Project>
+	<Target Name="GenValueObjects" BeforeTargets="CoreCompile" Inputs="@(ValueObject)" Outputs="Test">
+		<GenerateValueObject ValueObjects="@(ValueObject)">
+			<Output TaskParameter="FilePath" PropertyName="ValueObjectFilePath"/>
+		</GenerateValueObject>
+	</Target>
+</Project>

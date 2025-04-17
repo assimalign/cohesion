@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -12,11 +12,11 @@ using Assimalign.Cohesion.Internal;
 [DebuggerDisplay("Configuration Provider: {Name}")]
 public abstract class ConfigurationProvider : IConfigurationProvider
 {
-    private readonly List<IConfigurationEntry> entries;
-    private readonly KeyComparer comparer;
+    private readonly List<IConfigurationEntry> _entries;
+    private readonly KeyComparer _comparer;
 
-    private bool isDisposed;
-    private bool isLoaded;
+    private bool _isDisposed;
+    private bool _isLoaded;
 
     #region Constructors
 
@@ -25,6 +25,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// </summary>
     protected ConfigurationProvider() : this(KeyComparer.Ordinal)
     {
+
     }
 
     /// <summary>
@@ -33,8 +34,8 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <param name="comparer"></param>
     protected ConfigurationProvider(KeyComparer comparer)
     {
-        this.comparer = comparer;
-        this.entries = new List<IConfigurationEntry>();
+        _comparer = ThrowHelper.ThrowIfNull(comparer);
+        _entries = new List<IConfigurationEntry>();
     }
 
     #endregion
@@ -57,7 +58,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             ThrowHelper.ThrowArgumentException("'key' cannot be empty.");
         }
 
-        return entries.FirstOrDefault(p => comparer.Equals(p.Key, key));
+        return _entries.FirstOrDefault(p => _comparer.Equals(p.Key, key));
     }
 
     /// <summary>
@@ -75,20 +76,38 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             ThrowHelper.ThrowArgumentException("'IConfigurationEntry.Key' cannot be empty.");
         }
 
-        for (int i = 0; i < entries.Count; i++)
+        for (int i = 0; i < _entries.Count; i++)
         {
-            if (comparer.Equals(entries[i].Key, entry.Key))
+            if (_comparer.Equals(_entries[i].Key, entry.Key))
             {
-                entries.RemoveAt(i);
+                _entries.RemoveAt(i);
             }
         }
 
-        entries.Add(entry);
+        _entries.Add(entry);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="entry"></param>
+    public virtual void Remove(IConfigurationEntry entry)
+    {
+        bool removed = _entries.Remove(entry);
 
-    public abstract Task OnLoadAsync(IDictionary<KeyPath, string?> entries);
+        if (!removed)
+        {
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (_comparer.Equals(_entries[i].Key, entry.Key))
+                {
+                    _entries.RemoveAt(i);
+                }
+            }
+        }
+    }
 
+    public abstract Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
@@ -96,18 +115,41 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <returns></returns>
     public virtual IEnumerable<IConfigurationEntry> GetEntries()
     {
-        return entries;
+        return _entries;
     }
 
     public virtual void Load() => ReloadAsync().GetAwaiter().GetResult();
 
     public virtual async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        var entries = new Dictionary<KeyPath, string?>();
+        var entries = new Dictionary<Path, string?>();
 
-        await OnLoadAsync(entries);
+        await OnLoadAsync(entries, cancellationToken);
 
+        foreach (var (path, value) in entries)
+        {
+            Key key = path[0];
 
+            if (path.IsComposite)
+            {
+                var existing = Get(key) as ConfigurationSection;
+
+                if (existing is null)
+                {
+                    existing = new ConfigurationSection(key, _comparer);
+                }
+
+                Path subpath = path.Subpath(1);
+
+                existing[subpath] = value;
+
+                Set(existing);
+            }
+            else
+            {
+                Set(new ConfigurationValue(key, value));
+            }
+        }
     }
 
     public void Reload()
@@ -117,25 +159,24 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
     public virtual Task ReloadAsync(CancellationToken cancellationToken = default)
     {
-
-        entries.Clear();
+        _entries.Clear();
         return LoadAsync(cancellationToken);
     }
 
     public virtual void Dispose()
     {
-        entries.Clear();
+        _entries.Clear();
     }
 
     public virtual ValueTask DisposeAsync()
     {
-        entries.Clear();
+        _entries.Clear();
 
         return ValueTask.CompletedTask;
     }
 
     public bool ContainsKey(Key key)
     {
-        return entries.Any(p => comparer.Equals(p.Key, key));
+        return _entries.Any(p => _comparer.Equals(p.Key, key));
     }
 }

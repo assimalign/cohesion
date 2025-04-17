@@ -3,4 +3,7 @@
 		<Reference Include="Assimalign.Cohesion.Http" />
 		<Reference Include="Assimalign.Cohesion.Http.Connection" />
 	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Extensions\" />
+	</ItemGroup>
 </Project>

@@ -17,7 +17,7 @@ public interface ISyntharaAccount
     AccountId Id { get; }
 
     /// <summary>
-    /// 
+    /// The name 
     /// </summary>
     AccountName Name { get; }
 

@@ -5,13 +5,12 @@ public interface ILogger
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="level"></param>
-    /// <param name="message"></param>
-    void Log(LogLevel level, string message);
+    /// <param name="entry"></param>
+    void Log(ILoggerEntry entry);
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    ILoggerBatch CreateLogBatch();
+    IScopeLogger BeginScope(ILoggerEntry entry);
 }

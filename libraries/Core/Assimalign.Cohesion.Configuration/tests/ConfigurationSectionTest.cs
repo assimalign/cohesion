@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Configuration.Tests
             var configuration = new ConfigurationBuilder()
                 .AddProvider(async context =>
                 {
-                    var provider =  MockConfigurationProvider.Create(new Dictionary<KeyPath, object>()
+                    var provider =  MockConfigurationProvider.Create(new Dictionary<Path, object>()
                     {
                         { "IsEnabled", true },
                         { "Azure:Identity:ClientId", new Guid("afdc6951-fac8-4e68-8b02-a8acdda7558e") }
@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Configuration.Tests
 
 
             configuration["Azure:Identity:ClientSecret"] = "asdflkajdsf";
-            configuration["Azure:Identity:ClientSecret"] = Guid.NewGuid();
+            configuration["Azure:Identity:ClientSecret"] = Guid.NewGuid().ToString();
 
             var secret = configuration["Azure:Identity:ClientSecret"];
             var section = configuration.GetSection("Azure:Identity");
