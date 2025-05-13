@@ -16,6 +16,35 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     string Name { get; }
 
     /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    string? Get(Path path);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    bool TryGetValue(Path path, out string value);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="value"></param>
+    void Set(Path path, string? value);
+
+    /// <summary>
+    /// Checks whether the key exists.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <returns></returns>
+    bool ContainsPath(Path path);
+
+    /// <summary>
     /// Get the configuration entry, if exists.
     /// </summary>
     /// <param name="key"></param>
@@ -34,12 +63,7 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// <param name="IConfigurationEntry"></param>
     void Remove(IConfigurationEntry entry);
 
-    /// <summary>
-    /// Checks whether the key exists.
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    bool ContainsKey(Key key);
+    
 
     /// <summary>
     /// Synchronously loads the configuration values.

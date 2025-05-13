@@ -17,24 +17,5 @@ public interface IConfiguration : IEnumerable<IConfigurationEntry>
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    string? this[in Path path] { get; set; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    IConfigurationEntry? Get(Key key);
-
-    /// <summary>
-    /// Adds a configuration entry the section.
-    /// </summary>
-    /// <param name="entry"></param>
-    void Set(IConfigurationEntry entry);
-
-    /// <summary>
-    /// Removes an entry from the section
-    /// </summary>
-    /// <param name="entry"></param>
-    void Remove(IConfigurationEntry entry);
+    string? this[Path path] { get; set; }
 }

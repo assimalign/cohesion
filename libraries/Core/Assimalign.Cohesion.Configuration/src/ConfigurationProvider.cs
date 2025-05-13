@@ -12,8 +12,11 @@ using Assimalign.Cohesion.Internal;
 [DebuggerDisplay("Configuration Provider: {Name}")]
 public abstract class ConfigurationProvider : IConfigurationProvider
 {
-    private readonly List<IConfigurationEntry> _entries;
+    private readonly Dictionary<Path, Either<IConfigurationValue, IConfigurationSection>> _data;
+    private readonly Dictionary<Path, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
     private readonly KeyComparer _comparer;
+
+    //private readonly List<IConfigurationEntry> _entries;
 
     private bool _isDisposed;
     private bool _isLoaded;
@@ -25,17 +28,17 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// </summary>
     protected ConfigurationProvider() : this(KeyComparer.Ordinal)
     {
-
     }
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="comparer"></param>
-    protected ConfigurationProvider(KeyComparer comparer)
+    protected ConfigurationProvider(KeyComparer comparer) 
     {
         _comparer = ThrowHelper.ThrowIfNull(comparer);
-        _entries = new List<IConfigurationEntry>();
+        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(_comparer);
+        _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
     #endregion
@@ -45,6 +48,26 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// </summary>
     public abstract string Name { get; }
 
+
+    public void Set(Path path, string? value)
+    {
+        if (_lookup.TryGetValue(path, out var either))
+        {
+            if (either.If(out IConfigurationSection section, out IConfigurationValue v))
+            {
+
+            }
+        }
+        if ((i + 1) == path.Count)
+        {
+
+        }
+        else
+        {
+
+        }
+    }
+
     /// <summary>
     /// 
     /// </summary>
@@ -53,6 +76,10 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <exception cref="ArgumentException"></exception> 
     public virtual IConfigurationEntry? Get(Key key)
     {
+        if (_lookup.TryGetValue(key, out var either))
+        {
+            
+        }
         if (key.IsEmpty)
         {
             ThrowHelper.ThrowArgumentException("'key' cannot be empty.");
@@ -75,6 +102,10 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         {
             ThrowHelper.ThrowArgumentException("'IConfigurationEntry.Key' cannot be empty.");
         }
+
+        Key key = entry.Key;
+
+
 
         for (int i = 0; i < _entries.Count; i++)
         {

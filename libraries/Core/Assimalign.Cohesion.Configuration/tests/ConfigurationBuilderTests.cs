@@ -10,7 +10,15 @@ public class ConfigurationBuilderTests
 {
     public ConfigurationBuilderTests()
     {
-        var builder = default(IConfigurationBuilder)!;
+        var builder = ConfigurationBuilder.Create(options =>
+        {
+            
+        });
+
+        builder.AddProvider(context =>
+        {
+            
+        });
 
         //builder.AddProvider(context =>
         //{

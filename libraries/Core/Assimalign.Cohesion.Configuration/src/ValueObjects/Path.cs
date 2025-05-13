@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.Configuration;
 [JsonConverter(typeof(KeyPathJsonConvertor))]
 public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 {
+    private readonly Key[] _keys;
+
     #region Constructors
 
     /// <summary>
@@ -51,9 +53,8 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="keys"></param>
     public Path(Key[] keys)
     {
-        Keys = (keys ??= []);
+        _keys = keys ??= [];
     }
-
     #endregion
 
     #region Properties
@@ -64,7 +65,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="index"></param>
     /// <returns></returns>
     ///<exception cref="IndexOutOfRangeException"></exception>
-    public Key this[int index] => Keys[index];
+    public Key this[int index] => _keys[index];
 
     /// <summary>
     /// Returns the default separator used within a composite key.
@@ -84,7 +85,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <summary>
     /// The collection of keys that make up the path.
     /// </summary>
-    public Key[] Keys { get; } = [];
+    public Key[] Keys => _keys;
 
     /// <summary>
     /// The number of keys in the path.
@@ -98,12 +99,13 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <summary>
     /// Checks whether the path has any keys.
     /// </summary>
-    public bool IsEmpty => Keys.Length == 0;
+    public bool IsEmpty => _keys.Length == 0;
 
     /// <summary>
     /// Checks if the path is made up of two or more keys.
     /// </summary>
-    public bool IsComposite => Keys.Length > 1;
+    public bool IsComposite => _keys.Length > 1;
+
     #endregion
 
     #region Methods
@@ -115,7 +117,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public Path Subpath(int start)
     {
-        return Subpath(start, Keys.Length - start);
+        return Subpath(start, _keys.Length - start);
     }
 
     /// <summary>
@@ -130,7 +132,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
         for (int i = 0; i < length; i++)
         {
-            buffer[i] = Keys[start + i];
+            buffer[i] = _keys[start + i];
         }
 
         return new Path(buffer);
@@ -154,7 +156,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public static Path Combine(Path left, Path right)
     {
-        return new Path([.. left.Keys, .. right.Keys]);
+        return new Path([.. left._keys, .. right._keys]);
     }
 
     /// <summary>
@@ -182,8 +184,8 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
         for (int i = 0; i < Count; i++)
         {
-            ref var left = ref Keys[i];
-            ref var right = ref other.Keys[i];
+            ref var left = ref _keys[i];
+            ref var right = ref other._keys[i];
 
             if (!left.Equals(right, comparison))
             {
@@ -214,7 +216,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public override string ToString()
     {
-        return string.Join(DefaultDelimiter, Keys);
+        return string.Join(DefaultDelimiter, _keys);
     }
 
     /// <summary>
@@ -240,7 +242,11 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
     #region Helpers
 
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    /// <returns></returns>
     public static Path Parse(string? value)
     {
         return Parse(value.AsSpan());

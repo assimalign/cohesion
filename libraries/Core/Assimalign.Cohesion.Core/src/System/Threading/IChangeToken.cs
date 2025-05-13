@@ -10,5 +10,5 @@ public interface IChangeToken
     /// </summary>
     /// <param name="callback">The <see cref="Action{Object}"/> to invoke.</param>
     /// <returns>An <see cref="IDisposable"/> that is used to unregister the callback.</returns>
-    IDisposable OnChange(Action<object> callback);
+    IDisposable OnChange(Action<object?> callback, object? state);
 }

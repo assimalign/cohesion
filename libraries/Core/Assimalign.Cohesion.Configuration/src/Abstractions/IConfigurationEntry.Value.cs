@@ -11,5 +11,5 @@ public interface IConfigurationValue : IConfigurationEntry
     /// <summary>
     /// The raw configuration value.
     /// </summary>
-    string? Value { get; }
+    string? Value { get; set; }
 }

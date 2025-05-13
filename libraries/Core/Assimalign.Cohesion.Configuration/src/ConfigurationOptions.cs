@@ -7,11 +7,11 @@ using Assimalign.Cohesion.Internal;
 
 public sealed class ConfigurationOptions
 {
-    private ConfigurationSetStrategy setStrategy = ConfigurationSetStrategy.ExistingOnly;
+    private ConfigurationSetStrategy _setStrategy = ConfigurationSetStrategy.ExistingOnly;
 
     public ConfigurationOptions()
     {
-        
+
     }
 
     /// <summary>
@@ -20,15 +20,8 @@ public sealed class ConfigurationOptions
     /// <exception cref="ArgumentException"></exception>
     public ConfigurationSetStrategy SetStrategy
     {
-        get => setStrategy;
-        set
-        {
-            if (!Enum.IsDefined(typeof(ConfigurationSetStrategy), value))
-            {
-                ThrowHelper.ThrowArgumentException("");
-            }
-            setStrategy = value;
-        }
+        get => _setStrategy;
+        set => _setStrategy = ThrowHelper.ThrowIfNotDefined(value);
     }
 
     /// <summary>

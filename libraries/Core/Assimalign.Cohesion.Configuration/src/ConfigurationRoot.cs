@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Internal;
 public class ConfigurationRoot : IConfigurationRoot, IDisposable
 {
     private readonly ConfigurationSetStrategy _setStrategy;
-    private readonly IList<IConfigurationProvider> _providers;
+    private readonly List<IConfigurationProvider> _providers;
 
     private bool _disposed;
     private bool _isDisposing;
@@ -34,11 +34,16 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    public string? this[in Path path]
+    public string? this[Path path]
     {
         get => GetConfigurationValue(path, this);
         set => SetConfigurationValue(path, value, this);
     }
+
+    /// <summary>
+    /// Returns a readonly collection of providers.
+    /// </summary>
+    public IEnumerable<IConfigurationProvider> Providers => _providers.AsReadOnly();
 
     /// <summary>
     /// 
@@ -85,14 +90,12 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
                 }
             }
         }
-        else
-        {
-            for (int i = _providers.Count - 1; i >= 0; i--)
-            {
-                IConfigurationProvider provider = _providers[i];
 
-                provider.Set(entry);
-            }
+        for (int i = _providers.Count - 1; i >= 0; i--)
+        {
+            IConfigurationProvider provider = _providers[i];
+
+            provider.Set(entry);
         }
     }
 
@@ -114,15 +117,10 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     }
 
     /// <summary>
-    /// Returns a readonly collection of providers.
-    /// </summary>
-    public IEnumerable<IConfigurationProvider> Providers => _providers.AsReadOnly();
-
-    /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public IConfigurationChangeToken GetChangeToken()
+    public IChangeToken GetChangeToken()
     {
         CheckIfDisposedOrDisposing();
 
@@ -206,7 +204,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         }
     }
 
-    internal static string? GetConfigurationValue(in Path path, IConfigurationRoot root)
+    private string? GetConfigurationValue(in Path path, ConfigurationRoot root)
     {
         Key key = path[0];
         IList<IConfigurationProvider> providers = root.Providers.ToList();
@@ -244,22 +242,22 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
 
         return null;
     }
-    internal static void SetConfigurationValue(in Path path, string? value, IConfigurationRoot root)
+    private void SetConfigurationValue(in Path path, string? value, ConfigurationRoot root)
     {
         Key key = path[0];
+        IConfigurationProvider provider = default;
         IConfigurationEntry? entry = default;
 
-        if (!path.IsComposite)
-        {
-            entry = new ConfigurationValue(key, value);
-        }
-        else
-        {
-            var section = new ConfigurationSection(key);
-            section[path.Subpath(1)] = value;
-            entry = section;
-        }
 
-        root.Set(entry);
+        for (int i = _providers.Count - 1; i >= 0; i--)
+        {
+            provider = _providers[i];
+            entry = provider.Get(key);
+
+            if (entry is not null)
+            {
+
+            }
+        }
     }
 }

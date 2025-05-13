@@ -1,8 +1,11 @@
 ﻿using System;
+using System.Threading;
 using System.Collections.Generic;
 using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Configuration;
+
+using Internal;
 
 /// <summary>
 /// 
@@ -11,18 +14,21 @@ namespace Assimalign.Cohesion.Configuration;
 public class ConfigurationValue : IConfigurationValue
 {
     private Key _key;
+    private Path _path;
     private string? _value;
-    private IConfigurationProvider _provider;
+    private readonly List<ChangeToken>? _tokens;
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="key"></param>
+    /// <param name="path"></param>
     /// <param name="value"></param>
-    public ConfigurationValue(Key key, string? value)
+    public ConfigurationValue(Path path, string? value)
     {
-        _key = key;
+        _path = path;
+        _key = path.Keys[path.Count - 1];
         _value = value;
+        _tokens = new List<ChangeToken>();
     }
 
     #region Properties
@@ -31,6 +37,11 @@ public class ConfigurationValue : IConfigurationValue
     /// The configuration key.
     /// </summary>
     public Key Key => _key;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public Path Path => _path;
 
     /// <summary>
     /// The raw configuration value.
@@ -43,6 +54,7 @@ public class ConfigurationValue : IConfigurationValue
             _value = value;
         }
     }
+    
     #endregion
 
     #region Methods 
@@ -52,7 +64,7 @@ public class ConfigurationValue : IConfigurationValue
     /// </summary>
     /// <returns></returns>
     /// <exception cref="NotImplementedException"></exception>
-    public IConfigurationChangeToken GetChangeToken()
+    public IChangeToken GetChangeToken()
     {
         throw new NotImplementedException();
     }

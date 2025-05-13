@@ -48,22 +48,4 @@ public static class ConfigurationProviderExtensions
 
         return false;
     }
-
-    public static IConfigurationEntry? Get(this IConfigurationProvider provider, Key key, KeyComparison comparison)
-    {
-        foreach (var entry in provider.GetEntries())
-        {
-            if (entry.Key.Equals(key, comparison))
-            {
-                return entry;
-            }
-        }
-
-        return null;
-    }
-
-    public static void Set(this IConfigurationProvider provider, IConfigurationEntry entry, KeyComparison comparison)
-    {
-
-    }
 }

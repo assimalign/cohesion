@@ -9,8 +9,7 @@ namespace Assimalign.Cohesion.Configuration.Providers;
 
 using Assimalign.Cohesion;
 using Assimalign.Cohesion.FileSystem;
-using Assimalign.Cohesion.FileSystem.Globbing;
-using Assimalign.Cohesion.System.IO;
+
 
 /// <summary>
 /// Base class for file based <see cref="ConfigurationProvider"/>.
@@ -23,9 +22,20 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
     /// Initializes a new instance with the specified source.
     /// </summary>
     /// <param name="source">The source settings.</param>
-    public ConfigurationFileProvider(ConfigurationFileSource source)
+    public ConfigurationFileProvider(FileSystemConfigurationOptions options)
     {
         Source = source ?? throw new ArgumentNullException(nameof(source));
+
+        var fileSystem = options.FileSytem;
+
+        var file = fileSystem.GetFile("");
+
+        var changeToken = file.Watch();
+
+        changeToken.OnChange(context =>
+        {
+            
+        }, this);
 
         if (Source.ReloadOnChange && Source.FileSytem != null)
         {
@@ -42,7 +52,7 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
     /// <summary>
     /// The source settings for this provider.
     /// </summary>
-    public ConfigurationFileSource Source { get; }
+    public FileSystemConfigurationOptions Source { get; }
 
     /// <summary>
     /// Generates a string representing this provider name and relevant details.
@@ -120,7 +130,7 @@ public abstract class ConfigurationFileProvider : ConfigurationProvider, IDispos
     /// <exception cref="FileNotFoundException">If Optional is <c>false</c> on the source and a
     /// file does not exist at specified Path.</exception>
     /// <exception cref="InvalidDataException">Wrapping any exception thrown by the concrete implementation of the
-    /// <see cref="Load()"/> method. Use the source <see cref="ConfigurationFileSource.OnLoadException"/> callback
+    /// <see cref="Load()"/> method. Use the source <see cref="FileSystemConfigurationOptions.OnLoadException"/> callback
     /// if you need more control over the exception.</exception>
     public override void Load()
     {

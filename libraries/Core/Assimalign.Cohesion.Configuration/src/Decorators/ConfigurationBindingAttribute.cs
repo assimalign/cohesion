@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -14,15 +10,6 @@ public class ConfigurationBindingAttribute : Attribute
         Type = type;
     }
 
-    public Type Type { get; }
-}
 
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-public sealed class ConfigurationBindingAttribute<T> : ConfigurationBindingAttribute
-    where T : new()
-{
-    public ConfigurationBindingAttribute() : base(typeof(T))
-    {
-        
-    }
+    public Type Type { get; }
 }

@@ -1,22 +1,25 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-internal class ConfigurationContext : IConfigurationContext
+public sealed class ConfigurationContext : IConfigurationContext
 {
+    private readonly Dictionary<string, object> _properties;
     private readonly Dictionary<string, object>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+    private readonly List<IConfigurationProvider> _providers;
+    
     public ConfigurationContext()
     {
-        Providers ??= new List<IConfigurationProvider>();
-        Properties ??= new Dictionary<string, object>();
-        _lookup = Properties.GetAlternateLookup<ReadOnlySpan<char>>();
+        _properties ??= new Dictionary<string, object>();
+        _lookup = _properties.GetAlternateLookup<ReadOnlySpan<char>>();
+        _providers = new List<IConfigurationProvider>();
     }
 
-    public Dictionary<string, object> Properties { get; init; }
+    public Dictionary<string, object> Properties => _properties;
     IDictionary<string, object> IConfigurationContext.Properties => Properties;
-    public IEnumerable<IConfigurationProvider> Providers { get; init; } 
+    public IEnumerable<IConfigurationProvider> Providers => _providers.AsReadOnly();
+
 
     public T? GetProperty<T>(string key)
     {
@@ -29,4 +32,11 @@ internal class ConfigurationContext : IConfigurationContext
 
         return default!;
     }
+
+    public bool HasProvider(string name)
+    {
+        return _providers.Exists(p => p.Name == name);
+    }
+
+    public void AddProvider(IConfigurationProvider provider) => _providers.Add(provider);
 }

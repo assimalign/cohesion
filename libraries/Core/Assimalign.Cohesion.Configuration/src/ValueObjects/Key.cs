@@ -88,6 +88,15 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     #region Methods
 
     /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public ReadOnlySpan<char> AsSpan()
+    {
+        return Value.AsSpan();
+    }
+
+    /// <summary>
     /// Checks whether the key value is of index. '[int]'
     /// </summary>
     /// <param name="index"></param>
@@ -269,6 +278,12 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// </summary>
     /// <param name="key"></param>
     public static implicit operator string(in Key key) => key.ToString();
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key"></param>
+    public static implicit operator ReadOnlySpan<char>(in Key key) => key.AsSpan();
 
     /// <summary>
     /// 

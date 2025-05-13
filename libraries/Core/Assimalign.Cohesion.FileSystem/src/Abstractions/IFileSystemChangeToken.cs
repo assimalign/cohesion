@@ -7,33 +7,32 @@ namespace Assimalign.Cohesion.FileSystem;
 /// <summary>
 /// 
 /// </summary>
-public interface IFileSystemChangeToken : IChangeToken<IFileSystemChangeContext>
+public interface IFileSystemChangeToken : IChangeToken
 {
     /// <summary>
     /// 
     /// </summary>
+    /// <typeparam name="T"></typeparam>
     /// <param name="callback"></param>
+    /// <param name="state"></param>
     /// <returns></returns>
-    IDisposable OnCreate(Action<IFileSystemChangeContext> callback);
+    IDisposable OnChange<T>(Action<T> callback, T state);
 
     /// <summary>
     /// 
     /// </summary>
+    /// <typeparam name="T"></typeparam>
     /// <param name="callback"></param>
+    /// <param name="state"></param>
     /// <returns></returns>
-    IDisposable OnDelete(Action<IFileSystemChangeContext> callback);
-}
-
-
-public interface IFileSystemChangeContext
-{
-    /// <summary>
-    /// The effected path
-    /// </summary>
-    FileSystemPath Path { get; }
+    IDisposable OnCreate<T>(Action<T> callback, T state);
 
     /// <summary>
-    /// The effected file system info.
+    /// 
     /// </summary>
-    IFileSystemInfo Info { get; }
+    /// <typeparam name="T"></typeparam>
+    /// <param name="callback"></param>
+    /// <param name="state"></param>
+    /// <returns></returns>
+    IDisposable OnDelete<T>(Action<T> callback, T state);
 }

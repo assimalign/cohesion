@@ -17,7 +17,13 @@ using Assimalign.Cohesion.Internal;
 public class ConfigurationSection : IConfigurationSection
 {
     private readonly Key _key;
+    private readonly Path _path;
     private readonly KeyComparer _comparer = KeyComparer.Ordinal;
+    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>> _data;
+    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+
+
+
     private readonly List<IConfigurationEntry> _entries = new List<IConfigurationEntry>();
 
     #region Constructors
@@ -29,6 +35,8 @@ public class ConfigurationSection : IConfigurationSection
     public ConfigurationSection(Key key) 
     {
         _key = key;
+        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(_comparer);
+        _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
     /// <summary>
@@ -36,9 +44,13 @@ public class ConfigurationSection : IConfigurationSection
     /// </summary>
     /// <param name="key"></param>
     /// <param name="comparer"></param>
-    public ConfigurationSection(Key key, KeyComparer comparer) : this(key)
+    public ConfigurationSection(Key key, KeyComparer comparer)
     {
+        _key = key;
         _comparer = comparer;
+        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(_comparer);
+        _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
+
     }
 
     #endregion
@@ -50,7 +62,7 @@ public class ConfigurationSection : IConfigurationSection
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    public string? this[in Path path]
+    public string? this[Path path]
     {
         get => GetConfigurationValue(path);
         set => SetConfigurationValue(path, value);
@@ -60,6 +72,11 @@ public class ConfigurationSection : IConfigurationSection
     /// The entry key.
     /// </summary>
     public Key Key => _key;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public Path Path => _path;
 
     /// <summary>
     /// The total number entries in the section.
@@ -85,16 +102,26 @@ public class ConfigurationSection : IConfigurationSection
     /// </summary>
     /// <param name="entry"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public void Set(IConfigurationEntry entry)
+    public void Add(IConfigurationEntry entry)
     {
-        ThrowHelper.ThrowIfNull(entry, nameof(entry));
+        ThrowHelper.ThrowIfNull(entry);
 
-        var existing = _entries.Find(p => _comparer.Equals(p.Key, entry.Key));
+        Key key = entry.Key;
 
-        if (existing is not null)
+        if (_lookup.TryGetValue(key, out var either)) 
         {
-            Remove(existing);
+            if (either.If(out IConfigurationSection section, out string value))
+            {
+
+            }
         }
+
+        //var existing = _entries.Find(p => _comparer.Equals(p.Key, entry.Key));
+
+        //if (existing is not null)
+        //{
+        //    Remove(existing);
+        //}
 
         _entries.Add(entry);
     }
@@ -105,7 +132,7 @@ public class ConfigurationSection : IConfigurationSection
     /// <param name="entry"></param>
     public void Remove(IConfigurationEntry entry)
     {
-        ThrowHelper.ThrowIfNull(entry, nameof(entry));
+        ThrowHelper.ThrowIfNull(entry);
 
         bool removed = _entries.Remove(entry);
 
@@ -178,7 +205,7 @@ public class ConfigurationSection : IConfigurationSection
         return GetEnumerator();
     }
 
-    public IConfigurationChangeToken GetChangeToken()
+    public IChangeToken GetChangeToken()
     {
         throw new NotImplementedException();
     }
@@ -226,7 +253,6 @@ public class ConfigurationSection : IConfigurationSection
 
         return value?.Value;
     }
-
     private void SetConfigurationValue(in Path path, string? value)
     {
         Key key = path[0];
@@ -254,7 +280,7 @@ public class ConfigurationSection : IConfigurationSection
             Remove(existing);
         }
 
-        (existing as ConfigurationSection)![path.Subpath(1)] = value;
+            (existing as ConfigurationSection)![path.Subpath(1)] = value;
 
         Set(existing);
     }

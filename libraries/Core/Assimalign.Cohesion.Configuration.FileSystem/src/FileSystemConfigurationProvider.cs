@@ -1,63 +1,52 @@
-﻿using Assimalign.Cohesion.FileSystem;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
-internal abstract class FileSystemConfigurationProvider : IConfigurationProvider
+using Assimalign.Cohesion.FileSystem;
+
+public abstract class FileSystemConfigurationProvider : ConfigurationProvider
 {
-    private readonly IFileSystem fileSystem;
+    private readonly IFileSystemFile _file;
+    private readonly IChangeToken? _changeToken;
+    private readonly IDisposable? _onChange;
 
-    public FileSystemConfigurationProvider(IFileSystem fileSystem, FileSystemPath path)
+    public FileSystemConfigurationProvider(FileSystemConfigurationOptions options)
     {
-        this.fileSystem = fileSystem;
+        var fileSystem = options.FileSystem;
 
-        Name = path.GetFileName()!;
-    }
-    public string Name { get; }
+        _file = fileSystem.GetFile(options.Path);
+        _changeToken = _file.Watch();
 
-    public void Dispose()
-    {
-        throw new NotImplementedException();
-    }
+        if (options.ReloadOnChange)
+        {
+            _onChange = _changeToken.OnChange(async state =>
+            {
+                var provider = (FileSystemConfigurationProvider)state!;
 
-    public IEnumerable<IConfigurationEntry> EnumerateEntries()
-    {
-        throw new NotImplementedException();
-    }
+                await provider.ReloadAsync();
 
-    public object Get(Key key)
-    {
-        throw new NotImplementedException();
-    }
-    public void Set(Key key, object value)
-    {
-        throw new NotImplementedException();
+            }, this);
+        }
     }
 
-    public void Load()
+
+    public override void Dispose()
     {
-        throw new NotImplementedException();
+        _onChange?.Dispose();
+
+        base.Dispose();
     }
 
-    public Task LoadAsync()
+    public override ValueTask DisposeAsync()
     {
-        throw new NotImplementedException();
-    }
+        _onChange?.Dispose();
 
-    public void Reload()
-    {
-        throw new NotImplementedException();
+        return base.DisposeAsync();
     }
-
-    public Task RefreshAsync()
-    {
-        throw new NotImplementedException();
-    }
-
-    
 }

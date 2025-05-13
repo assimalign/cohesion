@@ -1,4 +1,4 @@
-﻿using Assimalign.Cohesion.Internal;
+﻿
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -12,6 +12,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
+using Assimalign.Cohesion.Internal;
+
 
 public delegate bool ConfigurationFinder(Path path);
 
@@ -20,6 +22,11 @@ public delegate bool ConfigurationFinder(Path path);
 /// </summary>
 public static class ConfigurationExtensions
 {
+
+
+    //public static Either<IConfigurationValue, IConfigurationSection> GetEntry(this ICon)
+
+
     private const BindingFlags DeclaredOnlyLookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
 
