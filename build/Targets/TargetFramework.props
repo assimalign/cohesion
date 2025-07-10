@@ -1,6 +1,6 @@
 <Project>
     <PropertyGroup>
-        <TargetFrameworkLatest>net9.0</TargetFrameworkLatest>
+        <TargetFrameworkLatest>net10.0</TargetFrameworkLatest>
         <TargetFrameworkForLibraries>$(TargetFrameworkLatest)</TargetFrameworkForLibraries>
         <TargetFrameworkForShared>$(TargetFrameworkLatest)</TargetFrameworkForShared>
         <TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>

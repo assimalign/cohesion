@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace System.Net;
 
-readonly struct CidrRange
+readonly struct CidrBlock
 {
     private readonly ushort _a;
 

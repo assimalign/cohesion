@@ -3,7 +3,7 @@
     <ItemGroup>
         <PackageReferenceProvider Include="System.IO.Pipelines" Version="9.0.3" />
         <PackageReferenceProvider Include="Sharprompt" Version="3.0.0" />
-        <PackageReferenceProvider Include="KubernetesClient" Version="16.0.2" />
+        <PackageReferenceProvider Include="KubernetesClient" Version="17.0.4" />
         <PackageReferenceProvider Include="NUlid" Version="1.7.2" />
     </ItemGroup>
     <!-- Analyzer Build Dependencies -->
@@ -20,10 +20,10 @@
     </ItemGroup>
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
-        <PackageReferenceProvider Include="FluentAssertions" Version="8.2.0"/>
+        <PackageReferenceProvider Include="FluentAssertions" Version="8.3.0"/>
         <PackageReferenceProvider Include="xunit" Version="2.9.3" />
         <PackageReferenceProvider Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-        <PackageReferenceProvider Include="xunit.runner.visualstudio" Version="3.0.2"
+        <PackageReferenceProvider Include="xunit.runner.visualstudio" Version="3.1.1"
             IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive"
             PrivateAssets="all" />
         <PackageReferenceProvider Include="coverlet.collector" Version="6.0.4">
