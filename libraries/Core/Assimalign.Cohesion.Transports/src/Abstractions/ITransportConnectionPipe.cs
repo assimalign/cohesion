@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.IO.Pipelines;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -22,13 +23,20 @@ public interface ITransportConnectionPipe : IDuplexPipe
     /// <summary>
     /// 
     /// </summary>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask<ReadResult> ReadAsync();
+    ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="buffer"></param>
     /// <returns></returns>
-    ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer);
+    ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default);
 }

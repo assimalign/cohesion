@@ -34,7 +34,7 @@ public interface IHttpContext : IAsyncDisposable
     IHttpResponse Response { get; }
 
     /// <summary>
-    /// 
+    /// Gets the Http connection info.
     /// </summary>
     IHttpConnectionInfo ConnectionInfo { get; }
 }

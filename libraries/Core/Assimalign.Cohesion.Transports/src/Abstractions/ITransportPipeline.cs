@@ -15,5 +15,5 @@ public interface ITransportPipeline
     /// <param name="context"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task ExecuteAsync(ITransportContext context, CancellationToken cancellationToken = default);
+    Task ExecuteAsync(ITransportConnection connection, ITransportConnectionContext context, CancellationToken cancellationToken = default);
 }

@@ -9,6 +9,14 @@ namespace Assimalign.Cohesion.Transports;
 /// </summary>
 public abstract class ServerTransport : ITransport
 {
+    protected ServerTransport()
+    {
+        Id = TransportId.NewTransportId();
+    }
+
+    /// <inheritdoc />
+    public virtual TransportId Id { get; }
+
     /// <inheritdoc />
     public TransportKind Kind => TransportKind.Server;
 
@@ -26,7 +34,13 @@ public abstract class ServerTransport : ITransport
     public abstract Task<ITransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default);
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public virtual void Dispose()
+    {
+        DisposeAsync().GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public abstract ValueTask DisposeAsync();
 
     ITransportConnection ITransport.Initialize() => AcceptOrListenAsync().GetAwaiter().GetResult();
     async Task<ITransportConnection> ITransport.InitializeAsync(CancellationToken cancellationToken) => await AcceptOrListenAsync(cancellationToken);

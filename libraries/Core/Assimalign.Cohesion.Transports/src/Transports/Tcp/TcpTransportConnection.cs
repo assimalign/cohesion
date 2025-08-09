@@ -3,45 +3,95 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
-public sealed class TcpTransportConnection : ITransportConnection
+public sealed class TcpTransportConnection : ISingleStreamTransportConnection
 {
-    private readonly SocketTransportConnection _connection;
+    private readonly TransportId _transportId;
+    private readonly ConnectionId _id;
+    private readonly SocketTransportConnectionContext _context;
+    private readonly TransportPipeline _pipeline;
 
-    internal TcpTransportConnection(SocketTransportConnection connection)
+    private bool _isOpen;
+
+    internal TcpTransportConnection(
+        SocketTransportConnectionContext context,
+        TransportPipeline pipeline,
+        TransportId transportId)
     {
-        _connection = connection;
+        _id = ConnectionId.NewConnectionId();
+        _context = context;
+        _pipeline = pipeline;
+        _transportId = transportId;
     }
 
-    public bool IsConnected => _connection.IsConnected;
-    public object? ConnectionData => _connection.ConnectionData;
-    public ProtocolType Protocol => _connection.Protocol;
-    public ConnectionState State => _connection.State;
-    public ITransportConnectionPipe Pipe => _connection.Pipe;
-    public EndPoint LocalEndPoint => _connection.LocalEndPoint;
-    public EndPoint RemoteEndPoint => _connection.RemoteEndPoint;
+    public ConnectionId Id => _id;
+    public TransportId TransportId => _transportId;
+    public ProtocolType Protocol => _context.Protocol;
+    public ConnectionState State => _context.State;
 
     public void Abort()
     {
-        _connection.Abort();
+        _context.Abort();
     }
 
-    public ValueTask AbortAsync()
+    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
-        return _connection.AbortAsync();
+        return _context.AbortAsync();
     }
 
     public void Dispose()
     {
-        _connection.Dispose();
+        _context.Dispose();
     }
 
-    public void Execute()
+    public ValueTask DisposeAsync()
     {
-        _connection.Execute();
+        return _context.DisposeAsync();
+    }
+
+    public TcpTransportConnectionContext Open()
+    {
+        return OpenAsync().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask<TcpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    {
+        if (_isOpen)
+        {
+            ThrowHelper.ThrowInvalidOperationException("The connection is already open.");
+        }
+        if (!(_isOpen = ThreadPool.UnsafeQueueUserWorkItem(_context, false)))
+        {
+            throw new Exception();
+        }
+
+        var context = new TcpTransportConnectionContext(_context);
+
+        var task = _pipeline?.ExecuteAsync(
+            this,
+            context,
+            cancellationToken);
+
+        if (task is not null)
+        {
+            await task;
+        }
+
+        return context;
+    }
+
+    ITransportConnectionContext ISingleStreamTransportConnection.Open()
+    {
+        return Open();
+    }
+    async ValueTask<ITransportConnectionContext> ISingleStreamTransportConnection.OpenAsync(CancellationToken cancellationToken)
+    {
+        return await OpenAsync(cancellationToken);
     }
 }

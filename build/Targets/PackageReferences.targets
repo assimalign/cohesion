@@ -6,6 +6,7 @@
         <PackageReferenceProvider Include="KubernetesClient" Version="17.0.4" />
         <PackageReferenceProvider Include="NUlid" Version="1.7.2" />
     </ItemGroup>
+    
     <!-- Analyzer Build Dependencies -->
     <ItemGroup>
 		<PackageReferenceProvider Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />

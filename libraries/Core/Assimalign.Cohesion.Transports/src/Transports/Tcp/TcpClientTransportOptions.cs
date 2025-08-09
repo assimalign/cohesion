@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Assimalign.Cohesion.Internal;
+using Assimalign.Cohesion.Transports.Internal;
+using System;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -7,11 +9,17 @@ namespace Assimalign.Cohesion.Transports;
 public sealed class TcpClientTransportOptions
 {
 	private TransportTrace onTrace = (code, data, message) => { };
+    private readonly TransportPipelineBuilder<TcpTransportConnection, TcpTransportConnectionContext> _builder;
 
-	/// <summary>
-	/// The endpoint in which the socket should listen on.
-	/// </summary>
-	public EndPoint EndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 8081);
+    public TcpClientTransportOptions()
+    {
+        _builder = new TransportPipelineBuilder<TcpTransportConnection, TcpTransportConnectionContext>();
+    }
+
+    /// <summary>
+    /// The endpoint in which the socket should listen on.
+    /// </summary>
+    public EndPoint EndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 8081);
 
 	/// <summary>
 	/// Wait until there is data available to allocate a buffer. Setting this to false 
@@ -71,4 +79,22 @@ public sealed class TcpClientTransportOptions
     /// The trace handler for the transport.
     /// </summary>
     public TransportTrace Trace { get; set; } = (a, b, c) => { };
+
+    /// 
+    /// </summary>
+    /// <param name="middleware"></param>
+    /// <returns></returns>
+    public TcpClientTransportOptions Use(Func<TcpTransportConnection, TcpTransportConnectionContext, TransportMiddleware, Task> middleware)
+    {
+        ThrowHelper.ThrowIfNull(middleware);
+
+        _builder.Use(middleware);
+
+        return this;
+    }
+
+    internal TransportPipeline BuildPipeline()
+    {
+        return (TransportPipeline)(_builder as ITransportPipelineBuilder).Build();
+    }
 }

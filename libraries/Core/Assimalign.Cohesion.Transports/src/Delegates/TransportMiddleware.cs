@@ -7,4 +7,4 @@ namespace Assimalign.Cohesion.Transports;
 /// </summary>
 /// <param name="context"></param>
 /// <returns></returns>
-public delegate Task TransportMiddleware(ITransportContext context);
+public delegate Task TransportMiddleware(ITransportConnection connection, ITransportConnectionContext context);

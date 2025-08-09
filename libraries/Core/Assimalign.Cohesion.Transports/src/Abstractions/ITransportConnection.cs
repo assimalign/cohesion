@@ -8,23 +8,20 @@ namespace Assimalign.Cohesion.Transports;
 /// <summary>
 /// 
 /// </summary>
-/// <remarks>
-/// 
-/// </remarks>
-public interface ITransportConnection : IThreadPoolWorkItem, IDisposable
+public interface ITransportConnection : IDisposable, IAsyncDisposable 
 {
     /// <summary>
-    /// Specifies whether the connection is connected to a remote host.
+    /// A unique connection id.
     /// </summary>
-    bool IsConnected { get; }
+    ConnectionId Id { get; }
 
     /// <summary>
-    /// 
+    /// Get the id of 
     /// </summary>
-    object? ConnectionData { get; }
+    TransportId TransportId { get; }
 
     /// <summary>
-    /// 
+    /// The underlying network protocol of the transport connection.
     /// </summary>
     ProtocolType Protocol { get; }
 
@@ -34,28 +31,14 @@ public interface ITransportConnection : IThreadPoolWorkItem, IDisposable
     ConnectionState State { get; }
 
     /// <summary>
-    /// A pipe to send and receive data from either client or server.
-    /// </summary>
-    ITransportConnectionPipe Pipe { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    EndPoint LocalEndPoint { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    EndPoint RemoteEndPoint { get; }
-
-    /// <summary>
     /// Aborts the connection.
     /// </summary>
     void Abort();
 
     /// <summary>
-    /// Asynchronously aborts the connection.
+    /// 
     /// </summary>
+    /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask AbortAsync();
+    ValueTask AbortAsync(CancellationToken cancellationToken = default);
 }

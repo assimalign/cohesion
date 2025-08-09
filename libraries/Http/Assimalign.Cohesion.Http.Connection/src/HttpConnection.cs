@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,7 +13,7 @@ public abstract class HttpConnection : IHttpConnection
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public abstract IAsyncEnumerable<IHttpContext> ReceiveAsync(CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// 
     /// </summary>
@@ -23,5 +21,18 @@ public abstract class HttpConnection : IHttpConnection
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public abstract IAsyncEnumerable<IHttpContext> SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
-    public abstract void Dispose();
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public virtual void Dispose()
+    {
+        DisposeAsync().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public abstract ValueTask DisposeAsync();
 }

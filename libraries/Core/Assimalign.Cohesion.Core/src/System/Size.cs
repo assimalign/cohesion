@@ -43,10 +43,12 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     /// Returns an empty size.
     /// </summary>
     public static Size Empty => new Size(-1);
+
     /// <summary>
     /// The number of 
     /// </summary>
     public long Bits => Length * 8;
+
     /// <summary>
     /// The length represented in 
     /// </summary>

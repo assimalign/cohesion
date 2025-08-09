@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports.Internal;
@@ -14,10 +10,8 @@ internal class TransportPipeline : ITransportPipeline
     {
         _middleware = middleware;
     }
-
-    public Task ExecuteAsync(ITransportContext context, CancellationToken cancellationToken = default)
+    public Task ExecuteAsync(ITransportConnection connection, ITransportConnectionContext context, CancellationToken cancellationToken = default)
     {
-        // 
-        return _middleware.Invoke(context);
+        return _middleware.Invoke(connection, context);
     }
 }

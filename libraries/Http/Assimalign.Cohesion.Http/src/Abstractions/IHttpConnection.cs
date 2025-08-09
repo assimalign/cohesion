@@ -18,9 +18,8 @@ namespace Assimalign.Cohesion.Http;
 ///     }
 /// }
 /// </code>
-/// 
 /// </summary>
-public interface IHttpConnection : IDisposable
+public interface IHttpConnection : IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// 

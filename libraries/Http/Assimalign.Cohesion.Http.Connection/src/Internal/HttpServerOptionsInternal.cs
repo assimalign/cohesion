@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 
 using Assimalign.Cohesion.Transports;
 
-internal sealed class HttpServerOptionsInternal : HttpServerOptions
+internal sealed class HttpServerOptionsInternal : HttpListenerOptions
 {
     public IServiceProvider? ServiceProvider { get; init; }
     public IHttpContextExecutor Executor { get; init; }

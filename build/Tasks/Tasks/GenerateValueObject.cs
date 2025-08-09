@@ -47,9 +47,9 @@ namespace Assimalign.Cohesion.Build.Tasks
                     string meta = string.Empty;
                     string path = item.ItemSpec;
 
-                    if (!path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase))
+                    if (!path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
                     {
-                        path = path.Replace(".cs", ".generated.cs");
+                        path = path.Replace(".cs", ".g.cs");
                     }
 
                     var context = new ValueObjectContext()

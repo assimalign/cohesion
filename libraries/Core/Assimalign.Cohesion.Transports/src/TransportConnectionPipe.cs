@@ -1,11 +1,13 @@
 ﻿using System;
 using System.IO;
 using System.IO.Pipelines;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Internal;
+using System.Buffers;
 
 /// <summary>
 /// A generic connection pipe which data is read and written to.
@@ -42,27 +44,34 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     }
 
     public PipeReader Input => _input;
-
     public PipeWriter Output => _output;
-
     public Stream GetStream() => _stream;
 
-    public async ValueTask<ReadResult> ReadAsync()
+
+    public async ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default)
     {
-        var result = await Input.ReadAsync();
+        ReadResult result = await Input.ReadAsync();
+        ReadOnlySequence<byte> buffer = result.Buffer;
 
-        Input.AdvanceTo(
-            result.Buffer.Start,
-            result.Buffer.End);
-
-        //Input.AdvanceTo(result.Buffer.End);
+        Input.AdvanceTo(buffer.Start);
 
         return result;
     }
 
-    public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer)
+    public async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
     {
-  
+        ReadResult result = await Input.ReadAsync();
+        ReadOnlySequence<byte> buffer = result.Buffer;
+
+        Input.AdvanceTo(
+            buffer.Start,
+            buffer.End);
+
+        return result;
+    }
+
+    public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
         var result = await Output.WriteAsync(buffer);
 
         //Output.Advance(buffer.Length);

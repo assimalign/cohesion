@@ -14,20 +14,17 @@ using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
 [DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
-public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>, ITransportPipelineBuilder
+public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 {
     private readonly TcpServerTransportOptions _options;
     private readonly SocketTransportConnectionSettings[] _settings;
     private readonly TransportTrace? _trace;
-    private TransportPipeline? _pipeline;
+    private TransportPipeline _pipeline;
     private readonly int _count;
     private long _index; // long to prevent overflow
     private Socket? _socket;
 
     private readonly List<TcpTransportConnection> _connections;
-    private readonly List<Func<TransportMiddleware, TransportMiddleware>> _middleware;
-
-    #region Constructors
 
     public TcpServerTransport() : this(TcpServerTransportOptions.Default)
     {
@@ -46,12 +43,8 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
             options.MaxWriteBufferSize,
             _trace);
         _connections = new List<TcpTransportConnection>();
-        _middleware = new List<Func<TransportMiddleware, TransportMiddleware>>();
+        _pipeline = options.BuildPipeline();
     }
-
-    #endregion
-
-    #region Properties
 
     /// <summary>
     /// 
@@ -63,8 +56,6 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     /// </summary>
     public IReadOnlyCollection<TcpTransportConnection> Connections => _connections.AsReadOnly();
 
-    #endregion
-
     /// <summary>
     /// 
     /// </summary>
@@ -72,15 +63,14 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     /// <returns></returns>
     public override async Task<TcpTransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
-        if (_pipeline is null)
-        {
-            _pipeline = (TransportPipeline)(this as ITransportPipelineBuilder).Build();
-        }
         if (_socket is null)
         {
             _socket = _options.EndPoint switch
             {
-                UnixDomainSocketEndPoint => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified),
+                UnixDomainSocketEndPoint => new Socket(
+                    _options.EndPoint.AddressFamily, 
+                    SocketType.Stream, 
+                    System.Net.Sockets.ProtocolType.Unspecified),
                 /* 
                     We're passing "ownsHandle: true" here even though we don't necessarily
                     own the handle because Socket.Dispose will clean-up everything safely.
@@ -93,6 +83,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
                     when it attempts to stop.
                 */
                 FileHandleEndPoint fileHandle => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
+                
                 _ => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
             };
             if (_options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
@@ -103,7 +94,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
             _socket.Listen(_options.Backlog);
         }
 
-        while (true)
+        while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -117,33 +108,25 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 
                 settings.Socket = socket;
 
-                var socketConnection = new SocketTransportConnection(settings)
+                var context = new SocketTransportConnectionContext(settings)
                 {
                     Protocol = ProtocolType.Tcp
                 };
 
-                var connection = new TcpTransportConnection(socketConnection);
+                var connection = new TcpTransportConnection(
+                    context, 
+                    _pipeline,
+                    Id);
 
-                if (!ThreadPool.UnsafeQueueUserWorkItem(connection, false))
+                context.OnOpen = () =>
                 {
-                    throw new Exception();
-                }
+                    _connections.Add(connection);
+                };
 
-                _connections.Add(connection);
-
-                socketConnection.OnDispose = () =>
+                context.OnDispose = () =>
                 {
                     _connections.Remove(connection);
                 };
-
-                var task = _pipeline?.ExecuteAsync(
-                    new TcpTransportContext(socketConnection),
-                    cancellationToken);
-
-                if (task is not null)
-                {
-                    await task;
-                }
 
                 return connection;
             }
@@ -159,71 +142,30 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
             }
             catch (SocketException)
             {
-
+                throw;
             }
             catch (Exception)
             {
-
+                throw;
             }
         }
+
+        throw new OperationCanceledException(cancellationToken);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    public override void Dispose()
+    public override ValueTask DisposeAsync()
     {
         _socket?.Close();
         _socket?.Dispose();
+
+        return ValueTask.CompletedTask;
     }
-
-
-    public TcpServerTransport Use(Func<TcpTransportContext, TransportMiddleware, Task> middleware)
-    {
-        ThrowHelper.ThrowIfNull(middleware);
-
-        Func<TcpTransportContext, TransportMiddleware, Task> middleware2 = middleware;
-
-        (this as ITransportPipelineBuilder).Use((TransportMiddleware next) => (ITransportContext c) =>
-        {
-            if (c is TcpTransportContext context)
-            {
-                return middleware2.Invoke(context, next);
-            }
-
-            return Task.CompletedTask;
-        });
-
-        return this;
-    }
-
-    ITransportPipelineBuilder ITransportPipelineBuilder.Use(Func<TransportMiddleware, TransportMiddleware> middleware)
-    {
-        ThrowHelper.ThrowIfNull(middleware);
-
-        _middleware.Add(middleware);
-
-        return this;
-    }
-
-    ITransportPipeline ITransportPipelineBuilder.Build()
-    {
-        var middleware = new TransportMiddleware(context =>
-        {
-            return Task.CompletedTask;
-        });
-
-        for (int i = _middleware.Count - 1; i >= 0; i--)
-        {
-            middleware = _middleware[i].Invoke(middleware);
-        }
-
-        return new TransportPipeline(middleware);
-    }
-
 
     /// <summary>
-    /// 
+    /// Creates a new server transport.
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>

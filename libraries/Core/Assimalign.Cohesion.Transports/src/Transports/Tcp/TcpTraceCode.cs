@@ -1,6 +1,6 @@
 ﻿namespace Assimalign.Cohesion.Transports;
 
-using Assimalign.Cohesion.Transports.Internal;
+using Internal;
 
 public enum TcpTraceCode
 {

@@ -4,23 +4,21 @@ using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Transports.Internal;
 
-internal class SocketTransportConnection : ITransportConnection
+internal class SocketTransportConnectionContext : ITransportConnectionContext, IThreadPoolWorkItem
 {
-    private readonly CancellationTokenSource connectionClosedTokenSource = new CancellationTokenSource();
-    private readonly TaskCompletionSource connectionClosingProcess = new TaskCompletionSource();
-    private readonly TransportTrace trace;
+    private readonly CancellationTokenSource _connectionClosedTokenSource = new CancellationTokenSource();
+    private readonly TaskCompletionSource _connectionClosingProcess = new TaskCompletionSource();
 
-    private volatile bool isSocketDisposed;
-    private bool isConnectionClosed;
-    private readonly object @lock = new object();
+    private readonly Lock _lock = new();
+    private bool _isConnectionClosed;
+    private volatile bool _isSocketDisposed;
+    private volatile ConnectionState _state;
 
-    private volatile ConnectionState state;
-
-
-    public SocketTransportConnection(SocketTransportConnectionSettings? settings)
+    public SocketTransportConnectionContext(SocketTransportConnectionSettings? settings)
     {
         if (settings is null)
         {
@@ -49,7 +47,7 @@ internal class SocketTransportConnection : ITransportConnection
             this.Output = clientPipe.Writer;
         }
 
-        this.trace = settings.Trace;
+        this.Trace = settings.Trace;
         this.Socket = settings.Socket;
         this.LocalEndPoint = settings?.Socket.LocalEndPoint!;
         this.RemoteEndPoint = settings?.Socket.RemoteEndPoint!;
@@ -59,18 +57,20 @@ internal class SocketTransportConnection : ITransportConnection
 
     public ProtocolType Protocol { get; init; }
     public bool IsConnected => RemoteEndPoint is not null;
-    public object? ConnectionData { get; set; }
-    public ConnectionState State => this.state;
+    public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+    public ConnectionState State => this._state;
     public ITransportConnectionPipe Pipe { get; set; }
     public EndPoint LocalEndPoint { get; set; }
     public EndPoint RemoteEndPoint { get; set; }
     public Action OnDispose { get; set; } = default!;
+    public Action OnOpen { get; set; } = default!;
 
     public readonly PipeWriter Output;
     public readonly PipeReader Input;
     public readonly SocketPipeReceiver Receiver;
     public readonly SocketPipeSenderPool SenderPool;
     public readonly Socket Socket;
+    public readonly TransportTrace? Trace;
     public Exception? ConnectionError;
 
 
@@ -78,11 +78,11 @@ internal class SocketTransportConnection : ITransportConnection
     {
         AbortAsync().GetAwaiter().GetResult();
     }
-    public ValueTask AbortAsync()
+    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
-        lock (@lock)
+        lock (_lock)
         {
-            if (isSocketDisposed)
+            if (_isSocketDisposed)
             {
                 return ValueTask.CompletedTask;
             }
@@ -108,28 +108,32 @@ internal class SocketTransportConnection : ITransportConnection
             }
 
             Socket.Dispose();
-            state = ConnectionState.Aborted;
+            _state = ConnectionState.Aborted;
         }
         return ValueTask.CompletedTask;
     }
     public void Dispose()
     {
-        if (!isSocketDisposed)
+        DisposeAsync().GetAwaiter().GetResult();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        if (!_isSocketDisposed)
         {
-            throw new ObjectDisposedException(nameof(SocketTransportConnection));
+            throw new ObjectDisposedException(nameof(SocketTransportConnectionContext));
         }
-        Abort();
-        isSocketDisposed = true;
+        await AbortAsync().ConfigureAwait(false);
+        _isSocketDisposed = true;
         OnDispose?.Invoke();
     }
     public void Execute()
     {
-        if (state != ConnectionState.Running)
+        if (_state != ConnectionState.Opening)
         {
             _ = Receive();
             _ = Send();
 
-            state = ConnectionState.Running;
+            _state = ConnectionState.Open;
         }
     }
     public async Task Receive()
@@ -147,7 +151,7 @@ internal class SocketTransportConnection : ITransportConnection
                 if (result.BytesTransferred == 0)
                 {
                     // FIN
-                    trace?.Invoke(SocketTraceCode.Finished, ConnectionData, "The remote host has finished sending data.");
+                    Trace?.Invoke(SocketTraceCode.Finished, Items, "The remote host has finished sending data.");
                     break;
                 }
 
@@ -159,14 +163,14 @@ internal class SocketTransportConnection : ITransportConnection
                 if (flushResultTask.IsCompleted)
                 {
                     // TODO: Add 'Connection Paused' Trace
-                    trace?.Invoke(SocketTraceCode.Paused, ConnectionData, "The connection has been paused receiving data.");
+                    Trace?.Invoke(SocketTraceCode.Paused, Items, "The connection has been paused receiving data.");
                 }
 
                 var flushResult = await flushResultTask;
 
                 if (flushResultTaskPaused)
                 {
-                    trace?.Invoke(SocketTraceCode.Resumed, ConnectionData, "The connection has resumed receiving data.");
+                    Trace?.Invoke(SocketTraceCode.Resumed, Items, "The connection has resumed receiving data.");
                 }
                 if (flushResult.IsCompleted || flushResult.IsCanceled)
                 {
@@ -182,9 +186,9 @@ internal class SocketTransportConnection : ITransportConnection
 
             // There's still a small chance that both DoReceive() and DoSend() can log the same connection reset.
             // Both logs will have the same ConnectionId. I don't think it's worthwhile to lock just to avoid this.
-            if (!isSocketDisposed)
+            if (!_isSocketDisposed)
             {
-                trace?.Invoke(SocketTraceCode.Reset, ConnectionData, exception.Message);
+                Trace?.Invoke(SocketTraceCode.Reset, Items, exception.Message);
             }
         }
         catch (Exception exception)
@@ -194,15 +198,15 @@ internal class SocketTransportConnection : ITransportConnection
 
             if ((exception is SocketException socketException && SocketHelper.IsConnectionAbortError(socketException.SocketErrorCode)) || exception is ObjectDisposedException)
             {
-                if (!isSocketDisposed)
+                if (!_isSocketDisposed)
                 {
                     // This is unexpected if the Socket hasn't been disposed yet.
-                    trace?.Invoke(SocketTraceCode.Error, ConnectionData, exception.Message);
+                    Trace?.Invoke(SocketTraceCode.Error, Items, exception.Message);
                 }
             }
             else
             {
-                trace?.Invoke(ConnectionData, SocketTraceCode.Error, $"A connection error occurred while receiving data: {exception.Message}");
+                Trace?.Invoke(SocketTraceCode.Error, Items, $"A connection error occurred while receiving data: {exception.Message}");
             }
         }
         finally
@@ -211,18 +215,18 @@ internal class SocketTransportConnection : ITransportConnection
             Output.Complete(ConnectionError ?? error);
 
             // Guard against scheduling this multiple times
-            if (!isConnectionClosed)
+            if (!_isConnectionClosed)
             {
-                isConnectionClosed = true;
+                _isConnectionClosed = true;
 
                 ThreadPool.UnsafeQueueUserWorkItem(state =>
                 {
                     state.CancelConnectionClosedToken();
-                    state.connectionClosingProcess.TrySetResult();
+                    state._connectionClosingProcess.TrySetResult();
 
                 }, this, preferLocal: false);
 
-                await connectionClosingProcess.Task;
+                await _connectionClosingProcess.Task;
 
                 Abort();
             }
@@ -297,7 +301,7 @@ internal class SocketTransportConnection : ITransportConnection
         when (SocketHelper.IsConnectionResetError(exception.SocketErrorCode))
         {
             error = new SocketConnectionResetException(exception.Message, exception);
-            trace?.Invoke(SocketTraceCode.Reset, ConnectionData, $"The connection was reset for the following reason: {error.Message}");
+            Trace?.Invoke(SocketTraceCode.Reset, Items, $"The connection was reset for the following reason: {error.Message}");
         }
         catch (Exception exception)
         when ((exception is SocketException socketEx && SocketHelper.IsConnectionAbortError(socketEx.SocketErrorCode)) || exception is ObjectDisposedException)
@@ -308,7 +312,7 @@ internal class SocketTransportConnection : ITransportConnection
         catch (Exception exception)
         {
             error = exception;
-            trace?.Invoke(SocketTraceCode.Error, ConnectionData, $"A connection error occurred while sending data: {exception.Message}");
+            Trace?.Invoke(SocketTraceCode.Error, Items, $"A connection error occurred while sending data: {exception.Message}");
         }
         finally
         {
@@ -327,7 +331,7 @@ internal class SocketTransportConnection : ITransportConnection
     {
         try
         {
-            connectionClosedTokenSource.Cancel();
+            _connectionClosedTokenSource.Cancel();
         }
         catch (Exception)
         {

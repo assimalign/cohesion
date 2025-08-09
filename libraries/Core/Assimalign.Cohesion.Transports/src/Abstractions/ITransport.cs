@@ -12,8 +12,16 @@ namespace Assimalign.Cohesion.Transports;
 /// A transport represents a delivery system for data transfer from host to host. It is used
 /// to make higher level transports such as IP for TCP and UDP or application layer protocols like HTTP.
 /// </remarks>
-public interface ITransport : IDisposable
+public interface ITransport : IDisposable, IAsyncDisposable
 {
+    /// <summary>
+    /// A unique identifier for the transport.
+    /// </summary>
+    /// <remarks>
+    /// Useful when a server is listening on multiple transports, each transport will have a unique identifier.
+    /// </remarks>
+    TransportId Id { get;  }
+
     /// <summary>
     /// Specifies whether the transport is a client or server.
     /// </summary>
@@ -31,7 +39,7 @@ public interface ITransport : IDisposable
     ITransportConnection Initialize();
 
     /// <summary>
-    /// 
+    /// Either accepts incoming connection or connects to remote host.
     /// </summary>
     /// <remarks>
     /// It's best to execute middleware inside initialization block.

@@ -14,7 +14,7 @@ public interface IConfigurationEntry
     Key Key { get; }
 
     /// <summary>
-    /// 
+    /// The complete path of the entry.
     /// </summary>
     Path Path { get; }
 

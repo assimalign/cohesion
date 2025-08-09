@@ -4,17 +4,30 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="Internal\Quic\**" />
-	  <Compile Remove="Transports\Quic\**" />
-	  <Compile Remove="Transports\Udp\**" />
-	  <EmbeddedResource Remove="Internal\Quic\**" />
-	  <EmbeddedResource Remove="Transports\Quic\**" />
-	  <EmbeddedResource Remove="Transports\Udp\**" />
-	  <None Remove="Internal\Quic\**" />
-	  <None Remove="Transports\Quic\**" />
-	  <None Remove="Transports\Udp\**" />
+		<Compile Remove="Transports\Quic\**" />
+		<Compile Remove="Transports\Udp\**" />
+		<EmbeddedResource Remove="Transports\Quic\**" />
+		<EmbeddedResource Remove="Transports\Udp\**" />
+		<None Remove="Transports\Quic\**" />
+		<None Remove="Transports\Udp\**" />
 	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ConnectionId.g.cs">
+			<Name>ConnectionId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<Namespace>Assimalign.Cohesion.Transports</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\TransportId.g.cs">
+			<Name>TransportId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<Namespace>Assimalign.Cohesion.Transports</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
 	</ItemGroup>
 </Project>

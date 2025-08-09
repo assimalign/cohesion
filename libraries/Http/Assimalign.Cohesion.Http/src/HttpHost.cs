@@ -53,7 +53,6 @@ public readonly struct HttpHost : IEquatable<HttpHost>
 
     #endregion
 
-
     #region Operators
 
     public static implicit operator HttpHost(string value)

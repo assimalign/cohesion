@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Transports;
+﻿using System.Collections.Generic;
+
+namespace Assimalign.Cohesion.Transports;
 
 /// <summary>
 /// A delegate for collecting trace information from the transport layer.
@@ -7,7 +9,7 @@
 /// It might be useful to use a lock method when utilizing this delegate 
 /// as it is possible for multiple threads to access this delegate at the same time.
 /// </remarks>
-/// <param name="connectionData"></param>
+/// <param name="items"></param>
 /// <param name="traceCode"></param>
 /// <param name="message"></param>
-public delegate void TransportTrace(object? traceCode, object? connectionData, string? message = null);
+public delegate void TransportTrace(object? traceCode, IDictionary<string, object?> items, string? message = null);

@@ -9,6 +9,14 @@ namespace Assimalign.Cohesion.Transports;
 /// </summary>
 public abstract class ClientTransport : ITransport
 {
+    protected ClientTransport()
+    {
+        Id = TransportId.NewTransportId();
+    }
+
+    /// <inheritdoc />
+    public virtual TransportId Id { get; }
+
     /// <inheritdoc />
     public TransportKind Kind => TransportKind.Client;
 
@@ -22,8 +30,13 @@ public abstract class ClientTransport : ITransport
     public abstract Task<ITransportConnection> ConnectAsync(CancellationToken cancellationToken = default);
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public virtual void Dispose()
+    {
+        DisposeAsync().GetAwaiter().GetResult();
+    }
 
+    /// <inheritdoc />
+    public abstract ValueTask DisposeAsync();
 
 
     ITransportConnection ITransport.Initialize() => ConnectAsync().GetAwaiter().GetResult();

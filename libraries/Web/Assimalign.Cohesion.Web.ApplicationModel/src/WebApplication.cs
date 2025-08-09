@@ -21,7 +21,7 @@ public partial class WebApplication : IWebApplication, IWebApplicationPipelineBu
 
     private readonly IList<ITransport> _transports;
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware;
-    //private readonly HttpConnectionFactory _httpConnectionFactory;
+    private readonly HttpConnectionFactory _httpConnectionFactory;
 
     internal WebApplication(WebApplicationContext context)
     {
@@ -89,7 +89,7 @@ public partial class WebApplication : IWebApplication, IWebApplicationPipelineBu
             while (true)
             {
                 // Queue/Re-Queue
-                foreach (var transport in this._transports)
+                foreach (var transport in _transports)
                 {
                     var hashCode = transport.GetHashCode();
 

@@ -10,26 +10,49 @@ using Assimalign.Cohesion.Internal;
 
 public static class TransportExtensions
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="transport"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    public static async IAsyncEnumerable<ITransportConnection> EnumerateAsync(
-        this ITransport transport, 
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+
+    extension(ITransport transport)
     {
-        ThrowHelper.ThrowIfNull(transport);
-
-        while (true)
+        public async IAsyncEnumerable<ITransportConnection> EnumerateAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            yield return await transport.InitializeAsync(cancellationToken);
+            ThrowHelper.ThrowIfNull(transport);
 
-            if (cancellationToken.IsCancellationRequested)
+            while (true)
             {
-                break;
+                yield return await transport.InitializeAsync(cancellationToken);
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
+        }
+    }
+
+    extension(ITransportConnection connection)
+    {
+        public bool IsOpen() => connection.State == ConnectionState.Open;
+    }
+
+    extension(ITransportConnectionContext context)
+    {
+        public void AddItem<T>(string key, T value)
+        {
+            ThrowHelper.ThrowIfNull(context);
+            ThrowHelper.ThrowIfNullOrEmpty(key);
+            context.Items[key] = value;
+        }
+
+        public T? GetItem<T>(string key) where T : class
+        {
+            ThrowHelper.ThrowIfNull(context);
+            ThrowHelper.ThrowIfNullOrEmpty(key);
+
+            if (context.Items.TryGetValue(key, out var value))
+            {
+                return value as T;
+            }
+            return default;
         }
     }
 }
