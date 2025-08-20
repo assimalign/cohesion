@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,13 +9,7 @@ using Assimalign.Cohesion.Http;
 /// <summary>
 /// 
 /// </summary>
-public interface IWebApplicationPipeline
+public interface IWebApplicationPipeline : IHttpApplication
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="context"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken);
+    
 }

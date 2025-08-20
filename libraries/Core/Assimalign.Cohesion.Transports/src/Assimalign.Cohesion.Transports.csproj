@@ -15,16 +15,26 @@
 		<Reference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
-		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ConnectionId.g.cs">
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ConnectionId.cs">
 			<Name>ConnectionId</Name>
 			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
 			<Namespace>Assimalign.Cohesion.Transports</Namespace>
 			<IncludeIsValidMethod>false</IncludeIsValidMethod>
 			<IncludeImplicitOperators>true</IncludeImplicitOperators>
 		</ValueObject>
-		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\TransportId.g.cs">
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\TransportId.cs">
 			<Name>TransportId</Name>
 			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
+			<Namespace>Assimalign.Cohesion.Transports</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\TransportProtocol.cs">
+			<Name>TransportProtocol</Name>
+			<RuntimeType>String</RuntimeType>
+			<IsStruct>true</IsStruct>
 			<Namespace>Assimalign.Cohesion.Transports</Namespace>
 			<IncludeIsValidMethod>false</IncludeIsValidMethod>
 			<IncludeImplicitOperators>true</IncludeImplicitOperators>

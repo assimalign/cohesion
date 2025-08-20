@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.Hosting.Tests;
 
 public class TestLifecycleService : IHostLifecycleService
 {
-    private readonly Action<Lifecycle> action;
+    private readonly Action<Lifecycle> _action;
 
     public TestLifecycleService(Action<Lifecycle> action)
     {
-        this.action = action;
+        _action = action;
     }
 
     public enum Lifecycle 
@@ -23,40 +23,41 @@ public class TestLifecycleService : IHostLifecycleService
         Stopped
     }
 
+    public ServiceId Id { get; } = ServiceId.New();
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Start);
+        _action.Invoke(Lifecycle.Start);
         return Task.CompletedTask;
     }
 
     public Task StartedAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Started);
+        _action.Invoke(Lifecycle.Started);
         return Task.CompletedTask;
     }
 
     public Task StartingAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Starting);
+        _action.Invoke(Lifecycle.Starting);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Stop);
+        _action.Invoke(Lifecycle.Stop);
         return Task.CompletedTask;
     }
 
     public Task StoppedAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Stopped);
+        _action.Invoke(Lifecycle.Stopped);
         return Task.CompletedTask;
     }
 
     public Task StoppingAsync(CancellationToken cancellationToken)
     {
-        action.Invoke(Lifecycle.Stopping);
+        _action.Invoke(Lifecycle.Stopping);
         return Task.CompletedTask;
     }
 }

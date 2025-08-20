@@ -1,6 +1,7 @@
 ﻿
 using System;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.IO;
 using System.Text;
 using Microsoft.Build.Framework;
@@ -21,7 +22,7 @@ namespace Assimalign.Cohesion.Build.Tasks
 
         public override bool Execute()
         {
-            var contexts = new List<ValueObjectContext>();
+            var contexts = new List<ValueTypeContext>();
 
             try
             {
@@ -47,12 +48,12 @@ namespace Assimalign.Cohesion.Build.Tasks
                     string meta = string.Empty;
                     string path = item.ItemSpec;
 
-                    if (!path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
+                    if (!path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase))
                     {
-                        path = path.Replace(".cs", ".g.cs");
+                        path = path.Replace(".cs", ".generated.cs");
                     }
 
-                    var context = new ValueObjectContext()
+                    var context = new ValueTypeContext()
                     {
                         Path = path,
                     };
@@ -98,6 +99,17 @@ namespace Assimalign.Cohesion.Build.Tasks
                         context.IncludeImplicitOperators = true;
                     }
 
+                    if (!string.IsNullOrEmpty((meta = item.GetMetadata("IsClass"))) &&
+                       meta.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.IsClass = true;
+                    }
+                    if (!string.IsNullOrEmpty((meta = item.GetMetadata("IsStruct"))) &&
+                       meta.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.IsStruct = true;
+                    }
+
                     contexts.Add(context);
                 }
             }
@@ -109,20 +121,18 @@ namespace Assimalign.Cohesion.Build.Tasks
 
             foreach (var context in contexts)
             {
-                var code = GenerateCode(context);
+                var builder = new StringBuilder();
+
+                GenerateValueType(builder, context);
 
                 using var stream = File.Create(context.Path);
 
-                var bytes = Encoding.UTF8.GetBytes(code);
+                var bytes = Encoding.UTF8.GetBytes(builder.ToString());
 
                 stream.Write(bytes, 0, bytes.Length);
 
                 FilePath = context.Path;
             }
-
-
-
-
 
             return true;
         }
@@ -134,85 +144,76 @@ namespace Assimalign.Cohesion.Build.Tasks
             return false;
         }
 
-        partial class ValueObjectContext
+        partial class ValueTypeContext
         {
             public string Path { get; set; }
-            public string Name { get; set; }
-            public string Namespace { get; set; }
-            public string RuntimeType { get; set; }
+            public string? Name { get; set; }
+            public string? Namespace { get; set; }
+            public string? RuntimeType { get; set; }
+            public bool IsClass { get; set; }
+            public bool IsStruct { get; set; }
             public bool IncludeIsValidMethod { get; set; }
             public bool IncludeImplicitOperators { get; set; }
         }
-
-
-        private static string GenerateCode(ValueObjectContext info)
+        private static void GenerateValueType(StringBuilder builder, ValueTypeContext context)
         {
-            var builder = new StringBuilder();
+            builder.AppendLine($$"""
+                using System;
 
-            builder.AppendLine("using System;");
-            builder.AppendLine();
+                namespace {{context.Namespace}}
+                {
+                    partial {{GetIdentifier()}} {{context.Name}} :
+                """);
 
-            builder.Append("namespace ");
-            builder.AppendLine(info.Namespace);
-            builder.AppendLine("{");
-            builder.Append("    partial struct ");
-            builder.Append(info.Name);
-            builder.AppendLine(" : ");
-
-            WriteInterfaces(builder, info);
+            GenerateValueTypeInterfaces(builder, context);
 
             builder.AppendLine("    {");
 
-            WriteConstructor(builder, info);
-            WriteProperties(builder, info);
-            WriteMethods(builder, info);
-            WriteOverloads(builder, info);
-            WriteOperators(builder, info);
+            GenerateValueTypeConstructor(builder, context);
+            GenerateValueTypeProperties(builder, context);
+            GenerateValueTypeMethods(builder, context);
+            GenerateValueTypeOverloads(builder, context);
+            GenerateValueTypeOperators(builder, context);
 
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
-            return builder.ToString();
+            string GetIdentifier()
+            {
+                if (context.IsClass)
+                {
+                    return "class";
+                }
+                if (context.IsStruct)
+                {
+                    return "struct";
+                }
+                return string.Empty;
+            }
         }
-        private static void WriteInterfaces(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeInterfaces(StringBuilder builder, ValueTypeContext context)
         {
-            builder.AppendLine("	#if NET7_0_OR_GREATER");
+            builder.AppendTabbedLine(2, $$"""
+            global::System.Numerics.IEqualityOperators<{{context.Name}}, {{context.Name}}, bool>
+            ,global::System.Numerics.IComparisonOperators<{{context.Name}}, {{context.Name}}, bool>
+            ,global::System.IComparable<{{context.Name}}>
+            ,global::System.IEquatable<{{context.Name}}>
+            """);
 
-            // IEqualityOperators<,,>
-            builder.Append("		global::System.Numerics.IEqualityOperators<");
-            builder.Append(info.Name);
-            builder.Append(", ");
-            builder.Append(info.Name);
-            builder.AppendLine(", bool>,");
-
-            // IComparisonOperators<,,>
-            builder.Append("		global::System.Numerics.IComparisonOperators<");
-            builder.Append(info.Name);
-            builder.Append(", ");
-            builder.Append(info.Name);
-            builder.AppendLine(", bool>,");
-
-            builder.AppendLine("	#endif");
-
-            // IComparable<>
-            builder.Append("		global::System.IComparable<");
-            builder.Append(info.Name);
-            builder.AppendLine(">,");
-
-            // IEquatable<>
-            builder.Append("		global::System.IEquatable<");
-            builder.Append(info.Name);
-            builder.AppendLine(">,");
-
-            // IFormattable
-            builder.AppendLine("		global::System.IFormattable");
+            // ISpanParsable
+            if (!context.RuntimeType.Equals("string", StringComparison.InvariantCultureIgnoreCase))
+            {
+                builder.AppendTabbedLine(2, $$"""
+                ,global::System.IFormattable
+                """);
+            }
         }
-        private static void WriteConstructor(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeConstructor(StringBuilder builder, ValueTypeContext info)
         {
             builder.Append("        public ");
             builder.Append(info.Name);
             builder.Append("(");
-            builder.Append(info.RuntimeType);
+            builder.Append(GetNormalizedName(info.RuntimeType));
             builder.Append(" ");
             builder.AppendLine("value)");
             builder.AppendLine("        {");
@@ -229,27 +230,19 @@ namespace Assimalign.Cohesion.Build.Tasks
             builder.AppendLine("        }");
             builder.AppendLine();
         }
-        private static void WriteProperties(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeProperties(StringBuilder builder, ValueTypeContext context)
         {
-            builder.Append("		public ");
-            builder.Append(info.RuntimeType);
-            builder.AppendLine(" Value { get; }");
-            builder.AppendLine();
+            builder.AppendTabbedLine(2, $$"""
+            public {{GetNormalizedName(context.RuntimeType)}} Value { get; }
+            """);
         }
-        private static void WriteOperators(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeOperators(StringBuilder builder, ValueTypeContext context)
         {
             var operators = new string[] { "==", "!=", ">", "<", ">=", "<=" };
 
             foreach (var op in operators)
             {
-                builder.Append("		public static bool operator ");
-                builder.Append(op);
-                builder.Append("(");
-                builder.Append(info.Name);
-                builder.Append(" a, ");
-                builder.Append(info.Name);
-                builder.Append(" b) => ");
-                builder.AppendLine(op switch
+                var body = op switch
                 {
                     "==" => "a.Equals(b);",
                     "!=" => "!a.Equals(b);",
@@ -257,102 +250,127 @@ namespace Assimalign.Cohesion.Build.Tasks
                     "<" => "a.CompareTo(b) < 0;",
                     ">=" => "a.CompareTo(b) >= 0;",
                     "<=" => "a.CompareTo(b) <= 0;",
-                });
+                };
+
+                builder.AppendTabbedLine(2, $$"""
+                public static bool operator {{op}}({{context.Name}} a, {{context.Name}} b) => {{body}}
+                """);
             }
 
-            if (info.IncludeImplicitOperators)
+            if (context.IncludeImplicitOperators)
             {
-                builder.Append("		public static implicit operator ");
-                builder.Append(info.RuntimeType);
-                builder.Append("(");
-                builder.Append(info.Name);
-                builder.AppendLine(" item) => item.Value;");
-
-                builder.Append("		public static implicit operator ");
-                builder.Append(info.Name);
-                builder.Append("(");
-                builder.Append(info.RuntimeType);
-                builder.Append(" item) => new ");
-                builder.Append(info.Name);
-                builder.AppendLine("(item);");
+                builder.AppendTabbedLine(2, $$"""
+                public static implicit operator {{GetNormalizedName(context.RuntimeType)}}({{context.Name}} item) => item.Value;
+                public static implicit operator {{context.Name}}({{GetNormalizedName(context.RuntimeType)}} item) => new {{context.Name}}(item);
+                """);
             }
         }
-        private static void WriteOverloads(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeOverloads(StringBuilder builder, ValueTypeContext context)
         {
-            builder.AppendLine("		public override int GetHashCode() => Value.GetHashCode();");
-            builder.AppendLine(info.RuntimeType switch
+            builder.AppendTabbedLine(2, $$"""
+		public override int GetHashCode() => Value.GetHashCode();
+		public override string ToString() => {{GetToString(context.RuntimeType)}}
+		public override bool Equals(object? obj) => ReferenceEquals(null, obj) || obj is not {{context.Name}} instance ? false : Equals(instance);
+		""");
+
+            string GetToString(string? type)
             {
-                "int" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "long" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "short" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "uint" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "ulong" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "ushort" => "		public override string ToString() => Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);",
-                "string" => "		public override string ToString() => Value;",
-                "Guid" => "		public override string ToString() => Value.ToString();",
-                "Ulid" => "		public override string ToString() => Value.ToString();"
-            });
-            builder.AppendLine("		public override bool Equals(object? obj)");
-            builder.AppendLine("		{");
-            builder.Append("			if (ReferenceEquals(null, obj) || obj is not ");
-            builder.Append(info.Name);
-            builder.AppendLine(" instance)");
-            builder.AppendLine("			{");
-            builder.AppendLine("				return false;");
-            builder.AppendLine("			}");
-            builder.AppendLine("			return Equals(instance);");
-            builder.AppendLine("		}");
-            builder.AppendLine();
+                if (type.Equals("guid", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return "Value.ToString();";
+                }
+                if (type.Equals("ulid", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return "Value.ToString();";
+                }
+                if (type.Equals("string", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return "Value;";
+                }
+                return "Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);";
+            }
         }
-        private static void WriteMethods(StringBuilder builder, ValueObjectContext info)
+        private static void GenerateValueTypeMethods(StringBuilder builder, ValueTypeContext context)
         {
-            if (info.IncludeIsValidMethod)
+            if (context.IncludeIsValidMethod)
             {
                 builder.Append("		public partial bool IsValid(");
-                builder.Append(info.RuntimeType);
+                builder.Append(GetNormalizedName(context.RuntimeType));
                 builder.AppendLine(" value, out string message);");
             }
 
             // Write CompareTo
             builder.Append("		public int CompareTo(");
-            builder.Append(info.Name);
+            builder.Append(context.Name);
             builder.AppendLine(" other) => Value.CompareTo(other.Value);");
 
             // Write IEquality
-            builder.Append("		public bool Equals(");
-            builder.Append(info.Name);
-            builder.AppendLine(" other) => Value.Equals(other.Value);");
+            builder.AppendTabbedLine(2, $"public bool Equals({context.Name} other) => Value.Equals(other.Value);");
 
             // Write IFormattable
-            builder.AppendLine("		public string ToString(");
-            builder.AppendLine("			#if NET7_0_OR_GREATER");
-            builder.AppendLine("			[global::System.Diagnostics.CodeAnalysis.StringSyntax(global::System.Diagnostics.CodeAnalysis.StringSyntaxAttribute.NumericFormat)]");
-            builder.AppendLine("			#endif");
-            builder.AppendLine("			string? format,");
-            builder.AppendLine("			global::System.IFormatProvider? formatProvider)");
+            var toStringBody = "";
 
-            if (info.RuntimeType.Equals("string"))
+
+            if (context.RuntimeType.Equals("string", StringComparison.InvariantCultureIgnoreCase))
             {
-                builder.AppendLine("			=> Value.ToString(formatProvider);");
+                toStringBody = "Value.ToString(formatProvider);";
             }
             else
             {
-                builder.AppendLine("			=> Value.ToString(format, formatProvider);");
+                toStringBody = " Value.ToString(format, formatProvider);";
             }
 
-            if (info.RuntimeType.Equals("Guid"))
+            builder.AppendTabbedLine(2, $$"""
+            public string ToString(
+                [global::System.Diagnostics.CodeAnalysis.StringSyntax(global::System.Diagnostics.CodeAnalysis.StringSyntaxAttribute.NumericFormat)] string? format,
+                global::System.IFormatProvider? formatProvider) => {{toStringBody}}
+            """);
+
+            // IParsable<>
+            if (!context.RuntimeType.Equals("string", StringComparison.InvariantCultureIgnoreCase))
             {
-                builder.AppendLine($"       public static {info.Name} New{info.Name}() => new {info.Name}(Guid.NewGuid()); ");
+                builder.AppendTabbedLine(2, $$"""
+			public static {{context.Name}} Parse(string value) => {{GetNormalizedName(context.RuntimeType)}}.Parse(value);
+			public static {{context.Name}} Parse(string value, IFormatProvider? provider) => Parse(value.AsSpan());
+			public static bool TryParse([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, IFormatProvider? provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.Name}} result) => TryParse(value.AsSpan(), provider, out result);
+			public static {{context.Name}} Parse(ReadOnlySpan<char> span) => Parse(span, null);
+			public static {{context.Name}} Parse(ReadOnlySpan<char> span, IFormatProvider? provider) => new {{context.Name}}({{GetNormalizedName(context.RuntimeType)}}.Parse(span, provider));
+			public static bool TryParse(ReadOnlySpan<char> span, IFormatProvider? provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.Name}} result)
+			{
+				result = default;
+				
+				if ({{GetNormalizedName(context.RuntimeType)}}.TryParse(span, provider, out {{GetNormalizedName(context.RuntimeType)}} value))
+				{
+					result = new {{context.Name}}(value);
+					return true;
+				}
+				
+				return false;
+			}
+			""");
             }
-            if (info.RuntimeType.Equals("Ulid"))
+            if (context.RuntimeType.Equals("ulid", StringComparison.InvariantCultureIgnoreCase))
             {
-                builder.AppendLine($"       public static {info.Name} New{info.Name}() => new {info.Name}(Ulid.NewUlid()); ");
+                builder.AppendTabbedLine(2, $$"""
+                    public static {{context.Name}} New() => new {{context.Name}}({{GetNormalizedName(context.RuntimeType)}}.NewUlid());
+                    """);
             }
 
             builder.AppendLine();
         }
+        private static string GetNormalizedName(string? underlyingType)
+        {
+            if (underlyingType.Equals("guid", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Guid";
+            }
+            if (underlyingType.Equals("ulid", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Ulid";
+            }
 
-
+            return underlyingType.ToLower();
+        }
     }
 }
 

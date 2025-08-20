@@ -17,11 +17,15 @@ public class HostTests
     {
         var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var queue = new Queue<TestLifecycleService.Lifecycle>();
-        var builder = HostBuilder.Create();
+        
+        using var host = HostBuilder.Create()
+            .AddService(context =>
+            {
 
-        builder.AddService(new TestLifecycleService(queue.Enqueue));
 
-        using var host = builder.Build();
+                return new TestLifecycleService(queue.Enqueue);
+            })
+            .Build();
 
         await host.RunAsync(cancellationTokenSource.Token);
 

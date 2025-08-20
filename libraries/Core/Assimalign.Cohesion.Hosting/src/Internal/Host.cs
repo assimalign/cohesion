@@ -7,33 +7,40 @@ namespace Assimalign.Cohesion.Hosting.Internal;
 
 internal sealed class Host : IHost
 {
-    private readonly HostOptions options;
-    public Host(HostOptions options)
+    private readonly HostOptions _options;
+    private readonly HostContext _context;
+    private readonly IEnumerable<Action<IHostContext>> _traces;
+
+    internal Host(HostOptions options)
     {
-        this.options = options;
-        this.Context = new()
+        _options = options;
+        _traces = options.GetTraces();
+        _context = new HostContext()
         {
+            HostId = HostId.New(),
             Environment = new HostEnvironment()
             {
                 Name = options.Environment
             }
         };
+        Id = _context.HostId;
     }
 
-    public HostContext Context { get; }
+    public HostId Id { get; }
+    public HostContext Context => _context;
     IHostContext IHost.Context => Context;
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        // Create a cancellation token source to pass
+        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         // Let's control the task completion of 'RunAsync()` by manually setting the 
         // results when Cancellation is Requested
         var taskCompletionSource = new TaskCompletionSource<Host>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Create a cancellation token source to pass
-        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
         // Set the Shutdown handle
-        Context.ShutdownCallback = () =>
+        _context.ShutdownCallback = () =>
         {
             cancellationTokenSource.Cancel();
         };
@@ -41,7 +48,7 @@ internal sealed class Host : IHost
         // Let's register a callback to complete the task 
         cancellationTokenSource.Token.Register(state =>
         {
-            options.Trace(Context);
+            Trace(_context);
 
             var source = (TaskCompletionSource<Host>)state!;
 
@@ -49,33 +56,32 @@ internal sealed class Host : IHost
 
         }, taskCompletionSource);
 
-        Context.State = HostState.Starting;
+        _context.State = HostState.Starting;
 
         // Begin trace
-        options.Trace(Context);
+        Trace(_context);
 
         await StartAsync(cancellationTokenSource.Token).ConfigureAwait(false);
 
-        Context.State = HostState.Running;
+        _context.State = HostState.Running;
 
-        options.Trace(Context);
+        Trace(_context);
 
         await taskCompletionSource.Task.ConfigureAwait(false);
 
-        Context.State = HostState.Stopping;
+        _context.State = HostState.Stopping;
 
-        options.Trace(Context);
+        Trace(_context);
 
         await StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
     }
-
-    private async Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         var startCancellationToken = cancellationToken;
 
-        if (options.ServiceStartupTimeout is not null)
+        if (_options.ServiceStartupTimeout is not null)
         {
-            var timeoutCancellationTokenSource = new CancellationTokenSource(options.ServiceStartupTimeout.Value);
+            var timeoutCancellationTokenSource = new CancellationTokenSource(_options.ServiceStartupTimeout.Value);
             var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
                 timeoutCancellationTokenSource.Token,
                 cancellationToken);
@@ -85,12 +91,12 @@ internal sealed class Host : IHost
         startCancellationToken.Register(() =>
         {
             // TODO: Need to change implementation for safer shutdown process
-            Context.Shutdown();
+            _context.Shutdown();
         });
 
         var services = Context.HostedServices;
 
-        if (options.StartServicesConcurrently)
+        if (_options.StartServicesConcurrently)
         {
             var tasks = new List<Task>();
 
@@ -134,13 +140,13 @@ internal sealed class Host : IHost
             }
         }
     }
-    private async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         var shutdownCancellationToken = cancellationToken;
 
-        if (options.ServiceShutdownTimeout is not null)
+        if (_options.ServiceShutdownTimeout is not null)
         {
-            var timeoutCancellationTokenSource = new CancellationTokenSource(options.ServiceShutdownTimeout.Value);
+            var timeoutCancellationTokenSource = new CancellationTokenSource(_options.ServiceShutdownTimeout.Value);
             var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
                 timeoutCancellationTokenSource.Token,
                 cancellationToken);
@@ -166,9 +172,15 @@ internal sealed class Host : IHost
             }
         }
     }
-
     public void Dispose()
     {
-        
+
+    }
+    private void Trace(IHostContext context)
+    {
+        foreach (var trace in _traces)
+        {
+            trace(context);
+        }
     }
 }

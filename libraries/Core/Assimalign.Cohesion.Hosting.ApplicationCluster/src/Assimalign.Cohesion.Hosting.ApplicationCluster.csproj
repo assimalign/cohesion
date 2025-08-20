@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Hosting</RootNamespace>
+		<Description>A</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Hosting" />
+	</ItemGroup>
+	<ItemGroup>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ResourceId.cs">
+			<Name>ResourceId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
+			<Namespace>Assimalign.Cohesion.Hosting</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ResourceName.cs">
+			<Name>ResourceName</Name>
+			<RuntimeType>String</RuntimeType>
+			<IsStruct>true</IsStruct>
+			<Namespace>Assimalign.Cohesion.Hosting</Namespace>
+			<IncludeIsValidMethod>false</IncludeIsValidMethod>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+	</ItemGroup>
+</Project>

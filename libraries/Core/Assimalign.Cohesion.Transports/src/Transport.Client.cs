@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-
 /// <summary>
 /// Represents a transport to be used for an underlying client.
 /// </summary>
@@ -11,7 +10,7 @@ public abstract class ClientTransport : ITransport
 {
     protected ClientTransport()
     {
-        Id = TransportId.NewTransportId();
+        Id = TransportId.New();
     }
 
     /// <inheritdoc />
@@ -21,7 +20,7 @@ public abstract class ClientTransport : ITransport
     public TransportKind Kind => TransportKind.Client;
 
     /// <inheritdoc />
-    public abstract ProtocolType Protocol { get; }
+    public abstract TransportProtocol Protocol { get; }
 
     /// <summary>
     /// A method that connects to a remote host (server) and returns a <see cref="ITransportConnection"/> object.

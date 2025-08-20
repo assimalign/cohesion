@@ -6,6 +6,7 @@
 		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\LogId.generated.cs">
 			<Name>LogId</Name>
 			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
 			<Namespace>Assimalign.Cohesion.Logging</Namespace>
 			<IncludeImplicitOperators>true</IncludeImplicitOperators>
 		</ValueObject>

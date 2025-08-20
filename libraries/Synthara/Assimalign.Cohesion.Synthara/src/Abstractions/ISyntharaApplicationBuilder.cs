@@ -18,6 +18,9 @@ public interface ISyntharaApplicationBuilder
     /// <returns></returns>
     ISyntharaApplicationBuilder AddResource(ISyntharaResource resource);
 
+
+    ISyntharaApplicationBuilder AddResource<TBuilder, >
+
     /// <summary>
     /// 
     /// </summary>

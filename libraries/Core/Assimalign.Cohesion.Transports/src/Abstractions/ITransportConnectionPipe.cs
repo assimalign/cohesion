@@ -19,24 +19,4 @@ public interface ITransportConnectionPipe : IDuplexPipe
     /// </summary>
     /// <returns></returns>
     Stream GetStream();
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
-    ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="buffer"></param>
-    /// <returns></returns>
-    ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default);
 }

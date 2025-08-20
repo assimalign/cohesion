@@ -55,7 +55,6 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         this.Receiver = new SocketPipeReceiver(settings.ReceiverScheduler);
     }
 
-    public ProtocolType Protocol { get; init; }
     public bool IsConnected => RemoteEndPoint is not null;
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
     public ConnectionState State => this._state;

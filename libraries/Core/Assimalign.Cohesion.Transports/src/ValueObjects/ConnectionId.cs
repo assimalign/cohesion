@@ -6,4 +6,5 @@ namespace Assimalign.Cohesion.Transports;
 
 public readonly partial struct ConnectionId
 {
+
 }

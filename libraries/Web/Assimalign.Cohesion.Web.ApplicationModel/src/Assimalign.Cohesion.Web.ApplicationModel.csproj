@@ -5,7 +5,7 @@
 	<ItemGroup>
 		<Reference Include="Assimalign.Cohesion.ApplicationModel" />
 		<Reference Include="Assimalign.Cohesion.Web" />
-		<Reference Include="Assimalign.Cohesion.Http.Connection" />
+		<Reference Include="Assimalign.Cohesion.Http.Transports" />
 		<Reference Include="Assimalign.Cohesion.Transports" />
 		<Reference Include="Assimalign.Cohesion.DependencyInjection" />
 		<Reference Include="Assimalign.Cohesion.Hosting" />

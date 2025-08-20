@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.Web" />
 		<Reference Include="Assimalign.Cohesion.Configuration" />
 		<Reference Include="Assimalign.Cohesion.Hosting" />
 		<Reference Include="Assimalign.Cohesion.DependencyInjection" />

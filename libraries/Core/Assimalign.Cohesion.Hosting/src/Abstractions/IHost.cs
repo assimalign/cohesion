@@ -7,17 +7,29 @@ namespace Assimalign.Cohesion.Hosting;
 /// <summary>
 /// A application host.
 /// </summary>
-public interface IHost : IDisposable
+public interface IHost : IDisposable, IAsyncDisposable
 {
+    /// <summary>
+    /// A unique identifier for the host.
+    /// </summary>
+    HostId Id { get; }
+
     /// <summary>
     /// The Host Context.
     /// </summary>
     IHostContext Context { get; }
 
     /// <summary>
-    /// Starts all the services in the host
+    /// Starts the host.
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task RunAsync(CancellationToken cancellationToken = default);
+    Task StartAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

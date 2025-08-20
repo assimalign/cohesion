@@ -11,7 +11,7 @@ public abstract class ServerTransport : ITransport
 {
     protected ServerTransport()
     {
-        Id = TransportId.NewTransportId();
+        Id = TransportId.New();
     }
 
     /// <inheritdoc />
@@ -21,7 +21,7 @@ public abstract class ServerTransport : ITransport
     public TransportKind Kind => TransportKind.Server;
 
     /// <inheritdoc />
-    public abstract ProtocolType Protocol { get; }
+    public abstract TransportProtocol Protocol { get; }
 
     /// <summary>
     /// Accepts or Listens for incoming connections.

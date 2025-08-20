@@ -49,7 +49,8 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     /// <summary>
     /// 
     /// </summary>
-    public override ProtocolType Protocol => ProtocolType.Tcp;
+    public override TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
+
 
     /// <summary>
     /// The number of connections that are open.
@@ -108,10 +109,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 
                 settings.Socket = socket;
 
-                var context = new SocketTransportConnectionContext(settings)
-                {
-                    Protocol = ProtocolType.Tcp
-                };
+                var context = new SocketTransportConnectionContext(settings);
 
                 var connection = new TcpTransportConnection(
                     context, 

@@ -17,11 +17,12 @@ using Assimalign.Cohesion.Transports.Internal;
 /// </summary>
 public sealed class PipeStream : Stream
 {
-    private readonly bool throwOnCanceled;
-    private volatile bool isCancelCalled;
+    private readonly bool _throwOnCanceled;
 
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
+
+    private volatile bool _isCancelCalled;
 
     /// <summary>
     /// 
@@ -42,7 +43,6 @@ public sealed class PipeStream : Stream
     {
         _input = ThrowHelper.ThrowIfNull(input);
         _output = ThrowHelper.ThrowIfNull(output);
-        this.throwOnCanceled = false;
     }
 
     /// <summary>
@@ -59,38 +59,23 @@ public sealed class PipeStream : Stream
     /// Always return true.
     /// </summary>
     public override bool CanWrite => true;
-
-    /// <summary>
-    /// Not Supported.
-    /// </summary>
-    /// <exception cref="NotSupportedException"></exception>
     public override long Length => throw new NotSupportedException();
-
-    /// <summary>
-    /// Not Supported.
-    /// </summary>
-    /// <exception cref="NotSupportedException"></exception>
     public override long Position
     {
         get => throw new NotSupportedException();
         set => throw new NotSupportedException();
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="offset"></param>
-    /// <param name="origin"></param>
-    /// <returns></returns>
-    /// <exception cref="NotSupportedException"></exception>
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="value"></param>
-    /// <exception cref="NotSupportedException"></exception>
-    public override void SetLength(long value) => throw new NotSupportedException();
-    
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        throw new NotSupportedException();
+    }
+
+    public override void SetLength(long value)
+    {
+        throw new NotSupportedException();
+    }
+  
     public override int Read(byte[] buffer, int offset, int count)
     {
         var valueTask = ReadAsyncInternal(new Memory<byte>(buffer, offset, count), default);
@@ -99,22 +84,61 @@ public sealed class PipeStream : Stream
             valueTask.Result :
             valueTask.AsTask().GetAwaiter().GetResult();
     }
-    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken = default) => ReadAsyncInternal(new Memory<byte>(buffer, offset, count), cancellationToken).AsTask();
-    public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default) => ReadAsyncInternal(destination, cancellationToken);
-    public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count).GetAwaiter().GetResult();
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken = default)
+    {
+        return ReadAsyncInternal(new Memory<byte>(buffer, offset, count), cancellationToken).AsTask();
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken cancellationToken = default)
+    {
+        return ReadAsyncInternal(destination, cancellationToken);
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        WriteAsync(buffer, offset, count).GetAwaiter().GetResult();
+    }
+
     public override Task WriteAsync(byte[]? buffer, int offset, int count, CancellationToken cancellationToken)
     {
         return _output.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).GetAsTask();
     }
+
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
     {
         return _output.WriteAsync(source, cancellationToken).GetAsValueTask();
     }
+
     public override void Flush()
     {
         FlushAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
-    public override Task FlushAsync(CancellationToken cancellationToken) => _output.FlushAsync(cancellationToken).GetAsTask();
+
+    public override Task FlushAsync(CancellationToken cancellationToken)
+    {
+        return _output.FlushAsync(cancellationToken).GetAsTask();
+    }
+
+    public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state)
+    {
+        return TaskToApm.Begin(ReadAsync(buffer, offset, count), callback, state);
+    }
+
+    public override int EndRead(IAsyncResult asyncResult)
+    {
+        return TaskToApm.End<int>(asyncResult);
+    }
+
+    public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state)
+    {
+        return TaskToApm.Begin(WriteAsync(buffer, offset, count), callback, state);
+    }
+
+    public override void EndWrite(IAsyncResult asyncResult)
+    {
+        TaskToApm.End(asyncResult);
+    }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<int> ReadAsyncInternal(Memory<byte> destination, CancellationToken cancellationToken)
@@ -125,10 +149,10 @@ public sealed class PipeStream : Stream
             var readableBuffer = result.Buffer;
             try
             {
-                if (throwOnCanceled && result.IsCanceled && isCancelCalled)
+                if (_throwOnCanceled && result.IsCanceled && _isCancelCalled)
                 {
                     // Reset the bool
-                    isCancelCalled = false;
+                    _isCancelCalled = false;
                     throw new OperationCanceledException();
                 }
                 if (!readableBuffer.IsEmpty)
@@ -151,8 +175,5 @@ public sealed class PipeStream : Stream
             }
         }
     }
-    public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state) => TaskToApm.Begin(ReadAsync(buffer, offset, count), callback, state);
-    public override int EndRead(IAsyncResult asyncResult) => TaskToApm.End<int>(asyncResult);
-    public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback? callback, object? state) => TaskToApm.Begin(WriteAsync(buffer, offset, count), callback, state);
-    public override void EndWrite(IAsyncResult asyncResult) => TaskToApm.End(asyncResult);
+    
 }

@@ -30,7 +30,7 @@ public interface ITransport : IDisposable, IAsyncDisposable
     /// <summary>
     /// The underlying network protocol of the transport.
     /// </summary>
-    ProtocolType Protocol { get; }
+    TransportProtocol Protocol { get; }
 
     /// <summary>
     /// Either accepts incoming connection or connects to remote host.

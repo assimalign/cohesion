@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -12,7 +9,7 @@ namespace Assimalign.Cohesion.Transports;
 public interface IMultiplexTransportConnection : ITransportConnection
 {
     /// <summary>
-    /// 
+    /// Opens the inbound point to point connection that allows reading and writing.
     /// </summary>
     /// <returns></returns>
     ITransportConnectionContext OpenInbound();

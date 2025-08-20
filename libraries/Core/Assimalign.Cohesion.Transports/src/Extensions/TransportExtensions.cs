@@ -1,16 +1,17 @@
 ﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Internal;
+using System.Buffers;
+using System.IO.Pipelines;
 
 public static class TransportExtensions
 {
-
     extension(ITransport transport)
     {
         public async IAsyncEnumerable<ITransportConnection> EnumerateAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -53,6 +54,41 @@ public static class TransportExtensions
                 return value as T;
             }
             return default;
+        }
+    }
+
+    extension(ITransportConnectionPipe pipe)
+    {
+
+        public async ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default)
+        {
+            ReadResult result = await pipe.Input.ReadAsync();
+            ReadOnlySequence<byte> buffer = result.Buffer;
+
+            pipe.Input.AdvanceTo(buffer.Start);
+
+            return result;
+        }
+
+        public async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            ReadResult result = await pipe.Input.ReadAsync();
+            ReadOnlySequence<byte> buffer = result.Buffer;
+
+            pipe.Input.AdvanceTo(
+                buffer.Start,
+                buffer.End);
+
+            return result;
+        }
+
+        public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var result = await pipe.Output.WriteAsync(buffer);
+
+            //Output.Advance(buffer.Length);
+
+            return result;
         }
     }
 }

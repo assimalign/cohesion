@@ -1,48 +1,38 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace System;
+﻿namespace System;
 
 public static class SpanExtensions
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="source"></param>
-    /// <param name="destination"></param>
-    /// <param name="separators"></param>
-    /// <returns></returns>
-    public static int SplitAny(this ReadOnlySpan<char> source, Span<Range> destination, ReadOnlySpan<char> separators)
+    extension(ref ReadOnlySpan<char> source)
     {
-#if NET7_0_OR_GREATER
-    return MemoryExtensions.SplitAny(source, destination, separators);
-#else
-        var count = 0;
-        var start = 0;
-
-        for (int i = 0; i < source.Length; i++)
+        public int SplitAny(Span<Range> destination, ReadOnlySpan<char> separators)
         {
-            if ((i + 1) == source.Length)
+#if NET7_0_OR_GREATER
+            return MemoryExtensions.SplitAny(source, destination, separators);
+#else
+            var count = 0;
+            var start = 0;
+
+            for (int i = 0; i < source.Length; i++)
             {
-                destination[count] = new Range(start, i);
-                count++;
-                break;
-            }
-            for (int a = 0; a < separators.Length; a++)
-            {
-                if (source[i] == separators[a])
+                if ((i + 1) == source.Length)
                 {
                     destination[count] = new Range(start, i);
-                    start = (i + 1);
                     count++;
+                    break;
+                }
+                for (int a = 0; a < separators.Length; a++)
+                {
+                    if (source[i] == separators[a])
+                    {
+                        destination[count] = new Range(start, i);
+                        start = (i + 1);
+                        count++;
+                    }
                 }
             }
-        }
 
-        return count;
+            return count;
 #endif
+        }
     }
 }

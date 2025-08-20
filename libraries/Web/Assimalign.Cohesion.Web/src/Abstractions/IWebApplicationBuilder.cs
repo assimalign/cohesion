@@ -7,6 +7,12 @@ namespace Assimalign.Cohesion.Web;
 /// </summary>
 public interface IWebApplicationBuilder
 {
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="server"></param>
+    /// <returns></returns>
+    IWebApplicationBuilder AddServer(IWebApplicationServer server);
 
     /// <summary>
     /// 

@@ -38,7 +38,7 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
         _pipeline = options.BuildPipeline();
     }
 
-    public override ProtocolType Protocol => ProtocolType.Tcp;
+    public override TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
 
     /// <summary>
     /// The number of connections that are open.
@@ -85,10 +85,7 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
         {
             try
             {
-                var context = new SocketTransportConnectionContext(_settings)
-                {
-                    Protocol = ProtocolType.Tcp
-                };
+                var context = new SocketTransportConnectionContext(_settings);
 
                 var connection = new TcpTransportConnection(context, _pipeline, Id);
 

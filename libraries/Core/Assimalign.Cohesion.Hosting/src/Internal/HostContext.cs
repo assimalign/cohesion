@@ -15,6 +15,7 @@ internal sealed class HostContext : IHostContext
         _state = HostState.Unknown;
     }
 
+    public HostId HostId { get; init; }
     public HostState State
     {
         get

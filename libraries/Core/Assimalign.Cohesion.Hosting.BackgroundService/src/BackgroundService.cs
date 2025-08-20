@@ -12,9 +12,10 @@ public abstract class BackgroundService : IHostLifecycleService
 
     protected BackgroundService()
     {
-        
+        Id = ServiceId.New();
     }
 
+    public virtual ServiceId Id { get; }
 
     public virtual Task StartingAsync(CancellationToken cancellationToken)
     {

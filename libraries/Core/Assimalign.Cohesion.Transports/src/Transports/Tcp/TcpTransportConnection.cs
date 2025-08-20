@@ -24,7 +24,7 @@ public sealed class TcpTransportConnection : ISingleStreamTransportConnection
         TransportPipeline pipeline,
         TransportId transportId)
     {
-        _id = ConnectionId.NewConnectionId();
+        _id = ConnectionId.New();
         _context = context;
         _pipeline = pipeline;
         _transportId = transportId;
@@ -32,7 +32,7 @@ public sealed class TcpTransportConnection : ISingleStreamTransportConnection
 
     public ConnectionId Id => _id;
     public TransportId TransportId => _transportId;
-    public ProtocolType Protocol => _context.Protocol;
+    public TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
     public ConnectionState State => _context.State;
 
     public void Abort()

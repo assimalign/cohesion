@@ -8,4 +8,6 @@ namespace Assimalign.Cohesion.EmailHub;
 
 public interface IEmailHub
 {
+    Task TestgeAsync();
+    Task Test();
 }

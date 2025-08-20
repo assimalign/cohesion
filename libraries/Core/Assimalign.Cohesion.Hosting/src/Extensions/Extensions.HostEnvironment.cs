@@ -1,6 +1,6 @@
 ﻿namespace Assimalign.Cohesion.Hosting;
 
-using Assimalign.Cohesion.Hosting.Internal;
+using Cohesion.Internal;
 
 public static class HostEnvironmentExtensions
 {
@@ -10,44 +10,36 @@ public static class HostEnvironmentExtensions
     private static readonly string production = nameof(production);
     private static readonly string uat = nameof(uat);
     private static readonly string qa = nameof(qa);
+    private static readonly string sandbox = nameof(sandbox);
 
-    public static bool IsDevelopment(this IHostEnvironment environment)
+    extension(IHostEnvironment environment)
     {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(development);
-    }
-
-    public static bool IsStaging(this IHostEnvironment environment)
-    {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(staging);
-    }
-    public static bool IsTest(this IHostEnvironment environment)
-    {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(test);
-    }
-    public static bool IsProduction(this IHostEnvironment environment)
-    {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(production);
-    }
-    public static bool IsUserAcceptanceTesting(this IHostEnvironment environment)
-    {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(uat);
-    }
-    public static bool IsQualityAssurance(this IHostEnvironment environment)
-    {
-        ThrowIfNull(environment);
-        return environment.IsEnvironment(qa);
-    }
-
-    private static void ThrowIfNull(IHostEnvironment environment)
-    {
-        if (environment is null)
+        public bool IsDevelopment()
         {
-            ThrowHelper.ThrowArgumentNullException(nameof(environment));
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(development);
+        }
+
+        public bool IsStaging()
+        {
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(staging);
+        }
+
+        public bool IsTest()
+        {
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(test);
+        }
+        public bool IsProduction()
+        {
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(production);
+        }
+        public bool IsUserAcceptanceTesting()
+        {
+           
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(uat);
+        }
+        public bool IsQualityAssurance()
+        {
+            return ThrowHelper.ThrowIfNull(environment).IsEnvironment(qa);
         }
     }
 }

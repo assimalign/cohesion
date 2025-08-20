@@ -2,16 +2,19 @@
 
 public static class RangeExtensions
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="range"></param>
-    /// <returns></returns>
-    public static (int start, int length) GetStartLength(this Range range)
+    extension(Range range)
     {
-        var start = range.Start.Value;
-        var length =  range.End.Value - start;
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
+        public (int start, int length) GetStartLength()
+        {
+            var start = range.Start.Value;
+            var length = range.End.Value - start;
 
-        return (start, length);
+            return (start, length);
+        }
     }
+    
 }

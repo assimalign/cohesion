@@ -16,14 +16,14 @@ public interface ITransportConnection : IDisposable, IAsyncDisposable
     ConnectionId Id { get; }
 
     /// <summary>
-    /// Get the id of 
+    /// Get the id of the transport in which the connection belongs to.
     /// </summary>
     TransportId TransportId { get; }
 
     /// <summary>
     /// The underlying network protocol of the transport connection.
     /// </summary>
-    ProtocolType Protocol { get; }
+    TransportProtocol Protocol { get; }
 
     /// <summary>
     /// Represents the current state of the pipeline.
@@ -36,7 +36,7 @@ public interface ITransportConnection : IDisposable, IAsyncDisposable
     void Abort();
 
     /// <summary>
-    /// 
+    /// Asynchronously aborts the connection.
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>

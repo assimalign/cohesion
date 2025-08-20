@@ -1,9 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<Reference Include="Assimalign.Cohesion.Http" />
-		<Reference Include="Assimalign.Cohesion.Http.Connection" />
-	</ItemGroup>
-	<ItemGroup>
-	  <Folder Include="Extensions\" />
+		<Reference Include="Assimalign.Cohesion.Http.Transports" />
 	</ItemGroup>
 </Project>

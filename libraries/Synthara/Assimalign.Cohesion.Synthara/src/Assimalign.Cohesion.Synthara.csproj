@@ -16,6 +16,7 @@
 		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\AccountName.generated.cs">
 			<Name>AccountName</Name>
 			<RuntimeType>string</RuntimeType>
+			<IsStruct>true</IsStruct>
 			<Namespace>Assimalign.Cohesion.Synthara</Namespace>
 			<IncludeIsValidMethod>true</IncludeIsValidMethod>
 			<IncludeImplicitOperators>true</IncludeImplicitOperators>

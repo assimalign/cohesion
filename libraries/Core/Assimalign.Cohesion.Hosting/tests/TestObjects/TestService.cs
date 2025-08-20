@@ -21,6 +21,8 @@ internal class TestService : IHostService
         this.factory = factory;
     }
 
+    public ServiceId Id => throw new NotImplementedException();
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

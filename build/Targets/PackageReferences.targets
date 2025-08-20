@@ -1,7 +1,6 @@
 <Project>
     <!-- #region Packages & Dependencies -->
     <ItemGroup>
-        <PackageReferenceProvider Include="System.IO.Pipelines" Version="9.0.3" />
         <PackageReferenceProvider Include="Sharprompt" Version="3.0.0" />
         <PackageReferenceProvider Include="KubernetesClient" Version="17.0.4" />
         <PackageReferenceProvider Include="NUlid" Version="1.7.2" />
@@ -14,14 +13,13 @@
 		<PackageReferenceProvider Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" PrivateAssets="all" />
 	</ItemGroup>
     <ItemGroup>
-        <PackageReferenceProvider Include="Microsoft.Build" Version="17.12.6" />
-        <PackageReferenceProvider Include="Microsoft.Build.Framework" Version="17.12.6" />
-        <PackageReferenceProvider Include="Microsoft.Build.Utilities.Core" Version="17.12.6" />
-		<PackageReferenceProvider Include="Microsoft.Build.Utilities.Core" Version="17.0.0" />
+        <PackageReferenceProvider Include="Microsoft.Build" Version="17.15.0-preview-25277-114" />
+        <PackageReferenceProvider Include="Microsoft.Build.Framework" Version="17.15.0-preview-25277-114" />
+        <PackageReferenceProvider Include="Microsoft.Build.Utilities.Core" Version="17.15.0-preview-25277-114" />
     </ItemGroup>
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
-        <PackageReferenceProvider Include="FluentAssertions" Version="8.3.0"/>
+        <PackageReferenceProvider Include="FluentAssertions" Version="8.5.0"/>
         <PackageReferenceProvider Include="xunit" Version="2.9.3" />
         <PackageReferenceProvider Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
         <PackageReferenceProvider Include="xunit.runner.visualstudio" Version="3.1.1"

@@ -9,6 +9,7 @@ public interface IHostEnvironment
     /// The name of the environment.
     /// </summary>
     string? Name { get; }
+
     /// <summary>
     /// Checks whether the environment name.
     /// </summary>

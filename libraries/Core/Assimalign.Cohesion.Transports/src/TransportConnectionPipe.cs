@@ -46,37 +46,4 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     public PipeReader Input => _input;
     public PipeWriter Output => _output;
     public Stream GetStream() => _stream;
-
-
-    public async ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default)
-    {
-        ReadResult result = await Input.ReadAsync();
-        ReadOnlySequence<byte> buffer = result.Buffer;
-
-        Input.AdvanceTo(buffer.Start);
-
-        return result;
-    }
-
-    public async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
-    {
-        ReadResult result = await Input.ReadAsync();
-        ReadOnlySequence<byte> buffer = result.Buffer;
-
-        Input.AdvanceTo(
-            buffer.Start,
-            buffer.End);
-
-        return result;
-    }
-
-    public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-    {
-        var result = await Output.WriteAsync(buffer);
-
-        //Output.Advance(buffer.Length);
-
-        return result;
-    }
-
 }
