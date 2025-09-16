@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfigurationRoot : IConfiguration, IDisposable, IAsyncDisposable
 {
     /// <summary>
-    /// The <see cref="IConfigurationProvider"/>s for this configuration.
+    /// Returns a collection of <see cref="IConfigurationProvider"/>.
     /// </summary>
     IEnumerable<IConfigurationProvider> Providers { get; }
 }

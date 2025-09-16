@@ -17,18 +17,11 @@ public interface IConfigurationBuilder
     IConfigurationBuilder AddProvider(IConfigurationProvider provider);
 
     /// <summary>
-    /// Adds a configuration provider to be built.
-    /// </summary>
-    /// <param name="configure"></param>
-    /// <returns>The same instance of <see cref="IConfigurationBuilder"/>.</returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure);
-
-    /// <summary>
     /// 
     /// </summary>
-    /// <param name="configure"></param>
+    /// <param name="provider"></param>
     /// <returns></returns>
-    IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure);
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider);
 
     /// <summary>
     /// Synchronously builds the <see cref="IConfigurationRoot"/> by loading 
@@ -43,5 +36,5 @@ public interface IConfigurationBuilder
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default);
+    ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default);
 }

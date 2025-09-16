@@ -1,15 +1,16 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
-using System.Collections.Generic;
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-#if NET7_0_OR_GREATER
-using System.Numerics;
-#endif
+
 
 namespace System.IO;
 
 using Assimalign.Cohesion.Internal;
+using System.Buffers;
+using System.Collections;
 using static Assimalign.Cohesion.Internal.PathHelper;
 
 /// <summary>
@@ -17,11 +18,10 @@ using static Assimalign.Cohesion.Internal.PathHelper;
 /// </summary>
 [DebuggerDisplay("{_value}")]
 [JsonConverter(typeof(PathJsonConverter))]
-public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<FileSystemPath>
-#if NET7_0_OR_GREATER
+public readonly struct FileSystemPath : IEquatable<FileSystemPath>
+    , IComparable<FileSystemPath>
     , IEqualityOperators<FileSystemPath, FileSystemPath, bool>
     , IAdditionOperators<FileSystemPath, FileSystemPath, FileSystemPath>
-#endif
 {
     private readonly string _value;
 
@@ -72,7 +72,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     {
         return _value.AsSpan();
     }
- 
+
     /// <summary>
     /// Returns the segments of the path relative to the root. The root, if any, is disregarded.
     /// </summary>
@@ -248,7 +248,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             return right;
         }
 
-        if (right.HasRoot(out var root) && root.Length != 1 && root[0] != Separator)
+        if (right.HasRoot())
         {
             ThrowHelper.ThrowArgumentException("The right most path must not be rooted in either '[Drive]:/' or '//[Server]/[share]'.");
         }
@@ -258,13 +258,13 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
 
     /// <summary>
     /// Combines the provided path with the current instance. If the provided path 
-    /// partially matches the current instance then the path is merged.
+    /// partially matches or the path is relative to the current instance then the path is merged.
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
-    public FileSystemPath Combine(FileSystemPath path)
+    public FileSystemPath Merge(FileSystemPath path)
     {
-        return Combine(this, path);
+        return Merge(this, path);
     }
 
     /// <summary>
@@ -273,14 +273,44 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static FileSystemPath Combine(FileSystemPath left, FileSystemPath right)
+    /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="PathTooLongException"></exception>
+    public static FileSystemPath Merge(FileSystemPath left, FileSystemPath right)
     {
+        if (right.StartsWith(".."))
+        {
+            var ls = left.GetSegments();
+            var rs = right.GetSegments();
+
+            for (int i = 0; i < rs.Length; i++)
+            {
+                if (rs[i] == "..")
+                {
+                    if (ls.Length == 0)
+                    {
+                        ThrowHelper.ThrowArgumentException("The path cannot be merged. The relative path goes beyond the root of the current path.");
+                    }
+                    ls = ls[..^1];
+                }
+                else
+                {
+                    if (left.HasRoot(out var root))
+                    {
+                        return string.Join(Separator, [root, .. ls, .. rs[i..]]);
+                    }
+                    else
+                    {
+                        return string.Join(Separator, [.. ls, .. rs[i..]]);
+                    }
+                }
+            }
+        }
         if (right.StartsWith(left))
         {
             return right;
         }
 
-        return Join(right, left);
+        return Join(left, right);
     }
 
     /// <summary>
@@ -290,7 +320,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <returns></returns>
     public bool EndsWith(FileSystemPath path)
     {
-        return EndsWith(path, CultureInfo.InvariantCulture);
+        return EndsWith(path, StringComparison.InvariantCulture);
     }
 
     /// <summary>
@@ -299,9 +329,9 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="path">A relative path.</param>
     /// <param name="comparison"></param>
     /// <returns></returns>
-    public bool EndsWith(FileSystemPath path, CultureInfo cultureInfo)
+    public bool EndsWith(FileSystemPath path, StringComparison comparison)
     {
-        return _value.EndsWith(path._value, true, cultureInfo);
+        return _value.EndsWith(path._value, comparison);
     }
 
     /// <summary>
@@ -311,7 +341,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <returns></returns>
     public bool StartsWith(FileSystemPath path)
     {
-        return StartsWith(path, CultureInfo.InvariantCulture);
+        return StartsWith(path, StringComparison.InvariantCulture);
     }
 
     /// <summary>
@@ -320,9 +350,9 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="path">A relative path.</param>
     /// <param name="comparison"></param>
     /// <returns></returns>
-    public bool StartsWith(FileSystemPath path, CultureInfo cultureInfo)
+    public bool StartsWith(FileSystemPath path, StringComparison comparison)
     {
-        return _value.StartsWith(path._value, true, cultureInfo);
+        return _value.StartsWith(path._value, comparison);
     }
 
     /// <summary>
@@ -330,10 +360,9 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// </summary>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
-    public int GetHashCode(CultureInfo cultureInfo)
+    public int GetHashCode(StringComparison comparison)
     {
-        int code = StringComparer.Create(cultureInfo, true).GetHashCode(_value);
-
+        int code = StringComparer.FromComparison(comparison).GetHashCode(_value);
         return (int)((uint)code | ((uint)code << 16));
     }
 
@@ -344,7 +373,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <returns></returns>
     public bool Equals(FileSystemPath other)
     {
-        return Equals(other, CultureInfo.InvariantCulture);
+        return Equals(other, StringComparison.InvariantCulture);
     }
 
     /// <summary>
@@ -353,9 +382,9 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="other"></param>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
-    public bool Equals(FileSystemPath other, CultureInfo cultureInfo)
+    public bool Equals(FileSystemPath other, StringComparison comparison)
     {
-        return StringComparer.Create(cultureInfo, true).Equals(_value, other._value);
+        return StringComparer.FromComparison(comparison).Equals(_value, other._value);
     }
 
     /// <summary>
@@ -365,7 +394,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <returns></returns>
     public int CompareTo(FileSystemPath other)
     {
-        return CompareTo(other, CultureInfo.InvariantCulture);
+        return CompareTo(other, StringComparison.InvariantCulture);
     }
 
     /// <summary>
@@ -374,13 +403,13 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="other"></param>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
-    public int CompareTo(FileSystemPath other, CultureInfo cultureInfo)
+    public int CompareTo(FileSystemPath other, StringComparison comparison)
     {
-        return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
+        return StringComparer.FromComparison(comparison).Compare(_value, other._value);
     }
 
     /// <summary>
-    /// 
+    /// Parses a string value into a <see cref="FileSystemPath"/>.
     /// </summary>
     /// <param name="value"></param>
     /// <returns></returns>
@@ -388,49 +417,75 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <exception cref="ArgumentNullException"></exception>
     public static FileSystemPath Parse(string value)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
+        return Parse(ThrowHelper.ThrowIfNull(value).AsSpan());
+    }
+
+    /// <summary>
+    /// Parses a string value into a <see cref="FileSystemPath"/>.
+    /// </summary>
+    /// <param name="value"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="ArgumentNullException"></exception>
+    public static FileSystemPath Parse(ReadOnlySpan<char> input)
+    {
+        if (input.IsEmpty)
+        {
+            return Empty;
+        }
 
         // Check if only root was passed
-        if (value.Length == 1)
+        if (input.Length == 1)
         {
-            if (IsPathSeparator(value[0]))
+            // "/" is root directory
+            if (IsPathSeparator(input[0]))
             {
                 return new FileSystemPath("/");
             }
-            if (IsDot(value[0])) // "." is current directory
+
+            // "." is current directory
+            if (IsDot(input[0]))
             {
                 return Empty;
             }
         }
 
+        // Check for relative path
+        if (input.SequenceEqual(".."))
+        {
+            return new FileSystemPath("..");
+        }
+
         int start = 0;
-        int end = value.Length - 1;
+        int end = input.Length - 1;
         int shift = 0;
 
         // Check for current directory syntax "./" and skip over
-        if (value.Length >= 2 && IsDot(value[0]) && IsPathSeparator(value[1]))
+        if (input.Length >= 2 && IsDot(input[0]) && IsPathSeparator(input[1]))
         {
-            start =+ 2;
+            start += 2;
         }
 
         // Check if path has valid drive, if so disregard shift
-        if (HasDriveLetter(value))
+        if (HasDriveLetter(input))
         {
             shift = 0;
         }
 
         // Check for leading slash root  '//' or '\\', or if your a weirdo '/\' '\/'
-        else if (value.Length >= 2 && IsPathSeparator(value[0]) && IsPathSeparator(value[1]))
+        else if (input.Length >= 2 && IsPathSeparator(input[0]) && IsPathSeparator(input[1]))
         {
-            shift =+ 2;
+            shift += 2;
         }
+
         // Maintain directory root '/'
-        else if (value.Length >= 2 && IsPathSeparator(value[0]))
+        else if (input.Length >= 2 && IsPathSeparator(input[0]))
         {
             shift = 1;
         }
 
-        CalculateTrimRange(value, ref start, ref end);
+        // Trim beginning and ending of 
+        CalculateSeparatorTrimRange(input, ref start, ref end);
 
         int reduce = 0;
         int length = ((end + 1) - start) + shift;
@@ -442,12 +497,42 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             span[i] = Separator;
         }
 
+        // Skip relative path beginning, if any '../../..'
+        if (shift == 0 && start == 0)
+        {
+            for (; shift < (end + 1); shift += 2)
+            {
+                if (IsDot(input[shift]) && IsDot(input[shift + 1]))
+                {
+                    if ((shift + 2) < (end + 1) && !IsPathSeparator(input[shift + 2]))
+                    {
+                        break;
+                    }
+
+                    span[shift] = '.';
+                    span[shift + 1] = '.';
+
+                    if ((shift + 2) < (end + 1) && IsPathSeparator(input[shift + 2]))
+                    {
+                        span[shift + 2] = Separator;
+                        shift += 1;
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            start += shift;
+        }
+
         char previous = default;
 
         // Let's convert all backward slashes to forward slashes
         for (int i = start; i < (end + 1); i++)
         {
-            var current = value[i];
+            var current = input[i];
 
             // Convert back slash to forward slash
             if (current == '\\')
@@ -462,7 +547,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
                 continue;
             }
 
-            // Check for parent directory globing ".."
+            // Check for parent directory globing ".." within the path
+            // Parent directory is allowed only at the beginning of a relative path
             if (IsDot(previous) && IsDot(current))
             {
                 // scenario 1: ".." was only passed
@@ -473,8 +559,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
                 var s = i - 2;
                 var e = i + 1;
 
-                var hasStart = (s > 0 && IsPathSeparator(value[s])) || s < 0;
-                var hasEnd = (e < end && IsPathSeparator(value[e])) || e > end;
+                var hasStart = (s > 0 && IsPathSeparator(input[s])) || s < 0;
+                var hasEnd = (e < end && IsPathSeparator(input[e])) || e > end;
 
                 if ((s < 0 && e > end) || (hasStart && hasEnd))
                 {
@@ -489,10 +575,10 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
 
             previous = current;
 
-            span[(i + shift) - start - reduce] = current;
-        }
+            var index = (i + shift) - start - reduce;
 
-       // span[span.Length - reduce]
+            span[index] = current;
+        }
 
         if (reduce > 0)
         {
@@ -501,12 +587,11 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
 
         if (span.Length > MaxLength)
         {
-            ThrowHelper.ThrowArgumentException("The path is too long");
+            ThrowHelper.ThrowPathToLongException();
         }
 
         return new FileSystemPath(span.ToString());
     }
-
     #region Overloads
 
     /// <inheritdoc />
@@ -528,7 +613,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return GetHashCode(CultureInfo.InvariantCulture);
+        return GetHashCode(StringComparison.InvariantCulture);
     }
 
     #endregion
@@ -543,7 +628,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <param name="path"></param>
     public static implicit operator FileSystemPath(string path)
     {
-        return Parse(path);
+        return Parse(path.AsSpan());
     }
 
     /// <summary>
@@ -553,6 +638,24 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     public static implicit operator string(FileSystemPath path)
     {
         return path._value;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    public static implicit operator FileSystemPath(ReadOnlySpan<char> path)
+    {
+        return Parse(path);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    public static implicit operator ReadOnlySpan<char>(FileSystemPath path)
+    {
+        return path.AsSpan();
     }
 
     /// <summary>
@@ -585,14 +688,14 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
     /// <returns></returns>
     public static FileSystemPath operator +(FileSystemPath left, FileSystemPath right)
     {
-        return left.Combine(right);
+        return left.Merge(right);
     }
 
     #endregion
 
     #region Partials
 
-    partial class PathJsonConverter : JsonConverter<FileSystemPath>
+    internal partial class PathJsonConverter : JsonConverter<FileSystemPath>
     {
         public override FileSystemPath Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
         {
@@ -618,6 +721,89 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>, IComparable<
             writer.WriteStringValue(str);
         }
     }
+
+
+    //internal ref struct SegmentEnumerable : IEnumerable<ReadOnlySpan<char>>
+    //{
+    //    private FileSystemPath _path;
+    //    internal SegmentEnumerable(FileSystemPath path)
+    //    {
+    //        _path = path;
+    //    }
+
+    //    public IEnumerator<ReadOnlySpan<char>> GetEnumerator()
+    //    {
+    //        return new SegmentEnumerator(_path);
+    //    }
+
+    //    IEnumerator IEnumerable.GetEnumerator()
+    //    {
+    //        return GetEnumerator();
+    //    }
+    //}
+
+    //internal ref struct SegmentEnumerator : IEnumerator<ReadOnlySpan<char>>
+    //{
+    //    private ReadOnlySpan<char> _remaining;
+    //    private ReadOnlySpan<char> _current;
+    //    private bool _isActive;
+
+    //    private static readonly SearchValues<char> _separator = SearchValues.Create("/".AsSpan());
+
+    //    internal SegmentEnumerator(ReadOnlySpan<char> span)
+    //    {
+    //        _remaining = span;
+    //    }
+
+    //    public ReadOnlySpan<char> Current => _current;
+
+    //    object IEnumerator.Current
+    //    {
+    //        get
+    //        {
+    //            throw new NotSupportedException();
+    //        }
+    //    }
+
+    //    public void Dispose()
+    //    {
+    //        throw new NotImplementedException();
+    //    }
+
+    //    public bool MoveNext()
+    //    {
+    //        if (!_isActive)
+    //        {
+    //            _current = default(ReadOnlySpan<char>);
+    //            return false;
+    //        }
+    //        ReadOnlySpan<char> remaining = _remaining;
+    //        int num = remaining.IndexOfAny(_separator);
+    //        if ((uint)num < (uint)remaining.Length)
+    //        {
+    //            int num2 = 1;
+    //            if (remaining[num] == '\r' && (uint)(num + 1) < (uint)remaining.Length && remaining[num + 1] == '\n')
+    //            {
+    //                num2 = 2;
+    //            }
+    //            _current = remaining.Slice(0, num);
+    //            _remaining = remaining.Slice(num + num2);
+    //        }
+    //        else
+    //        {
+    //            _current = remaining;
+    //            _remaining = default(ReadOnlySpan<char>);
+    //            _isActive = false;
+    //        }
+    //        return true;
+    //    }
+
+    //    public void Reset()
+    //    {
+    //        throw new NotImplementedException();
+    //    }
+    //}
+
     #endregion
 }
 

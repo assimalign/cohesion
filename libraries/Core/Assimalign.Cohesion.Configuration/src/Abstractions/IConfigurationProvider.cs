@@ -19,8 +19,9 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// 
     /// </summary>
     /// <param name="path"></param>
+    /// <param name="value"></param>
     /// <returns></returns>
-    string? Get(Path path);
+    bool TryGet(Path path, out string? value);
 
     /// <summary>
     /// 
@@ -28,42 +29,20 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// <param name="path"></param>
     /// <param name="value"></param>
     /// <returns></returns>
-    bool TryGetValue(Path path, out string value);
+    bool TrySet(Path path, string? value);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="path"></param>
-    /// <param name="value"></param>
-    void Set(Path path, string? value);
-
-    /// <summary>
-    /// Checks whether the key exists.
-    /// </summary>
-    /// <param name="path"></param>
     /// <returns></returns>
-    bool ContainsPath(Path path);
-
-    /// <summary>
-    /// Get the configuration entry, if exists.
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    IConfigurationEntry? Get(Key key);
-
-    /// <summary>
-    /// Sets a configuration value for the specified key.
-    /// </summary>
-    /// <param name="entry">The value.</param>
-    void Set(IConfigurationEntry entry);
+    IConfigurationEntry? GetEntry(Path path);
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="IConfigurationEntry"></param>
-    void Remove(IConfigurationEntry entry);
-
-    
+    /// <returns></returns>
+    IEnumerable<IConfigurationEntry> GetEntries();
 
     /// <summary>
     /// Synchronously loads the configuration values.
@@ -76,22 +55,4 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     Task LoadAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Synchronously reloads the configuration provider.
-    /// </summary>
-    void Reload();
-
-    /// <summary>
-    /// Asynchronously reloads the configuration provider.
-    /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    Task ReloadAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns a collection of entries from the provider.
-    /// </summary>
-    /// <returns></returns>
-    IEnumerable<IConfigurationEntry> GetEntries();
 }

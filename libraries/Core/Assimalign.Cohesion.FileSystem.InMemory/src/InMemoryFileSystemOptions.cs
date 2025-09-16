@@ -10,6 +10,21 @@ namespace Assimalign.Cohesion.FileSystem;
 public class InMemoryFileSystemOptions
 {
     /// <summary>
+    /// A name for the in memory file system instance.
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Sets whether the in memory file system is read-only.
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// Specify the lock timeout on File System objects. The default is 30 seconds.
+    /// </summary>
+    public TimeSpan LockTmieout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// The max size of the in memory file system. The default is 32 MB
     /// </summary>
     public Size Size { get; set; } = Size.FromMegabytes(32);
@@ -17,12 +32,7 @@ public class InMemoryFileSystemOptions
     /// <summary>
     /// Specify the culture to use when comparing the path.
     /// </summary>
-    public CultureInfo? CultureInfo { get; set; }
-
-    /// <summary>
-    /// Sets whther the In Memory File System should be case-insensitive.
-    /// </summary>
-    public bool IgnoreCase { get; set; }
+    public StringComparison Comparison { get; set; }
 
     /// <summary>
     /// Set a root directory name.

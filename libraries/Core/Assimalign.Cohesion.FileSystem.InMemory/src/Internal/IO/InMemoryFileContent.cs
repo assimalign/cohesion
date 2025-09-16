@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
@@ -7,14 +8,17 @@ internal class InMemoryFileContent
 {
     private readonly InMemoryFileSystemFile _file;
     private readonly MemoryStream _stream;
+    private readonly Lock _lock;
 
     public InMemoryFileContent(InMemoryFileSystemFile file)
     {
+        _lock = new Lock();
         _file = file;
         _stream = new MemoryStream();
     }
     public InMemoryFileContent(InMemoryFileSystemFile file, InMemoryFileContent copy)
     {
+        _lock = new Lock();
         _file = file;
         var length = copy.Length;
         _stream = new MemoryStream(length <= int.MaxValue ? (int)length : int.MaxValue);
@@ -29,7 +33,7 @@ internal class InMemoryFileContent
     }
     public void CopyFrom(InMemoryFileContent copy)
     {
-        lock (this)
+        lock (_lock)
         {
             var length = copy.Length;
             var buffer = copy.ToArray();
@@ -77,10 +81,7 @@ internal class InMemoryFileContent
         {
             lock (this)
             {
-                var dif = value - _stream.Length;
-
-                _file.FileSystem.IncrementSpaceUsed(dif);
-
+                _file.FileSystem.IncrementSpaceUsed(value - _stream.Length);
                 _stream.SetLength(value);
             }
             _file.ContentChanged();

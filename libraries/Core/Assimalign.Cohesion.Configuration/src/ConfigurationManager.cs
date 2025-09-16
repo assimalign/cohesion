@@ -18,123 +18,102 @@ using Assimalign.Cohesion.Internal;
 /// </summary>
 public sealed class ConfigurationManager : IConfigurationManager
 {
-    private readonly Lock _lock = new Lock();
+    private readonly Lock _lock;
     private readonly ConfigurationOptions _options;
+    private readonly ConfigurationBuilderContext _context;
     private readonly Dictionary<string, object> _properties;
 
-    private ConfigurationRoot? _root;
+    private ConfigurationRoot _root;
     private bool _isDisposed;
-
+    
     /// <summary>
     /// 
     /// </summary>
-    public ConfigurationManager()
+    public ConfigurationManager(ConfigurationOptions options)
     {
-        _options = ConfigurationOptions.Default;
+        _lock = new Lock();
+        _options = ThrowHelper.ThrowIfNull(options);
         _properties = new Dictionary<string, object>();
-
-       // _builder = new ConfigurationBuilder();
+        _root = new ConfigurationRoot(options);
+        _context = new ConfigurationBuilderContext(options.Providers);
     }
 
-    public string? this[in Path path] 
+    public string? this[Path path] { get => _root[path]; set => _root[path] = value; }
+
+    public IEnumerable<IConfigurationProvider> Providers => _root.Providers;
+
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
     {
-        get => ConfigurationRoot.GetConfigurationValue(path, this);
-        set => ConfigurationRoot.SetConfigurationValue(path, value, this);
+        return AddProvider(_ => provider);
     }
 
-    public IEnumerable<IConfigurationProvider> Providers
+    public ConfigurationManager AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
     {
-        get
+        return AddProvider(context => Task.FromResult(configure.Invoke(context)));
+    }
+
+    public ConfigurationManager AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
+    {
+        ThrowHelper.ThrowIfNull(configure);
+
+        try
         {
-            lock (_lock)
+            IConfigurationProvider provider = configure.Invoke(_context)
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+
+            if (provider is null)
             {
-                return _options.Providers;
+                throw new NullReferenceException("No configuration provider was returned.");
             }
-        }
-    }
 
-    public IConfigurationBuilder AddProvider(IConfigurationProvider provider)
-    {
-        ThrowHelper.ThrowIfNull(provider);
-
-        provider.Load();
-
-        lock(_lock)
-        {
             _options.Providers.Add(provider);
-            _root = new ConfigurationRoot(_options);
+        }
+        catch (Exception exception) when (exception is not NullReferenceException)
+        {
+
         }
 
         return this;
-    }
-    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
-    {
-        ThrowHelper.ThrowIfNull(configure);
-
-        var context = new ConfigurationContext()
-        {
-            Properties = _properties,
-            Providers = _options.Providers
-        };
-
-        var provider = configure.Invoke(context);
-
-        ThrowHelper.ThrowIfNull(provider);
-
-        provider.Load();
-
-        lock (_lock)
-        {
-            _options.Providers.Add(provider);
-            _root = new ConfigurationRoot(_options);
-        }
-
-        return this;
-    }
-    public IConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
-    {
-        ThrowHelper.ThrowIfNull(configure);
-
-        var context = new ConfigurationContext()
-        {
-            Properties = _properties,
-            Providers = _options.Providers
-        };
-
-        var provider = configure.Invoke(context).GetAwaiter().GetResult();
-
-        ThrowHelper.ThrowIfNull(provider);
-
-        provider.Load();
-
-        lock (_lock)
-        {
-            _options.Providers.Add(provider);
-            _root = new ConfigurationRoot(_options);
-        }
-
-        return this;
-    }
-
-    public void Set(IConfigurationEntry entry)
-    {
-        throw new NotImplementedException();
-    }
-
-    public void Remove(IConfigurationEntry entry)
-    {
-        throw new NotImplementedException();
     }
 
     IConfigurationRoot IConfigurationBuilder.Build()
     {
-        return (_root ??= new ConfigurationRoot(_options));
+        return this;
     }
-    Task<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken = default)
+
+    ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
     {
-        return Task.FromResult<IConfigurationRoot>((this as IConfigurationBuilder).Build());
+        return ValueTask.FromResult<IConfigurationRoot>(this);
     }
+
+    public void Dispose()
+    {
+        throw new NotImplementedException();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationEntry? GetEntry(Path path)
+    {
+        throw new NotImplementedException();
+    }
+
     public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationSection? GetSection(Path path)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationValue? GetValue(Path path)
     {
         throw new NotImplementedException();
     }
@@ -143,27 +122,4 @@ public sealed class ConfigurationManager : IConfigurationManager
     {
         return GetEnumerator();
     }
-
-    public ValueTask DisposeAsync()
-    {
-        throw new NotImplementedException();
-    }
-
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        lock (_lock)
-        {
-            //DisposeRegistrationsAndProvidersUnsynchronized();
-        }
-    }
-
-    private void CheckIsDisposed()
-    {
-        if (_isDisposed)
-        {
-            ThrowHelper.ThrowObjectDisposedException(nameof(ConfigurationManager));
-        }
-    }
-
 }

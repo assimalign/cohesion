@@ -30,9 +30,9 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     /// <param name="name"></param>
     /// <exception cref="ArgumentException"></exception>
     /// <exception cref="ArgumentNullException"></exception>
-    public FileName(string name)
+    public FileName(ReadOnlySpan<char> name)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(name);
+        ThrowHelper.ThrowIfEmptySpan(name);
 
         int start = 0;
         
@@ -42,7 +42,7 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
 
         _value = string.Create(name.Length - start, name, (span, value) =>
         {
-            for (int i = start; i < name.Length; i++)
+            for (int i = start; i < value.Length; i++)
             {
                 var current = value[i];
 
@@ -75,6 +75,15 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     #region Methods
 
     /// <summary>
+    /// Returns the value of the current instance as a read-only span of characters.
+    /// </summary>
+    /// <returns>A read-only span of characters representing the value of the current instance.</returns>
+    public ReadOnlySpan<char> AsSpan()
+    {
+        return _value.AsSpan();
+    }
+
+    /// <summary>
     /// 
     /// </summary>
     /// <param name="extension"></param>
@@ -91,18 +100,18 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     /// <returns></returns>
     public bool Equals(FileName other)
     {
-        return Equals(other, CultureInfo.InvariantCulture);
+        return Equals(other, StringComparison.InvariantCulture);
     }
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="other"></param>
-    /// <param name="cultureInfo"></param>
+    /// <param name="comparison"></param>
     /// <returns></returns>
-    public bool Equals(FileName other, CultureInfo cultureInfo)
+    public bool Equals(FileName other, StringComparison comparison)
     {
-        return StringComparer.Create(cultureInfo, true).Equals(_value, other._value);
+        return StringComparer.FromComparison(comparison).Equals(_value, other._value);
     }
 
     /// <summary>
@@ -112,28 +121,28 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     /// <returns></returns>
     public int CompareTo(FileName other)
     {
-        return CompareTo(other, CultureInfo.InvariantCulture);
+        return CompareTo(other, StringComparison.InvariantCulture);
     }
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="other"></param>
-    /// <param name="cultureInfo"></param>
+    /// <param name="comparison"></param>
     /// <returns></returns>
-    public int CompareTo(FileName other, CultureInfo cultureInfo)
+    public int CompareTo(FileName other, StringComparison comparison)
     {
-        return StringComparer.Create(cultureInfo, true).Compare(_value, other._value);
+        return StringComparer.FromComparison(comparison).Compare(_value, other._value);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="cultureInfo"></param>
+    /// <param name="comparison"></param>
     /// <returns></returns>
-    public int GetHashCode(CultureInfo cultureInfo)
+    public int GetHashCode(StringComparison comparison)
     {
-        return StringComparer.Create(cultureInfo, true).GetHashCode(_value);
+        return StringComparer.FromComparison(comparison).GetHashCode(_value);
     }
 
     #region Overloads
@@ -161,7 +170,7 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     // <inheritdoc />
     public override int GetHashCode()
     {
-        return GetHashCode(CultureInfo.InvariantCulture);
+        return GetHashCode(StringComparison.InvariantCulture);
     }
 
     #endregion

@@ -3,11 +3,9 @@
 		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Remove="Internal\PollingFileChangeToken.cs" />
-		<Compile Remove="Internal\PollingWildCardChangeToken.cs" />
-		<Compile Remove="PhysicalFileWatcher.cs" />
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem" />
+		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
 	</ItemGroup>
 </Project>

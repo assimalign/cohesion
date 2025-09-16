@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -11,85 +12,118 @@ namespace Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
 
-public class InMemoryFileSystem : IFileSystem
+public sealed partial class InMemoryFileSystem : IFileSystem
 {
     // The locking strategy is based on https://www.kernel.org/doc/Documentation/filesystems/directory-locking
 
+    private readonly Lock _lock = new Lock();
     private readonly InMemoryFileSystemDirectory _root;
+    private readonly string _name;
+    private readonly bool _isReadOnly;
     private Size _size;
     private Size _spaceUsed;
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="options"></param>
     public InMemoryFileSystem(InMemoryFileSystemOptions options)
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
+        _name = options.Name ?? nameof(InMemoryFileSystem);
         _size = options.Size;
-        _root = new InMemoryFileSystemDirectory(options.RootName)
+        _root = new InMemoryFileSystemDirectory(options.RootName, this)
         {
-            FileSystem = this,
-            Comparer = GetComparer(options)
+            Comparer = FileSystemPathComparer.Create(options.Comparison)
         };
     }
 
 
+    public string Name => _name;
+    public bool IsReadOnly => _isReadOnly;
     public Size Size => _size;
     public Size SpaceAvailable => _size - _spaceUsed;
     public Size SpaceUsed => _spaceUsed;
     public IFileSystemDirectory RootDirectory => _root;
 
-    #region Methods
-
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
-        RootDirectory.CopyFile(source, destination);
+
     }
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        return RootDirectory.CreateDirectory(path);
+        CheckIfReadOnly(nameof(CreateDirectory));
+
+        FileSystemPath fullPath = RootDirectory.Path.Merge(path);
+        DirectoryName[] directories = fullPath.GetDirectories();
+        
+        InMemoryFileSystemDirectory directory = _root!;
+
+        for (int i = 0; i < directories.Length; i++)
+        {
+            DirectoryName name = directories[i];
+
+            if (directory.TryGetDirectory(name, out var existing))
+            {
+                // Check if last
+                if ((i + 1) == directories.Length)
+                {
+                    ThrowHelper.ThrowFileOrDirectoryAlreadyExists(fullPath);
+                }
+
+                directory = existing;
+                continue;
+            }
+
+            directory = (InMemoryFileSystemDirectory)directory.CreateDirectory(name);
+        }
+
+        return directory!;
     }
     public IFileSystemFile CreateFile(FileSystemPath path)
     {
-        return RootDirectory.CreateFile(path);
+        throw new NotImplementedException();
     }
     public void DeleteDirectory(FileSystemPath path)
     {
-        RootDirectory.DeleteDirectory(path);
+        throw new NotImplementedException();
     }
     public void DeleteFile(FileSystemPath path)
     {
-        RootDirectory.DeleteFile(path);
+        throw new NotImplementedException();
     }
     public bool Exists(FileSystemPath path)
     {
-        return RootDirectory.Exist(path);
+        throw new NotImplementedException();
     }
     public IEnumerable<IFileSystemDirectory> EnumerateDirectories()
     {
-        return RootDirectory.GetDirectories();
+        throw new NotImplementedException();
     }
     public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
-        return RootDirectory.GetDirectory(path);
+        throw new NotImplementedException();
     }
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
-        return RootDirectory.GetEnumerator();
+        throw new NotImplementedException();
     }
     public IFileSystemFile GetFile(FileSystemPath path)
     {
-        return RootDirectory.GetFile(path);
+        throw new NotImplementedException();
     }
     public IEnumerable<IFileSystemFile> EnumerateFiles()
     {
-        return RootDirectory.GetFiles();
+        throw new NotImplementedException();
     }
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
-       // RootDirectory.Move(source, destination);
+        // RootDirectory.Move(source, destination);
     }
     public IFileSystemChangeToken Watch(Glob pattern)
     {
-        return RootDirectory.Watch(pattern);
+        throw new NotImplementedException();
     }
     IEnumerator IEnumerable.GetEnumerator()
     {
@@ -106,29 +140,31 @@ public class InMemoryFileSystem : IFileSystem
 
     internal void IncrementSpaceUsed(Size value)
     {
-        _spaceUsed =+ value;
-    }
-
-    internal void DecrementSpaceUsed(Size value)
-    {
-        _spaceUsed =- value;
-    }
-
-    private StringComparer GetComparer(InMemoryFileSystemOptions options)
-    {
-        var comparer = StringComparer.Ordinal;
-
-        if (options.CultureInfo is not null)
+        if ((_spaceUsed + value) > SpaceAvailable)
         {
-            comparer = StringComparer.Create(options.CultureInfo, options.IgnoreCase);
+            throw new IOException("There is not enough space in the file system to complete this operation.");
         }
-        else if (options.IgnoreCase)
+        lock (_lock)
         {
-            comparer = StringComparer.OrdinalIgnoreCase;
+            _spaceUsed += value;
         }
-
-        return comparer;
     }
 
-    #endregion
+    public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IFileSystemInfo GetInfo(FileSystemPath path)
+    {
+        throw new NotImplementedException();
+    }
+
+    private void CheckIfReadOnly(string? operation = null)
+    {
+        if (IsReadOnly)
+        {
+            ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
+        }
+    }
 }

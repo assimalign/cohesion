@@ -3,6 +3,8 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+using Assimalign.Cohesion.Internal;
+
 internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
 {
     private readonly FileSystemInfo _fileSystemInfo;
@@ -33,7 +35,7 @@ internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
         catch (Exception exception) 
         when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            FileSystemException.ThrowNotFound(Path, exception);
+           ThrowHelper.ThrowPathNotFound(Path, exception);
         }
     }
 

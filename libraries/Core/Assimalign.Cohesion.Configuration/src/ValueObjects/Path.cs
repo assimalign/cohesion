@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// </item>
 /// <item>
 ///     <term>Mixed Format</term>
-///     <description>"/key1.key2\\key3[index$indexLabel]:key4"</description>
+///     <description>"/key1.key2\\key3[2]:key4"</description>
 /// </item>
 /// <item>
 ///     <term>Colon Format (labels)</term>
@@ -45,8 +45,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 {
     private readonly Key[] _keys;
 
-    #region Constructors
-
     /// <summary>
     /// The default constructor
     /// </summary>
@@ -55,9 +53,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     {
         _keys = keys ??= [];
     }
-    #endregion
-
-    #region Properties
 
     /// <summary>
     /// Gets a key at the provided <paramref name="index"/>.
@@ -65,7 +60,15 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="index"></param>
     /// <returns></returns>
     ///<exception cref="IndexOutOfRangeException"></exception>
-    public Key this[int index] => _keys[index];
+    public Key this[int index]
+    {
+        get
+        {
+            ref Key key = ref _keys[index];
+
+            return key;
+        }
+    }
 
     /// <summary>
     /// Returns the default separator used within a composite key.
@@ -93,7 +96,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     public int Count
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Keys.Length;
+        get => _keys.Length;
     }
 
     /// <summary>
@@ -105,10 +108,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// Checks if the path is made up of two or more keys.
     /// </summary>
     public bool IsComposite => _keys.Length > 1;
-
-    #endregion
-
-    #region Methods
 
     /// <summary>
     /// Creates a subpath at the 
@@ -128,14 +127,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public Path Subpath(int start, int length)
     {
-        var buffer = new Key[length];
-
-        for (int i = 0; i < length; i++)
-        {
-            buffer[i] = _keys[start + i];
-        }
-
-        return new Path(buffer);
+        return _keys[start..(start + length)];
     }
 
     /// <summary>
@@ -149,6 +141,17 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     }
 
     /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public Path Combine(Path other, KeyComparison comparison)
+    {
+        return Combine(this, other, comparison);
+    }
+
+    /// <summary>
     /// Combines the two paths into one.
     /// </summary>
     /// <param name="left"></param>
@@ -156,7 +159,62 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public static Path Combine(Path left, Path right)
     {
+        return Combine(left, right, KeyComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public static Path Combine(Path left, Path right, KeyComparison comparison)
+    {
+        if (right.StartsWith(left, comparison))
+        {
+            return right;
+        }
+
         return new Path([.. left._keys, .. right._keys]);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool StartsWith(in Path other)
+    {
+        return StartsWith(other, KeyComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public bool StartsWith(in Path other, KeyComparison comparison)
+    {
+        // Has more keys than the current instance than it cannot be a match.
+        if (other.Count > Count)
+        {
+            return false;
+        }
+
+        // Get the index of the last key
+        int last = other.Count - 1;
+
+        for (int i = 0; i < last; i++)
+        {
+            if (!_keys[i].Equals(other._keys[i], comparison))
+            {
+                return false;
+            }
+        }
+
+        return _keys[last].StartsWith(other._keys[last], comparison);
     }
 
     /// <summary>
@@ -196,6 +254,12 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
         return true;
     }
 
+    //public ReadOnlySpan<char> AsSpan()
+    //{
+    //    return new ReadOnlySpan<char>(ref )
+    //    return ToString().AsSpan();
+    //}
+
     public IEnumerator<Key> GetEnumerator()
     {
         return (IEnumerator<Key>)Keys.GetEnumerator();
@@ -205,10 +269,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     {
         return GetEnumerator();
     }
-
-    #endregion
-
-    #region Overloads
 
     /// <summary>
     /// Formats the key path with the path's default delimiter.
@@ -238,10 +298,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
         return ToString().GetHashCode();
     }
 
-    #endregion
-
-    #region Helpers
-
     /// <summary>
     /// 
     /// </summary>
@@ -265,27 +321,64 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
         }
 
         int start = 0;
+        int end = span.Length - 1;
+
+        // Calculate start of string
+        for (; start < span.Length; start++)
+        {
+            int index = 0;
+            char c = span[start];
+            while (index < Delimiters.Length && Delimiters[index] != c)
+            {
+                index++;
+            }
+            if (index == Delimiters.Length)
+            {
+                break;
+            }
+        }
+
+        // Calculate end of string
+        for (; end >= start; end--)
+        {
+            int index = 0;
+            char c = span[end];
+            while (index < Delimiters.Length && Delimiters[index] != c)
+            {
+                index++;
+            }
+            if (index == Delimiters.Length)
+            {
+                break;
+            }
+        }
+
         int count = 0;
         Key[] segments = new Key[5];
+        int length = span.Length - start - (span.Length - end) + 1;
+        ReadOnlySpan<char> trimmed = span.Slice(start, length);
 
-        while (start < span.Length)
+        // Reset start
+        start = 0;
+
+        while (start < trimmed.Length)
         {
             // Find the next segment by locating ':'
-            int segmentEnd = span.Slice(start).IndexOfAny(Delimiters);
+            int segmentEnd = trimmed.Slice(start).IndexOfAny(Delimiters);
 
             if (segmentEnd == -1)
             {
-                segmentEnd = span.Length - start;
+                segmentEnd = trimmed.Length - start;
 
                 Array.Resize(ref segments, count + 1);
             }
 
-            ReadOnlySpan<char> segment = span.Slice(start, segmentEnd);
+            ReadOnlySpan<char> segment = trimmed.Slice(start, segmentEnd);
 
             start += segmentEnd + 1; // Move start past the current segment
 
             // Parse the segment
-            segments[count] = Key.Parse(segment);
+            segments[count] = new Key(segment);
 
             count++;
 
@@ -297,10 +390,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
         return new Path(segments);
     }
-
-    #endregion
-
-    #region Operators
 
     /// <summary>
     /// 
@@ -327,6 +416,12 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     public static implicit operator Path(Key[] keys) => new Path(keys);
 
     /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="path"></param>
+    public static implicit operator Key[](Path path) => path.Keys;
+
+    /// <summary>
     /// Combines two paths together.
     /// </summary>
     /// <param name="left"></param>
@@ -348,6 +443,14 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="right"></param>
     /// <returns></returns>
     public static Path operator +(Path left, Key right) => Combine(left, right);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="left"></param>
+    /// <param name="right"></param>
+    /// <returns></returns>
+    public static Path operator +(Key left, Path right) => Combine(left, right);
 
     /// <summary>
     /// 
@@ -381,18 +484,6 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public static bool operator !=(Path? left, Path right) => left.HasValue && !left.Equals(right);
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    // public static bool operator ==(KeyPath left, KeyPath? right) => right.HasValue && left.Equals(right);
-
-    #endregion
-
-    #region Partials
-
     partial class KeyPathJsonConvertor : JsonConverter<Path>
     {
         public override Path Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -407,12 +498,9 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
             return Path.Parse(value);
         }
-
         public override void Write(Utf8JsonWriter writer, Path value, JsonSerializerOptions options)
         {
             writer.WritePropertyName(value);
         }
     }
-
-    #endregion
 }

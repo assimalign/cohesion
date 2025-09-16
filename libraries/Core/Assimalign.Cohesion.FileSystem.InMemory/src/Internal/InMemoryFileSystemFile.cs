@@ -12,7 +12,7 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 {
     private bool _isDiposed;
 
-    public InMemoryFileSystemFile(InMemoryFileSystemDirectory directory, FileName name)
+    public InMemoryFileSystemFile(FileName name, InMemoryFileSystemDirectory directory, InMemoryFileSystem fileSystem) : base(fileSystem)
     {
         Name = name;
         Directory = directory;
@@ -24,39 +24,9 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
     public InMemoryFileSystemDirectory Directory { get; }
     public InMemoryFileContent Content { get; private set; }
     IFileSystemDirectory IFileSystemFile.Directory => Directory;
-    public void ContentChanged()
-    {
-        //var dispatcher = FileSystem.TryGetDispatcher();
-        //if (dispatcher != null)
-        //{
-        //    // TODO: cache this
-        //    var path = GeneratePath();
-        //    dispatcher.RaiseChange(path);
-        //}
-    }
-
     public override void Dispose()
     {
-        BeginLock();
-
-        try
-        {
-            if (_isDiposed)
-            {
-                ThrowHelper.ThrowObjectDisposedException("");
-            }
-
-            var isRemoved = Directory.Children.Remove(this);
-
-            if (isRemoved)
-            {
-                FileSystem.DecrementSpaceUsed(Size);
-            }
-        }
-        finally
-        {
-            Endlock();
-        }
+        Directory.DeleteFile(Name);
     }
 
     public Stream Open()
@@ -85,16 +55,14 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
         var isWriting = (fileAccess & FileAccess.Write) != 0;
         var isExclusive = fileShare == FileShare.None;
 
-
         if (isExclusive)
         {
-            BeginLock();
+            Lock(LockPolicy.Exclusive);
         }
         else
         {
-            BeginSharedLock(fileShare);
+            Lock(LockPolicy.Read | LockPolicy.Write);
         }
-
 
         var stream = new InMemoryFileStream(
             this, 
@@ -150,17 +118,10 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 
     public void Close(bool isShared)
     {
-        if (isShared)
-        {
-            EndSharedLock();
-        }
-        else
-        {
-            Endlock();
-        }
+        Unlock();
     }
     public IFileSystemChangeToken Watch()
     {
-        return GetToken(this);
+        return default!;// GetToken(this);
     }
 }

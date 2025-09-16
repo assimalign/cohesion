@@ -24,20 +24,20 @@ internal static class PathHelper
         '<', '>', '?' 
         ];
 
-    internal static bool IsDot(char value)
+    internal static bool IsDot(in char value)
     {
         return value == dot;
     }
-    internal static bool IsPathSeparator(char value)
+    internal static bool IsPathSeparator(in char value)
     {
         return value == _separators[0] || value == _separators[1];
     }
-    internal static bool IsValidDriveChar(char value)
+    internal static bool IsValidDriveChar(in char value)
     {
         return (uint)((value | 0x20) - 97) <= 25u;
     }
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool IsDirectorySeparator(char c)
+    internal static bool IsDirectorySeparator(in char c)
     {
         if (c != '\\')
         {
@@ -86,7 +86,7 @@ internal static class PathHelper
 
         return true;
     }
-    internal static bool IsValidNameChar(char value)
+    internal static bool IsValidNameChar(in char value)
     {
         for (int i = 0; i < _invalidFileChars.Length; i++)
         {
@@ -98,7 +98,7 @@ internal static class PathHelper
 
         return true;
     }
-    internal static bool HasDriveLetter(string value)
+    internal static bool HasDriveLetter(ReadOnlySpan<char> value)
     {
         if (value.Length >= 2)
         {
@@ -183,7 +183,7 @@ internal static class PathHelper
         }
         return true;
     }
-    internal static void CalculateTrimRange(string value, ref int start, ref int end)
+    internal static void CalculateSeparatorTrimRange(ReadOnlySpan<char> value, ref int start, ref int end)
     {
         // Calculate start of string
         for (; start < value.Length; start++)
@@ -194,7 +194,10 @@ internal static class PathHelper
             {
                 index++;
             }
-            if (index == _separators.Length) break;
+            if (index == _separators.Length)
+            {
+                break;
+            }
         }
 
         // Calculate end of string
@@ -206,10 +209,13 @@ internal static class PathHelper
             {
                 index++;
             }
-            if (index == _separators.Length) break;
+            if (index == _separators.Length)
+            {
+                break;
+            }
         }
     }
-    internal static void CalculateTrimStart(string value, ref int start)
+    internal static void CalculateTrimStart(ReadOnlySpan<char> value, ref int start)
     {
         // Calculate start of string
         for (; start < value.Length; start++)
@@ -220,7 +226,10 @@ internal static class PathHelper
             {
                 index++;
             }
-            if (index == _separators.Length) break;
+            if (index == _separators.Length)
+            {
+                break;
+            }
         }
     }
 

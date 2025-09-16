@@ -2,7 +2,7 @@
 
 public static class SpanExtensions
 {
-    extension(ref ReadOnlySpan<char> source)
+    extension(ReadOnlySpan<char> source)
     {
         public int SplitAny(Span<Range> destination, ReadOnlySpan<char> separators)
         {

@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Assimalign.Cohesion.FileSystem" />
+	</ItemGroup>
+</Project>

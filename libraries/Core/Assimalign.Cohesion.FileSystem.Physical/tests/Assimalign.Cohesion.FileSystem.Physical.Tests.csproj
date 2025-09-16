@@ -10,5 +10,6 @@
 		<Reference Include="xunit.runner.visualstudio" />
 		<Reference Include="xunit" />
 		<Reference Include="Assimalign.Cohesion.FileSystem.Physical" />
+		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
 	</ItemGroup>
 </Project>

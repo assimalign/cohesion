@@ -42,10 +42,10 @@ internal static class CertUtility
         var certificateRequest = new CertificateRequest("CN=localhost", signature, HashAlgorithmName.SHA256);
         // Adds purpose
         certificateRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection
-    {
-        new("1.3.6.1.5.5.7.3.1") // serverAuth
+        {
+            new("1.3.6.1.5.5.7.3.1") // serverAuth
 
-    }, false));
+        }, false));
 
 
         // Adds usage
@@ -53,13 +53,14 @@ internal static class CertUtility
         // Adds subject alternate names
         certificateRequest.CertificateExtensions.Add(sanBuilder.Build());
         // Sign
-        using var crt = certificateRequest.CreateSelfSigned(timestamp, timestamp.AddDays(365)); // 14 days is the max duration of a certificate for this
+        return certificateRequest.CreateSelfSigned(timestamp, timestamp.AddDays(365)); // 14 days is the max duration of a certificate for this
 
-        certificate = X509CertificateLoader.LoadCertificate(crt.Export(X509ContentType.Pfx));
+        // TODO: Fix export and load issue
+        //certificate = X509CertificateLoader.LoadCertificate(crt.Export(X509ContentType.Pfx));
 
-        // We need to add the certificate to the store so error is not thrown due to invalid cert chain
-        store.Add(certificate);
+        //// We need to add the certificate to the store so error is not thrown due to invalid cert chain
+        //store.Add(certificate);
 
-        return certificate;
+        //return certificate;
     }
 }

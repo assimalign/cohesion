@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -9,13 +8,17 @@ using Assimalign.Cohesion.Internal;
 /// <summary>
 /// 
 /// </summary>
-public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
+public class KeyComparer :
+    IComparer<Key>,
+    IEqualityComparer<Key>,
+    IEqualityComparer<Path>,
+    IAlternateEqualityComparer<ReadOnlySpan<char>, Key>
 {
-    private readonly StringComparer _comparer;
+    private readonly KeyComparison _comparison;
 
     KeyComparer(KeyComparison comparison)
     {
-        _comparer = StringComparer.FromComparison((StringComparison)comparison);
+        _comparison = comparison;
     }
 
     /// <summary>
@@ -26,7 +29,7 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
     /// <returns></returns>
     public int Compare(Key left, Key right)
     {
-        return _comparer.Compare(left, right);
+        return StringComparer.FromComparison((StringComparison)_comparison).Compare(left, right);
     }
 
     /// <summary>
@@ -37,18 +40,23 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
     /// <returns></returns>
     public int Compare(in Key left, in Key right)
     {
-        return _comparer.Compare(left, right);
+        return StringComparer.FromComparison((StringComparison)_comparison).Compare(left, right);
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
+
     bool IEqualityComparer<Key>.Equals(Key left, Key right)
     {
-        return _comparer.Equals(left, right);
+        return StringComparer.FromComparison((StringComparison)_comparison).Equals(left, right);
+    }
+
+    bool IEqualityComparer<Path>.Equals(Path left, Path right)
+    {
+        return left.Equals(right, _comparison);
+    }
+
+    int IEqualityComparer<Path>.GetHashCode(Path obj)
+    {
+        return obj.GetHashCode();
     }
 
     /// <summary>
@@ -59,7 +67,7 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
     /// <returns></returns>
     public bool Equals(in Key left, in Key right)
     {
-        return _comparer.Equals(left, right);
+        return StringComparer.FromComparison((StringComparison)_comparison).Equals(left, right);
     }
 
     /// <summary>
@@ -69,7 +77,7 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
     /// <returns></returns>
     public int GetHashCode(Key obj)
     {
-        return _comparer.GetHashCode(obj);
+        return StringComparer.FromComparison((StringComparison)_comparison).GetHashCode(obj);
     }
 
     /// <summary>
@@ -80,11 +88,22 @@ public class KeyComparer : IComparer<Key>, IEqualityComparer<Key>
     /// <exception cref="ArgumentException"></exception>
     public static KeyComparer FromComparison(KeyComparison comparison)
     {
-        if (Enum.IsDefined(comparison))
-        {
-            throw new ArgumentException("Invalid comparison.");
-        }
-        return new KeyComparer(comparison);
+        return new KeyComparer(ThrowHelper.ThrowIfNotDefined(comparison));
+    }
+
+    public bool Equals(ReadOnlySpan<char> alternate, Key other)
+    {
+        return alternate.Equals(other, (StringComparison)_comparison);
+    }
+
+    public int GetHashCode(ReadOnlySpan<char> alternate)
+    {
+        return Create(alternate).GetHashCode();
+    }
+
+    public Key Create(ReadOnlySpan<char> alternate)
+    {
+        return new Key(alternate);
     }
 
     public static KeyComparer Ordinal { get; } = new KeyComparer(KeyComparison.Ordinal);

@@ -10,37 +10,53 @@ using Assimalign.Cohesion.Internal;
 /// <summary>
 /// 
 /// </summary>
-public sealed class FileSystemPathComparer : IEqualityComparer<FileSystemPath>, IComparer<FileSystemPath>
+public sealed class FileSystemPathComparer :
+    IComparer<FileSystemPath>
+    , IEqualityComparer<FileSystemPath>
+    , IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>
 {
-    private readonly CultureInfo _cultureInfo;
+    private readonly StringComparison _comparison;
 
-    private FileSystemPathComparer(CultureInfo cultureInfo)
+    private FileSystemPathComparer(StringComparison comparison)
     {
-        _cultureInfo = cultureInfo;
+        _comparison = comparison;
     }
 
     public int Compare(FileSystemPath left, FileSystemPath right)
     {
-        return left.CompareTo(right, _cultureInfo);
+        return left.CompareTo(right, _comparison);
     }
 
     public bool Equals(FileSystemPath left, FileSystemPath right)
     {
-        return left.Equals(right, _cultureInfo);
+        return left.Equals(right, _comparison);
     }
 
     public int GetHashCode([DisallowNull] FileSystemPath path)
     {
-        return path.GetHashCode(_cultureInfo);
+        return path.GetHashCode(_comparison);
     }
 
-    public static FileSystemPathComparer Create(CultureInfo cultureInfo)
+    bool IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.Equals(ReadOnlySpan<char> alternate, FileSystemPath other)
     {
-        ThrowHelper.ThrowIfNull(cultureInfo, nameof(cultureInfo));
-
-        return new FileSystemPathComparer(cultureInfo);
+        return alternate.Equals(other, _comparison);
     }
 
-    public static FileSystemPathComparer CurrentCulture { get; } = new FileSystemPathComparer(CultureInfo.InvariantCulture);
-    public static FileSystemPathComparer InvariantCulture { get; } = new FileSystemPathComparer(CultureInfo.InvariantCulture);
+    int IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.GetHashCode(ReadOnlySpan<char> alternate)
+    {
+        return FileSystemPath.Parse(alternate).GetHashCode(_comparison);
+    }
+
+    FileSystemPath IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.Create(ReadOnlySpan<char> alternate)
+    {
+        return alternate;
+    }
+
+    public static FileSystemPathComparer Create(StringComparison comparison)
+    {
+        return new FileSystemPathComparer(comparison);
+    }
+
+    public static FileSystemPathComparer CurrentCulture { get; } = new FileSystemPathComparer(StringComparison.InvariantCulture);
+    public static FileSystemPathComparer InvariantCulture { get; } = new FileSystemPathComparer(StringComparison.InvariantCulture);
 }

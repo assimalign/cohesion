@@ -25,6 +25,11 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     Size SpaceUsed { get; }
 
     /// <summary>
+    /// A user friendly name for the file system.
+    /// </summary>
+    string Name { get; }
+
+    /// <summary>
     /// Indicates whether the file system is read only.
     /// </summary>
     bool IsReadOnly { get; }
@@ -56,16 +61,11 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     IFileSystemChangeToken Watch(Glob? pattern);
 
     /// <summary>
-    /// Enumerates all the files in the file system.
+    /// 
     /// </summary>
+    /// <param name="options"></param>
     /// <returns></returns>
-    IEnumerable<IFileSystemFile> EnumerateFiles();
-
-    /// <summary>
-    /// Enumerates through all the directories and sub-directories in the file system.
-    /// </summary>
-    /// <returns></returns>
-    IEnumerable<IFileSystemDirectory> EnumerateDirectories();
+    IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = default);
 
     /// <summary>
     /// Returns the directory at the given path.
@@ -90,7 +90,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     IFileSystemInfo GetInfo(FileSystemPath path);
 
     /// <summary>
-    /// 
+    /// Creates a directory at the given path.
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>

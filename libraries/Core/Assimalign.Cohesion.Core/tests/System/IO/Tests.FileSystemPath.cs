@@ -10,6 +10,18 @@ namespace System.IO.Tests;
 public class FileSystemPathTests
 {
 
+    [Fact]
+    public void GetDirectoriesExtensionTest()
+    {
+        var path = FileSystemPath.Parse("C:/users/dotnetcadet/documents/projects");
+        var dirs = path.GetDirectories();
+        Assert.Equal(4, dirs.Length);
+        Assert.Equal("users/", dirs[0]);
+        Assert.Equal("dotnetcadet/", dirs[1]);
+        Assert.Equal("documents/", dirs[2]);
+        Assert.Equal("projects/", dirs[3]);
+    }
+
     [Theory]
     [InlineData("//", "///\\")]
     [InlineData("/", "\\")]
@@ -26,7 +38,7 @@ public class FileSystemPathTests
 
     [Theory]
     [InlineData("C:/users/../", typeof(ArgumentException))]
-    [InlineData("../users/../", typeof(ArgumentException))]
+    [InlineData("/../users/../", typeof(ArgumentException))]
     [InlineData("C:/users/?test.cs", typeof(ArgumentException))]
     public void ParseExceptionTest(string value, Type exceptionType)
     {
@@ -37,17 +49,19 @@ public class FileSystemPathTests
     }
 
     [Theory]
-    [InlineData("..", false)]
+    [InlineData("..", true)]
     [InlineData("users/..", false)]
-    [InlineData("../users", false)]
+    [InlineData("../users", true)]
+    [InlineData("../../..", true)]
+    [InlineData("/../../..", false)]
     [InlineData("users/../documents", false)]
-    [InlineData("..test/uses", true)] // Weird but file names can have
+    [InlineData("..test/uses", true)] // Weird but file names with beginning '.'
     [InlineData("test/...uses", true)]
     public void ParentGlobingTest(string value, bool isValid)
     {
         if (isValid)
         {
-            FileSystemPath.Parse(value);
+            var path = FileSystemPath.Parse(value);
         }
         else
         {
@@ -60,14 +74,16 @@ public class FileSystemPathTests
 
     [Theory]
     [InlineData("C:/users/", "C:/users/johndoe/", "C:/users/johndoe")]
+    [InlineData("C:/users/path1/path2", "../../johndoe/", "C:/users/johndoe")]
+    [InlineData("users/path1/path2", "../../johndoe/", "users/johndoe")]
     [InlineData("users/", "users/johndoe/", "users/johndoe")]
-    [InlineData("users/", "/users/johndoe/", "/users/johndoe/users")]
-    public void CombineTest(string value1, string value2, string expected)
+    [InlineData("/users/", "/users/johndoe/", "/users/johndoe/users")]
+    public void MergeTest(string value1, string value2, string expected)
     {
         var path1 = FileSystemPath.Parse(value1);
         var path2 = FileSystemPath.Parse(value2);
 
-        var path = FileSystemPath.Combine(path1, path2);
+        var path = FileSystemPath.Merge(path1, path2);
 
         Assert.Equal(expected, path);
     }

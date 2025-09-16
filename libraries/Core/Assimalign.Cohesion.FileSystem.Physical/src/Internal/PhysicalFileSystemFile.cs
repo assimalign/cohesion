@@ -5,6 +5,8 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+using Assimalign.Cohesion.Internal;
+
 [DebuggerDisplay("[F] - {Path}")]
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 {
@@ -49,7 +51,7 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
         if (!isAllowed)
         {
-            // TODO: throw exception
+            ThrowHelper.ThrowInvalidOperationException("");
         }
 
         return File.Open(Path, fileMode, fileAccess, fileShare);

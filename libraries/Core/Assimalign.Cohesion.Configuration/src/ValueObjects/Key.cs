@@ -1,67 +1,33 @@
 ﻿using System;
-using System.Linq;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
+using System.Collections.Generic;
 
 [DebuggerDisplay("{ToString()}")]
 [JsonConverter(typeof(KeyJsonConverter))]
 public readonly struct Key : IEquatable<Key>, IComparable<Key>
 {
-    #region Constructors
-
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="value"></param>
+    /// <param name="span"></param>
     /// <exception cref="ArgumentException"></exception>
     /// <exception cref="ArgumentNullException"></exception>
-    public Key(string value)
+    public Key(ReadOnlySpan<char> span)
     {
-        var span = ThrowHelper.ThrowIfNullOrEmpty(value).AsSpan();
-
         if (span.ContainsAny(Path.Delimiters))
         {
-            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', [..Path.Delimiters])}");
-        }
-        if (span.Contains(LabelDelimiter))
-        {
-            ThrowHelper.ThrowArgumentException("");
+            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', [.. Path.Delimiters])}");
         }
 
-        Value = value;
+        Value = new string(span);
     }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="value"></param>
-    /// <param name="label"></param>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="ArgumentNullException"></exception>
-    public Key(string value, string label) : this(value)
-    {
-        var span = ThrowHelper.ThrowIfNullOrEmpty(label).AsSpan();
-
-        if (span.ContainsAny(Path.Delimiters))
-        {
-            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', [..Path.Delimiters])}");
-        }
-        if (span.Contains(LabelDelimiter))
-        {
-            ThrowHelper.ThrowArgumentException($"The parameter {label} cannot contain the '$' ");
-        }
-
-        Label = label;
-    }
-
-    #endregion
-
-    #region Properties
 
     /// <summary>
     /// The raw key value.
@@ -69,23 +35,9 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public string Value { get; }
 
     /// <summary>
-    /// Gets the label segment.
-    /// </summary>
-    public string? Label { get; }
-
-    /// <summary>
     /// Checks whether the key is empty.
     /// </summary>
     public bool IsEmpty => string.IsNullOrEmpty(Value);
-
-    /// <summary>
-    /// The delimiter used to identify a labeled segment.
-    /// </summary>
-    public const char LabelDelimiter = '$';
-
-    #endregion
-
-    #region Methods
 
     /// <summary>
     /// 
@@ -97,29 +49,61 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     }
 
     /// <summary>
-    /// Checks whether the key value is of index. '[int]'
+    /// Checks whether the key value is of index.'[int]'
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
-    public bool IsIndexed(out int index)
+    /// <exception cref="FormatException" />
+    //public bool IsIndexed(out int index)
+    //{
+    //    index = default;
+
+    //    if (IsEmpty)
+    //    {
+    //        return false;
+    //    }
+
+    //    int start;
+    //    int end;
+
+    //    var span = Value.AsSpan();
+
+    //    if ((start = span.IndexOf('[')) == -1 || (end = span.IndexOf(']')) == -1 || start > end || end != span.Length - 1)
+    //    {
+    //        return false;
+    //    }
+
+    //    var value = span.Slice(start + 1, end - start - 1);
+
+    //    index = int.Parse(value);
+
+    //    return true;
+    //}
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool StartsWith(Key other)
     {
-        index = default;
+        return StartsWith(other, KeyComparison.Ordinal);
+    }
 
-        if (IsEmpty)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="other"></param>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public bool StartsWith(Key other, KeyComparison comparison)
+    {
+        if (other.Value.Length > Value.Length)
         {
             return false;
         }
 
-        var span = Value.AsSpan();
-
-        if (span[0] != '[' || span.IndexOf(']') != (span.Length - 1))
-        {
-            return false;
-        }
-
-        var value = span.Slice(1, span.Length - 1);
-
-        return int.TryParse(value, out index);
+        return Value.StartsWith(other.Value, (StringComparison)comparison);
     }
 
     /// <summary>
@@ -156,23 +140,13 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         return KeyComparer.FromComparison(comparison).Equals(in left, in right);
     }
 
-    #endregion
-
-    #region Overloads
-
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
     public override string ToString()
     {
-        // TODO: Look into using String.Create() with span allocation. May be faster.
-        if (string.IsNullOrEmpty(Label))
-        {
-            return Value;
-        }
-
-        return string.Join(LabelDelimiter, Value, Label);
+        return Value;
     }
 
     /// <summary>
@@ -181,10 +155,6 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public override int GetHashCode()
     {
-        if (Label is not null)
-        {
-            return Value.GetHashCode() >> Label.GetHashCode();
-        }
         return Value.GetHashCode();
     }
 
@@ -222,56 +192,8 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <exception cref="ArgumentException"></exception>
     public int CompareTo(Key other, KeyComparison comparison)
     {
-        var comparer = comparison switch
-        {
-            KeyComparison.Ordinal => KeyComparer.Ordinal,
-            KeyComparison.OrdinalIgnoreCase => KeyComparer.OrdinalIgnoreCase,
-            _ => throw new ArgumentException()
-        };
-
-        return comparer.Compare(this, other);
+        return KeyComparer.FromComparison(comparison).Compare(this, other);
     }
-
-    #endregion
-
-    #region Helpers
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="value"></param>
-    /// <returns></returns>
-    public static Key Parse(string value)
-    {
-        return Parse(value.AsSpan());
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="segment"></param>
-    /// <returns></returns>
-    public static Key Parse(ReadOnlySpan<char> segment)
-    {
-        ReadOnlySpan<char> value = segment;
-        ReadOnlySpan<char> label = ReadOnlySpan<char>.Empty;
-
-        // Check for label `$`
-        int labelIndex = segment.IndexOf('$');
-        if (labelIndex != -1)
-        {
-            value = segment.Slice(0, labelIndex);
-            label = segment.Slice(labelIndex + 1);
-
-            return new Key(new string(value), new string(label));
-        }
-
-        return new Key(new string(value));
-    }
-
-    #endregion
-
-    #region Operators
 
     /// <summary>
     /// 
@@ -289,7 +211,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// 
     /// </summary>
     /// <param name="value"></param>
-    public static implicit operator Key(string value) => Key.Parse(value);
+    public static implicit operator Key(string value) => new Key(value);
 
     /// <summary>
     /// 
@@ -355,9 +277,6 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public static bool operator !=(in Key? left, in Key? right) => (!left.HasValue && right.HasValue) || (left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && left.Value.Equals(right.Value));
 
-    #endregion
-
-    #region Partials
 
     partial class KeyJsonConverter : JsonConverter<Key>
     {
@@ -375,7 +294,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
                 throw new JsonException("Key expected a string token type.");
             }
 
-            return Key.Parse(str);
+            return new Key(str);
         }
 
         public override void Write(Utf8JsonWriter writer, Key value, JsonSerializerOptions options)
@@ -383,6 +302,4 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
             writer.WritePropertyName(value);
         }
     }
-
-    #endregion
 }

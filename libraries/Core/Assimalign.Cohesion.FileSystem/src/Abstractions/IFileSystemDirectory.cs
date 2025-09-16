@@ -41,7 +41,7 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// <summary>
     /// Gets an existing directory.
     /// </summary>
-    /// <param name="name">A relative  or absolute path to given directory.</param>
+    /// <param name="name">A relative or absolute path to given directory.</param>
     /// <returns></returns>
     IFileSystemDirectory GetDirectory(DirectoryName name);
 
@@ -84,4 +84,11 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// </summary>
     /// <param name="name"></param>
     void DeleteFile(FileName name);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="options"></param>
+    /// <returns></returns>
+    IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = default);
 }

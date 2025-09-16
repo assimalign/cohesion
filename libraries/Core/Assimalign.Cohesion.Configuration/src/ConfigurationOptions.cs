@@ -7,11 +7,11 @@ using Assimalign.Cohesion.Internal;
 
 public sealed class ConfigurationOptions
 {
-    private ConfigurationSetStrategy _setStrategy = ConfigurationSetStrategy.ExistingOnly;
+    private ConfigurationSetStrategy _setStrategy;
 
     public ConfigurationOptions()
     {
-
+        _setStrategy = ConfigurationSetStrategy.ExistingOnly;
     }
 
     /// <summary>
@@ -23,11 +23,6 @@ public sealed class ConfigurationOptions
         get => _setStrategy;
         set => _setStrategy = ThrowHelper.ThrowIfNotDefined(value);
     }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    public bool LoadProvidersOnBuild { get; set; } = true;
 
     /// <summary>
     /// The amount of time to wait before canceling the load or reload.

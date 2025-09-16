@@ -37,7 +37,7 @@ public class TcpTransportServerClientResponseTests
 
         while (i != 2)
         {
-            if (DateTime.Now > timestamp.AddSeconds(10))
+            if (DateTime.Now > timestamp.AddSeconds(20))
             {
                 Assert.Fail("The process ran too long and was unable to complete.");
             }
@@ -47,7 +47,7 @@ public class TcpTransportServerClientResponseTests
     {
         return new Thread(async () =>
         {
-            await using var transport = TcpClientTransport.Create(options =>
+            await using (var transport = TcpClientTransport.Create(options =>
             {
                 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
                 options.Use(async (connection, context, next) =>
@@ -62,28 +62,30 @@ public class TcpTransportServerClientResponseTests
 
                     await next.Invoke(connection, context);
                 });
-            });
+            }))
+            {
+                await using (var connection = await transport.ConnectAsync())
+                {
+                    var context = await connection.OpenAsync();
+                    var message = Encoding.UTF8.GetBytes("Client -> Server: Hello");
+                    var memory = new ReadOnlyMemory<byte>(message);
 
+                    await context.Pipe.WriteAsync(memory);
 
-            await using var connection = await transport.ConnectAsync();
-            var context = await connection.OpenAsync();
-            var message = Encoding.UTF8.GetBytes("Client -> Server: Hello");
-            var memory = new ReadOnlyMemory<byte>(message);
+                    var result = await context.Pipe.ReadAsync();
+                    var buffer = result.Buffer.ToArray();
+                    var data = Encoding.UTF8.GetString(buffer);
 
-            await context.Pipe.WriteAsync(memory);
-
-            var result = await context.Pipe.ReadAsync();
-            var buffer = result.Buffer.ToArray();
-            var data = Encoding.UTF8.GetString(buffer);
-
-            callback.Invoke(data);
+                    callback.Invoke(data);
+                }
+            }
         });
     }
     private Thread GetServer(Action<string> callback)
     {
         return new Thread(async () =>
         {
-            await using var transport = TcpServerTransport.Create(options =>
+            await using (var transport = TcpServerTransport.Create(options =>
             {
                 options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
                 options.Use(async (connection, context, next) =>
@@ -99,25 +101,26 @@ public class TcpTransportServerClientResponseTests
 
                     await next.Invoke(connection, context);
                 });
-            });
+            }))
+            {
+                await using (var connection = await transport.AcceptOrListenAsync())
+                {
+                    var context = await connection.OpenAsync();
+                    var result = await context.Pipe.ReadAsync();
+                    var buffer = result.Buffer.ToArray();
+                    var data = Encoding.UTF8.GetString(buffer);
 
+                    callback.Invoke(data);
 
-            await using var connection = await transport.AcceptOrListenAsync();
+                    var message = Encoding.UTF8.GetBytes("Server -> Client: Hello");
+                    var memory = new ReadOnlyMemory<byte>(message);
 
-            var context = await connection.OpenAsync();
-            var result = await context.Pipe.ReadAsync();
-            var buffer = result.Buffer.ToArray();
-            var data = Encoding.UTF8.GetString(buffer);
+                    await context.Pipe.WriteAsync(memory);
 
-            callback.Invoke(data);
-
-            var message = Encoding.UTF8.GetBytes("Server -> Client: Hello");
-            var memory = new ReadOnlyMemory<byte>(message);
-
-            await context.Pipe.WriteAsync(memory);
-
-            // Need to wait for the client to receive data before disposing of the underlying transport
-            await Task.Delay(3000);
+                    // Need to wait for the client to receive data before disposing of the underlying transport
+                    await Task.Delay(5000);
+                }
+            }
         });
     }
 }

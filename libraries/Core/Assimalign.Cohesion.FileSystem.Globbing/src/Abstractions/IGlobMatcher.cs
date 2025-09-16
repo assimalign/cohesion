@@ -31,7 +31,7 @@ public interface IGlobMatcher
     /// <summary>
     /// Returns a collection of matches from the given directory.
     /// </summary>
-    /// <param name="directory">The directory to begin globbing from.</param>
+    /// <param name="directory">The directory to begin globing from.</param>
     /// <returns></returns>
     GlobMatchResults Match(IFileSystemDirectory directory);
 }

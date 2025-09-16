@@ -1,7 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
-
 
 /// <summary>
 /// Represents a leaf entry in the configuration tree.

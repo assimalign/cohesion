@@ -1,262 +1,312 @@
-﻿
-using System;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.Collections;
-using System.Reflection.Metadata.Ecma335;
+using System.Xml.Linq;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-[DebuggerDisplay("d - {Path}")]
+using Assimalign.Cohesion.Internal;
+
+
+[DebuggerDisplay("[D] - {Path}")]
 internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystemDirectory
 {
-    public InMemoryFileSystemDirectory()
+    private readonly Dictionary<FileSystemPath, InMemoryFileSystemInfo> _children;
+    private readonly Dictionary<FileSystemPath, InMemoryFileSystemInfo>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+
+    private InMemoryFileSystemDirectory? _parent;
+    private DirectoryName _name;
+
+    public InMemoryFileSystemDirectory(DirectoryName name, InMemoryFileSystem fileSystem)
+        : base(fileSystem)
     {
-        Children = new List<InMemoryFileSystemInfo>();
+        _name = name;
+        _children = new Dictionary<FileSystemPath, InMemoryFileSystemInfo>(Comparer);
+        _lookup = _children.GetAlternateLookup<ReadOnlySpan<char>>();
     }
-    public InMemoryFileSystemDirectory(DirectoryName name) 
-        : this()
+
+    public InMemoryFileSystemDirectory(DirectoryName name, InMemoryFileSystemDirectory parent, InMemoryFileSystem fileSystem)
+        : this(name, fileSystem)
     {
-        Name = name;
-    }
-    public InMemoryFileSystemDirectory(DirectoryName name, InMemoryFileSystemDirectory parent) 
-        : this(name)
-    {
-        Parent = parent;
+        _parent = parent;
     }
 
 
-    public DirectoryName Name { get; } = DirectoryName.Root;
-    public InMemoryFileSystemDirectory? Parent { get; }
-    public List<InMemoryFileSystemInfo> Children { get; }
+    public int Count => _children.Count;
+    public DirectoryName Name => _name;
+    public InMemoryFileSystemDirectory? Parent => _parent;
     IFileSystemDirectory? IFileSystemDirectory.Parent => Parent;
 
-    public void CopyFile(FileSystemPath source, FileSystemPath destination)
+    public bool TryGetDirectory(in DirectoryName name, out InMemoryFileSystemDirectory directory)
     {
-        BeginSharedLock(FileShare.Read);
+        directory = default!;
+        
+        if (_lookup.TryGetValue(FormatPath(name), out var info) && info is InMemoryFileSystemDirectory dir)
+        {
+            directory = dir;
+            return true;
+        }
+
+        return false;
+    }
+
+    public IFileSystemChangeToken Watch(Glob? glob)
+    {
+        return new InMemoryFileSystemChangeToken(
+            this, 
+            glob ?? Glob.Parse(Path));
+    }
+
+    public IFileSystemDirectory CreateDirectory(DirectoryName name)
+    {
+        Lock(LockPolicy.Read);
+
+        InMemoryFileSystemDirectory? directory = default;
 
         try
         {
-            if (source == destination)
+            FileSystemPath path = FormatPath(name);
+
+            // Check if directory already or file exists
+            if (_lookup.ContainsKey(path))
             {
-                // TODO: throw exception
+                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(
+                    path,
+                    new IOException($"Cannot create directory `{path}` on an existing file or directory"));
+            }
+
+            // Set new directory
+            _children[path] = directory = new InMemoryFileSystemDirectory(name, this, FileSystem);
+
+            // TODO: Raise Directory created
+            // ... {code}
+
+            return directory;
+        }
+        finally
+        {
+            Unlock();
+        }
+    }
+
+    public IFileSystemFile CreateFile(FileName name)
+    {
+        // Place a exclusive lock on the directory
+        Lock(LockPolicy.Exclusive);
+
+        InMemoryFileSystemFile? file = default!;
+
+        try
+        {
+            FileSystemPath path = FormatPath(name);
+
+            // Check if directory already or file exists
+            if (_lookup.ContainsKey(path))
+            {
+                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(
+                    path,
+                    new IOException($"Cannot create directory `{path}` on an existing file or directory"));
+            }
+
+            // Set new directory
+            _children[path] = file = new InMemoryFileSystemFile(name, this, FileSystem);
+
+            return file!;
+        }
+        finally
+        {
+            if (file is not null)
+            {
+                // Dispatch event
+                Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Created,
+                    file.Path,
+                    name));
+            }
+
+            Unlock();
+        }
+    }
+
+    public void DeleteDirectory(DirectoryName name)
+    {
+        // Place a exclusive lock on the directory, and recurse into children
+        // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
+        Lock(LockPolicy.Exclusive, recurse: true);
+
+        try
+        {
+            FileSystemPath path = FormatPath(name);
+
+            if (!_lookup.TryGetValue(path, out InMemoryFileSystemInfo? info))
+            {
+                ThrowHelper.ThrowPathNotFound(path);
+            }
+
+            if (info is not InMemoryFileSystemDirectory directory)
+            {
+                ThrowHelper.ThrowPathNotFound(path);
+            }
+
+            else
+            {
+                if (!_lookup.Remove(path))
+                {
+                    ThrowHelper.ThrowAccessNotAllowed(path);
+                }
+
+                // Dispatch event
+                Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Deleted,
+                    path,
+                    name));
+            }
+
+        }
+        finally
+        {
+            // TODO: Raise Directory created
+            // ... {code}
+
+            Unlock(recurse: true);
+        }
+    }
+
+    public void DeleteFile(FileName name)
+    {
+        // Place a exclusive lock on the directory, and recurse into children
+        // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
+        Lock(LockPolicy.Exclusive);
+
+        InMemoryFileSystemFile? file = default!;
+
+        try
+        {
+            FileSystemPath path = FormatPath(name);
+
+            if (!_lookup.TryGetValue(path, out InMemoryFileSystemInfo? info))
+            {
+                ThrowHelper.ThrowPathNotFound(path);
+            }
+
+            if (info is not InMemoryFileSystemFile f)
+            {
+                ThrowHelper.ThrowPathNotFound(path);
+            }
+
+            else
+            {
+                if (!_lookup.Remove(path))
+                {
+                    ThrowHelper.ThrowAccessNotAllowed(path);
+                }
+
+                file = f;
             }
         }
         finally
         {
-            EndSharedLock();
+            if (file is not null)
+            {
+                // Dispatch event
+                Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Deleted,
+                    file.Path,
+                    name));
+            }
+            Unlock();
         }
     }
 
-    public void Move(FileSystemPath source, FileSystemPath destination)
+    public IFileSystemDirectory GetDirectory(DirectoryName name)
     {
-        throw new NotImplementedException();
-    }
-
-    public IFileSystemDirectory CreateDirectory(FileSystemPath path)
-    {
-        BeginSharedLock(FileShare.Read);
+        Lock(LockPolicy.Read);
 
         try
         {
-            InMemoryFileSystemDirectory parent = this;
+            FileSystemPath path = FormatPath(name);
 
-            var values = Path.Combine(path).GetSegments();
-
-            for (int i = 0; i < values.Length; i++)
+            if (!_lookup.TryGetValue(path, out InMemoryFileSystemInfo? info))
             {
-                var isFound = false;
-                var name = values[i];
-                var children = parent.Children;
-
-                // Check if starting from root
-                if (Comparer.Equals(name, parent.Name))
-                {
-                    continue;
-                }
-
-                for (int a = 0; a < children.Count; a++)
-                {
-                    switch (children[a])
-                    {
-                        case InMemoryFileSystemFile file
-                        when Comparer.Equals(file.Name, name):
-                            {
-                                throw new IOException($"Cannot create directory `{path}` on an existing file");
-                            }
-                        case InMemoryFileSystemDirectory directory
-                        when (isFound = Comparer.Equals(directory.Name, name)):
-                            {
-                                parent = directory;
-                                parent.AccessedOn = DateTime.Now;
-                                break;
-                            }
-                    }
-                }
-
-                // If the sub directory does not exist, then create
-                if (!isFound)
-                {
-                    children.Add((parent = new InMemoryFileSystemDirectory(name, parent)
-                    {
-                        FileSystem = base.FileSystem,
-                        Comparer = base.Comparer,
-                    }));
-
-                    parent.Parent!.UpdatedOn = DateTime.Now;
-                }
+                ThrowHelper.ThrowPathNotFound(path);
             }
 
-            return parent;
+            if (info is not InMemoryFileSystemDirectory)
+            {
+                ThrowHelper.ThrowPathNotFound(path);
+            }
+
+            return (InMemoryFileSystemDirectory)info;
         }
         finally
         {
-            EndSharedLock();
-        }
-    }
-    public IFileSystemFile CreateFile(FileSystemPath path)
-    {
-        try
-        {
-            BeginSharedLock(FileShare.Read);
-
-
-
-
-            return default!;
-        }
-        finally
-        {
-            EndSharedLock();
+            Unlock();
         }
     }
 
-    public void DeleteDirectory(FileSystemPath path)
+    public IFileSystemFile GetFile(FileName name)
     {
-        BeginSharedLock(FileShare.Read);
+        Lock(LockPolicy.Read);
 
         try
         {
-            InMemoryFileSystemDirectory parent = this;
+            FileSystemPath path = FormatPath(name);
 
-            var values = Path.Combine(path).GetSegments();
-
-            for (int i = 0; i < values.Length; i++)
+            if (!_lookup.TryGetValue(path, out InMemoryFileSystemInfo? info))
             {
-                var isFound = false;
-                var name = values[i];
-                var children = parent.Children;
-
-                for (int a = 0; a < children.Count; a++)
-                {
-                    switch (children[a])
-                    {
-                        case InMemoryFileSystemFile file
-                        when Comparer.Equals(file.Name, name):
-                            {
-                                throw new IOException($"Cannot create directory `{path}` on an existing file");
-                            }
-                        case InMemoryFileSystemDirectory directory
-                        when (isFound = Comparer.Equals(directory.Name, name)):
-                            {
-                                parent = directory;
-                                break;
-                            }
-                    }
-                }
-
-                // If sub directory does not exist create
-                if (parent is null)
-                {
-                    throw new Exception();
-                    // TODO: throw not found exception
-                }
+                ThrowHelper.ThrowPathNotFound(path);
             }
 
-            if (parent.IsLocked)
+            if (info is not InMemoryFileSystemFile)
             {
-                throw new UnauthorizedAccessException();
+                ThrowHelper.ThrowPathNotFound(path);
             }
 
-            parent.Dispose();
+            return (InMemoryFileSystemFile)info;
         }
         finally
         {
-            EndSharedLock();
+            Unlock();
         }
-    }
-
-    public void DeleteFile(FileSystemPath path)
-    {
-        throw new NotImplementedException();
-    }
-
-    public bool Exist(FileSystemPath path)
-    {
-        throw new NotImplementedException();
     }
 
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {
-        return Children.OfType<InMemoryFileSystemDirectory>();
-    }
-
-    public IFileSystemDirectory GetDirectory(FileSystemPath path)
-    {
-        BeginSharedLock(FileShare.Read);
-
-        try
-        {
-            InMemoryFileSystemDirectory parent = this;
-
-            var names = path.GetSegments();
-
-            for (int i = 0; i < names.Length; i++)
-            {
-                var name = names[i];
-                var directory = Children
-                    .OfType<InMemoryFileSystemDirectory>()
-                    .FirstOrDefault(p => Comparer.Equals(p.Name, name));
-
-                if (directory is null) 
-                {
-                    throw new Exception();
-                }
-                else
-                {
-                    parent = directory;
-                }
-            }
-
-            return parent;
-        }
-        finally
-        {
-            EndSharedLock();
-        }
-    }
-
-    public IEnumerator<IFileSystemInfo> GetEnumerator()
-    {
-        return Children.GetEnumerator();
-    }
-
-    public IFileSystemFile GetFile(FileSystemPath path)
-    {
-        throw new NotImplementedException();
+        return _children.Values.OfType<InMemoryFileSystemDirectory>();
     }
 
     public IEnumerable<IFileSystemFile> GetFiles()
     {
-        return Children.OfType<InMemoryFileSystemFile>();
+        return _children.Values.OfType<InMemoryFileSystemFile>();
     }
 
-    public IFileSystemChangeToken Watch(FileSystemPath path)
+    public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
     {
-        
-        return new InMemoryFileSystemChangeToken(path);
+        options ??= new FileSystemEnumerationOptions();
+        if (options.Recurse)
+        {
+            return _children.Values
+                .Where(item => !item.Attributes.HasFlag(options.AttributesToSkip))
+                .SelectMany(child =>
+                {
+                    if (child is InMemoryFileSystemDirectory dir)
+                    {
+                        return dir.EnumerateFileSystem(options);
+                    }
+                    return new IFileSystemInfo[] { child };
+                });
+        }
+
+        return _children.Values
+                .Where(item => !item.Attributes.HasFlag(options.AttributesToSkip));
+    }
+
+    public IEnumerator<IFileSystemInfo> GetEnumerator()
+    {
+        return EnumerateFileSystem().GetEnumerator();
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -266,24 +316,21 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
 
     public override void Dispose()
     {
-        // Create exclusive lock
-        BeginLock();
-
-        try
+        if (!IsLocked)
         {
-            if (Parent is not null)
-            {
-                Parent.Children.Remove(this);
-            }
 
-            foreach (var child in Children)
-            {
-                child.Dispose();
-            }
         }
-        finally
+    }
+
+
+
+    private FileSystemPath FormatPath(FileSystemPath path)
+    {
+        if (Parent is null)
         {
-            Endlock();
+            return path;
         }
+
+        return Parent.Path.Join(path);
     }
 }

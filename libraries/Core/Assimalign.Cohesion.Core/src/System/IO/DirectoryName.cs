@@ -23,9 +23,9 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
 {
     private readonly string _value;
 
-    public DirectoryName(string value)
+    public DirectoryName(ReadOnlySpan<char> value)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(value, nameof(value));
+        ThrowHelper.ThrowIfEmptySpan(value);
 
         if (value.Length == 1 && IsPathSeparator(value[0]))
         {
@@ -38,7 +38,7 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
         int start = 0;
         int end = value.Length - 1;
 
-        CalculateTrimRange(value, ref start, ref end);
+        CalculateSeparatorTrimRange(value, ref start, ref end);
 
         _value = string.Create((end + 2) - start, value, (span, value) =>
         {
@@ -168,6 +168,15 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     /// </summary>
     /// <param name="value"></param>
     public static implicit operator DirectoryName(string value)
+    {
+        return new DirectoryName(value);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="value"></param>
+    public static implicit operator DirectoryName(ReadOnlySpan<char> value)
     {
         return new DirectoryName(value);
     }

@@ -12,7 +12,7 @@ using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Internal;
 
-public sealed class WebApplicationBuilder : IWebApplicationBuilder
+public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 {
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
@@ -48,8 +48,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder
     /// </summary>
     public ConfigurationManager Configuration { get; }
 
-    
-
     /// <summary>
     /// 
     /// </summary>
@@ -74,11 +72,23 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder
     {
         return Build();
     }
+    IHost IHostBuilder.Build()
+    {
+        return Build();
+    }
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         throw new NotImplementedException();
     }
-
-
-
+    IHostBuilder IHostBuilder.AddHostedService(IHostService service)
+    {
+        ThrowHelper.ThrowIfNull(service);
+        var server  = ThrowHelper.ThrowIfNotType<IWebApplicationServer>(service);
+        (this as IWebApplicationBuilder).AddServer(server);
+        return this;
+    }
+    IHostBuilder IHostBuilder.AddHostedService(Func<IHostContext, IHostService> configure)
+    {
+        throw new NotImplementedException();
+    }
 }

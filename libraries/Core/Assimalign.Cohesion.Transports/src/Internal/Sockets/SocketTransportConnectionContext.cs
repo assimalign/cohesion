@@ -75,7 +75,7 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
 
     public void Abort()
     {
-        AbortAsync().GetAwaiter().GetResult();
+        AbortAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
     public ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
@@ -113,11 +113,11 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
     }
     public void Dispose()
     {
-        DisposeAsync().GetAwaiter().GetResult();
+        DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
     public async ValueTask DisposeAsync()
     {
-        if (!_isSocketDisposed)
+        if (_isSocketDisposed)
         {
             throw new ObjectDisposedException(nameof(SocketTransportConnectionContext));
         }

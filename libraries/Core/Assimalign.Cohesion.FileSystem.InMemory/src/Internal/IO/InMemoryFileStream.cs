@@ -77,7 +77,7 @@ internal class InMemoryFileStream : Stream
         AssertNotDisposed();
         int readCount = _file.Content.Read(_position, buffer, offset, count);
         _position += readCount;
-        _file.AccessedOn = DateTime.Now;
+        _file.SetAccessedOn(DateTime.Now);
         return readCount;
     }
     public override long Seek(long offset, SeekOrigin origin)
@@ -104,8 +104,8 @@ internal class InMemoryFileStream : Stream
         AssertNotDisposed();
         _file.Content.Length = value;
         var time = DateTime.Now;
-        _file.AccessedOn = time;
-        _file.UpdatedOn = time;
+        _file.SetAccessedOn(time);
+        _file.SetUpdatedOn(time);
     }
     public override void Write(byte[] buffer, int offset, int count)
     {
@@ -113,8 +113,8 @@ internal class InMemoryFileStream : Stream
         _file.Content.Write(_position, buffer, offset, count);
         _position += count;
         var time = DateTime.Now;
-        _file.AccessedOn = time;
-        _file.UpdatedOn = time;
+        _file.SetAccessedOn(time);
+        _file.SetUpdatedOn(time);
     }
     private void AssertNotDisposed()
     {

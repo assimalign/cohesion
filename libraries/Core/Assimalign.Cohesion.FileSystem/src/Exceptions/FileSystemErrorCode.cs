@@ -13,7 +13,12 @@ public enum FileSystemErrorCode
     NotFound,
 
     /// <summary>
-    /// 
+    /// The target location already exists.
+    /// </summary>
+    Conflict,
+
+    /// <summary>
+    /// The file or directory path is too long.
     /// </summary>
     PathTooLong,
 

@@ -16,14 +16,14 @@ using Assimalign.Cohesion.Configuration.Internal;
 public class ConfigurationBuilder : IConfigurationBuilder
 {
     private readonly ConfigurationOptions _options;
-    private readonly List<Func<ConfigurationContext, Task>> _builds;
+    private readonly List<Func<ConfigurationBuilderContext, Task>> _builds;
 
     /// <summary>
     /// 
     /// </summary>
     public ConfigurationBuilder()
     {
-        _builds = new List<Func<ConfigurationContext, Task>>();
+        _builds = new List<Func<ConfigurationBuilderContext, Task>>();
         _options ??= ConfigurationOptions.Default;
     }
 
@@ -42,10 +42,10 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public ConfigurationBuilder AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
+    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
     {
         return AddProvider(
-            new Func<IConfigurationContext, Task<IConfigurationProvider>>(context =>
+            new Func<IConfigurationBuilderContext, Task<IConfigurationProvider>>(context =>
             {
                 return Task.FromResult(configure.Invoke(context));
             }));
@@ -56,7 +56,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public ConfigurationBuilder AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
+    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
         ThrowHelper.ThrowIfNull(configure);
 
@@ -80,7 +80,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <returns></returns>
     public ConfigurationRoot Build()
     {
-        return BuildAsync().GetAwaiter().GetResult();
+        return BuildAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -88,7 +88,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
     {
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -96,20 +96,24 @@ public class ConfigurationBuilder : IConfigurationBuilder
         cancellationTokenSource.CancelAfter(_options.LoadTimeout);
 
         // Pass the list<Providers> ref to the builder context
-        var context = new ConfigurationContext();
+        var context = new ConfigurationBuilderContext(_options.Providers);
 
         foreach (var func in _builds)
         {
             await func.Invoke(context);
         }
-
-        if (_options.LoadProvidersOnBuild)
+        foreach (var provider in context.Providers)
         {
-            foreach (var provider in context.Providers)
+            try
             {
                 await provider.LoadAsync(cancellationTokenSource.Token);
+
+            }
+            catch (Exception exception) when (exception is not TimeoutException)
+            {
             }
         }
+
 
         return new ConfigurationRoot(_options);
     }
@@ -128,29 +132,20 @@ public class ConfigurationBuilder : IConfigurationBuilder
         return new ConfigurationBuilder(options);
     }
 
-    #region Interfaces
     IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
     {
-        return AddProvider(context => provider);
+        return AddProvider(_ => provider);
     }
-    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationContext, IConfigurationProvider> configure)
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider)
     {
-        return AddProvider(configure);
+        return AddProvider(provider);
     }
-
-    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationContext, Task<IConfigurationProvider>> configure)
-    {
-        return AddProvider(configure);
-    }
-
     IConfigurationRoot IConfigurationBuilder.Build()
     {
         return Build();
     }
-
-    async Task<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
+    async ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
     {
         return await BuildAsync(cancellationToken);
     }
-    #endregion
 }

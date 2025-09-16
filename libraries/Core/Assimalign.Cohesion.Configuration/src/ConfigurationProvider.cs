@@ -12,202 +12,250 @@ using Assimalign.Cohesion.Internal;
 [DebuggerDisplay("Configuration Provider: {Name}")]
 public abstract class ConfigurationProvider : IConfigurationProvider
 {
-    private readonly Dictionary<Path, Either<IConfigurationValue, IConfigurationSection>> _data;
-    private readonly Dictionary<Path, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
-    private readonly KeyComparer _comparer;
+    private readonly KeyComparison _comparison;
+    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>> _data;
+    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+    private readonly CancellationTokenSource _cancellationTokenSource;
+    private readonly Lock _lock;
+    private readonly bool _isReadOnly;
 
-    //private readonly List<IConfigurationEntry> _entries;
-
-    private bool _isDisposed;
     private bool _isLoaded;
+    private bool _isLoading;
 
-    #region Constructors
-
-    /// <summary>
-    /// 
-    /// </summary>
-    protected ConfigurationProvider() : this(KeyComparer.Ordinal)
+    protected ConfigurationProvider() : this(KeyComparison.OrdinalIgnoreCase, Timeout.InfiniteTimeSpan)
     {
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="comparer"></param>
-    protected ConfigurationProvider(KeyComparer comparer) 
+    protected ConfigurationProvider(TimeSpan timeout) : this(KeyComparison.OrdinalIgnoreCase, timeout)
     {
-        _comparer = ThrowHelper.ThrowIfNull(comparer);
-        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(_comparer);
+    }
+
+    protected ConfigurationProvider(KeyComparison comparison, TimeSpan timeout, bool isReadOnly = false)
+    {
+        _comparison = comparison;
+        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(KeyComparer.FromComparison(comparison));
         _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
+        _cancellationTokenSource = new CancellationTokenSource(timeout);
+        _isReadOnly = isReadOnly;
+        _lock = new Lock();
     }
 
-    #endregion
-
-    /// <summary>
-    /// The provider name if any.
-    /// </summary>
+    /// <inheritdoc />
     public abstract string Name { get; }
 
-
-    public void Set(Path path, string? value)
+    /// <inheritdoc />
+    public bool TryGet(Path path, out string value)
     {
-        if (_lookup.TryGetValue(path, out var either))
-        {
-            if (either.If(out IConfigurationSection section, out IConfigurationValue v))
-            {
+        value = null!;
 
-            }
+        Key key = path[0];
+
+        if (!_lookup.TryGetValue(key, out var either))
+        {
+            return false;
         }
-        if ((i + 1) == path.Count)
-        {
 
+        if (either.If(out IConfigurationValue val, out IConfigurationSection section))
+        {
+            if (path.IsComposite)
+            {
+                return false;
+            }
+
+            value = val?.Value!;
         }
         else
         {
-
-        }
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception> 
-    public virtual IConfigurationEntry? Get(Key key)
-    {
-        if (_lookup.TryGetValue(key, out var either))
-        {
-            
-        }
-        if (key.IsEmpty)
-        {
-            ThrowHelper.ThrowArgumentException("'key' cannot be empty.");
-        }
-
-        return _entries.FirstOrDefault(p => _comparer.Equals(p.Key, key));
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="entry"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    /// <exception cref="ArgumentException"></exception>
-    public virtual void Set(IConfigurationEntry entry)
-    {
-        ThrowHelper.ThrowIfNull(entry, nameof(entry));
-
-        if (entry.Key.IsEmpty)
-        {
-            ThrowHelper.ThrowArgumentException("'IConfigurationEntry.Key' cannot be empty.");
-        }
-
-        Key key = entry.Key;
-
-
-
-        for (int i = 0; i < _entries.Count; i++)
-        {
-            if (_comparer.Equals(_entries[i].Key, entry.Key))
+            if (path.IsComposite)
             {
-                _entries.RemoveAt(i);
+                value = section.GetValue(path.Subpath(1))?.Value!;
             }
         }
 
-        _entries.Add(entry);
+        return value is not null;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="entry"></param>
-    public virtual void Remove(IConfigurationEntry entry)
+    /// <inheritdoc />
+    public bool TrySet(Path path, string? value)
     {
-        bool removed = _entries.Remove(entry);
-
-        if (!removed)
+        if (_isReadOnly && !_isLoading)
         {
-            for (int i = 0; i < _entries.Count; i++)
+            return false;
+        }
+
+        Key key = path[0];
+
+        // If No Entry
+        if (!_lookup.TryGetValue(key, out var either))
+        {
+            if (path.Count > 1)
             {
-                if (_comparer.Equals(_entries[i].Key, entry.Key))
+                var entryPath = path.Subpath(0, 1);
+                var entry = new ConfigurationSection(entryPath, this, _comparison, _isReadOnly);
+
+                entry[path] = value;
+
+                _data.Add(key, entry);
+            }
+            else
+            {
+                _data.Add(key, new ConfigurationValue(path, value, this, _isReadOnly));
+            }
+
+            return true;
+        }
+        else if (either.If(out IConfigurationValue val))
+        {
+            if (path.Count == 1)
+            {
+                val.Value = value;
+            }
+            else
+            {
+                var entryPath = path.Subpath(0, 1);
+                var entry = new ConfigurationSection(entryPath, this, _comparison, _isReadOnly);
+
+                entry[path] = value;
+
+                // Remove the value and replace with a section.
+                _data.Remove(key, out var old);
+                _data.Add(key, entry);
+            }
+
+            return true;
+        }
+        else if (either.If(out IConfigurationSection section))
+        {
+            // Remove section and replace with value.
+            if (path.Count == 1)
+            {
+                _data.Remove(key);
+                _data.Add(key, new ConfigurationValue(path, value, this));
+            }
+            else
+            {
+                section[path] = value;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    public IConfigurationEntry? GetEntry(Path path)
+    {
+        IConfigurationEntry? entry = default;
+
+        for (int i = 0; i < path.Count; i++)
+        {
+            Key key = path[i];
+
+            if (!_data.TryGetValue(key, out Either<IConfigurationValue, IConfigurationSection>? either))
+            {
+                return entry;
+            }
+
+            if (either.If(out IConfigurationSection section))
+            {
+                if (path.Count > section.Path.Count)
                 {
-                    _entries.RemoveAt(i);
+                    return section.GetEntry(path);
                 }
+
+                return section;
+            }
+
+            if (either.If(out IConfigurationValue value))
+            {
+                return value;
             }
         }
+
+        return entry;
+    }
+
+    /// <inheritdoc />
+    public virtual IEnumerable<IConfigurationEntry> GetEntries()
+    {
+        return _data.Values.Select(either =>
+        {
+            return either.If(out IConfigurationSection section, out IConfigurationValue value) ?
+                (IConfigurationEntry)section :
+                value;
+        });
     }
 
     public abstract Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
-    public virtual IEnumerable<IConfigurationEntry> GetEntries()
+    /// <inheritdoc />
+    public virtual void Load()
     {
-        return _entries;
-    }
-
-    public virtual void Load() => ReloadAsync().GetAwaiter().GetResult();
-
-    public virtual async Task LoadAsync(CancellationToken cancellationToken = default)
-    {
-        var entries = new Dictionary<Path, string?>();
-
-        await OnLoadAsync(entries, cancellationToken);
-
-        foreach (var (path, value) in entries)
+        try
         {
-            Key key = path[0];
-
-            if (path.IsComposite)
-            {
-                var existing = Get(key) as ConfigurationSection;
-
-                if (existing is null)
-                {
-                    existing = new ConfigurationSection(key, _comparer);
-                }
-
-                Path subpath = path.Subpath(1);
-
-                existing[subpath] = value;
-
-                Set(existing);
-            }
-            else
-            {
-                Set(new ConfigurationValue(key, value));
-            }
+            LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is not TimeoutException)
+        {
+            throw;
         }
     }
 
-    public void Reload()
+    /// <inheritdoc />
+    public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        ReloadAsync().GetAwaiter().GetResult();
+        using var cancellationTokenSource = CancellationTokenSource
+            .CreateLinkedTokenSource(_cancellationTokenSource.Token, cancellationToken);
+
+        var entries = new Dictionary<Path, string?>(KeyComparer.FromComparison(_comparison));
+
+        try
+        {
+            _isLoading = true;
+
+            await OnLoadAsync(entries, cancellationTokenSource.Token).ConfigureAwait(false);
+
+            foreach (var (path, value) in entries)
+            {
+                if (TrySet(path, value))
+                {
+                    // TODO: Notify of set issue
+                }
+            }
+        }
+        catch (OperationCanceledException exception)
+        {
+            throw new TimeoutException("The operation timed out ", exception);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
-    public virtual Task ReloadAsync(CancellationToken cancellationToken = default)
-    {
-        _entries.Clear();
-        return LoadAsync(cancellationToken);
-    }
-
+    /// <inheritdoc />
     public virtual void Dispose()
     {
-        _entries.Clear();
+        DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
+    /// <inheritdoc />
     public virtual ValueTask DisposeAsync()
     {
-        _entries.Clear();
-
+        _data.Clear();
         return ValueTask.CompletedTask;
     }
 
-    public bool ContainsKey(Key key)
+    public void CheckIfLoaded()
     {
-        return _entries.Any(p => _comparer.Equals(p.Key, key));
+        if (_isLoaded)
+        {
+            return;
+        }
+         
+        lock (_lock)
+        {
+            Load();
+        }
     }
 }

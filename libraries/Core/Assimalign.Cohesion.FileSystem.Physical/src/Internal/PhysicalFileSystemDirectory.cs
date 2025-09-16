@@ -23,9 +23,11 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
         : base(fileSystem, directoryInfo)
     {
         _directoryInfo = directoryInfo;
+
     }
 
     public DirectoryName Name => _directoryInfo.Name;
+
     public IFileSystemDirectory? Parent
     {
         get
@@ -41,147 +43,75 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
             return null;
         }
     }
+
     public IFileSystemChangeToken Watch(Glob? pattern)
     {
-        pattern ??= Glob.Parse(Path);
-
         return new PhysicalFileSystemChangeToken(
             this,
-            pattern);
+            pattern ?? Glob.Parse(Path));
     }
+
     public IFileSystemDirectory GetDirectory(DirectoryName name)
     {
-        try
-        {
-            var directoryInfo = new DirectoryInfo(Path.Combine(name));
+        return FileSystem.GetDirectory(Path.Join(name));
+    }
 
-            CheckFileOrDirectoryExist(directoryInfo);
-
-            return new PhysicalFileSystemDirectory(FileSystem, directoryInfo)
-            {
-                IgnoreAttributes = IgnoreAttributes
-            };
-        }
-        catch (Exception exception) when (exception is not FileSystemException)
-        {
-            throw new FileSystemException("", exception);
-        }
-    }
-    public IEnumerable<IFileSystemFile> GetFiles()
-    {
-        return _directoryInfo.EnumerateFiles("*", GetEnumerationOptions())
-            .Select(fileInfo => new PhysicalFileSystemFile(FileSystem, fileInfo)
-            {
-                IgnoreAttributes = IgnoreAttributes
-            });
-    }
-    public IEnumerable<IFileSystemDirectory> GetDirectories()
-    {
-        return _directoryInfo.EnumerateDirectories("*", GetEnumerationOptions())
-            .Select(directoryInfo => new PhysicalFileSystemDirectory(FileSystem, directoryInfo)
-            {
-                IgnoreAttributes = IgnoreAttributes
-            });
-    }
     public IFileSystemFile GetFile(FileName name)
     {
-        try
-        {
-            var info = new FileInfo(Path.Combine(name));
-
-            CheckFileOrDirectoryExist(info);
-
-            return new PhysicalFileSystemFile(FileSystem, info)
-            {
-                IgnoreAttributes = IgnoreAttributes
-            };
-        }
-        catch (Exception exception)
-        when (exception is not FileSystemException)
-        {
-            throw new FileSystemException("", exception);
-        }
+        return FileSystem.GetFile(Path.Join(name));
     }
+
     public IFileSystemDirectory CreateDirectory(DirectoryName name)
     {
-        CheckIfReadOnly();
-
-        try
-        {
-            var path = Path.Combine(name);
-
-            return new PhysicalFileSystemDirectory(
-                FileSystem,
-                Directory.CreateDirectory(path))
-            {
-                IgnoreAttributes = IgnoreAttributes
-            };
-        }
-        catch (Exception)
-        {
-            throw;
-        }
+        return FileSystem.CreateDirectory(Path.Join(name));
     }
+    
     public IFileSystemFile CreateFile(FileName name)
     {
-        var filePath = GetFullPath(name);
-        var fileInfo = new FileInfo(filePath);
-
-        if (fileInfo.Exists)
-        {
-            throw new IOException("File already exists");
-        }
-
-        using var fileStream = fileInfo.Create();
-
-        return new PhysicalFileSystemFile(FileSystem, fileInfo)
-        {
-            IgnoreAttributes = IgnoreAttributes
-        };
+        return FileSystem.CreateFile(Path.Join(name));
     }
 
     public void DeleteDirectory(DirectoryName name)
     {
-        CheckIfReadOnly();
-
-        var directoryPath = GetFullPath(name);
-        var directoryInfo = new DirectoryInfo(directoryPath);
-
-        CheckFileOrDirectoryExist(directoryInfo);
-
-        directoryInfo.Delete();
+        FileSystem.DeleteDirectory(Path.Join(name));
     }
 
     public void DeleteFile(FileName name)
     {
-        try
-        {
-            CheckIfReadOnly();
-
-            var path = Path.Combine(name);
-            var info = new FileInfo(path);
-
-            CheckFileOrDirectoryExist(info);
-
-            info.Delete();
-        }
-        catch (IOException exception)
-        {
-
-        }
-        catch (SecurityException excpetion)
-        {
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            ThrowHelper.ThrowFileSystemException("", exception);
-        }
+        FileSystem.DeleteFile(Path.Join(name));
     }
 
-
-    public IEnumerator<IFileSystemInfo> GetEnumerator()
+    public IEnumerable<IFileSystemFile> GetFiles()
     {
-        return _directoryInfo.EnumerateFileSystemInfos("*", GetEnumerationOptions())
+        return EnumerateFileSystem(new FileSystemEnumerationOptions()
+        {
+            Recurse = false
+
+        }).OfType<IFileSystemFile>();
+    }
+    
+    public IEnumerable<IFileSystemDirectory> GetDirectories()
+    {
+        return EnumerateFileSystem(new FileSystemEnumerationOptions()
+        {
+            Recurse = false
+
+        }).OfType<IFileSystemDirectory>();
+    }
+
+    public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
+    {
+        options ??= new FileSystemEnumerationOptions()
+        {
+            AttributesToSkip = IgnoreAttributes,
+            Recurse = false
+        };
+
+        return _directoryInfo.EnumerateFileSystemInfos("*", new EnumerationOptions()
+            {
+                AttributesToSkip = options.AttributesToSkip,
+                RecurseSubdirectories = options.Recurse,
+            })
             .Select<FileSystemInfo, IFileSystemInfo>(item => item switch
             {
                 FileInfo info => new PhysicalFileSystemFile(FileSystem, info)
@@ -193,46 +123,16 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
                     IgnoreAttributes = IgnoreAttributes
                 },
                 _ => throw new Exception("Invalid object in physical file system.")
+            });
+    }
 
-            }).GetEnumerator();
+    public IEnumerator<IFileSystemInfo> GetEnumerator()
+    {
+        return EnumerateFileSystem().GetEnumerator();
     }
 
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
-    }
-
-    private FileSystemPath GetFullPath(FileSystemPath path)
-    {
-        return System.IO.Path.GetFullPath(path, _directoryInfo.FullName);
-    }
-
-    private void CheckIfReadOnly()
-    {
-        if (FileSystem.IsReadOnly)
-        {
-            ThrowHelper.ThrowFileSystemIsReadOnly();
-        }
-    }
-    private void CheckFileOrDirectoryExist(FileSystemInfo fileSystemInfo)
-    {
-        if (!fileSystemInfo.Exists)
-        {
-            ThrowHelper.ThrowPathNotExistException(fileSystemInfo.FullName);
-        }
-        // Check if the file or directory has the ignore attribute
-        if (fileSystemInfo.Attributes.HasFlag(base.IgnoreAttributes))
-        {
-            ThrowHelper.ThrowPathNotExistException(fileSystemInfo.FullName);
-        }
-    }
-    private EnumerationOptions GetEnumerationOptions()
-    {
-        return new EnumerationOptions()
-        {
-            IgnoreInaccessible = true,
-
-            AttributesToSkip = base.IgnoreAttributes
-        };
     }
 }

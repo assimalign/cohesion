@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="coverlet.collector" />
+		<Reference Include="Microsoft.NET.Test.Sdk" />
+		<Reference Include="xunit.runner.visualstudio" />
+		<Reference Include="xunit" />
+		<Reference Include="Assimalign.Cohesion.FileSystem.Isolated" />
+	</ItemGroup>
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+
+</Project>

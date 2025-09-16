@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
+internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposable
 {
     // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly Glob _glob;
@@ -25,19 +25,26 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
         _watcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
         _watcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
         _watcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
+        _watcher.Renamed += (sender, args) => Notify(sender, args, ChangeType.Rename);
     }
 
-    public IDisposable OnChange(Action<object> callback)
+    public void Dispose()
     {
-        return OnChange(state => callback(state));
+        
     }
-    public IDisposable OnChange(Action<IFileSystemChangeContext> callback)
-    {
-        ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new Subscriber()
+    public IDisposable OnChange(Action<object?> callback, object? state)
+    {
+        return OnChange(callback, state);
+    }
+    public IDisposable OnChange<T>(Action<FileSystemChangeArgs<T>> callback, T state)
+    {
+        ThrowHelper.ThrowIfNull(callback);
+
+        var disposable = new Subscriber<T>()
         {
             ChangeType = ChangeType.Changed,
+            State = state,
             Callback = callback,
             OnDispose = subscriber => _subscribers.Remove(subscriber)
         };
@@ -46,13 +53,14 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 
         return disposable;
     }
-    public IDisposable OnCreate(Action<IFileSystemChangeContext> callback)
+    public IDisposable OnCreate<T>(Action<FileSystemChangeArgs<T>> callback, T state)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new Subscriber()
+        var disposable = new Subscriber<T>()
         {
             ChangeType = ChangeType.Created,
+            State = state,
             Callback = callback,
             OnDispose = Subscriber => _subscribers.Remove(Subscriber)
         };
@@ -61,21 +69,39 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
 
         return disposable;
     }
-    public IDisposable OnDelete(Action<IFileSystemChangeContext> callback)
+    public IDisposable OnDelete<T>(Action<FileSystemChangeArgs<T>> callback, T state)
     {
         ThrowHelper.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new Subscriber()
+        var disposable = new Subscriber<T>()
         {
             ChangeType = ChangeType.Deleted,
+            State = state,
             Callback = callback,
-            OnDispose = subscriber => _subscribers.Remove(subscriber)
+            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
         };
 
         _subscribers.Add(disposable);
 
         return disposable;
     }
+    public IDisposable OnRename<T>(Action<FileSystemRenameArgs<T>> callback, T state)
+    {
+        ThrowHelper.ThrowIfNull(callback, nameof(callback));
+
+        var disposable = new RenameSubscriber<T>()
+        {
+            ChangeType = ChangeType.Rename,
+            State = state,
+            Callback = callback,
+            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+        };
+
+        _subscribers.Add(disposable);
+
+        return disposable;
+    }
+
     private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
     {
         FileSystemPath fileSystemPath = args.FullPath;
@@ -92,11 +118,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
         {
             if (subscriber.ChangeType == changeType)
             {
-                subscriber.Invoke(new PhysicalFileSystemChangeContext()
-                {
-                    Path = fileSystemPath,
-                    Info = fileSystemInfo
-                });
+                subscriber.Invoke(args);
             }
         }
     }
@@ -104,25 +126,40 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken
     {
         Created,
         Deleted,
-        Changed
+        Changed,
+        Rename
     }
-    partial class Subscriber : IDisposable
+
+    abstract partial class Subscriber : IDisposable
     {
-        public ChangeType ChangeType { get; init; }
+        public required ChangeType ChangeType { get; init; }
         public Action<Subscriber> OnDispose { get; init; } = default!;
-        public Action<IFileSystemChangeContext> Callback { get; init; } = default!;
-        public void Invoke(IFileSystemChangeContext info)
-        {
-            Callback.Invoke(info);
-        }
+        public abstract void Invoke(FileSystemEventArgs args);
         public void Dispose()
         {
             OnDispose.Invoke(this);
         }
     }
-    partial class PhysicalFileSystemChangeContext : IFileSystemChangeContext
+
+    partial class Subscriber<T> : Subscriber
     {
-        public FileSystemPath Path { get; init; }
-        public IFileSystemInfo Info { get; init; } = default!;
+        public required T State { get; init; }
+        public required Action<FileSystemChangeArgs<T>> Callback { get; init; } = default!;
+        public override void Invoke(FileSystemEventArgs args)
+        {
+            Callback.Invoke(new FileSystemChangeArgs<T>(args.FullPath, State));
+        }
+    }
+
+    partial class RenameSubscriber<T> : Subscriber
+    {
+        public required T State { get; init; }
+        public required Action<FileSystemRenameArgs<T>> Callback { get; init; } = default!;
+        public override void Invoke(FileSystemEventArgs args)
+        {
+            var renameArgs = (RenamedEventArgs)args;
+
+            Callback.Invoke(new FileSystemRenameArgs<T>(renameArgs.OldFullPath, renameArgs.FullPath, State));
+        }
     }
 }

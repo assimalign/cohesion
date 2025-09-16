@@ -12,32 +12,34 @@ public interface IHostBuilder
     /// </summary>
     /// <param name="service">The service managed by the host.</param>
     /// <returns>The same instance of <see cref="IHostBuilder"/></returns>
-    IHostBuilder AddService(IHostService service);
+    IHostBuilder AddHostedService(IHostService service);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    IHostBuilder AddService(Func<IHostContext, IHostService> configure);
-
-    /// <summary>
-    /// Adds a <see cref="IServiceProvider"/> to the host context.
-    /// </summary>
-    /// <param name="serviceProvider"></param>
-    /// <returns></returns>
-    IHostBuilder AddServiceProvider(IServiceProvider serviceProvider);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="serviceProvider"></param>
-    /// <returns></returns>
-    IHostBuilder AddServiceProvider(Func<IHostContext, IServiceProvider> serviceProvider);
+    IHostBuilder AddHostedService(Func<IHostContext, IHostService> configure);
 
     /// <summary>
     /// Builds the <see cref="IHost"/>.
     /// </summary>
     /// <returns></returns>
     IHost Build();
+
+
+    /// <summary>
+    /// Adds a <see cref="IServiceProvider"/> to the host context.
+    /// </summary>
+    /// <param name="serviceProvider"></param>
+    /// <returns></returns>
+    //IHostBuilder AddServiceProvider(IServiceProvider serviceProvider);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="serviceProvider"></param>
+    /// <returns></returns>
+    //IHostBuilder AddServiceProvider(Func<IHostContext, IServiceProvider> serviceProvider);
+
 }

@@ -3,6 +3,9 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
+/// <summary>
+/// The base abstraction for file system entries.
+/// </summary>
 public interface IFileSystemInfo
 {
     /// <summary>

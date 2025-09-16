@@ -41,7 +41,7 @@ public abstract class HostContext : IHostContext
     }
     public abstract FileSystemPath? ContentRootPath { get; }
     public abstract IHostEnvironment Environment { get; } 
-    public virtual IServiceProvider? ServiceProvider { get;}
+    public abstract IServiceProvider? ServiceProvider { get;}
     public abstract IEnumerable<IHostService> HostedServices { get; }
     internal Action? ShutdownCallback { get; set; }
 

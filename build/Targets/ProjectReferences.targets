@@ -48,6 +48,8 @@
       <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.Globbing.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.Globbing\tests\Assimalign.Cohesion.FileSystem.Globbing.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.InMemory" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.InMemory\src\Assimalign.Cohesion.FileSystem.InMemory.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.InMemory.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.InMemory\tests\Assimalign.Cohesion.FileSystem.InMemory.Tests.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.Isolated" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.Isolated\src\Assimalign.Cohesion.FileSystem.Isolated.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.Isolated.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.Isolated\tests\Assimalign.Cohesion.FileSystem.Isolated.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.Physical" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.Physical\src\Assimalign.Cohesion.FileSystem.Physical.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.FileSystem.Physical.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.FileSystem.Physical\tests\Assimalign.Cohesion.FileSystem.Physical.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Hosting" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Hosting\src\Assimalign.Cohesion.Hosting.csproj" />
@@ -60,6 +62,8 @@
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Logging.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Logging\tests\Assimalign.Cohesion.Logging.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Logging.Console" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Logging.Console\src\Assimalign.Cohesion.Logging.Console.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.Logging.Console.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Logging.Console\tests\Assimalign.Cohesion.Logging.Console.Tests.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Logging.Debug" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Logging.Debug\src\Assimalign.Cohesion.Logging.Debug.csproj" />
+      <ProjectReferenceProvider Include="Assimalign.Cohesion.Logging.Debug.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.Logging.Debug\tests\Assimalign.Cohesion.Logging.Debug.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ObjectMapping" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.ObjectMapping\src\Assimalign.Cohesion.ObjectMapping.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ObjectMapping.Tests" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.ObjectMapping\tests\Assimalign.Cohesion.ObjectMapping.Tests.csproj" />
       <ProjectReferenceProvider Include="Assimalign.Cohesion.ObjectPool" ProjectPath="$(RepositoryRoot)libraries\Core\Assimalign.Cohesion.ObjectPool\src\Assimalign.Cohesion.ObjectPool.csproj" />

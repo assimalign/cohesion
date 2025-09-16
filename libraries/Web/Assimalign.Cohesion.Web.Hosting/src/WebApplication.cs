@@ -28,6 +28,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     public override WebApplicationContext Context => _context;
+    
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
         if (_isBuilt)

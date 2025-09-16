@@ -23,6 +23,17 @@ internal static partial class ThrowHelper
         return argument;
     }
 
+    internal static ReadOnlySpan<T> ThrowIfEmptySpan<T>(
+        [NotNull] ReadOnlySpan<T> argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null) 
+    {
+        if (argument.Length <= 0)
+        {
+            ThrowArgumentNullException(paramName);
+        }
+        return argument;
+    }
+
     internal static string ThrowIfNullOrEmpty(
         [NotNull] string? argument,
         [CallerArgumentExpression(nameof(argument))] string? paramName = null)
@@ -62,6 +73,18 @@ internal static partial class ThrowHelper
         }
 
         return argument;
+    }
+
+    internal static T ThrowIfNotType<T>(
+        [NotNull] object argument,
+        [CallerArgumentExpression(nameof(argument))] string? paramName = null)
+    {
+        if (argument is not T type)
+        {
+            throw new ArgumentException("");
+        }
+
+        return type;
     }
 
     [DoesNotReturn]
@@ -131,6 +154,12 @@ internal static partial class ThrowHelper
     internal static void ThrowJsonException(string message)
     {
         throw new JsonException(message);
+    }
+
+    [DoesNotReturn]
+    internal static void ThrowPathToLongException()
+    {
+        throw new PathTooLongException();
     }
 
     #endregion

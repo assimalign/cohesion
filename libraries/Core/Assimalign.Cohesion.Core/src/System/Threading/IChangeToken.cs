@@ -12,3 +12,4 @@ public interface IChangeToken
     /// <returns>An <see cref="IDisposable"/> that is used to unregister the callback.</returns>
     IDisposable OnChange(Action<object?> callback, object? state);
 }
+

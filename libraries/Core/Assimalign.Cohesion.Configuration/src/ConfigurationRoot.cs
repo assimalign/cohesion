@@ -9,12 +9,58 @@ namespace Assimalign.Cohesion.Configuration;
 
 using Assimalign.Cohesion.Internal;
 
-public class ConfigurationRoot : IConfigurationRoot, IDisposable
+
+
+public class NewConfigurationRoot : IConfigurationRoot
+{
+
+    public NewConfigurationRoot(List<IConfigurationProvider> providers)
+    {
+        for (int i = 0; i < providers.Count; i++)
+        {
+            var provider = providers[i];
+
+            provider.Get
+        }
+    }
+
+
+    public string? this[Path path] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+    public IEnumerable<IConfigurationProvider> Providers => throw new NotImplementedException();
+
+    public void Dispose()
+    {
+        throw new NotImplementedException();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationEntry? GetEntry(Path path)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        throw new NotImplementedException();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+}
+
+public class ConfigurationRoot : IConfigurationRoot
 {
     private readonly ConfigurationSetStrategy _setStrategy;
-    private readonly List<IConfigurationProvider> _providers;
+    private readonly IReadOnlyList<IConfigurationProvider> _providers;
 
-    private bool _disposed;
+    private bool _isDisposed;
     private bool _isDisposing;
 
     /// <summary>
@@ -29,35 +75,26 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         _setStrategy = options.SetStrategy;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="path"></param>
-    /// <returns></returns>
+    /// <inheritdoc />
     public string? this[Path path]
     {
         get => GetConfigurationValue(path, this);
         set => SetConfigurationValue(path, value, this);
     }
 
-    /// <summary>
-    /// Returns a readonly collection of providers.
-    /// </summary>
-    public IEnumerable<IConfigurationProvider> Providers => _providers.AsReadOnly();
+    /// <inheritdoc />
+    public IEnumerable<IConfigurationProvider> Providers => _providers;
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    public IConfigurationEntry? Get(Key key)
+    /// <inheritdoc />
+    public IConfigurationEntry? GetEntry(Path path)
     {
+        IConfigurationEntry? entry = default;
+
         for (int i = _providers.Count - 1; i >= 0; i--)
         {
             IConfigurationProvider provider = _providers[i];
-            IConfigurationEntry? entry = provider.Get(key);
 
-            if (entry is not null)
+            if ((entry = provider.GetEntry(path)) is not null)
             {
                 return entry;
             }
@@ -66,60 +103,33 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         return null;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="entry"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public void Set(IConfigurationEntry entry)
+    /// <inheritdoc />
+    public IConfigurationValue? GetValue(Path path)
     {
-        ThrowHelper.ThrowIfNull(entry);
+        IConfigurationEntry? entry = default;
 
-        if (_setStrategy == ConfigurationSetStrategy.ExistingOnly)
+        if ((entry = GetEntry(path)) is not null and IConfigurationValue value)
         {
-            Key key = entry.Key;
-
-            for (int i = _providers.Count - 1; i >= 0; i--)
-            {
-                IConfigurationProvider provider = _providers[i];
-
-                if (provider.ContainsKey(key))
-                {
-                    provider.Set(entry);
-                    return;
-                }
-            }
+            return value;
         }
 
-        for (int i = _providers.Count - 1; i >= 0; i--)
-        {
-            IConfigurationProvider provider = _providers[i];
-
-            provider.Set(entry);
-        }
+        return null;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="entry"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public void Remove(IConfigurationEntry entry)
+    /// <inheritdoc />
+    public IConfigurationSection? GetSection(Path path)
     {
-        ThrowHelper.ThrowIfNull(entry);
+        IConfigurationEntry? entry = default;
 
-        for (int i = _providers.Count - 1; i >= 0; i--)
+        if ((entry = GetEntry(path)) is not null and IConfigurationSection section)
         {
-            IConfigurationProvider provider = _providers[i];
-
-            provider.Remove(entry);
+            return section;
         }
+
+        return null;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
+    /// <inheritdoc />
     public IChangeToken GetChangeToken()
     {
         CheckIfDisposedOrDisposing();
@@ -127,12 +137,14 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         throw new NotImplementedException();
     }
 
-    public IConfigurationSection? GetSection(Key key) => GetEntry<IConfigurationSection>(key);
-    public IEnumerable<IConfigurationSection> GetSections() => GetEntriesOf<IConfigurationSection>();
-    public IConfigurationValue? GetValue(Key key) => GetEntry<IConfigurationValue>(key);
-    public IEnumerable<IConfigurationValue> GetValues() => GetEntriesOf<IConfigurationValue>();
-    public IEnumerator<IConfigurationEntry> GetEnumerator() => GetEntriesOf<IConfigurationEntry>().GetEnumerator();
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        return EnumeratorEntries().GetEnumerator();
+    }
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
     public void Dispose()
     {
         CheckIfDisposedOrDisposing();
@@ -142,7 +154,7 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
             provider.Dispose();
         }
 
-        _disposed = true;
+        _isDisposed = true;
     }
 
     public async ValueTask DisposeAsync()
@@ -154,52 +166,28 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
             await provider.DisposeAsync();
         }
 
-        _disposed = true;  
+        _isDisposed = true;  
     }
 
     private void CheckIfDisposedOrDisposing()
     {
-        if (_disposed || _isDisposing)
+        if (_isDisposed || _isDisposing)
         {
             ThrowHelper.ThrowObjectDisposedException(nameof(ConfigurationRoot));
         }
     }
 
-
-    private TEntry? GetEntry<TEntry>(Key key)
+    private IEnumerable<IConfigurationEntry> EnumeratorEntries()
     {
         CheckIfDisposedOrDisposing();
 
-        IConfigurationEntry? entry = null;
-
-        for (int i = 0; i < _providers.Count; i++)
+        for (int i = _providers.Count - 1; i >= 0; i--)
         {
-            if ((entry = _providers[i].Get(key)) is not null && entry is TEntry)
+            IConfigurationProvider provider = _providers[i];
+
+            foreach (IConfigurationEntry entry in provider.GetEntries())
             {
-                return (TEntry)entry;
-            }
-        }
-
-        return default;
-    }
-    private IEnumerable<TEntry> GetEntriesOf<TEntry>()
-    {
-        CheckIfDisposedOrDisposing();
-
-        IConfigurationProvider? provider = null;
-
-        for (int i = 0; i < _providers.Count; i++)
-        {
-            provider = _providers[i];
-
-            var entries = provider.GetEntries();
-
-            foreach (var entry in entries)
-            {
-                if (entry is TEntry t)
-                {
-                    yield return t;
-                }
+                yield return entry;
             }
         }
     }
@@ -207,37 +195,16 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
     private string? GetConfigurationValue(in Path path, ConfigurationRoot root)
     {
         Key key = path[0];
-        IList<IConfigurationProvider> providers = root.Providers.ToList();
+        IReadOnlyList<IConfigurationProvider> providers = (IReadOnlyList<IConfigurationProvider>)root.Providers;
 
         for (int i = providers.Count - 1; i >= 0; i--)
         {
             IConfigurationProvider provider = providers[i];
-            IConfigurationEntry? entry = provider.Get(key);
 
-            if (entry is null)
+            if (provider.TryGet(path, out string? value))
             {
-                continue;
+                return value;
             }
-
-            if (entry.IsValue(out IConfigurationValue? value))
-            {
-                if (path.IsComposite)
-                {
-                    continue;
-                }
-
-                return value!.Value;
-            }
-
-            // This would be weird if this happened
-            if (entry is not IConfigurationSection section)
-            {
-                continue;
-            }
-
-            Path subpath = path.Subpath(1);
-
-            return section[subpath];
         }
 
         return null;
@@ -248,11 +215,10 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         IConfigurationProvider provider = default;
         IConfigurationEntry? entry = default;
 
-
         for (int i = _providers.Count - 1; i >= 0; i--)
         {
             provider = _providers[i];
-            entry = provider.Get(key);
+            entry = provider.GetEntry(key);
 
             if (entry is not null)
             {
