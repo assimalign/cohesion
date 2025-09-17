@@ -4,12 +4,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Xml.Linq;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
-
 
 [DebuggerDisplay("[D] - {Path}")]
 internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystemDirectory
@@ -43,7 +41,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
     public bool TryGetDirectory(in DirectoryName name, out InMemoryFileSystemDirectory directory)
     {
         directory = default!;
-        
+
         if (_lookup.TryGetValue(FormatPath(name), out var info) && info is InMemoryFileSystemDirectory dir)
         {
             directory = dir;
@@ -56,12 +54,14 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
     public IFileSystemChangeToken Watch(Glob? glob)
     {
         return new InMemoryFileSystemChangeToken(
-            this, 
+            this,
             glob ?? Glob.Parse(Path));
     }
 
     public IFileSystemDirectory CreateDirectory(DirectoryName name)
     {
+        CheckIfReadOnly(nameof(CreateDirectory));
+
         Lock(LockPolicy.Read);
 
         InMemoryFileSystemDirectory? directory = default;
@@ -81,19 +81,27 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
             // Set new directory
             _children[path] = directory = new InMemoryFileSystemDirectory(name, this, FileSystem);
 
-            // TODO: Raise Directory created
-            // ... {code}
-
             return directory;
         }
         finally
         {
+            if (directory is not null)
+            {
+                // Dispatch event
+                Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Created,
+                    directory.Path,
+                    directory.Name));
+            }
+
             Unlock();
         }
     }
 
     public IFileSystemFile CreateFile(FileName name)
     {
+        CheckIfReadOnly(nameof(CreateFile));
+
         // Place a exclusive lock on the directory
         Lock(LockPolicy.Exclusive);
 
@@ -124,7 +132,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                 Dispatcher.RaiseEvent(new FileSystemEventArgs(
                     WatcherChangeTypes.Created,
                     file.Path,
-                    name));
+                    file.Name));
             }
 
             Unlock();
@@ -133,9 +141,13 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
 
     public void DeleteDirectory(DirectoryName name)
     {
+        CheckIfReadOnly(nameof(DeleteDirectory));
+
         // Place a exclusive lock on the directory, and recurse into children
         // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
         Lock(LockPolicy.Exclusive, recurse: true);
+
+        InMemoryFileSystemDirectory? directory = default!;
 
         try
         {
@@ -145,12 +157,10 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
             {
                 ThrowHelper.ThrowPathNotFound(path);
             }
-
-            if (info is not InMemoryFileSystemDirectory directory)
+            if (info is not InMemoryFileSystemDirectory)
             {
                 ThrowHelper.ThrowPathNotFound(path);
             }
-
             else
             {
                 if (!_lookup.Remove(path))
@@ -158,18 +168,20 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                     ThrowHelper.ThrowAccessNotAllowed(path);
                 }
 
-                // Dispatch event
-                Dispatcher.RaiseEvent(new FileSystemEventArgs(
-                    WatcherChangeTypes.Deleted,
-                    path,
-                    name));
+                directory = (InMemoryFileSystemDirectory)info;
             }
 
         }
         finally
         {
-            // TODO: Raise Directory created
-            // ... {code}
+            if (directory is not null)
+            {
+                // Dispatch event
+                Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Deleted,
+                    directory.Path,
+                    directory.Name));
+            }
 
             Unlock(recurse: true);
         }
@@ -177,6 +189,8 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
 
     public void DeleteFile(FileName name)
     {
+        CheckIfReadOnly(nameof(DeleteFile));
+
         // Place a exclusive lock on the directory, and recurse into children
         // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
         Lock(LockPolicy.Exclusive);
@@ -192,7 +206,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                 ThrowHelper.ThrowPathNotFound(path);
             }
 
-            if (info is not InMemoryFileSystemFile f)
+            if (info is not InMemoryFileSystemFile)
             {
                 ThrowHelper.ThrowPathNotFound(path);
             }
@@ -204,7 +218,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                     ThrowHelper.ThrowAccessNotAllowed(path);
                 }
 
-                file = f;
+                file = (InMemoryFileSystemFile)info;
             }
         }
         finally
@@ -260,7 +274,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                 ThrowHelper.ThrowPathNotFound(path);
             }
 
-            if (info is not InMemoryFileSystemFile)
+            if (info is not InMemoryFileSystemFile file)
             {
                 ThrowHelper.ThrowPathNotFound(path);
             }
@@ -300,8 +314,8 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                 });
         }
 
-        return _children.Values
-                .Where(item => !item.Attributes.HasFlag(options.AttributesToSkip));
+        return _children.Values;
+                //.Where(item => !item.Attributes.HasFlag(options.AttributesToSkip));
     }
 
     public IEnumerator<IFileSystemInfo> GetEnumerator()
@@ -316,13 +330,8 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
 
     public override void Dispose()
     {
-        if (!IsLocked)
-        {
-
-        }
+      
     }
-
-
 
     private FileSystemPath FormatPath(FileSystemPath path)
     {

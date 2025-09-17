@@ -3,16 +3,9 @@
 		<RootNamespace>Assimalign.Cohesion.FileSystem</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Remove="Internal\Nodes\**" />
-		<EmbeddedResource Remove="Internal\Nodes\**" />
-		<None Remove="Internal\Nodes\**" />
-	</ItemGroup>
-	<ItemGroup>
-		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
 		<Reference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 </Project>

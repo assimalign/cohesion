@@ -1,9 +1,10 @@
-﻿using System;
-using System.IO;
-using System.Threading;
-using System.Diagnostics;
-using System.Linq;
+﻿using Assimalign.Cohesion.Internal;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
@@ -48,8 +49,9 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
     public DateTime CreatedOn => _createdOn;
     public FileSystemPath Path => GetPath(this);
     public FileAttributes Attributes => _attributes;
+    public FileAttributes IgnoreAttributes { get; init; }
     public FileSystemPathComparer Comparer { get; init; } = FileSystemPathComparer.InvariantCulture;
-    public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    //public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public InMemoryFileSystemDispatcher Dispatcher => _dispatcher;
     public InMemoryFileSystem FileSystem => _fileSystem;
     IFileSystem IFileSystemInfo.FileSystem => FileSystem;
@@ -71,7 +73,7 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
     }
     private FileSystemPath GetPath(InMemoryFileSystemDirectory directory)
     {
-        if (directory.HasParent(out var parent))
+        if (directory.HasParent<InMemoryFileSystemDirectory>(out var parent))
         {
             return FileSystemPath.Merge(GetPath((InMemoryFileSystemDirectory)parent), directory.Name);
         }
@@ -82,7 +84,14 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
     {
         return FileSystemPath.Merge(GetPath(file.Directory), file.Name);
     }
-    private bool HasParent(out InMemoryFileSystemDirectory parent) => this.HasParent<InMemoryFileSystemDirectory>(out parent);
+
+    protected void CheckIfReadOnly(string? operation = null)
+    {
+        if (FileSystem.IsReadOnly)
+        {
+            ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
+        }
+    }
 
     #region FieSystem Locking Mechanisms
 
@@ -214,6 +223,8 @@ internal abstract class InMemoryFileSystemInfo : IFileSystemInfo, IDisposable
             Monitor.Exit(this);
         }
     }
+
+
     //private bool TryBeginLock()
     //{
     //    Monitor.Enter(this);

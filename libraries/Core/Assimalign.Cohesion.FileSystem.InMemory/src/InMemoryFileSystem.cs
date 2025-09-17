@@ -1,9 +1,8 @@
 ﻿using System;
-using System.Collections;
 using System.IO;
 using System.Linq;
+using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,14 +30,15 @@ public sealed partial class InMemoryFileSystem : IFileSystem
     {
         ThrowHelper.ThrowIfNull(options, nameof(options));
 
+        _isReadOnly = options.IsReadOnly;
         _name = options.Name ?? nameof(InMemoryFileSystem);
         _size = options.Size;
         _root = new InMemoryFileSystemDirectory(options.RootName, this)
         {
-            Comparer = FileSystemPathComparer.Create(options.Comparison)
+            Comparer = FileSystemPathComparer.Create(options.Comparison),
+            IgnoreAttributes = options.IgnoreAttributes,
         };
     }
-
 
     public string Name => _name;
     public bool IsReadOnly => _isReadOnly;
@@ -46,15 +46,12 @@ public sealed partial class InMemoryFileSystem : IFileSystem
     public Size SpaceAvailable => _size - _spaceUsed;
     public Size SpaceUsed => _spaceUsed;
     public IFileSystemDirectory RootDirectory => _root;
-
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
 
     }
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
-        CheckIfReadOnly(nameof(CreateDirectory));
-
         FileSystemPath fullPath = RootDirectory.Path.Merge(path);
         DirectoryName[] directories = fullPath.GetDirectories();
         
@@ -113,15 +110,11 @@ public sealed partial class InMemoryFileSystem : IFileSystem
     {
         throw new NotImplementedException();
     }
-    public IEnumerable<IFileSystemFile> EnumerateFiles()
-    {
-        throw new NotImplementedException();
-    }
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
         // RootDirectory.Move(source, destination);
     }
-    public IFileSystemChangeToken Watch(Glob pattern)
+    public IFileSystemChangeToken Watch(Glob? pattern)
     {
         throw new NotImplementedException();
     }
@@ -138,18 +131,6 @@ public sealed partial class InMemoryFileSystem : IFileSystem
         return ValueTask.CompletedTask;
     }
 
-    internal void IncrementSpaceUsed(Size value)
-    {
-        if ((_spaceUsed + value) > SpaceAvailable)
-        {
-            throw new IOException("There is not enough space in the file system to complete this operation.");
-        }
-        lock (_lock)
-        {
-            _spaceUsed += value;
-        }
-    }
-
     public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
     {
         throw new NotImplementedException();
@@ -160,11 +141,15 @@ public sealed partial class InMemoryFileSystem : IFileSystem
         throw new NotImplementedException();
     }
 
-    private void CheckIfReadOnly(string? operation = null)
+    internal void IncrementSpaceUsed(Size value)
     {
-        if (IsReadOnly)
+        if ((_spaceUsed + value) > SpaceAvailable)
         {
-            ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
+            throw new IOException("There is not enough space in the file system to complete this operation.");
+        }
+        lock (_lock)
+        {
+            _spaceUsed += value;
         }
     }
 }

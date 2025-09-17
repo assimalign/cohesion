@@ -59,7 +59,11 @@ internal class InMemoryFileContent
             _stream.Write(buffer, offset, count);
             _file.FileSystem.IncrementSpaceUsed(count);
         }
-        _file.ContentChanged();
+
+        _file.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+            WatcherChangeTypes.Changed,
+            _file.Path,
+            _file.Name));
     }
     public void SetPosition(long position)
     {
@@ -84,7 +88,10 @@ internal class InMemoryFileContent
                 _file.FileSystem.IncrementSpaceUsed(value - _stream.Length);
                 _stream.SetLength(value);
             }
-            _file.ContentChanged();
+            _file.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                WatcherChangeTypes.Changed,
+                _file.Path,
+                _file.Name));
         }
     }
 }

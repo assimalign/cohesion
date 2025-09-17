@@ -22,7 +22,7 @@ public class InMemoryFileSystemOptions
     /// <summary>
     /// Specify the lock timeout on File System objects. The default is 30 seconds.
     /// </summary>
-    public TimeSpan LockTmieout { get; set; } = TimeSpan.FromSeconds(30);
+    //public TimeSpan LockTmieout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// The max size of the in memory file system. The default is 32 MB

@@ -253,7 +253,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
             ThrowHelper.ThrowArgumentException("The right most path must not be rooted in either '[Drive]:/' or '//[Server]/[share]'.");
         }
 
-        return string.Join(Separator, left._value, right._value.Trim(Separator));
+        return string.Join(Separator, left._value.Trim(Separator), right._value.Trim(Separator));
     }
 
     /// <summary>
@@ -305,6 +305,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
                 }
             }
         }
+
         if (right.StartsWith(left))
         {
             return right;

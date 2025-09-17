@@ -67,7 +67,7 @@ internal class InMemoryFileSystemDispatcher : IDisposable
                 _ => throw new InvalidOperationException($"Unsupported change type '{args.ChangeType}'"),
             };
 
-            handler.Invoke(this, args);
+            handler?.Invoke(this, args);
         }
     }
 }

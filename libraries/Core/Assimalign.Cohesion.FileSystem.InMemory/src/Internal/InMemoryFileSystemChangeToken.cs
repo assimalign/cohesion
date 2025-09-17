@@ -4,7 +4,6 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-using Globbing;
 using Assimalign.Cohesion.Internal;
 
 internal class InMemoryFileSystemChangeToken : IFileSystemChangeToken

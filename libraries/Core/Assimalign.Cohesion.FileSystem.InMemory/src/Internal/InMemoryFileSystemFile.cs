@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-[DebuggerDisplay("f - {Path}")]
+[DebuggerDisplay("[f] - {Path}")]
 internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 {
     private bool _isDiposed;
@@ -20,14 +20,14 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
     }
 
     public Size Size => Content.Length;
+
     public FileName Name { get; }
+
     public InMemoryFileSystemDirectory Directory { get; }
+
     public InMemoryFileContent Content { get; private set; }
+
     IFileSystemDirectory IFileSystemFile.Directory => Directory;
-    public override void Dispose()
-    {
-        Directory.DeleteFile(Name);
-    }
 
     public Stream Open()
     {
@@ -122,6 +122,10 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
     }
     public IFileSystemChangeToken Watch()
     {
-        return default!;// GetToken(this);
+        return new InMemoryFileSystemChangeToken(this, Glob.Parse(Path));
+    }
+    public override void Dispose()
+    {
+        Directory.DeleteFile(Name);
     }
 }
