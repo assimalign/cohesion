@@ -27,19 +27,38 @@ public static class IOExtensions
             return Path.GetDirectoryName(path.AsSpan())!;
         }
 
+        public DirectoryName? GetLastDirectoryName()
+        {
+            return path.GetSegments()[^1];
+        }
+
         /// <summary>
         /// Returns all the directories in the path as an array of <see cref="DirectoryName"/>.
         /// </summary>
         /// <returns></returns>
-        public DirectoryName[] GetDirectories()
+        public DirectoryName[] GetDirectoryNames()
         {
+
+            int skip = 0;
             var segments = path.GetSegments();
             var directories = new DirectoryName[segments.Length];
 
             for (int i = 0; i < segments.Length; i++)
             {
-                directories[i] = segments[i];
+                string segment = segments[i];
+
+                // Skip relative paths
+                if (segment.Equals(".."))
+                {
+                    skip++;
+                }
+                else
+                {
+                    directories[i - skip] = segment;
+                }
             }
+
+            Array.Resize(ref directories, segments.Length - skip);
 
             return directories;
         }

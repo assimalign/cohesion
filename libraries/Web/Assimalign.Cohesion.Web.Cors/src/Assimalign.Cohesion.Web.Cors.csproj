@@ -3,6 +3,6 @@
 	  <ProjectReference Include="..\..\Assimalign.Cohesion.Web.Hosting\src\Assimalign.Cohesion.Web.Hosting.csproj" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
 </Project>

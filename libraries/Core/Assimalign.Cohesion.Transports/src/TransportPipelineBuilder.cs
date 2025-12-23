@@ -22,7 +22,7 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
 
     public TransportPipelineBuilder<TConnection, TContext> Use(Func<TConnection, TContext, TransportMiddleware, Task> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         Func<TConnection, TContext, TransportMiddleware, Task> middleware2 = middleware;
 
@@ -41,7 +41,7 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
 
     ITransportPipelineBuilder ITransportPipelineBuilder.Use(Func<TransportMiddleware, TransportMiddleware> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         _middleware.Add(middleware);
 

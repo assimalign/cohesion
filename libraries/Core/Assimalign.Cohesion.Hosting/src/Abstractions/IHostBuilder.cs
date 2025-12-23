@@ -8,14 +8,14 @@ namespace Assimalign.Cohesion.Hosting;
 public interface IHostBuilder
 {
     /// <summary>
-    /// Adds a service to host to be started.
+    /// Adds a service to host.
     /// </summary>
     /// <param name="service">The service managed by the host.</param>
     /// <returns>The same instance of <see cref="IHostBuilder"/></returns>
     IHostBuilder AddHostedService(IHostService service);
 
     /// <summary>
-    /// 
+    /// Adds a service to the host.
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
@@ -26,20 +26,4 @@ public interface IHostBuilder
     /// </summary>
     /// <returns></returns>
     IHost Build();
-
-
-    /// <summary>
-    /// Adds a <see cref="IServiceProvider"/> to the host context.
-    /// </summary>
-    /// <param name="serviceProvider"></param>
-    /// <returns></returns>
-    //IHostBuilder AddServiceProvider(IServiceProvider serviceProvider);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="serviceProvider"></param>
-    /// <returns></returns>
-    //IHostBuilder AddServiceProvider(Func<IHostContext, IServiceProvider> serviceProvider);
-
 }

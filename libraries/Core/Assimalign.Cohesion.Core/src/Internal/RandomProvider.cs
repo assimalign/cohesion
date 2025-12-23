@@ -11,10 +11,10 @@ namespace Assimalign.Cohesion.Internal;
 internal static class RandomProvider
 {
     [ThreadStatic]
-    static Random random;
+    static Random? random;
 
     [ThreadStatic]
-    static XorShift64 xorShift;
+    static XorShift64? xorShift;
 
     // this random is async-unsafe, be careful to use.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

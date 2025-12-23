@@ -18,10 +18,9 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// <exception cref="ArgumentNullException"></exception>
     public HttpHost(string value)
     {
-        ReadOnlySpan<char> span = ThrowHelper.ThrowIfNullOrEmpty(value);
+        ArgumentNullException.ThrowIfNullOrEmpty(value);
 
-
-        Value = span.ToString();
+        Value = value;
     }
 
     public string Value { get; }

@@ -7,8 +7,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Configuration.Internal;
+using Assimalign.Cohesion.Configuration;
 
 /// <summary>
 /// Used to build key/value based configuration settings for use in an application.
@@ -34,7 +33,8 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// <exception cref="ArgumentNullException"></exception>
     public ConfigurationBuilder(ConfigurationOptions options) : this()
     {
-        _options = ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
     }
 
     /// <summary>
@@ -42,10 +42,12 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
+    public ConfigurationBuilder AddProvider(Func<ConfigurationBuilderContext, IConfigurationProvider> configure)
     {
+        ArgumentNullException.ThrowIfNull(configure);
+
         return AddProvider(
-            new Func<IConfigurationBuilderContext, Task<IConfigurationProvider>>(context =>
+            new Func<ConfigurationBuilderContext, Task<IConfigurationProvider>>(context =>
             {
                 return Task.FromResult(configure.Invoke(context));
             }));
@@ -56,18 +58,17 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public ConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
+    public ConfigurationBuilder AddProvider(Func<ConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
-        ThrowHelper.ThrowIfNull(configure);
+        ArgumentNullException.ThrowIfNull(configure);
 
         _builds.Add(async context =>
         {
             var provider = await configure.Invoke(context);
 
-            if (context.HasProvider(provider.Name))
-            {
-                ThrowHelper.ThrowInvalidOperationException($"The configuration provider: '{provider.Name}' has already been added.");
-            }
+            InvalidOperationException.ThrowIf(
+                context.HasProvider(provider.Name),
+                $"The configuration provider: '{provider.Name}' has already been added.");
 
             context.AddProvider(provider);
         });
@@ -107,7 +108,6 @@ public class ConfigurationBuilder : IConfigurationBuilder
             try
             {
                 await provider.LoadAsync(cancellationTokenSource.Token);
-
             }
             catch (Exception exception) when (exception is not TimeoutException)
             {
@@ -127,7 +127,9 @@ public class ConfigurationBuilder : IConfigurationBuilder
     {
         var options = new ConfigurationOptions();
 
-        ThrowHelper.ThrowIfNull(configure, nameof(configure)).Invoke(options);
+        ArgumentNullException.ThrowIfNull(configure, nameof(configure));
+        
+        configure.Invoke(options);
 
         return new ConfigurationBuilder(options);
     }

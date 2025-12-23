@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="Assimalign.IO.Ebml" />
+    <CohesionProjectReference Include="Assimalign.IO.Ebml" />
   </ItemGroup>
 
 </Project>

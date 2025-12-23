@@ -1,6 +1,6 @@
 ﻿namespace System;
 
-public record Either<T1, T2, T3> : Either
+public record Either<T1, T2, T3> : IEither
 {
     #region Implicit Conversion From Value
     public static implicit operator Either<T1, T2, T3>(T1 value) => new Either<T1, T2, T3>(value);
@@ -69,9 +69,9 @@ public record Either<T1, T2, T3> : Either
     int _typeIndex;
     object _value;
 
-    protected override int TypeIndex => _typeIndex;
 
-    protected override Type Type => _typeIndex switch
+    int IEither.TypeIndex => _typeIndex;
+    Type IEither.Type => _typeIndex switch
     {
         1 => typeof(T1),
         2 => typeof(T2),
@@ -79,7 +79,7 @@ public record Either<T1, T2, T3> : Either
         _ => throw new InvalidOperationException()
     };
 
-    protected override object Value => _value;
+    object? IEither.Value => _value;
 
     Either(int typeIndex, object value) => (_typeIndex, _value) = (typeIndex, value);
     #endregion IEither Implementation
@@ -437,7 +437,7 @@ public record Either<T1, T2, T3> : Either
     #endregion If (methods)
 
     #region ToString
-    public override string ToString() => $"{Type.Name}:{_value}";
+    public override string ToString() => $"{(this as IEither)?.Type?.Name}:{_value}";
 
     #endregion ToString
 }

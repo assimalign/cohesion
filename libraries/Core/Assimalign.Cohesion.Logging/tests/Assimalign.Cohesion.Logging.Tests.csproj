@@ -4,7 +4,7 @@
 		<Reference Include="Microsoft.NET.Test.Sdk" />
 		<Reference Include="xunit" />
 		<Reference Include="xunit.runner.visualstudio" />
-		<Reference Include="Assimalign.Cohesion.Logging"/>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging"/>
 	</ItemGroup>
 
 	<ItemGroup>

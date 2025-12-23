@@ -25,7 +25,7 @@ public partial class WebApplication : IWebApplication, IWebApplicationPipelineBu
 
     internal WebApplication(WebApplicationContext context)
     {
-        ThrowHelper.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(context);
 
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
     }
@@ -177,7 +177,7 @@ public partial class WebApplication : IWebApplication, IWebApplicationPipelineBu
     /// <returns></returns>
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         Func<IHttpContext, WebApplicationMiddleware, Task> middleware2 = middleware;
 
@@ -194,7 +194,7 @@ public partial class WebApplication : IWebApplication, IWebApplicationPipelineBu
     /// <returns></returns>
     public WebApplication Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         _middleware.Add(middleware);
 

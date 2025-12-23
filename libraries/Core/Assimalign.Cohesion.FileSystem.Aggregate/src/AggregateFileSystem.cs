@@ -92,7 +92,7 @@ public sealed class AggregateFileSystem : IFileSystem
         throw new NotImplementedException();
     }
 
-    public IFileSystemChangeToken Watch(Glob? pattern)
+    public IFileSystemEventToken Watch(Glob? pattern)
     {
         throw new NotImplementedException();
     }

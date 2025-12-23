@@ -25,7 +25,8 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     /// <exception cref="ArgumentNullException"></exception>
     public TransportConnectionPipe(Stream stream)
     {
-        _stream = ThrowHelper.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(stream);
+        _stream = stream;
         _input = PipeReader.Create(stream);
         _output = PipeWriter.Create(stream);
     }
@@ -38,8 +39,11 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     /// <exception cref="ArgumentNullException"></exception>
     public TransportConnectionPipe(PipeReader input, PipeWriter output)
     {
-        _input = ThrowHelper.ThrowIfNull(input);
-        _output = ThrowHelper.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
+        _input = input;
+        _output = output;
         _stream = new PipeStream(this);
     }
 

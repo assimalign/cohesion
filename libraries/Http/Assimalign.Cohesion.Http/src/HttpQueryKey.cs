@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -19,7 +18,8 @@ public readonly struct HttpQueryKey : IEquatable<HttpQueryKey>, IComparable<Http
     /// <exception cref="ArgumentNullException"></exception>
     public HttpQueryKey(string value)
     {
-        Value = ThrowHelper.ThrowIfNullOrEmpty(value);
+        ArgumentNullException.ThrowIfNullOrEmpty(value);
+        Value = value;
     }
 
     /// <summary>

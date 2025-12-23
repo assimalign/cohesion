@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 
 
 
@@ -20,7 +20,7 @@ public class NewConfigurationRoot : IConfigurationRoot
         {
             var provider = providers[i];
 
-            provider.Get
+            //provider.Get
         }
     }
 
@@ -69,7 +69,7 @@ public class ConfigurationRoot : IConfigurationRoot
     /// <param name="options"></param>
     public ConfigurationRoot(ConfigurationOptions options)
     {
-        ThrowHelper.ThrowIfNull(options, nameof(options));
+        ArgumentNullException.ThrowIfNull(options);
 
         _providers = options.Providers;
         _setStrategy = options.SetStrategy;
@@ -171,10 +171,7 @@ public class ConfigurationRoot : IConfigurationRoot
 
     private void CheckIfDisposedOrDisposing()
     {
-        if (_isDisposed || _isDisposing)
-        {
-            ThrowHelper.ThrowObjectDisposedException(nameof(ConfigurationRoot));
-        }
+        ObjectDisposedException.ThrowIf(_isDisposing || _isDisposing, nameof(ConfigurationRoot));
     }
 
     private IEnumerable<IConfigurationEntry> EnumeratorEntries()

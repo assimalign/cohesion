@@ -6,8 +6,6 @@ using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
-using System.Collections.Generic;
 
 [DebuggerDisplay("{ToString()}")]
 [JsonConverter(typeof(KeyJsonConverter))]
@@ -21,10 +19,9 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <exception cref="ArgumentNullException"></exception>
     public Key(ReadOnlySpan<char> span)
     {
-        if (span.ContainsAny(Path.Delimiters))
-        {
-            ThrowHelper.ThrowArgumentException($"Key value cannot have any path delimiters: {string.Join(',', [.. Path.Delimiters])}");
-        }
+        ArgumentException.ThrowIf(
+            span.ContainsAny(Path.Delimiters),
+            $"Key value cannot have any path delimiters: {string.Join(',', [.. Path.Delimiters])}");
 
         Value = new string(span);
     }
@@ -104,6 +101,20 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         }
 
         return Value.StartsWith(other.Value, (StringComparison)comparison);
+    }
+
+    public bool EndsWith(Key other)
+    {
+        return EndsWith(other, KeyComparison.Ordinal);
+    }
+
+    public bool EndsWith(Key other, KeyComparison comparison)
+    {
+        if (other.Value.Length > Value.Length)
+        {
+            return false;
+        }
+        return Value.EndsWith(other.Value, (StringComparison)comparison);
     }
 
     /// <summary>

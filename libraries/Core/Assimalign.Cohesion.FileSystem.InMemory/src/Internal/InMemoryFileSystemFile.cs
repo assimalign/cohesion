@@ -7,43 +7,40 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-[DebuggerDisplay("[f] - {Path}")]
+[DebuggerDisplay("[F] - {Path}")]
 internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 {
+    private readonly FileName _name;
+    private readonly InMemoryFileSystemDirectory _directory;
+
     private bool _isDiposed;
 
-    public InMemoryFileSystemFile(FileName name, InMemoryFileSystemDirectory directory, InMemoryFileSystem fileSystem) : base(fileSystem)
+    public InMemoryFileSystemFile(FileName name, InMemoryFileSystemDirectory directory, InMemoryFileSystem fileSystem) 
+        : base(fileSystem, directory.CultureInfo, directory.IgnoreCase)
     {
-        Name = name;
-        Directory = directory;
+        _name = name;
+        _directory = directory;
         Content = new InMemoryFileContent(this);
+        
     }
 
     public Size Size => Content.Length;
-
-    public FileName Name { get; }
-
-    public InMemoryFileSystemDirectory Directory { get; }
-
+    public FileName Name => _name;
     public InMemoryFileContent Content { get; private set; }
-
+    public InMemoryFileSystemDirectory Directory => _directory;
     IFileSystemDirectory IFileSystemFile.Directory => Directory;
-
     public Stream Open()
     {
         return Open(FileMode.Open);
     }
-
     public Stream Open(FileMode fileMode)
     {
         return Open(fileMode, FileAccess.ReadWrite);
     }
-
     public Stream Open(FileMode fileMode, FileAccess fileAccess)
     {
         return Open(fileMode, fileAccess, FileShare.None);
     }
-
     public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
     {
         if (fileMode == FileMode.Append && (fileAccess & FileAccess.Read) != 0)
@@ -120,12 +117,32 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
     {
         Unlock();
     }
-    public IFileSystemChangeToken Watch()
+    public IFileSystemEventToken Watch()
     {
-        return new InMemoryFileSystemChangeToken(this, Glob.Parse(Path));
+        return new InMemoryFileSystemEventToken(this, Glob.Parse(Path));
     }
     public override void Dispose()
     {
-        Directory.DeleteFile(Name);
+        ObjectDisposedException.ThrowIf(_isDiposed, this);
+
+        Lock(LockPolicy.Exclusive);
+
+        try
+        {
+            if (_directory.IsLocked) 
+            {
+                // TODO: Need to go through code path to see if child ever needs to lock parent
+            }
+            _directory.Entries.Remove(Path);
+
+        }
+        finally
+        {
+            Unlock();
+
+            base.Dispose();
+
+            GC.SuppressFinalize(this);
+        }
     }
 }

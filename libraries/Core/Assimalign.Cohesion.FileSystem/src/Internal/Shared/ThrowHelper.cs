@@ -45,7 +45,7 @@ internal static partial class ThrowHelper
     {
         var message = string.Format("Access to the path is denied `{0}`.", path);
         throw new FileSystemException(
-            FileSystemErrorCode.Unauthorized,
+            FileSystemErrorCode.AccessDenied,
             message,
             innerException);
     }
@@ -60,6 +60,16 @@ internal static partial class ThrowHelper
         throw new FileSystemException(
             FileSystemErrorCode.Conflict,
             message,
+            innerException);
+    }
+
+    [DoesNotReturn]
+    internal static void ThrowNotEnoughSpace(
+        [AllowNull] Exception? innerException = null)
+    {
+        throw new FileSystemException(
+            FileSystemErrorCode.NotEnoughSpace,
+            "",
             innerException);
     }
 }

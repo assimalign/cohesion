@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposable
+internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposable
 {
     // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly Glob _glob;
@@ -37,11 +37,11 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposab
     {
         return OnChange(callback, state);
     }
-    public IDisposable OnChange<T>(Action<FileSystemChangeArgs<T>> callback, T state)
+    public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
-        ThrowHelper.ThrowIfNull(callback);
+        ArgumentNullException.ThrowIfNull(callback);
 
-        var disposable = new Subscriber<T>()
+        var disposable = new Subscriber<T?>()
         {
             ChangeType = ChangeType.Changed,
             State = state,
@@ -53,11 +53,11 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposab
 
         return disposable;
     }
-    public IDisposable OnCreate<T>(Action<FileSystemChangeArgs<T>> callback, T state)
+    public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
-        ThrowHelper.ThrowIfNull(callback, nameof(callback));
+        ArgumentNullException.ThrowIfNull(callback);
 
-        var disposable = new Subscriber<T>()
+        var disposable = new Subscriber<T?>()
         {
             ChangeType = ChangeType.Created,
             State = state,
@@ -69,11 +69,11 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposab
 
         return disposable;
     }
-    public IDisposable OnDelete<T>(Action<FileSystemChangeArgs<T>> callback, T state)
+    public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
-        ThrowHelper.ThrowIfNull(callback, nameof(callback));
+        ArgumentNullException.ThrowIfNull(callback, nameof(callback));
 
-        var disposable = new Subscriber<T>()
+        var disposable = new Subscriber<T?>()
         {
             ChangeType = ChangeType.Deleted,
             State = state,
@@ -85,9 +85,9 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposab
 
         return disposable;
     }
-    public IDisposable OnRename<T>(Action<FileSystemRenameArgs<T>> callback, T state)
+    public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T>> callback, T state)
     {
-        ThrowHelper.ThrowIfNull(callback, nameof(callback));
+        ArgumentNullException.ThrowIfNull(callback);
 
         var disposable = new RenameSubscriber<T>()
         {
@@ -144,22 +144,22 @@ internal class PhysicalFileSystemChangeToken : IFileSystemChangeToken, IDisposab
     partial class Subscriber<T> : Subscriber
     {
         public required T State { get; init; }
-        public required Action<FileSystemChangeArgs<T>> Callback { get; init; } = default!;
+        public required Action<FileSystemEvent<T>> Callback { get; init; } = default!;
         public override void Invoke(FileSystemEventArgs args)
         {
-            Callback.Invoke(new FileSystemChangeArgs<T>(args.FullPath, State));
+            Callback.Invoke(new FileSystemEvent<T>(args.FullPath, State));
         }
     }
 
     partial class RenameSubscriber<T> : Subscriber
     {
         public required T State { get; init; }
-        public required Action<FileSystemRenameArgs<T>> Callback { get; init; } = default!;
+        public required Action<FileSystemRenameEvent<T>> Callback { get; init; } = default!;
         public override void Invoke(FileSystemEventArgs args)
         {
             var renameArgs = (RenamedEventArgs)args;
 
-            Callback.Invoke(new FileSystemRenameArgs<T>(renameArgs.OldFullPath, renameArgs.FullPath, State));
+            Callback.Invoke(new FileSystemRenameEvent<T>(renameArgs.OldFullPath, renameArgs.FullPath, State));
         }
     }
 }

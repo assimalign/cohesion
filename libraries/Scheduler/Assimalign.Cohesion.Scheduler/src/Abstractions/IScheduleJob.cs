@@ -12,12 +12,22 @@ public interface IScheduleJob
     /// <summary>
     /// A unique identifier for the job.
     /// </summary>
-    string Id { get; }
+    JobId Id { get; }
+
+    /// <summary>
+    /// A friendly name for the job.
+    /// </summary>
+    string? Name { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    JobState State { get; }
 
     /// <summary>
     /// Executes the job
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask ExecuteAsync(IScheduleJobContext context , CancellationToken cancellationToken = default);
+    ValueTask ExecuteAsync(IScheduleContext context, CancellationToken cancellationToken = default);
 }

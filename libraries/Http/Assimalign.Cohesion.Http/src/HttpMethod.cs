@@ -20,14 +20,16 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     /// </summary>
     /// <param name="value"></param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public HttpMethod(string value)
+    public HttpMethod(string? value)
     {
+        ArgumentNullException.ThrowIfNullOrEmpty(value);
+
         if (value.Length > _length)
         {
-            ThrowHelper.ThrowArgumentException($"The method is too long. Must be under {_length} characters.");
+            throw new ArgumentException($"The method is too long. Must be under {_length} characters.");
         }
 
-        ReadOnlySpan<char> source = ThrowHelper.ThrowIfNullOrEmpty(value);
+        ReadOnlySpan<char> source = value;
         Span<char> destination = stackalloc char[source.Length];
 
         for (int i = 0; i < source.Length; i++)

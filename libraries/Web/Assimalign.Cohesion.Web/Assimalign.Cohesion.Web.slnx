@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Assimalign.Cohesion.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Assimalign.Cohesion.Web.Tests.csproj" />
+  </Folder>
+</Solution>

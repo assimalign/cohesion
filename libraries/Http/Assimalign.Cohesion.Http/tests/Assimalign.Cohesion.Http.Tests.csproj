@@ -3,7 +3,7 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<Reference Include="coverlet.collector" />
 		<Reference Include="Microsoft.NET.Test.Sdk" />
 		<Reference Include="xunit" />

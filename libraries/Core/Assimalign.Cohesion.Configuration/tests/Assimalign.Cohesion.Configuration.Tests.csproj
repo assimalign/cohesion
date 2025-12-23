@@ -11,6 +11,6 @@
 		<PackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 	</ItemGroup>
 </Project>

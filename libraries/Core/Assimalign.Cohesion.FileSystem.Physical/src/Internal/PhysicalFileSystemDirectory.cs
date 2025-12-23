@@ -23,7 +23,6 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
         : base(fileSystem, directoryInfo)
     {
         _directoryInfo = directoryInfo;
-
     }
 
     public DirectoryName Name => _directoryInfo.Name;
@@ -44,7 +43,7 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
         }
     }
 
-    public IFileSystemChangeToken Watch(Glob? pattern)
+    public IFileSystemEventToken Watch(Glob? pattern)
     {
         return new PhysicalFileSystemChangeToken(
             this,

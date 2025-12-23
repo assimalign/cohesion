@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 
 public static partial class ConfigurationExtensions
 {
@@ -17,7 +17,7 @@ public static partial class ConfigurationExtensions
         /// <returns></returns>
         public bool IsValue(out IConfigurationValue? value)
         {
-            ThrowHelper.ThrowIfNull(entry, nameof(entry));
+            ArgumentNullException.ThrowIfNull(entry);
 
             value = null;
 
@@ -37,7 +37,7 @@ public static partial class ConfigurationExtensions
         /// <returns></returns>
         public bool IsSection(out IConfigurationSection? section)
         {
-            ThrowHelper.ThrowIfNull(entry, nameof(entry));
+            ArgumentNullException.ThrowIfNull(entry);
 
             section = null;
 

@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 
 	<ItemGroup>

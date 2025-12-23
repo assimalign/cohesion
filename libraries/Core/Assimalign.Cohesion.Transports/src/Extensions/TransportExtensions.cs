@@ -16,7 +16,7 @@ public static class TransportExtensions
     {
         public async IAsyncEnumerable<ITransportConnection> EnumerateAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            ThrowHelper.ThrowIfNull(transport);
+            ArgumentNullException.ThrowIfNull(transport);
 
             while (true)
             {
@@ -39,15 +39,16 @@ public static class TransportExtensions
     {
         public void AddItem<T>(string key, T value)
         {
-            ThrowHelper.ThrowIfNull(context);
-            ThrowHelper.ThrowIfNullOrEmpty(key);
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNullOrEmpty(key);
+
             context.Items[key] = value;
         }
 
         public T? GetItem<T>(string key) where T : class
         {
-            ThrowHelper.ThrowIfNull(context);
-            ThrowHelper.ThrowIfNullOrEmpty(key);
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNullOrEmpty(key);
 
             if (context.Items.TryGetValue(key, out var value))
             {

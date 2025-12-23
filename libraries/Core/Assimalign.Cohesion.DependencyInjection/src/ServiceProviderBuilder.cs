@@ -7,19 +7,24 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
 {
     private static readonly ConcurrentDictionary<int, IServiceCollection> services = new();
     private static readonly ConcurrentDictionary<int, IServiceProvider> providers = new();
-    
-    
-    private readonly ServiceProviderOptions options;
-    public ServiceProviderBuilder() => this.options = ServiceProviderOptions.Default;
-    public ServiceProviderBuilder(ServiceProviderOptions options) => this.options = options == null ? throw new ArgumentNullException(nameof(options)) : options;
+
+
+    private readonly ServiceProviderOptions _options = ServiceProviderOptions.Default;
+    public ServiceProviderBuilder()
+    {
+    }
+
+    public ServiceProviderBuilder(ServiceProviderOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        _options = options;
+    }
 
     public IServiceCollection Services => services.GetOrAdd(this.GetHashCode(), new ServiceCollection());    
     public IServiceProviderBuilder Add(ServiceDescriptor serviceDescriptor)
     {
-        if (serviceDescriptor == null)
-        {
-            throw new ArgumentNullException(nameof(serviceDescriptor));
-        }
+        ArgumentNullException.ThrowIfNull(serviceDescriptor);
 
         Services.Add(serviceDescriptor);
 
@@ -29,7 +34,7 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
     {
         return new ServiceProvider(
             Services, 
-            options);
+            _options);
     }
 
     public void Dispose()

@@ -10,7 +10,8 @@ internal class GlobContext : IGlobContext
 {
     public GlobContext(Glob glob)
     {
-        Glob = ThrowHelper.ThrowIfNull(glob);
+        ArgumentNullException.ThrowIfNull(glob);
+        Glob = glob;
     }
 
     public Glob Glob { get; }

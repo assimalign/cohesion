@@ -8,14 +8,21 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 internal class InMemoryFileSystemDispatcher : IDisposable
 {
-    private FileSystemEventHandler _onChanged;
-    private FileSystemEventHandler _onCreated;
-    private FileSystemEventHandler _onDeleted;
-    private RenamedEventHandler _onRenamed;
+    private FileSystemEventHandler? _onChanged;
+    private FileSystemEventHandler? _onCreated;
+    private FileSystemEventHandler? _onDeleted;
+    private RenamedEventHandler? _onRenamed;
 
     public InMemoryFileSystemDispatcher()
     {
 
+    }
+
+    public InMemoryFileSystemDispatcher(InMemoryFileSystemDispatcher parent)
+    {
+        Changed += parent._onChanged;
+        Changed += parent._onDeleted;
+        //Changed += parent._onRenamed;
     }
 
 
@@ -43,19 +50,11 @@ internal class InMemoryFileSystemDispatcher : IDisposable
         remove => _onRenamed = (RenamedEventHandler)Delegate.Remove(_onRenamed, value)!;
     }
 
-    public void Dispose()
-    {
-        _onChanged = null!;
-        _onCreated = null!;
-        _onDeleted = null!;
-        _onRenamed = null!;
-    }
-
     public void RaiseEvent(FileSystemEventArgs args)
     {
         if (args.ChangeType == WatcherChangeTypes.Renamed)
         {
-            _onRenamed.Invoke(this, (RenamedEventArgs)args);
+            _onRenamed?.Invoke(this, (RenamedEventArgs)args);
         }
         else
         {
@@ -69,5 +68,13 @@ internal class InMemoryFileSystemDispatcher : IDisposable
 
             handler?.Invoke(this, args);
         }
+    }
+
+    public void Dispose()
+    {
+        _onChanged = null!;
+        _onCreated = null!;
+        _onDeleted = null!;
+        _onRenamed = null!;
     }
 }

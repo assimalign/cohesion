@@ -25,7 +25,8 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
 
     public TcpClientTransport(TcpClientTransportOptions? options)
     {
-        _options = ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
         _settings = SocketTransportConnectionSettings.GetIOQueueSettings(
             1,
             options.UnsafePreferInLineScheduling,
@@ -135,7 +136,9 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
     {
         var options = new TcpClientTransportOptions();
 
-        ThrowHelper.ThrowIfNull(configure).Invoke(options);
+        ArgumentNullException.ThrowIfNull(configure);
+        
+        configure.Invoke(options);
 
         return new TcpClientTransport(options);
     }

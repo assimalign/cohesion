@@ -25,5 +25,15 @@ public enum FileSystemErrorCode
     /// <summary>
     /// 
     /// </summary>
-    Unauthorized,
+    NotEnoughSpace,
+
+    /// <summary>
+    /// 
+    /// </summary>
+    AccessDenied,
+
+    /// <summary>
+    /// 
+    /// </summary>
+    PathInUse,
 }

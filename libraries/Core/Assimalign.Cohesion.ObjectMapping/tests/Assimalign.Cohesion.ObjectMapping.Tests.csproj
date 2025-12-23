@@ -13,6 +13,6 @@
 		<Folder Include="TestData\" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.ObjectMapping" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
 	</ItemGroup>
 </Project>

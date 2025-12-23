@@ -19,7 +19,7 @@ public sealed partial class Glob
 
     internal Glob(TokenBase[] tokens)
     {
-        _tokens = ThrowHelper.ThrowIfNullOrNone(tokens);
+        _tokens = ArgumentNullException.ThrowIfNullOrNone(tokens);
     }
 
     /// <summary>
@@ -134,7 +134,7 @@ public sealed partial class Glob
     /// <returns></returns>
     public static Glob Parse(string pattern)
     {
-        ThrowHelper.ThrowIfNullOrEmpty(pattern);
+        ArgumentNullException.ThrowIfNullOrEmpty(pattern);
 
         var tokens = _parser.Tokenize(pattern);
 

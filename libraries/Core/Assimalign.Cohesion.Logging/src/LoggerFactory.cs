@@ -30,7 +30,9 @@ public class LoggerFactory : ILoggerFactory
 
     public ILogger Create(string loggerName)
     {
-        var lookupName = ThrowHelper.ThrowIfNullOrEmpty(loggerName).AsSpan();
+        ArgumentNullException.ThrowIfNullOrEmpty(loggerName);
+
+        var lookupName = loggerName.AsSpan();
 
         if (!_lookup.TryGetValue(lookupName, out ILogger? logger)) 
         {

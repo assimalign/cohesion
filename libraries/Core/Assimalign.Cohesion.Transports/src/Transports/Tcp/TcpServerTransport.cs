@@ -32,7 +32,8 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 
     public TcpServerTransport(TcpServerTransportOptions options)
     {
-        _options = ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
         _count = options.IOQueueCount > 0 ? options.IOQueueCount : 1;
         _trace = options.Trace;
         _settings = SocketTransportConnectionSettings.GetIOQueueSettings(
@@ -69,8 +70,8 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
             _socket = _options.EndPoint switch
             {
                 UnixDomainSocketEndPoint => new Socket(
-                    _options.EndPoint.AddressFamily, 
-                    SocketType.Stream, 
+                    _options.EndPoint.AddressFamily,
+                    SocketType.Stream,
                     System.Net.Sockets.ProtocolType.Unspecified),
                 /* 
                     We're passing "ownsHandle: true" here even though we don't necessarily
@@ -84,7 +85,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
                     when it attempts to stop.
                 */
                 FileHandleEndPoint fileHandle => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
-                
+
                 _ => new Socket(_options.EndPoint.AddressFamily, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp)
             };
             if (_options.EndPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
@@ -112,7 +113,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
                 var context = new SocketTransportConnectionContext(settings);
 
                 var connection = new TcpTransportConnection(
-                    context, 
+                    context,
                     _pipeline,
                     Id);
 
@@ -172,7 +173,9 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     {
         var options = new TcpServerTransportOptions();
 
-        ThrowHelper.ThrowIfNull(configure).Invoke(options);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        configure.Invoke(options);
 
         return new TcpServerTransport(options);
     }

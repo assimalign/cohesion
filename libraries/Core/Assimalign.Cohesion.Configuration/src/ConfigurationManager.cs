@@ -6,12 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
-
-
-using Assimalign.Cohesion.Configuration.Internal;
-using Assimalign.Cohesion.Internal;
-
-
 /// <summary>
 /// Configuration is mutable configuration object. It is both an <see cref="IConfigurationBuilder"/> and an <see cref="IConfigurationRoot"/>.
 /// As sources are added, it updates its current view of configuration. Once Build is called, configuration is frozen.
@@ -25,36 +19,49 @@ public sealed class ConfigurationManager : IConfigurationManager
 
     private ConfigurationRoot _root;
     private bool _isDisposed;
-    
+
     /// <summary>
     /// 
     /// </summary>
     public ConfigurationManager(ConfigurationOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         _lock = new Lock();
-        _options = ThrowHelper.ThrowIfNull(options);
+        _options = options;
         _properties = new Dictionary<string, object>();
         _root = new ConfigurationRoot(options);
         _context = new ConfigurationBuilderContext(options.Providers);
     }
 
-    public string? this[Path path] { get => _root[path]; set => _root[path] = value; }
+    public string? this[Path path]
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _root[path];
+            }
+        }
+        set
+        {
+            lock (_lock)
+            {
+                _root[path] = value;
+            }
+        }
+    }
 
     public IEnumerable<IConfigurationProvider> Providers => _root.Providers;
 
-    IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
-    {
-        return AddProvider(_ => provider);
-    }
-
-    public ConfigurationManager AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> configure)
+    public ConfigurationManager AddProvider(Func<ConfigurationBuilderContext, IConfigurationProvider> configure)
     {
         return AddProvider(context => Task.FromResult(configure.Invoke(context)));
     }
 
-    public ConfigurationManager AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
+    public ConfigurationManager AddProvider(Func<ConfigurationBuilderContext, Task<IConfigurationProvider>> configure)
     {
-        ThrowHelper.ThrowIfNull(configure);
+        ArgumentNullException.ThrowIfNull(configure);
 
         try
         {
@@ -63,19 +70,71 @@ public sealed class ConfigurationManager : IConfigurationManager
                 .GetAwaiter()
                 .GetResult();
 
-            if (provider is null)
+            ArgumentNullException.ThrowIfNull(provider);
+
+            lock (_lock)
             {
-                throw new NullReferenceException("No configuration provider was returned.");
+                _options.Providers.Add(provider);
             }
-
-            _options.Providers.Add(provider);
         }
-        catch (Exception exception) when (exception is not NullReferenceException)
-        {
-
-        }
+        catch (Exception exception) when (exception is not NullReferenceException) { }
 
         return this;
+    }
+
+    public IConfigurationSection? GetSection(Path path)
+    {
+        if (GetEntry(path) is not IConfigurationSection section)
+        {
+            throw ConfigurationException.NotFound;
+        }
+
+        return section;
+    }
+
+    public IConfigurationValue? GetValue(Path path)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IConfigurationEntry? GetEntry(Path path)
+    {
+        lock (_lock)
+        {
+            return _root.GetEntry(path);
+        }
+    }
+
+    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    {
+        lock(_lock)
+        {
+            return _root.GetEnumerator();
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    public void Dispose()
+    {
+
+    }
+    public ValueTask DisposeAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
+    {
+        return AddProvider(_ => provider);
+    }
+
+    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider)
+    {
+        return AddProvider(provider);
     }
 
     IConfigurationRoot IConfigurationBuilder.Build()
@@ -86,40 +145,5 @@ public sealed class ConfigurationManager : IConfigurationManager
     ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
     {
         return ValueTask.FromResult<IConfigurationRoot>(this);
-    }
-
-    public void Dispose()
-    {
-        throw new NotImplementedException();
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        throw new NotImplementedException();
-    }
-
-    public IConfigurationEntry? GetEntry(Path path)
-    {
-        throw new NotImplementedException();
-    }
-
-    public IEnumerator<IConfigurationEntry> GetEnumerator()
-    {
-        throw new NotImplementedException();
-    }
-
-    public IConfigurationSection? GetSection(Path path)
-    {
-        throw new NotImplementedException();
-    }
-
-    public IConfigurationValue? GetValue(Path path)
-    {
-        throw new NotImplementedException();
-    }
-
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
     }
 }

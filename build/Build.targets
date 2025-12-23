@@ -1,7 +1,21 @@
 <Project>
-	<Target Name="GenValueObjects" BeforeTargets="CoreCompile" Inputs="@(ValueObject)" Outputs="Test">
-		<GenerateValueObject ValueObjects="@(ValueObject)">
-			<Output TaskParameter="FilePath" PropertyName="ValueObjectFilePath"/>
-		</GenerateValueObject>
+	<!--Metadata Reference: https://learn.microsoft.com/en-us/visualstudio/msbuild/msbuild-well-known-item-metadata?view=vs-2022-->
+
+	<!-- #region: Code Generation: Value Types Targets -->
+	<ItemGroup>
+		<CohesionCodeGenValueType
+			Update="@(CohesionCodeGenValueType)"
+			ObjectFilePath="$(CohesionOutputPathForCodeGen)\create-value-types\%(Identity)"
+			ObjectRelativePath="%(Identity)" />
+	</ItemGroup>
+	<Target Name="CohesionCreateValueType" BeforeTargets="CoreCompile" Inputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" Outputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')">
+		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionCodeGenValueType)" CodeGenOutputPath="$(CohesionOutputPathForCodeGen)\create-value-types">
+			<Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
+		</CodeGenerationCreateValueTypeTask>
+		<!-- DEBUG: <Message Text="My ValueTypes: @(CohesionCodeGenValueType)" Importance="high" /> -->
 	</Target>
+	<ItemGroup>
+		<Compile Include="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
+	</ItemGroup>
+	<!-- #endregion -->
 </Project>

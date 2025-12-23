@@ -6,6 +6,9 @@ using System.Text;
 namespace Assimalign.Cohesion.FileSystem;
 
 using Assimalign.Cohesion.Internal;
+using System.IO;
+using System.Linq;
+using System.Threading;
 
 public static class InMemoryFileSystemExtensions
 {
@@ -31,7 +34,7 @@ public static class InMemoryFileSystemExtensions
         /// <returns></returns>
         public FileSystemFactoryBuilder AddInMemoryFileSystem(Action<InMemoryFileSystemOptions> configure)
         {
-            ThrowHelper.ThrowIfNull(configure);
+            ArgumentNullException.ThrowIfNull(configure);
 
             return builder.AddFileSystem<InMemoryFileSystem>(() =>
             {

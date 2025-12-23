@@ -11,7 +11,7 @@
 		</None>
 	</ItemGroup>
 	<ItemGroup>
-	  <Reference Include="Assimalign.Cohesion.Configuration.FileSystem" />
+	  <CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
 	</ItemGroup>
 	
 </Project>

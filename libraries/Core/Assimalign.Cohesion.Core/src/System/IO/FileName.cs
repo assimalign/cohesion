@@ -32,7 +32,7 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     /// <exception cref="ArgumentNullException"></exception>
     public FileName(ReadOnlySpan<char> name)
     {
-        ThrowHelper.ThrowIfEmptySpan(name);
+        ArgumentNullException.ThrowIfEmptySpan(name);
 
         int start = 0;
         
@@ -56,15 +56,8 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
             }
         });
 
-        if (_value.Length > MaxLength)
-        {
-            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
-        }
-
-        if (error is not null)
-        {
-            ThrowHelper.ThrowArgumentException(error);
-        }
+        ArgumentException.ThrowIf(_value.Length > MaxLength, $"The file name is too long. Max Length allowed is {MaxLength}");
+        ArgumentException.ThrowIf(error is not null, error);
     }
 
     /// <summary>

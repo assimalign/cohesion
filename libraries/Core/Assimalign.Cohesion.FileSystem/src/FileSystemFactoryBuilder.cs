@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Concurrent;
 
 namespace Assimalign.Cohesion.FileSystem;
+
+using Assimalign.Cohesion.Internal;
 
 public class FileSystemFactoryBuilder
 {
@@ -56,7 +59,6 @@ public class FileSystemFactoryBuilder
             _fileSystems = fileSystems;
         }
 
-
         public IFileSystem Create(string name)
         {
             return _fileSystems[name];
@@ -64,7 +66,11 @@ public class FileSystemFactoryBuilder
 
         public IFileSystem Create<TFileSystem>() where TFileSystem : IFileSystem
         {
-            throw new NotImplementedException();
+            var fileSystem = _fileSystems.Values.OfType<TFileSystem>().FirstOrDefault();
+
+            InvalidOperationException.ThrowIf(fileSystem is null, $"The file system of type '{typeof(TFileSystem).FullName}' is not registered.");
+
+            return fileSystem;
         }
     }
 }

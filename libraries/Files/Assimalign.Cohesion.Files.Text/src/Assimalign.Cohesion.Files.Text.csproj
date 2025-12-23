@@ -3,6 +3,6 @@
 		<RootNamespace>Assimalign.Cohesion.Files</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Files" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Files" />
 	</ItemGroup>
 </Project>

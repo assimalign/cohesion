@@ -12,7 +12,7 @@
 		<Reference Include="Microsoft.NET.Test.Sdk" />
 		<Reference Include="xunit" />
 		<Reference Include="xunit.runner.visualstudio" />
-		<Reference Include="Assimalign.Cohesion.Synthara.Local" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Synthara.Local" />
 	</ItemGroup>
 
 	<ItemGroup>

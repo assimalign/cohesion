@@ -3,7 +3,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-using Assimalign.Cohesion.Internal;
+
 
 internal abstract class ConfigurationEntry : IConfigurationEntry
 {
@@ -14,10 +14,12 @@ internal abstract class ConfigurationEntry : IConfigurationEntry
 
     internal ConfigurationEntry(Path path, string providerName)
     {
+        ArgumentNullException.ThrowIfNullOrEmpty(providerName);
+
         _path = path;
         _key = path.Keys[path.Count - 1];
         _token = new Lazy<ConfigurationChangeToken>(() => new ConfigurationChangeToken(this), true);
-        _providerName = ThrowHelper.ThrowIfNullOrEmpty(providerName);
+        _providerName = providerName;
     }
 
     /// <inheritdoc />

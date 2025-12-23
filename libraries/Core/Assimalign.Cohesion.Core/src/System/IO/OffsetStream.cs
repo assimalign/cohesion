@@ -61,17 +61,9 @@ public class OffsetStream : Stream
         get => _position;
         set
         {
-            if (!_stream.CanSeek)
-            {
-                ThrowHelper.ThrowInvalidOperationException("Seeking is not allowed.");
-            }
-
-            // Check if exceeding boundary of offset
-            if (value < 0 || value > _length)
-            {
-                ThrowHelper.ThrowInvalidOperationException($"The position {value} cannot exceed boundary of {_offset + _length}");
-            }
-
+            InvalidOperationException.ThrowIf(!_stream.CanSeek, "Seeking is not allowed.");
+            InvalidOperationException.ThrowIf(value < 0 || value > _length, $"The position {value} cannot exceed boundary of {_offset + _length}");
+            
             _stream.Position = (_offset + value);
             _position = value;
         }
@@ -124,10 +116,8 @@ public class OffsetStream : Stream
         {
             return 0;
         }
-        if (count > Remaining)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The count exceeds the remaining readable bytes.");
-        }
+
+        InvalidOperationException.ThrowIf(count > Remaining, "The count exceeds the remaining readable bytes.");
 
         int bytesRead = _stream.Read(buffer, offset, count);
 
@@ -144,10 +134,8 @@ public class OffsetStream : Stream
         {
             return 0;
         }
-        if (count > Remaining)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The count exceeds the remaining readable bytes.");
-        }
+
+        InvalidOperationException.ThrowIf(count > Remaining, "The count exceeds the remaining readable bytes.");
 
         Memory<byte> memory = buffer.AsMemory(offset, count);
 
@@ -162,10 +150,7 @@ public class OffsetStream : Stream
     {
         CheckOrAdjustPosition();
 
-        if (!_stream.CanSeek)
-        {
-            ThrowHelper.ThrowInvalidOperationException("Stream is not seekable.");
-        }
+        InvalidOperationException.ThrowIf(!_stream.CanSeek, "Stream is not seekable.");
 
         var boundary = origin switch
         {
@@ -175,10 +160,7 @@ public class OffsetStream : Stream
             _ => throw new ArgumentException("Invalid Seek Origin")
         };
 
-        if (boundary < _offset || boundary > (_offset + _length))
-        {
-            ThrowHelper.ThrowInvalidOperationException("The offset exceeds the boundary of the stream.");
-        }
+        InvalidOperationException.ThrowIf(boundary < _offset || boundary > (_offset + _length), "The offset exceeds the boundary of the stream.");
 
         _stream.Position = boundary;
         _position =+ (boundary - _offset);
@@ -238,7 +220,9 @@ public class OffsetStream : Stream
         AssertReadOnly();
 
         if (count < 1)
+        {
             return;
+        }
 
         //		if (_stream.CanSeek)
         //			_stream.Position = _offset + _position;
@@ -255,7 +239,9 @@ public class OffsetStream : Stream
         AssertReadOnly();
 
         if (buffer.Length < 1)
+        {
             return;
+        }
         //
         //		if (_stream.CanSeek)
         //			_stream.Position = _offset + _position;
@@ -271,7 +257,7 @@ public class OffsetStream : Stream
     {
         if (_isDisposed)
         {
-            ThrowHelper.ThrowObjectDisposedException(nameof(OffsetStream));
+            throw new ObjectDisposedException(nameof(OffsetStream));
         }
 
         if (disposing && !_leaveOpen && _stream is not null)
@@ -286,10 +272,7 @@ public class OffsetStream : Stream
 
     private void AssertReadOnly()
     {
-        if (IsReadOnly)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The stream is ReadOnly.");
-        }
+        InvalidOperationException.ThrowIf(IsReadOnly, "The stream is ReadOnly.");
     }
 
     private void CheckOrAdjustPosition()

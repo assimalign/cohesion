@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="Assimalign.Cohesion.Configuration.Json" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Configuration.Json" />
   </ItemGroup>
 
   <ItemGroup>

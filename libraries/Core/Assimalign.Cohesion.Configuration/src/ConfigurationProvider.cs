@@ -7,7 +7,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+using Assimalign.Cohesion.Configuration.Internal;
 
 [DebuggerDisplay("Configuration Provider: {Name}")]
 public abstract class ConfigurationProvider : IConfigurationProvider
@@ -91,7 +91,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             if (path.Count > 1)
             {
                 var entryPath = path.Subpath(0, 1);
-                var entry = new ConfigurationSection(entryPath, this, _comparison, _isReadOnly);
+                var entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
 
                 entry[path] = value;
 
@@ -99,7 +99,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             }
             else
             {
-                _data.Add(key, new ConfigurationValue(path, value, this, _isReadOnly));
+                _data.Add(key, new ConfigurationValue(path, value, Name, _isReadOnly));
             }
 
             return true;
@@ -113,7 +113,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             else
             {
                 var entryPath = path.Subpath(0, 1);
-                var entry = new ConfigurationSection(entryPath, this, _comparison, _isReadOnly);
+                var entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
 
                 entry[path] = value;
 
@@ -130,7 +130,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             if (path.Count == 1)
             {
                 _data.Remove(key);
-                _data.Add(key, new ConfigurationValue(path, value, this));
+                _data.Add(key, new ConfigurationValue(path, value, Name));
             }
             else
             {

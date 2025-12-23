@@ -5,6 +5,6 @@
 		<EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

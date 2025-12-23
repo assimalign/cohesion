@@ -4,8 +4,6 @@ using System.Text;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Assimalign.Cohesion.Internal;
-
 public static class PhsysicalFileSystemExtensions
 {
     extension(FileSystemFactoryBuilder builder)
@@ -27,7 +25,7 @@ public static class PhsysicalFileSystemExtensions
         /// <returns></returns>
         public FileSystemFactoryBuilder AddPhysicalFileSystem(Action<PhysicalFileSystemOptions> configure)
         {
-            ThrowHelper.ThrowIfNull(configure);
+            ArgumentNullException.ThrowIfNull(configure);
 
             return builder.AddFileSystem<PhysicalFileSystem>(() =>
             {

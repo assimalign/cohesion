@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Synthara" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Synthara" />
 	</ItemGroup>
 </Project>

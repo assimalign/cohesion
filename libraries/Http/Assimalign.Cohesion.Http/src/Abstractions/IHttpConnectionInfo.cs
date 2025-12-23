@@ -9,12 +9,12 @@ namespace Assimalign.Cohesion.Http;
 public interface IHttpConnectionInfo
 {
     /// <summary>
-    /// 
+    /// The remote port connecting.
     /// </summary>
     int RemotePort { get; }
 
     /// <summary>
-    /// 
+    /// The remote IP address of the server or client.
     /// </summary>
     IPAddress RemoteIp { get; }
 

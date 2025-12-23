@@ -9,6 +9,6 @@
 		<PackageReference Include="xunit.runner.visualstudio"/>
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.ObjectValidation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 	</ItemGroup>
 </Project>

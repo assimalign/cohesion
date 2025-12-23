@@ -1,39 +1,43 @@
 <Project>
     <!-- #region Packages & Dependencies -->
     <ItemGroup>
-        <PackageReferenceProvider Include="Sharprompt" Version="3.0.0" />
-        <PackageReferenceProvider Include="KubernetesClient" Version="17.0.4" />
-        <PackageReferenceProvider Include="NUlid" Version="1.7.2" />
+        <CohesionPackage Include="Sharprompt" Version="3.0.0" />
+        <CohesionPackage Include="KubernetesClient" Version="17.0.4" />
+        <CohesionPackage Include="NUlid" Version="1.7.2" />
     </ItemGroup>
-    
+
     <!-- Analyzer Build Dependencies -->
     <ItemGroup>
-		<PackageReferenceProvider Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
-		<PackageReferenceProvider Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
-		<PackageReferenceProvider Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" PrivateAssets="all" />
-	</ItemGroup>
-    <ItemGroup>
-        <PackageReferenceProvider Include="Microsoft.Build" Version="17.15.0-preview-25277-114" />
-        <PackageReferenceProvider Include="Microsoft.Build.Framework" Version="17.15.0-preview-25277-114" />
-        <PackageReferenceProvider Include="Microsoft.Build.Utilities.Core" Version="17.15.0-preview-25277-114" />
+        <CohesionPackage Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+        <CohesionPackage Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
+        <CohesionPackage Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" PrivateAssets="all" />
     </ItemGroup>
+    <ItemGroup>
+        <CohesionPackage Include="Microsoft.Build" Version="18.0.2" />
+        <CohesionPackage Include="Microsoft.Build.Framework" Version="18.0.2" />
+        <CohesionPackage Include="Microsoft.Build.Utilities.Core" Version="18.0.2" />
+    </ItemGroup>
+
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
-        <PackageReferenceProvider Include="FluentAssertions" Version="8.5.0"/>
-        <PackageReferenceProvider Include="xunit" Version="2.9.3" />
-        <PackageReferenceProvider Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-        <PackageReferenceProvider Include="xunit.runner.visualstudio" Version="3.1.1"
+        <CohesionPackage Include="FluentAssertions" Version="8.5.0" />
+        <CohesionPackage Include="xunit" Version="2.9.3" />
+        <CohesionPackage Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+        <CohesionPackage Include="xunit.runner.visualstudio" Version="3.1.1"
             IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive"
             PrivateAssets="all" />
-        <PackageReferenceProvider Include="coverlet.collector" Version="6.0.4">
+        <CohesionPackage Include="coverlet.collector" Version="6.0.4">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
-        </PackageReferenceProvider>
+        </CohesionPackage>
     </ItemGroup>
+
+
+    <!-- #region: Package Reference Update -->
     <ItemGroup>
-        <Reference Update="@(PackageReferenceProvider)" Version="%(PackageReferenceProvider.Version)" />
-        <PackageReference Include="@(Reference->HasMetadata('Version'))" />
-        <PackageReference Update="@(PackageReferenceProvider)" Version="%(PackageReferenceProvider.Version)" />
-        <Reference Remove="@(Reference->HasMetadata('Version'))" />
+        <CohesionPackageReference Update="@(CohesionPackage)" Version="%(CohesionPackage.Version)" />
+        <PackageReference Include="@(CohesionPackageReference)" />
+        <CohesionPackageReference Remove="@(CohesionPackageReference)" />
     </ItemGroup>
+    <!-- #endregion -->
 </Project>

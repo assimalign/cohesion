@@ -4,6 +4,6 @@
 		<Description>https://datatracker.ietf.org/doc/html/rfc8794#name-ebml-element-types</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Files.Binary" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Files.Binary" />
 	</ItemGroup>
 </Project>

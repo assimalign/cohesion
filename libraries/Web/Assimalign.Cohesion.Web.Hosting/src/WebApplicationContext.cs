@@ -14,7 +14,9 @@ public sealed class WebApplicationContext : HostContext
     private readonly ServiceProviderBuilder _builder;
     internal WebApplicationContext(ServiceProviderBuilder builder)
     {
-        _builder = ThrowHelper.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(builder);
+
+        _builder = builder;
     }
     public override FileSystemPath? ContentRootPath { get; }
     public override IServiceProvider ServiceProvider => (_builder as IServiceProviderBuilder).Build();

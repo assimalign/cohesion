@@ -108,7 +108,7 @@ public sealed class TcpServerTransportOptions
     /// <returns></returns>
     public TcpServerTransportOptions Use(Func<TcpTransportConnection, TcpTransportConnectionContext, TransportMiddleware, Task> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         _builder.Use(middleware);
 

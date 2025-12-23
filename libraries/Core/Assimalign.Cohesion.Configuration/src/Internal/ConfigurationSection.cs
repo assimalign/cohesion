@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Configuration;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-using Assimalign.Cohesion.Internal;
+
 
 /// <summary>
 /// Represents a section of application configuration values.
@@ -30,7 +30,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
     internal ConfigurationSection(Path path, string providerName, KeyComparison comparison, bool isReadOnly = false) 
         : this(path, providerName)
     {
-        _comparison = ThrowHelper.ThrowIfNull(comparison);
+        _comparison = ArgumentException.ThrowIfEnumNotDefined(comparison);
         _isReadOnly = isReadOnly;
     }
 

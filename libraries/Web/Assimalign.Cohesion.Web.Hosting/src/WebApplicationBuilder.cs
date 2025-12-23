@@ -19,12 +19,14 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
     public WebApplicationBuilder(WebApplicationOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         Environment = new HostEnvironment(options.Environment!);
         Configuration = new ConfigurationManager();
         Services = new ServiceProviderBuilder();
         Web = new WebApplicationServerBuilder(this);
 
-        _options = ThrowHelper.ThrowIfNull(options);
+        _options = options;
         _context = new WebApplicationContext(Services);
     }
 
@@ -82,8 +84,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
     IHostBuilder IHostBuilder.AddHostedService(IHostService service)
     {
-        ThrowHelper.ThrowIfNull(service);
-        var server  = ThrowHelper.ThrowIfNotType<IWebApplicationServer>(service);
+        ArgumentNullException.ThrowIfNull(service);
+
+        var server  = ArgumentException.ThrowIfNotOfType<IWebApplicationServer>(service);
         (this as IWebApplicationBuilder).AddServer(server);
         return this;
     }

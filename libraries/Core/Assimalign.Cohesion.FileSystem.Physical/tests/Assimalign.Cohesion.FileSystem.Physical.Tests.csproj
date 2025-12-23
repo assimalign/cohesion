@@ -9,7 +9,7 @@
 		<Reference Include="Microsoft.NET.Test.Sdk" />
 		<Reference Include="xunit.runner.visualstudio" />
 		<Reference Include="xunit" />
-		<Reference Include="Assimalign.Cohesion.FileSystem.Physical" />
-		<Reference Include="Assimalign.Cohesion.FileSystem.Globbing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Globbing" />
 	</ItemGroup>
 </Project>

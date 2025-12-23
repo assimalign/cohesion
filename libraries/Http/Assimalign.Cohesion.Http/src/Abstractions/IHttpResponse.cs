@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Net;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -17,7 +16,7 @@ public interface IHttpResponse
     IHttpHeaderCollection Headers { get; }
 
     /// <summary>
-    /// 
+    /// Gets the response cookies.
     /// </summary>
     IHttpCookieCollection Cookies { get; }
 

@@ -1,14 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Hosting;
 
-using Cohesion.Internal;
-
-public abstract class HostContext : IHostContext 
+public abstract class HostContext : IHostContext
 {
     private readonly Lock _lock;
     private readonly HostId _hostId;
@@ -31,26 +28,24 @@ public abstract class HostContext : IHostContext
                 return _state;
             }
         }
-        set
+    }
+    public abstract IHostEnvironment Environment { get; }
+    public abstract IServiceProvider? ServiceProvider { get; }
+    public abstract IEnumerable<IHostService> HostedServices { get; }
+
+    internal Action? ShutdownCallback { get; set; }
+    internal void SetState(HostState state)
+    {
+        lock (_lock)
         {
-            lock (_lock)
-            {
-                _state = value;
-            }
+            _state = state;
         }
     }
-    public abstract FileSystemPath? ContentRootPath { get; }
-    public abstract IHostEnvironment Environment { get; } 
-    public abstract IServiceProvider? ServiceProvider { get;}
-    public abstract IEnumerable<IHostService> HostedServices { get; }
-    internal Action? ShutdownCallback { get; set; }
 
     public void Shutdown()
     {
-        if (ShutdownCallback is null)
-        {
-            ThrowHelper.ThrowInvalidOperationException("Host has not started.");
-        }
+        InvalidOperationException.ThrowIf(ShutdownCallback is null, "Host has not started.");
+
         ShutdownCallback.Invoke();
     }
 }

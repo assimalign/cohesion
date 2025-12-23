@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Scheduler;
 
@@ -17,6 +13,13 @@ public interface ISchedulerBuilder
     /// <param name="schedule"></param>
     /// <returns></returns>
     ISchedulerBuilder AddSchedule(ISchedule schedule);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    IScheduleProvider AddScheduleProvider(IScheduleProvider provider);
 
     /// <summary>
     /// 

@@ -93,7 +93,7 @@ public class TcpTransportServerClientResponseTests
                     var pipe = context.Pipe;
                     var stream = pipe.GetStream();
                     var sslStream = new SslStream(stream);
-                    var certificate = CertUtility.GetSelfSignedCertificate();
+                    var certificate = CertUtility.GenerateSelfSignedCert();
 
                     await sslStream.AuthenticateAsServerAsync(certificate);
 

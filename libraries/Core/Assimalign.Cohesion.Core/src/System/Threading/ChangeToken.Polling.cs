@@ -46,7 +46,7 @@ public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
     {
         if (callback is not Action<T>)
         {
-            ThrowHelper.ThrowInvalidOperationException("");
+            //ThrowHelper.ThrowInvalidOperationException("");
         }
         return OnChange((callback as Action<T>)!);
     }

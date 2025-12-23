@@ -86,10 +86,8 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// <param name="statusCode"></param>
     public HttpStatusCode(int statusCode)
     {
-        if (!IsValid(statusCode))
-        {
-            ThrowHelper.ThrowArgumentException($"The provided status code is invalid: '{statusCode}'");
-        }
+        ArgumentException.ThrowIf(!IsValid(statusCode), $"The provided status code is invalid: '{statusCode}'");
+
         Value = statusCode;
     }
 

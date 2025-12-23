@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 
 public sealed class ConfigurationOptions
 {
@@ -21,7 +21,7 @@ public sealed class ConfigurationOptions
     public ConfigurationSetStrategy SetStrategy
     {
         get => _setStrategy;
-        set => _setStrategy = ThrowHelper.ThrowIfNotDefined(value);
+        set => _setStrategy = ArgumentException.ThrowIfEnumNotDefined(value);
     }
 
     /// <summary>

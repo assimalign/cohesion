@@ -54,19 +54,23 @@ internal class GlobMatcher : IGlobMatcher
 
     public bool IsMatch(IFileSystemFile file)
     {
-        return IsMatch(ThrowHelper.ThrowIfNull(file).Path);
+        ArgumentNullException.ThrowIfNull(file);
+        return IsMatch(file.Path);
     }
 
     public bool IsMatch(IFileSystemDirectory directory)
     {
-        return IsMatch(ThrowHelper.ThrowIfNull(directory).Path);
+        ArgumentNullException.ThrowIfNull(directory);
+        return IsMatch(directory.Path);
     }
 
     public GlobMatchResults Match(IFileSystemDirectory directory)
     {
+        ArgumentNullException.ThrowIfNull(directory);
+
         var matches = new List<IFileSystemInfo>();
 
-        Recurse(ThrowHelper.ThrowIfNull(directory), matches);
+        Recurse(directory, matches);
 
         if (matches.Count > 0)
         {

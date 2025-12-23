@@ -10,7 +10,7 @@
 		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Cli" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Cli" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

@@ -15,36 +15,39 @@ public sealed class FileSystemPathComparer :
     , IEqualityComparer<FileSystemPath>
     , IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>
 {
-    private readonly StringComparison _comparison;
+    private readonly CultureInfo _cultureInfo;
+    private readonly bool _ignoreCase;
+    private readonly StringComparer _comparer;
 
-    private FileSystemPathComparer(StringComparison comparison)
+    private FileSystemPathComparer(CultureInfo cultureInfo, bool ignoreCase = false)
     {
-        _comparison = comparison;
+        _cultureInfo = cultureInfo;
+        _ignoreCase = ignoreCase;
+        _comparer = StringComparer.Create(cultureInfo, ignoreCase);
     }
 
     public int Compare(FileSystemPath left, FileSystemPath right)
     {
-        return left.CompareTo(right, _comparison);
+        return left.CompareTo(right, _cultureInfo, _ignoreCase);
     }
-
     public bool Equals(FileSystemPath left, FileSystemPath right)
     {
-        return left.Equals(right, _comparison);
+        return left.Equals(right, _cultureInfo, _ignoreCase);
     }
-
     public int GetHashCode([DisallowNull] FileSystemPath path)
     {
-        return path.GetHashCode(_comparison);
+        return path.GetHashCode(_cultureInfo, _ignoreCase);
     }
 
     bool IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.Equals(ReadOnlySpan<char> alternate, FileSystemPath other)
     {
-        return alternate.Equals(other, _comparison);
+        return ((IAlternateEqualityComparer<ReadOnlySpan<char>, string>)_comparer).Equals(alternate, other);
     }
 
     int IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.GetHashCode(ReadOnlySpan<char> alternate)
     {
-        return FileSystemPath.Parse(alternate).GetHashCode(_comparison);
+        int code =  ((IAlternateEqualityComparer<ReadOnlySpan<char>, string>)_comparer).GetHashCode(alternate);
+        return (int)((uint)code | ((uint)code << 16));
     }
 
     FileSystemPath IAlternateEqualityComparer<ReadOnlySpan<char>, FileSystemPath>.Create(ReadOnlySpan<char> alternate)
@@ -52,11 +55,8 @@ public sealed class FileSystemPathComparer :
         return alternate;
     }
 
-    public static FileSystemPathComparer Create(StringComparison comparison)
+    public static FileSystemPathComparer Create(CultureInfo cultureInfo, bool ignoreCase = false)
     {
-        return new FileSystemPathComparer(comparison);
+        return new FileSystemPathComparer(cultureInfo, ignoreCase);
     }
-
-    public static FileSystemPathComparer CurrentCulture { get; } = new FileSystemPathComparer(StringComparison.InvariantCulture);
-    public static FileSystemPathComparer InvariantCulture { get; } = new FileSystemPathComparer(StringComparison.InvariantCulture);
 }

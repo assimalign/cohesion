@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="Assimalign.Cohesion.Configuration" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
   </ItemGroup>
 
 	

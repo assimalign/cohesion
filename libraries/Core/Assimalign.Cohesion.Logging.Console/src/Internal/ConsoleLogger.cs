@@ -19,7 +19,7 @@ public class ConsoleLogger : ILogger
 
     public void Log(ILoggerEntry entry)
     {
-        ThrowHelper.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(entry);
 
     }
 

@@ -21,8 +21,6 @@ public abstract class ClientTransport<TConnection> : ITransport
     /// <inheritdoc />
     public abstract TransportProtocol Protocol { get; }
 
-    
-
     /// <summary>
     /// A method that connects to a remote host (server) and returns a <see cref="ITransportConnection"/> object.
     /// </summary>

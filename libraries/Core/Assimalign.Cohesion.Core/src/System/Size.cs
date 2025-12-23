@@ -2,11 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-#if NET7_0_OR_GREATER
 using System.Numerics;
-#endif
 
 namespace System;
 
@@ -16,25 +12,24 @@ using Assimalign.Cohesion.Internal;
 /// Represents the size of data.
 /// </summary>
 //[JsonConverter(typeof(SizeJsonConverter))]
-[DebuggerDisplay("Length: {Gigabytes}")]
-public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComparer<Size>
-#if NET7_0_OR_GREATER
+[DebuggerDisplay("Length: {Gigabytes} GB")]
+public readonly struct Size : IEquatable<Size>
+    , IComparable<Size>
+    , IEqualityComparer<Size>
     , IEqualityOperators<Size, Size, bool>
     , IAdditionOperators<Size, Size, Size>
     , ISubtractionOperators<Size, Size, Size>
-#endif
 {
     /// <summary>
     /// The default constructor
     /// </summary>
     /// <param name="length">The number bytes.</param>
+    /// <exception cref="ArgumentException"></exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Size(long length)
     {
-        if (length < -1)
-        {
-            ThrowHelper.ThrowArgumentException($"The '{nameof(length)}' must be greater than -1.");
-        }
+        ArgumentException.ThrowIf(length < -1, $"The length must be greater than or equal to -1.");
+        
         Length = length;
     }
 
@@ -223,11 +218,8 @@ public readonly struct Size : IEquatable<Size>, IComparable<Size>, IEqualityComp
     public static Size operator -(Size left, Size right)
     {
         var value = left.Length - right.Length;
-        
-        if (value < -1)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The calculated must exceed -1.");
-        }
+
+        InvalidOperationException.ThrowIf(value < -1, "The calculated must exceed -1.");
 
         return value;
     }

@@ -31,15 +31,13 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
-        if (_isBuilt)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The web host is already built.");
-        }
+        InvalidOperationException.ThrowIf(_isBuilt, "The web host is already built.");
+
         throw new NotImplementedException();
     }
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         _middleware.Add(middleware);
 
@@ -63,7 +61,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options)
     {
-        ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
 
         return new WebApplicationBuilder(options);
     }

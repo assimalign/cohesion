@@ -2,8 +2,6 @@
 using System.Linq;
 using System.Buffers;
 using System.Diagnostics;
-using System.Web;
-using System.Text.Encodings.Web;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -36,7 +34,7 @@ public readonly struct HttpPath : IEquatable<HttpPath>
 		//{
 		//	ThrowUtility.InvalidHttpPath($"The following path contains an in invalid character: '{value}'.");
 		//}
-		this.Value = value;
+		Value = value;
 	}
 
 	/// <summary>

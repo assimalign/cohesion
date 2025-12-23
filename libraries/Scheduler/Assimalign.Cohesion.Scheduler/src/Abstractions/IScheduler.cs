@@ -6,15 +6,10 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Scheduler;
 
 /// <summary>
-/// 
+/// Acts as a host for schedules.
 /// </summary>
 public interface IScheduler : IDisposable
 {
-    /// <summary>
-    /// A the collection of schedules
-    /// </summary>
-    IEnumerable<ISchedule> Schedules { get; }
-
     /// <summary>
     /// Starts the scheduler 
     /// </summary>

@@ -20,43 +20,66 @@ if (-not (Test-Path $Path)) {
     return
 }
 
+$UpdateReferences = $false
 $Items = @(
     @{ Type = 'classlib'; Suffix = $null; Directory = 'src' }
     @{ Type = 'xunit'; Suffix = 'Tests'; Directory = 'tests' }
-    @{ Type = 'sln'; Suffix = $null; Directory = $null }
+    @{ Type = 'sln'; Suffix = $null; Directory = $null; Args = '--format slnx' }
 )
 
+Set-Location "$Path\$Name"
+
 $Items | ForEach-Object {
-    $CliArgs = "new " + $_.Type + " -n $Name"
 
-    if (-not [System.String]::IsNullOrEmpty($_.Suffix)) {
-        $CliArgs = $CliArgs + "." + $_.Suffix
-    }
-    if (-not [system.String]::IsNullOrEmpty($_.Directory)) {
-        $CliArgs = $CliArgs + " -o $Path\$Name\" + $_.Directory
-    }
-    else {
-        $CliArgs = $CliArgs + " -o $Path\$Name"
+    $Type = $_.Type
+    $Suffix = $_.Suffix
+    $Directory = $_.Directory
+    $Args = $_.Args
+
+    switch ($_.Type) {
+        { $_ -eq "classlib" -or $_ -eq "xunit" } {
+            $CliArgs = "new " + $Type + " -o $Path\$Name\" + $Directory + " -n $Name" + ([system.String]::IsNullOrEmpty($Suffix) ? "" : ".$Suffix")
+            $ItemPath = "$Path\$Name\" + "$Directory\$Name"  + ([system.String]::IsNullOrEmpty($Suffix) ? "" : ".$Suffix") + ".csproj"
+            break;
+        }
+        "sln" {
+            $CliArgs = "new " + $Type + " -o $Path\$Name\" +" -n $Name" + " " + $Args
+            $ItemPath = "$Path\$Name\$Name" + ".slnx"
+            break;
+        }
     }
 
-    Start-Process dotnet -ArgumentList $CliArgs -Wait -NoNewWindow -PassThru
+    Write-Host "Running Command: dotnet $CliArgs"
+    
+    if ((Test-Path $ItemPath) -eq $false) {
+
+        if ($ItemPath.EndsWith('.csproj')) {
+            $UpdateReferences = $true
+        }
+
+        Start-Process dotnet -ArgumentList $CliArgs -Wait -NoNewWindow -PassThru
+    }
 }
 
 
-Set-Location "$Path\$Name"
+
 Get-ChildItem -Include *.csproj -Recurse -File | ForEach-Object {
     $SolutionFolder = $_.Directory.BaseName
     $ProjectPath = [System.IO.Path]::GetRelativePath((Get-Location).Path, $_.FullName)
 
     $SolutionFolder
     $ProjectPath
-    Start-Process dotnet -NoNewWindow -Wait -ArgumentList "sln $Name.sln add $ProjectPath --solution-folder $SolutionFolder"
+    Start-Process dotnet -NoNewWindow -Wait -ArgumentList "sln $Name.slnx add $ProjectPath --solution-folder $SolutionFolder"
 }
 
-New-Item 'README.md' -ItemType File
+if ((Test-Path "$Path\$Name\README.md") -eq $false) {
+    New-Item 'README.md' -ItemType File
+}
 
+if ($UpdateReferences -eq $true) {
 $UpdateRefs = [System.IO.Path]::GetFullPath("$PSScriptRoot\..\update\update-project-references.ps1")
-
 . $UpdateRefs
+}
+
 
 Set-Location $MyLocation.Path

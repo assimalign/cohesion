@@ -50,6 +50,7 @@ public sealed class TcpTransportConnectionContext : ITransportConnectionContext
     /// <exception cref="ArgumentNullException"></exception>
     public void SetPipe(ITransportConnectionPipe pipe)
     {
-        _context.Pipe = ThrowHelper.ThrowIfNull(pipe);
+        ArgumentNullException.ThrowIfNull(pipe);
+        _context.Pipe = pipe;
     }
 }

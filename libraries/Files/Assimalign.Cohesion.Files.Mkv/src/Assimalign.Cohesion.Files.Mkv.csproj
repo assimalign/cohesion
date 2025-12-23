@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Files.Bmff" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Files.Bmff" />
 	</ItemGroup>
 </Project>

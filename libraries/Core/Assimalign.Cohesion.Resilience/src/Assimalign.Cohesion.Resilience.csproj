@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+	  <Compile Remove="_old\Internal\Utilities\CancellationTokenSourcePool.cs" />
+	  <Compile Remove="_old\Internal\Utilities\CancellationTokenSourcePool.Pooled.cs" />
+	  <Compile Remove="_old\Internal\Utilities\DefaultPredicates.cs" />
+	  <Compile Remove="_old\Internal\Utilities\RandomUtil.cs" />
+	  <Compile Remove="_old\Internal\Utilities\TimeProviderExtensions.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectPool" />
+	</ItemGroup>
+</Project>

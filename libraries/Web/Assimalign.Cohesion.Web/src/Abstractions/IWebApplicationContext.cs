@@ -6,4 +6,5 @@ namespace Assimalign.Cohesion.Web;
 
 public interface IWebApplicationContext
 {
+
 }

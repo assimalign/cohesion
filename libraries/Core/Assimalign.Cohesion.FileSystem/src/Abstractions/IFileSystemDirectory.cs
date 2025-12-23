@@ -30,7 +30,7 @@ public interface IFileSystemDirectory : IFileSystemInfo, IEnumerable<IFileSystem
     /// </summary>
     /// <param name="pattern"></param>
     /// <returns></returns>
-    IFileSystemChangeToken Watch(Glob? pattern);
+    IFileSystemEventToken Watch(Glob? pattern);
 
     /// <summary>
     /// Gets all the directories relative to the current directory.

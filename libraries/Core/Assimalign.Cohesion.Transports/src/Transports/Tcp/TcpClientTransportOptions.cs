@@ -1,10 +1,11 @@
-﻿using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Transports.Internal;
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
+
+using Assimalign.Cohesion.Transports.Internal;
 
 public sealed class TcpClientTransportOptions
 {
@@ -14,6 +15,7 @@ public sealed class TcpClientTransportOptions
     public TcpClientTransportOptions()
     {
         _builder = new TransportPipelineBuilder<TcpTransportConnection, TcpTransportConnectionContext>();
+		EventListeners = new List<TransportEventListener>();
     }
 
     /// <summary>
@@ -80,13 +82,18 @@ public sealed class TcpClientTransportOptions
     /// </summary>
     public TransportTrace Trace { get; set; } = (a, b, c) => { };
 
+    /// <summary>
+    /// Returns a  collection of event listeners.
+    /// </summary>
+    public List<TransportEventListener> EventListeners { get; }
+
     /// 
     /// </summary>
     /// <param name="middleware"></param>
     /// <returns></returns>
     public TcpClientTransportOptions Use(Func<TcpTransportConnection, TcpTransportConnectionContext, TransportMiddleware, Task> middleware)
     {
-        ThrowHelper.ThrowIfNull(middleware);
+        ArgumentNullException.ThrowIfNull(middleware);
 
         _builder.Use(middleware);
 

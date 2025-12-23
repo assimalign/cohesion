@@ -17,4 +17,21 @@ public class DirectoryNameTests
 
         Assert.Equal(expected, name);
     }
+
+    [Theory]
+    [InlineData("../../users/chase", new string[] { "users", "chase" })]
+    public void TestGetDirectories(string item, string[] segments)
+    {
+        FileSystemPath path = item;
+
+        var directories = path.GetDirectoryNames();
+
+        Assert.Equal(segments.Length, directories.Length);
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            Assert.Equal(segments[i] + "/", directories[i]);
+        }
+
+    }
 }

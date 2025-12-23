@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
 
 </Project>

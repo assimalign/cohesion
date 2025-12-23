@@ -3,7 +3,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.ObjectPool;
 
-internal sealed class ObjectPoolDisposable<T> : ObjectPoolDefault<T>, IDisposable where T : class
+internal sealed class ObjectPoolDisposable<T> : DefaultObjectPool<T>, IDisposable where T : class
 {
     private volatile bool isDisposed;
 
@@ -45,7 +45,7 @@ internal sealed class ObjectPoolDisposable<T> : ObjectPoolDefault<T>, IDisposabl
     {
         bool returnedTooPool = false;
 
-        if (isDefaultPolicy || (fastPolicy?.Return(instance) ?? policy.Return(instance)))
+        if (_isDefaultPolicy || (_fastPolicy?.Return(instance) ?? _poolPolicy.Return(instance)))
         {
             if (firstElement == null && Interlocked.CompareExchange(ref firstElement, instance, null) == null)
             {
@@ -53,7 +53,7 @@ internal sealed class ObjectPoolDisposable<T> : ObjectPoolDefault<T>, IDisposabl
             }
             else
             {
-                var items = elements;
+                var items = _poolElements;
                 for (var i = 0; i < items.Length && !(returnedTooPool = Interlocked.CompareExchange(ref items[i].Element, instance, null) == null); i++)
                 {
                 }
@@ -70,7 +70,7 @@ internal sealed class ObjectPoolDisposable<T> : ObjectPoolDefault<T>, IDisposabl
         DisposeItem(firstElement);
         firstElement = null;
 
-        ObjectWrapper[] items = elements;
+        ObjectWrapper[] items = _poolElements;
         for (var i = 0; i < items.Length; i++)
         {
             DisposeItem(items[i].Element);

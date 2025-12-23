@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Transports;
 
-public interface ITransportMulticastConnection : ITransportConnection
-{
+//public interface ITransportMulticastConnection : ITransportConnection
+//{
 
-}
+//}

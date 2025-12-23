@@ -4,7 +4,7 @@
 		<Description>A</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
 		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ResourceId.cs">

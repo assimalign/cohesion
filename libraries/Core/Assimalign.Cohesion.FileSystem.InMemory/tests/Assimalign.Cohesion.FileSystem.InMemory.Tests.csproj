@@ -9,9 +9,12 @@
 		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\tests\Shared\FileSystemStandardTests.cs" Link="Shared\FileSystemStandardTests.cs" />
 	</ItemGroup>
 </Project>

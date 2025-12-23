@@ -49,12 +49,12 @@ public interface IHttpRequest
     IHttpFormCollection Form { get; }
 
     /// <summary>
-    /// 
+    /// Gets the body of the request.
     /// </summary>
     Stream Body { get; }
 
     /// <summary>
-    /// Gets the User Or Application for this request.
+    /// Gets the User or Application for this request.
     /// </summary>
     ClaimsPrincipal ClaimsPrincipal { get; }
 }

@@ -24,8 +24,9 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
     public FileName Name => _fileInfo.Name;
     public Size Size => _fileInfo.Length;
-    public IFileSystemDirectory Directory => _directory;
-    public IFileSystemChangeToken Watch()
+    public PhysicalFileSystemDirectory Directory => _directory;
+    IFileSystemDirectory IFileSystemFile.Directory => _directory;
+    public IFileSystemEventToken Watch()
     {
         string path = Path;
 
@@ -56,8 +57,7 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
         return File.Open(Path, fileMode, fileAccess, fileShare);
     }
-
-    public void Dispose()
+    public override void Dispose()
     {
 
     }

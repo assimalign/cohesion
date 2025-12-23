@@ -3,7 +3,7 @@
 		<None Remove="Boxes\BmffBox.Edit.cs~RF102fefb7.TMP" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Files.Media" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Files.Media" />
 	</ItemGroup>
 	<ItemGroup>
 		<Folder Include="Internal\Extensions\" />

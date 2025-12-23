@@ -28,7 +28,8 @@ public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
     /// <param name="options"></param>
     public GlobMatcherBuilder(GlobMatcherOptions options) : this()
     {
-        _options = ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
     }
 
     /// <summary>

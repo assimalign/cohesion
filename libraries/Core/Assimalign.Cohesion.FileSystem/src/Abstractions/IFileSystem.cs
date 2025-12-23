@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.FileSystem;
 public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsyncDisposable
 {
     /// <summary>
-    /// The total size of the file system.
+    /// The max size of the file system.
     /// </summary>
     Size Size { get; }
 
@@ -47,7 +47,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     bool Exists(FileSystemPath path);
 
     /// <summary>
-    /// Creates a <see cref="IFileSystemChangeToken"/> for the specified <paramref name="filter"/>.
+    /// Returns a <see cref="IFileSystemEventToken"/> for the specified <paramref name="pattern"/>.
     /// Examples: 
     /// <list type="bullet">
     /// <item>
@@ -57,8 +57,8 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     /// </list>
     /// </summary>
     /// <param name="pattern">Filter string used to determine what files or folders to monitor. Example: **/*.cs, *.*, subFolder/**/*.cshtml.</param>
-    /// <returns>An <see cref="IFileSystemChangeToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
-    IFileSystemChangeToken Watch(Glob? pattern);
+    /// <returns>An <see cref="IFileSystemEventToken"/> that is notified when a file matching <paramref name="filter"/> is added, modified or deleted.</returns>
+    IFileSystemEventToken Watch(Glob? pattern);
 
     /// <summary>
     /// 
@@ -97,7 +97,7 @@ public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsync
     IFileSystemDirectory CreateDirectory(FileSystemPath path);
 
     /// <summary>
-    ///
+    /// Creates a file at the given path.
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>

@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 using System.Numerics;
 using System.Threading;
 
@@ -51,12 +51,9 @@ public static partial class ConfigurationExtensions
         {
             var type = typeof(T);
             var value = configuration.GetValue(path)?.Value;
-       
-            if (string.IsNullOrEmpty(value))
-            {
-                ThrowHelper.ThrowArgumentNullException(nameof(path), "");
-            }
 
+            ArgumentNullException.ThrowIfNullOrEmpty(value);
+ 
             for (int i = 0; i < _converters.Count; i++)
             {
                 var (filter, converter) = _converters[i];
@@ -121,8 +118,8 @@ public static partial class ConfigurationExtensions
         /// <returns></returns>
         public IConfigurationProvider? GetProvider(string name, StringComparison comparison)
         {
-            ThrowHelper.ThrowIfNull(configuration);
-            ThrowHelper.ThrowIfNull(name);
+            ArgumentNullException.ThrowIfNull(configuration);
+            ArgumentNullException.ThrowIfNull(name);
 
             IConfigurationProvider? existing = default;
 
@@ -145,7 +142,7 @@ public static partial class ConfigurationExtensions
         /// <returns></returns>
         public async Task ReloadAsync(CancellationToken cancellationToken = default)
         {
-            ThrowHelper.ThrowIfNull(configuration);
+            ArgumentNullException.ThrowIfNull(configuration);
 
             foreach (var provider in configuration.Providers)
             {

@@ -21,7 +21,9 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <exception cref="ArgumentNullException"></exception>
     public HttpHeaderKey(string value)
     {
-        Value = ThrowHelper.ThrowIfNullOrEmpty(value);
+        ArgumentNullException.ThrowIfNullOrEmpty(value);
+
+        Value = value;
     }
 
     #endregion

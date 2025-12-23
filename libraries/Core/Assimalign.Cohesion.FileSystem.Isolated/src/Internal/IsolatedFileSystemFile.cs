@@ -46,7 +46,7 @@ internal class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSystemFile
         throw new NotImplementedException();
     }
 
-    public IFileSystemChangeToken Watch()
+    public IFileSystemEventToken Watch()
     {
         throw new NotImplementedException();
     }

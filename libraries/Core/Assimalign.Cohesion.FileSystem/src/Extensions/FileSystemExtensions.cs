@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 namespace Assimalign.Cohesion.FileSystem;
 
 using Assimalign.Cohesion.Internal;
+using System;
+using System.Diagnostics.CodeAnalysis;
 
 public static class FileSystemExtensions
 {
@@ -16,7 +18,7 @@ public static class FileSystemExtensions
         /// <typeparam name="T"></typeparam>
         /// <param name="parent"></param>
         /// <returns></returns>
-        public bool HasParent<T>(out T parent) where T : class, IFileSystemInfo
+        public bool HasParent<T>([NotNullWhen(true)] out T parent) where T : class, IFileSystemInfo
         {
             parent = default!;
             if (info.HasParent(out IFileSystemDirectory? p) && p is T type)
@@ -32,9 +34,9 @@ public static class FileSystemExtensions
         /// </summary>
         /// <param name="parent"></param>
         /// <returns></returns>
-        public bool HasParent(out IFileSystemDirectory? parent)
+        public bool HasParent([NotNullWhen(true)] out IFileSystemDirectory? parent)
         {
-            ThrowHelper.ThrowIfNull(info);
+            ArgumentNullException.ThrowIfNull(info);
 
             parent = info switch
             {
@@ -55,6 +57,7 @@ public static class FileSystemExtensions
         /// <returns></returns>
         public bool Exists(FileSystemPath path)
         {
+            ArgumentNullException.ThrowIfNull(directory);
             /*
                 TODO: Not sure whether to include this API on IFileSystemDirectory. Will leave as extension method 
                 and reevaluate later
@@ -62,7 +65,7 @@ public static class FileSystemExtensions
 
             FileSystemPath fullPath = directory.Path.Merge(path);
 
-            return ThrowHelper.ThrowIfNull(directory).FileSystem.Exists(fullPath);
+            return directory.FileSystem.Exists(fullPath);
         }
 
         /// <summary>
@@ -73,7 +76,7 @@ public static class FileSystemExtensions
 
         public IFileSystemDirectory CreateSubdirectory(FileSystemPath path)
         {
-            ThrowHelper.ThrowIfNull(directory);
+            ArgumentNullException.ThrowIfNull(directory);
 
             FileSystemPath newPath = directory.Path.Merge(path);
 

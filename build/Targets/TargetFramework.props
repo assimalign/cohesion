@@ -6,5 +6,9 @@
         <TargetFrameworkForCli>$(TargetFrameworkLatest)</TargetFrameworkForCli>
         <TargetFrameworkForPortal>$(TargetFrameworkLatest)</TargetFrameworkForPortal>
         <TargetFrameworkForSdk>$(TargetFrameworkLatest)</TargetFrameworkForSdk>
+        <TargetFrameworkForBuild>$(TargetFrameworkLatest)</TargetFrameworkForBuild>
+    </PropertyGroup>
+    <PropertyGroup>
+        <LangVersion>Latest</LangVersion>
     </PropertyGroup>
 </Project>

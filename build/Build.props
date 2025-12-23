@@ -1,3 +1,18 @@
 <Project>
-	<UsingTask TaskName="Assimalign.Cohesion.Build.Tasks.GenerateValueObject" AssemblyFile="Tasks\bin\$(Configuration)\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll"/>
+	<PropertyGroup>
+		<CohesionRepositoryDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)\..'))\</CohesionRepositoryDirectory>
+		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
+		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
+		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
+		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
+		<CohesionOutputPathForCodeGen>$(CohesionOutputPath)\code-generation</CohesionOutputPathForCodeGen>
+	</PropertyGroup>
+	<!-- Cohesion Build Properties -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>none</DebugType>
+	</PropertyGroup>
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
+		AssemblyFile="$(MSBuildThisFileDirectory)Tasks\bin\$(Configuration)\$(TargetFrameworkForBuild)\Assimalign.Cohesion.Build.Tasks.dll"
+		Runtime="NET" />
 </Project>

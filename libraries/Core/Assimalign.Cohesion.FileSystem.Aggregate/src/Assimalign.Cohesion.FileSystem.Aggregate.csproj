@@ -6,6 +6,6 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 </Project>

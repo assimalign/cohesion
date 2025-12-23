@@ -3,7 +3,10 @@ using System.IO;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-public interface IFileSystemFile : IFileSystemInfo, IDisposable
+/// <summary>
+/// 
+/// </summary>
+public interface IFileSystemFile : IFileSystemInfo
 {
     /// <summary>
     /// The length of the file in bytes, or -1 for  non-existing files.
@@ -24,7 +27,7 @@ public interface IFileSystemFile : IFileSystemInfo, IDisposable
     /// 
     /// </summary>
     /// <returns></returns>
-    IFileSystemChangeToken Watch();
+    IFileSystemEventToken Watch();
 
     /// <summary>
     /// Return file content as readonly stream. Caller should dispose stream when complete.

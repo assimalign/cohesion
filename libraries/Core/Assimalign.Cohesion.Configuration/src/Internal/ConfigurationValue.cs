@@ -1,7 +1,8 @@
 ﻿using System.Threading;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Assimalign.Cohesion.Internal;
+using System;
+
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
@@ -33,10 +34,7 @@ internal class ConfigurationValue : ConfigurationEntry, IConfigurationValue
         get => _value;
         set
         {
-            if (_isReadOnly)
-            {
-                ThrowHelper.ThrowInvalidOperationException("The configuration value is read-only.");
-            }
+            ObjectDisposedException.ThrowIf(_isReadOnly, "The configuration value is read-only.");
 
             lock (_lock)
             {

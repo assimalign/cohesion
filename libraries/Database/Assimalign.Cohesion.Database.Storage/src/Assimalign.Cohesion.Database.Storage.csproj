@@ -8,6 +8,6 @@
 		<None Remove="Internal\**" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 </Project>

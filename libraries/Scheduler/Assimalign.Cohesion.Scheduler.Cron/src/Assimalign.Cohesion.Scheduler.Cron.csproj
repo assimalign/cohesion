@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Scheduling</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Scheduler</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Reference Include="Assimalign.Cohesion.Scheduler" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Scheduler" />
 	</ItemGroup>
 </Project>

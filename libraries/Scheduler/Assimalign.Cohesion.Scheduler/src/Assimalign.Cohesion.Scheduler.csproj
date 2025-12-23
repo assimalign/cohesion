@@ -1,9 +1,29 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Core" />
+	  <Compile Remove="Delegates\**" />
+	  <Compile Remove="Extensions\**" />
+	  <EmbeddedResource Remove="Delegates\**" />
+	  <EmbeddedResource Remove="Extensions\**" />
+	  <None Remove="Delegates\**" />
+	  <None Remove="Extensions\**" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Folder Include="Extensions\" />
-	  <Folder Include="Delegates\" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\JobId.generated.cs">
+			<Name>JobId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
+			<Namespace>Assimalign.Cohesion.Scheduler</Namespace>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
+		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ScheduleId.generated.cs">
+			<Name>ScheduleId</Name>
+			<RuntimeType>Ulid</RuntimeType>
+			<IsStruct>true</IsStruct>
+			<Namespace>Assimalign.Cohesion.Scheduler</Namespace>
+			<IncludeImplicitOperators>true</IncludeImplicitOperators>
+		</ValueObject>
 	</ItemGroup>
 </Project>

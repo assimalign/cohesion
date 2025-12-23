@@ -35,7 +35,7 @@ public class PhysicalFileSystem : IFileSystem
     /// <param name="options"></param>
     public PhysicalFileSystem(PhysicalFileSystemOptions options)
     {
-        ThrowHelper.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options);
 
         _driveInfo = new DriveInfo(options!.Root!);
         _isReadOnly = options.IsReadOnly;
@@ -181,11 +181,11 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (FileNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(path, exception);
+            FileSystemException.ThrowFileNotFound(path, exception);
         }
         catch (DirectoryNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(path, exception);
+            FileSystemException.ThrowDirectoryNotFound(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
@@ -221,7 +221,7 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (DirectoryNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(path, exception);
+            FileSystemException.ThrowDirectoryNotFound(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
@@ -256,11 +256,11 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(path, exception);
+            FileSystemException.ThrowPathTooLong(path, exception);
         }
         catch (FileNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(path, exception);
+            FileSystemException.ThrowFileNotFound(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
@@ -300,15 +300,15 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (FileNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(source, exception);
+            FileSystemException.ThrowFileNotFound(source, exception);
         }
         catch (DirectoryNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(source, exception);
+            FileSystemException.ThrowDirectoryNotFound(source, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(source, exception);
+            FileSystemException.ThrowAccessDenied(source, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
@@ -341,7 +341,7 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (FileNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(source, exception);
+            FileSystemException.ThrowFileNotFound(source, exception);
         }
         catch (DirectoryNotFoundException exception)
         {
@@ -357,7 +357,7 @@ public class PhysicalFileSystem : IFileSystem
         }
     }
     
-    public IFileSystemChangeToken Watch(Glob? pattern)
+    public IFileSystemEventToken Watch(Glob? pattern)
     {
         return RootDirectory.Watch(pattern);
     }

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Configuration;
 public interface IConfigurationSection : IConfigurationEntry, IConfiguration
 {
     /// <summary>
-    /// 
+    /// Returns a section as a string value
     /// </summary>
     /// <returns></returns>
     string? ToValue();

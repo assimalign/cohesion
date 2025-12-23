@@ -3,13 +3,13 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="coverlet.collector"  />
+		<PackageReference Include="coverlet.collector" />
 		<PackageReference Include="Microsoft.NET.Test.Sdk" />
-		<PackageReference Include="xunit"  />
-		<PackageReference Include="xunit.runner.visualstudio"/>
+		<PackageReference Include="xunit" />
+		<PackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

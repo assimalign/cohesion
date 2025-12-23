@@ -25,66 +25,92 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
 
     public DirectoryName(ReadOnlySpan<char> value)
     {
-        ThrowHelper.ThrowIfEmptySpan(value);
+        ArgumentNullException.ThrowIfEmptySpan(value);
 
-        if (value.Length == 1 && IsPathSeparator(value[0]))
-        {
-            _value = "/";
-            return;
-        }
+        //if (value.Length == 1 && IsPathSeparator(value[0]))
+        //{
+        //    _value = "/";
+        //    return;
+        //}
 
         string error = null!;
 
-        int start = 0;
-        int end = value.Length - 1;
-
-        CalculateSeparatorTrimRange(value, ref start, ref end);
-
-        _value = string.Create((end + 2) - start, value, (span, value) =>
+        if (IsRooted(value, out string root) && value.SequenceEqual(root))
         {
-            for (int i = start; i < (end + 1); i++)
+            if (root[root.Length - 1] != '/')
             {
-                var current = value[i];
-
-                if (!IsValidNameChar(current))
-                {
-                    error = $"The directory name has an invalid character `{current}`.";
-                    break;
-                }
-
-                span[i - start] = current;
+                root += '/';
             }
-            // ending slash's indicate directory so lets concat each name with an ending slash
-            span[span.Length - 1] = '/';
-        });
-
-        if (_value.Length > MaxLength)
-        {
-            ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
+            _value = root;
         }
+        else
+        {
+            int start = 0;
+            int end = value.Length - 1;
+
+            CalculateSeparatorTrimRange(value, ref start, ref end);
+
+            _value = string.Create((end + 2) - start, value, (span, value) =>
+            {
+                for (int i = start; i < (end + 1); i++)
+                {
+                    var current = value[i];
+
+                    if (!IsValidNameChar(current))
+                    {
+                        error = $"The directory name has an invalid character `{current}`.";
+                        break;
+                    }
+
+                    span[i - start] = current;
+                }
+                // ending slash's indicate directory so lets concat each name with an ending slash
+                span[span.Length - 1] = '/';
+            });
+        }
+
+        //if (_value.Length > MaxLength)
+        //{
+        //    ThrowHelper.ThrowArgumentException($"The file name is too long. Max Length allowed is {MaxLength}");
+        //}
 
         if (error is not null)
         {
-            ThrowHelper.ThrowArgumentException(error);
+            throw new ArgumentException(error);
         }
     }
 
-    /// <summary>
-    /// The max directory name length.
-    /// </summary>
-    public const int MaxLength = 255;
+
+    ///// <summary>
+    ///// The max directory name length.
+    ///// </summary>
+    //public const int MaxLength = 255;
 
     /// <summary>
     /// 
     /// </summary>
-    public bool IsRoot => _value[0] == '/';
+    public bool IsRoot => IsRooted(_value, out var _);
 
     /// <summary>
-    /// Returns an empty directory name.
+    /// Returns an the default root name.
     /// </summary>
     public static DirectoryName Root { get; } = "/";
 
+    /// <summary>
+    /// Returns the length of the directory name.
+    /// </summary>
+    public int Length => _value.Length;
+
     #region Methods
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public ReadOnlySpan<char> AsSpan()
+    {
+        return _value.AsSpan();
+    }
 
     /// <summary>
     /// 
@@ -155,6 +181,40 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     public override int GetHashCode()
     {
         return GetHashCode(CultureInfo.InvariantCulture);
+    }
+
+    private static bool IsRooted(ReadOnlySpan<char> input, out string root)
+    {
+        root = default!;
+
+        var value = GetPathRoot(input)!;
+
+        if (!string.IsNullOrEmpty(value))
+        {
+            if (value.Length == input.Length)
+            {
+                root = value;
+                return true;
+            }
+            root = string.Create(value.Length, value, (span, item) =>
+            {
+                for (int i = 0; i < item.Length; i++)
+                {
+                    if (item[i] == '\\')
+                    {
+                        span[i] = '/';
+                    }
+                    else
+                    {
+                        span[i] = item[i];
+                    }
+                }
+            });
+
+            return true;
+        }
+
+        return false;
     }
 
     #endregion

@@ -5,7 +5,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 
 /// <summary>
 /// Extension methods for <see cref="IConfigurationRoot"/>.

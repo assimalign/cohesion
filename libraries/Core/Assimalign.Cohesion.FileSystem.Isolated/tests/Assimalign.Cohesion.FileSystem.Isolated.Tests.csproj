@@ -9,7 +9,7 @@
 		<Reference Include="Microsoft.NET.Test.Sdk" />
 		<Reference Include="xunit.runner.visualstudio" />
 		<Reference Include="xunit" />
-		<Reference Include="Assimalign.Cohesion.FileSystem.Isolated" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Isolated" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Hosting;
+﻿using System.IO;
+
+namespace Assimalign.Cohesion.Hosting;
 
 /// <summary>
 /// 
@@ -6,14 +8,12 @@
 public interface IHostEnvironment
 {
     /// <summary>
-    /// The name of the environment.
+    /// Gets the name of the environment.
     /// </summary>
     string? Name { get; }
 
     /// <summary>
-    /// Checks whether the environment name.
+    /// Gets the absolute path to the directory that contains the application content files.
     /// </summary>
-    /// <param name="environment"></param>
-    /// <returns></returns>
-    bool IsEnvironment(string? environment);
+    FileSystemPath? ContentRootPath { get; }
 }

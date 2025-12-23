@@ -27,7 +27,7 @@ public interface IHost : IDisposable, IAsyncDisposable
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 
+    /// Stops the host.
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>

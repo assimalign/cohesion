@@ -41,8 +41,11 @@ public sealed class PipeStream : Stream
     /// <exception cref="ArgumentNullException"></exception>
     public PipeStream(PipeReader input, PipeWriter output)
     {
-        _input = ThrowHelper.ThrowIfNull(input);
-        _output = ThrowHelper.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
+        _input = input;
+        _output = output;
     }
 
     /// <summary>

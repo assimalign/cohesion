@@ -1,5 +1,4 @@
 ﻿using System;
-using System.IO;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Hosting;
@@ -15,14 +14,9 @@ public interface IHostContext
     HostId HostId { get; }
 
     /// <summary>
-    /// 
+    /// The state of the host running.
     /// </summary>
     HostState State { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    FileSystemPath? ContentRootPath { get; }
 
     /// <summary>
     /// The host environment information.

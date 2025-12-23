@@ -4,6 +4,8 @@ public enum HostState
 {
     Unknown = 0,
     Starting,
-    Running,
-    Stopping
+    Started,
+    Running = Started,
+    Stopping,
+    Stopped,
 }

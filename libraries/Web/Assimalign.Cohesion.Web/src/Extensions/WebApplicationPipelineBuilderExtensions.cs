@@ -16,7 +16,7 @@ public static class WebApplicationPipelineBuilderExtensions
     {
         public TBuilder Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
         {
-            ThrowHelper.ThrowIfNull(middleware);
+            ArgumentNullException.ThrowIfNull(middleware);
 
             Func<IHttpContext, WebApplicationMiddleware, Task> middleware2 = middleware;
 

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Internal;
+
 
 /// <summary>
 /// 
@@ -88,7 +88,7 @@ public class KeyComparer :
     /// <exception cref="ArgumentException"></exception>
     public static KeyComparer FromComparison(KeyComparison comparison)
     {
-        return new KeyComparer(ThrowHelper.ThrowIfNotDefined(comparison));
+        return new KeyComparer(ArgumentException.ThrowIfEnumNotDefined(comparison));
     }
 
     public bool Equals(ReadOnlySpan<char> alternate, Key other)

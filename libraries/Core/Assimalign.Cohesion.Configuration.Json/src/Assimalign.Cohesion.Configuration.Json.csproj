@@ -6,7 +6,7 @@
 		<Description>JSON configuration provider implementation for  Assimalign.Cohesion.Configuration.</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Assimalign.Cohesion.Configuration.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Include="README.md">

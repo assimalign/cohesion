@@ -29,6 +29,7 @@
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+		
 		<!-- <SignAssembly>true</SignAssembly>
 		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>
@@ -50,7 +51,6 @@
 	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 	</PropertyGroup>
-
 	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
 		<None Include="..\..\..\..\LICENSE">
 			<Pack>True</Pack>

@@ -62,10 +62,8 @@ public sealed class TcpTransportConnection : ISingleStreamTransportConnection
 
     public async ValueTask<TcpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
-        if (_isOpen)
-        {
-            ThrowHelper.ThrowInvalidOperationException("The connection is already open.");
-        }
+        InvalidOperationException.ThrowIf(_isOpen, "he connection is already open.");
+
         if (!(_isOpen = ThreadPool.UnsafeQueueUserWorkItem(_context, false)))
         {
             throw new Exception();

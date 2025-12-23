@@ -13,18 +13,20 @@ public class LoggerEntry : ILoggerEntry
 
     public LoggerEntry(LogId id, LogLevel level, string message)
     {
+        ArgumentNullException.ThrowIfNullOrEmpty(message);
+        ArgumentException.ThrowIfEnumNotDefined(level);
+
         Id = id;
-        Level = ThrowHelper.ThrowIfNotDefined(level);
-        Message = ThrowHelper.ThrowIfNullOrEmpty(message);
+        Level = level;
+        Message = message;
     }
 
-    public LoggerEntry(LogId id, LogId parentId, LogLevel level, string message)
+    public LoggerEntry(LogId id, LogId parentId, LogLevel level, string message) : this(id, level, message)
     {
         Id = id;
-        Level = ThrowHelper.ThrowIfNotDefined(level);
-        Message = ThrowHelper.ThrowIfNullOrEmpty(message);
+        ParentId = parentId;
     }
-    public LogId Id { get; set; } = LogId.NewLogId();
+    public LogId Id { get; set; } = LogId.New();
     public LogId? ParentId { get; set; }
     public LogLevel Level { get; set; }
     public string? Message { get; set; }

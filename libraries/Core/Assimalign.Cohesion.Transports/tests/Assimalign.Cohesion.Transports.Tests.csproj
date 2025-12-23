@@ -5,12 +5,11 @@
 	<ItemGroup>
 	  <Compile Remove="Tests.QuicTransportServerClientResponse.cs" />
 	</ItemGroup>
-
 	<ItemGroup>
-		<Reference Include="coverlet.collector" />
-		<Reference Include="Microsoft.NET.Test.Sdk" />
-		<Reference Include="xunit" />
-		<Reference Include="xunit.runner.visualstudio" />
-		<Reference Include="Assimalign.Cohesion.Transports" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
 	</ItemGroup>
 </Project>

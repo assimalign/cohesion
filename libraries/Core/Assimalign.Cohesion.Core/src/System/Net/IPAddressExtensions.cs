@@ -13,7 +13,7 @@ public static class IPAddressExtensions
     {
         public IPAddress? Next()
         {
-            ThrowHelper.ThrowIfNull(address);
+            ArgumentNullException.ThrowIfNull(address);
 
             byte[] bytes = address.GetAddressBytes();
 
