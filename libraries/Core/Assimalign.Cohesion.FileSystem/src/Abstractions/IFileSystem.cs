@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.FileSystem;
 public interface IFileSystem : IEnumerable<IFileSystemInfo>, IDisposable, IAsyncDisposable
 {
     /// <summary>
-    /// The max size of the file system.
+    /// The max or total size of the file system.
     /// </summary>
     Size Size { get; }
 

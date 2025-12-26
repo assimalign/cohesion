@@ -1,5 +1,9 @@
 <Project>
 	<PropertyGroup>
+		<Nullable>enable</Nullable>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
+	<PropertyGroup>
 		<CohesionRepositoryDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)\..'))\</CohesionRepositoryDirectory>
 		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
 		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>

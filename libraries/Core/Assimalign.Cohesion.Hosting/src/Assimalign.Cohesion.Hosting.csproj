@@ -7,13 +7,13 @@
 			Include="ValueTypes\HostId.cs"
 			ObjectType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.Hosting"
-			ObjectAccessModifier="public" 
-			IncludeImplicitOperators="true" />
-		<CohesionCodeGenValueType
-			Include="ValueTypes\ServiceId.cs"
-			ObjectType="Ulid"
-			ObjectNamespace="Assimalign.Cohesion.Hosting"
 			ObjectAccessModifier="public"
+			IncludeImplicitOperators="true" />
+		<CohesionCodeGenValueType 
+			Include="ValueTypes\ServiceId.cs" 
+			ObjectType="Ulid" 
+			ObjectNamespace="Assimalign.Cohesion.Hosting" 
+			ObjectAccessModifier="public" 
 			IncludeImplicitOperators="true" />
 	</ItemGroup>
 </Project>

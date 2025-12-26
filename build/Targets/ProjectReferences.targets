@@ -1,12 +1,15 @@
 <Project>
-    <!-- #region: Project Reference Update By Name -->
-	<ItemGroup>
-        <CohesionProject Include="$(CohesionRepositoryDirectory)**\*.csproj" />
-        <CohesionProject Update="@(CohesionProject)" ProjectId="%(CohesionProject.Filename)" ProjectPath="%(CohesionProject.Identity)" />
-        <CohesionProjectReference Update="@(CohesionProject->'%(ProjectId)')" ProjectPath="%(CohesionProject.ProjectPath)" />
+    <!-- Project Reference By Name Only
+        
+        NOTES: Currently Project references should only be included the following folders:
+        - /libraries
+    -->
+    <ItemGroup>
+        <_CohesionProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj" />
+        <_CohesionProject Update="@(_CohesionProject)" ProjectId="%(_CohesionProject.Filename)" ProjectPath="%(_CohesionProject.Identity)" />
+        <CohesionProjectReference Update="@(_CohesionProject->'%(ProjectId)')" ProjectPath="%(_CohesionProject.ProjectPath)" />
         <ProjectReference Include="@(CohesionProjectReference->'%(ProjectPath)')" />
         <CohesionProjectReference Remove="@(CohesionProjectReference->HasMetadata('ProjectPath'))" />
-        <CohesionProjectProject Remove="@(CohesionProject)" />
+        <_CohesionProject Remove="@(_CohesionProject)" />
     </ItemGroup>
-	<!-- #endregion -->
 </Project>

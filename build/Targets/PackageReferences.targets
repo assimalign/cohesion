@@ -1,41 +1,47 @@
 <Project>
     <!-- #region Packages & Dependencies -->
     <ItemGroup>
-        <CohesionPackage Include="Sharprompt" Version="3.0.0" />
-        <CohesionPackage Include="KubernetesClient" Version="17.0.4" />
-        <CohesionPackage Include="NUlid" Version="1.7.2" />
+        <_CohesionPackage Include="Sharprompt" Version="3.0.0" />
+        <_CohesionPackage Include="KubernetesClient" Version="17.0.4" />
+        <_CohesionPackage Include="NUlid" Version="1.7.2" />
     </ItemGroup>
 
-    <!-- Analyzer Build Dependencies -->
+    <!-- Analyzer & Build Dependencies -->
     <ItemGroup>
-        <CohesionPackage Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
-        <CohesionPackage Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
-        <CohesionPackage Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" PrivateAssets="all" />
-    </ItemGroup>
-    <ItemGroup>
-        <CohesionPackage Include="Microsoft.Build" Version="18.0.2" />
-        <CohesionPackage Include="Microsoft.Build.Framework" Version="18.0.2" />
-        <CohesionPackage Include="Microsoft.Build.Utilities.Core" Version="18.0.2" />
+        <_CohesionPackage Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+        <_CohesionPackage Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
+        <_CohesionPackage Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" PrivateAssets="all" />
+        <_CohesionPackage Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" PrivateAssets="all" />
+        <_CohesionPackage Include="Microsoft.Build" Version="18.0.2" PrivateAssets="all" />
+        <_CohesionPackage Include="Microsoft.Build.Framework" Version="18.0.2" PrivateAssets="all"  />
+        <_CohesionPackage Include="Microsoft.Build.Utilities.Core" Version="18.0.2" PrivateAssets="all"  />
+        <_CohesionPackage Include="Microsoft.Build.Locator" Version="1.11.2" PrivateAssets="all" />
     </ItemGroup>
 
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
-        <CohesionPackage Include="FluentAssertions" Version="8.5.0" />
-        <CohesionPackage Include="xunit" Version="2.9.3" />
-        <CohesionPackage Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-        <CohesionPackage Include="xunit.runner.visualstudio" Version="3.1.1"
+        <_CohesionPackage Include="FluentAssertions" Version="8.5.0" />
+        <_CohesionPackage Include="xunit" Version="2.9.3" />
+        <_CohesionPackage Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+        <_CohesionPackage Include="xunit.runner.visualstudio" Version="3.1.5"
             IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive"
             PrivateAssets="all" />
-        <CohesionPackage Include="coverlet.collector" Version="6.0.4">
+        <_CohesionPackage Include="coverlet.collector" Version="6.0.4">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
-        </CohesionPackage>
+        </_CohesionPackage>
     </ItemGroup>
 
+    <!-- PowerShell Binary Module Dependencies -->
+    <ItemGroup>
+        <_CohesionPackage Include="PowerShellStandard.Library" Version="5.1.1">
+            <PrivateAssets>All</PrivateAssets>
+        </_CohesionPackage>
+    </ItemGroup>
 
     <!-- #region: Package Reference Update -->
     <ItemGroup>
-        <CohesionPackageReference Update="@(CohesionPackage)" Version="%(CohesionPackage.Version)" />
+        <CohesionPackageReference Update="@(_CohesionPackage)" Version="%(_CohesionPackage.Version)" />
         <PackageReference Include="@(CohesionPackageReference)" />
         <CohesionPackageReference Remove="@(CohesionPackageReference)" />
     </ItemGroup>

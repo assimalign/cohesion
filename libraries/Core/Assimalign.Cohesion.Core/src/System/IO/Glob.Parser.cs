@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Generic;
 using System.Text;
 
 namespace System.IO;
@@ -97,7 +95,9 @@ public sealed partial class Glob
         {
             var readLine = base.ReadLine();
             if (readLine != null)
+            {
                 CurrentIndex += readLine.Length;
+            }
             return readLine!;
         }
         public string ReadPathSegment()
@@ -410,14 +410,14 @@ public sealed partial class Glob
         }
         private void AcceptCurrentChar(Lexer reader)
         {
-            if (reader.CurrentChar == '\\')
-            {
-                _buffer.Append('/'); // Normalize any backslashes to forward slashes
-            }
-            else
-            {
+            //if (reader.CurrentChar == '\\')
+            //{
+            //    _buffer.Append('/'); // Normalize any backslashes to forward slashes
+            //}
+            //else
+            //{
                 _buffer.Append(reader.CurrentChar);
-            }
+            //}
         }
         private string GetBufferAndReset()
         {

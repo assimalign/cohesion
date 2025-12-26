@@ -1,8 +1,12 @@
 <Solution>
-  <Folder Name="/src/">
+  <Folder Name="/Assimalign.Cohesion.FileSystem/" />
+  <Folder Name="/Assimalign.Cohesion.FileSystem/refs/">
+    <Project Path="../Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.FileSystem/src/">
     <Project Path="src/Assimalign.Cohesion.FileSystem.csproj" />
   </Folder>
-  <Folder Name="/tests/">
+  <Folder Name="/Assimalign.Cohesion.FileSystem/tests/">
     <Project Path="tests/Assimalign.Cohesion.FileSystem.Tests.csproj" />
   </Folder>
 </Solution>

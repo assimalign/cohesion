@@ -13,8 +13,6 @@
 		-->
 	<PropertyGroup>
 		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
-		<Nullable>enable</Nullable>
-		<LangVersion>preview</LangVersion>
 		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
 		<RollForward>LatestPatch</RollForward>
 		<!-- AOT-->

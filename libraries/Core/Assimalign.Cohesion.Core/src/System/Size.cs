@@ -6,8 +6,6 @@ using System.Numerics;
 
 namespace System;
 
-using Assimalign.Cohesion.Internal;
-
 /// <summary>
 /// Represents the size of data.
 /// </summary>

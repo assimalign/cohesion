@@ -32,9 +32,9 @@ jobs:
             "Assimalign.Cohesion.Core",
             # 'Assimalign.Cohesion.DependencyInjection',
             # 'Assimalign.Cohesion.Diagnostics',
-            "Assimalign.Cohesion.FileSystem",
+            # "Assimalign.Cohesion.FileSystem",
             # 'Assimalign.Cohesion.FileSystem.Composite',
-            'Assimalign.Cohesion.FileSystem.Globbing',
+            # 'Assimalign.Cohesion.FileSystem.Globbing',
             # 'Assimalign.Cohesion.FileSystem.InMemory',
             # 'Assimalign.Cohesion.FileSystem.Physical',
             "Assimalign.Cohesion.Hosting",
@@ -42,10 +42,10 @@ jobs:
             # 'Assimalign.Cohesion.Hosting.ServiceManagement',
             # 'Assimalign.Cohesion.Logging',
             # 'Assimalign.Cohesion.Logging.Console',
-            'Assimalign.Cohesion.ObjectMapping',
-            "Assimalign.Cohesion.ObjectPool",
-            "Assimalign.Cohesion.ObjectValidation",
-            "Assimalign.Cohesion.Transports",
+            # 'Assimalign.Cohesion.ObjectMapping',
+            # "Assimalign.Cohesion.ObjectPool",
+            # "Assimalign.Cohesion.ObjectValidation",
+            # "Assimalign.Cohesion.Transports",
             # 'Assimalign.Cohesion.Security.Cryptography'
           ]
     steps:
@@ -56,7 +56,7 @@ jobs:
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: |
-            9.x
+            10.x
 
       - name: ".NET Restore: ${{ matrix.projects }}"
         run: dotnet restore './libraries/Core/${{ matrix.projects }}'

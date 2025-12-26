@@ -1,0 +1,15 @@
+<Project>
+    <!-- Analyzer Reference By Name Only
+        
+        NOTES: Currently Project references should only be included the following folders:
+        - /libraries
+    -->
+    <ItemGroup>
+        <_AnalyzerProject Include="$(CohesionRepositoryDirectory)analyzers\**\*.csproj" />
+        <_AnalyzerProject Update="@(_AnalyzerProject)" ProjectId="%(_AnalyzerProject.Filename)" ProjectPath="%(_AnalyzerProject.Identity)" />
+        <CohesionAnalyzerReference Update="@(_AnalyzerProject->'%(ProjectId)')" ProjectPath="%(_AnalyzerProject.ProjectPath)" />
+        <ProjectReference Include="@(CohesionAnalyzerReference->'%(ProjectPath)')" />
+        <CohesionAnalyzerReference Remove="@(CohesionAnalyzerReference->HasMetadata('ProjectPath'))" />
+        <_AnalyzerProject Remove="@(_AnalyzerProject)" />
+    </ItemGroup>
+</Project>

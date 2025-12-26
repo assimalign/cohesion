@@ -38,10 +38,9 @@ public static class IOExtensions
         /// <returns></returns>
         public DirectoryName[] GetDirectoryNames()
         {
-
             int skip = 0;
-            var segments = path.GetSegments();
-            var directories = new DirectoryName[segments.Length];
+            string[] segments = path.GetSegments();
+            DirectoryName[] directories = new DirectoryName[segments.Length];
 
             for (int i = 0; i < segments.Length; i++)
             {

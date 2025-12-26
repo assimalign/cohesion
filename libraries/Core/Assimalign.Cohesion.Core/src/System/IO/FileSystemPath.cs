@@ -84,7 +84,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
         if (HasRoot(out string root))
         {
             span = span.Slice(root.Length);
-            segments.Add(root); // add root as first segment
+            segments.Add(root.TrimEnd('/')); // add root as first segment
         }
 
         for (int i = 0; i < span.Length; i++)
@@ -341,21 +341,14 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
                 if (rs[i] == "..")
                 {
                     ArgumentException.ThrowIf(
-                        ls.Length == 0, 
+                        ls.Length == 0,
                         "The path cannot be merged. The relative path goes beyond the root of the current path.");
-         
+
                     ls = ls[..^1];
                 }
                 else
                 {
-                    if (left.HasRoot(out var root))
-                    {
-                        return string.Join(Separator, [root, .. ls, .. rs[i..]]);
-                    }
-                    else
-                    {
-                        return string.Join(Separator, [.. ls, .. rs[i..]]);
-                    }
+                    return string.Join(Separator, [.. ls, .. rs[i..]]);
                 }
             }
         }
@@ -440,7 +433,7 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
     public int GetHashCode(CultureInfo cultureInfo, bool ignoreCase)
-    { 
+    {
         int code = GetComparer(cultureInfo, ignoreCase).GetHashCode(_value);
         return (int)((uint)code | ((uint)code << 16));
     }

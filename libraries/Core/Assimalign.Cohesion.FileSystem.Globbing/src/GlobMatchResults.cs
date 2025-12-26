@@ -4,16 +4,14 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Globbing;
 
-using Cohesion.Internal;
-
 /// <summary>
 /// Represents a collection of <see cref="IFileSystemInfo" /> matches.
 /// </summary>
-public class GlobMatchResults
+public sealed class GlobMatchResults
 {
     public GlobMatchResults(IEnumerable<IFileSystemInfo> files)
     {
-        Files = ThrowHelper.ThrowIfNullOrNone(files);
+        Files = ArgumentNullException.ThrowIfNull<IEnumerable<IFileSystemInfo>>(files);
     }
 
     /// <summary>

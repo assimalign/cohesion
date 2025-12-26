@@ -15,11 +15,12 @@ public class FileSystemPathTests
     {
         var path = FileSystemPath.Parse("C:/users/dotnetcadet/documents/projects");
         var dirs = path.GetDirectoryNames();
-        Assert.Equal(4, dirs.Length);
-        Assert.Equal("users/", dirs[0]);
-        Assert.Equal("dotnetcadet/", dirs[1]);
-        Assert.Equal("documents/", dirs[2]);
-        Assert.Equal("projects/", dirs[3]);
+        Assert.Equal(5, dirs.Length);
+        Assert.Equal("C:/", dirs[0]);
+        Assert.Equal("users/", dirs[1]);
+        Assert.Equal("dotnetcadet/", dirs[2]);
+        Assert.Equal("documents/", dirs[3]);
+        Assert.Equal("projects/", dirs[4]);
     }
 
     [Theory]
@@ -109,9 +110,8 @@ public class FileSystemPathTests
     }
 
     [Theory]
-    [InlineData("//server/share/directory", 1, "directory")]
+    [InlineData("//server/share/directory", 2, "//server/share")]
     [InlineData("C:/server/share/directory", 4, "C:")]
-    [InlineData("//server/share/directory", 1, "directory")]
     public void SegmentTest(string value, int count, string firstSegment)
     {
         var path = FileSystemPath.Parse(value);

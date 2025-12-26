@@ -5,7 +5,6 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.FileSystem.Globbing;
 
 using Internal;
-using Cohesion.Internal;
 
 public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
 {
@@ -39,6 +38,8 @@ public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
     /// <returns></returns>
     public GlobMatcherBuilder AddInclude(Glob pattern)
     {
+        ArgumentNullException.ThrowIfNull(pattern);
+
         _includes.Add(new GlobContext(pattern)
         {
             IgnoreCase = _options.IgnoreCase,
@@ -54,6 +55,8 @@ public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
     /// <returns></returns>
     public GlobMatcherBuilder AddExclude(Glob pattern)
     {
+        ArgumentNullException.ThrowIfNull(pattern);
+
         _excludes.Add(new GlobContext(pattern)
         {
             IgnoreCase = _options.IgnoreCase,
@@ -64,10 +67,9 @@ public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
 
     public IGlobMatcher Build()
     {
-        if (_includes.Count == 0 && _excludes.Count == 0)
-        {
-            ThrowHelper.ThrowInvalidOperationException("At least one Glob pattern must be added.");
-        }
+        InvalidOperationException.ThrowIf(
+            condition: _includes.Count == 0 && _excludes.Count == 0,
+            message: "At least one Glob pattern must be added.");
 
         return new GlobMatcher(
             _includes,

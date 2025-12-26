@@ -3,15 +3,17 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="GeneratorTests.cs" />
+	  <Compile Remove="GlobMatchResultsTests.cs" />
+	  <Compile Remove="IntegrationTests.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<Reference Include="coverlet.collector" />
-		<Reference Include="Microsoft.NET.Test.Sdk" />
-		<Reference Include="xunit" />
-		<Reference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Globbing" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
+		<!--<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />-->
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

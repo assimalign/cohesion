@@ -60,21 +60,22 @@ public class GlobTests
     [InlineData("/**/file.*", "/file.txt")]
     [InlineData("**/file.*", "/file.txt")]
     [InlineData("/*file.txt", "/file.txt")]
+    [InlineData("C:/**/*.txt", "C:/folder/file.txt")]
     [InlineData("C:\\THIS_IS_A_DIR\\*", "C:\\THIS_IS_A_DIR\\somefile")]
-    [InlineData("/DIR1/*/*", "/DIR1/DIR2/file.txt")] 
-    [InlineData("~/*~3", "~/abc123~3")] 
+    [InlineData("/DIR1/*/*", "/DIR1/DIR2/file.txt")]
+    [InlineData("~/*~3", "~/abc123~3")]
     [InlineData("**\\Shock* 12", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**\\*ave*2", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12")]
     [InlineData("**", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Adobe\\Shockwave 12.txt")]
-    [InlineData("Stuff, *", "Stuff, x")]     
-    [InlineData("\"Stuff*", "\"Stuff")]     
+    [InlineData("Stuff, *", "Stuff, x")]
+    [InlineData("\"Stuff*", "\"Stuff")]
     [InlineData("path/**/somefile.txt", "path//somefile.txt")]
-    [InlineData("**/app*.js", "dist/app.js", "dist/app.a72ka8234.js")]     
-    [InlineData("**/y", "y")]     
-    [InlineData("**/gfx/*.gfx", "HKEY_LOCAL_MACHINE\\gfx\\foo.gfx", "HKEY_LOCAL_MACHINE/gfx/foo.gfx")]     
-    [InlineData("**/gfx/**/*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]     
-    [InlineData("**\\gfx\\**\\*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]     
+    [InlineData("**/app*.js", "dist/app.js", "dist/app.a72ka8234.js")]
+    [InlineData("**/y", "y")]
+    [InlineData("**/gfx/*.gfx", "HKEY_LOCAL_MACHINE\\gfx\\foo.gfx", "HKEY_LOCAL_MACHINE/gfx/foo.gfx")]
+    [InlineData("**/gfx/**/*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]
+    [InlineData("**\\gfx\\**\\*.gfx", "a_b\\gfx\\bar\\foo.gfx", "a_b/gfx/bar/foo.gfx")]
     [InlineData(@"/foo/bar!.baz", @"/foo/bar!.baz")] // match a ! after bar
     [InlineData(@"/foo/bar[!!].baz", @"/foo/bar7.baz")] // anything except an exclaimation mark after bar
     [InlineData(@"/foo/bar[!]].baz", @"/foo/bar9.baz")] // anything except an ] after bar
@@ -86,7 +87,7 @@ public class GlobTests
     [InlineData(@"C:\myergen[*]ator", @"C:\myergen*ator")]
     [InlineData(@"C:\myergen[*][]]ator", @"C:\myergen*]ator")]
     [InlineData(@"C:\myergen[*]]ator", @"C:\myergen*ator", @"C:\myergen]ator")]
-    //[InlineData(@"C:\myergen[?]ator", @"C:\myergen?ator")] // This doesn't work cause FilSystems don't allow '?' characters in names
+    [InlineData(@"C:\myergen[?]ator", @"C:\myergen?ator")]
     [InlineData(@"/path[\]hatstand", @"/path\hatstand")]
     [InlineData(@"**\[#!]*\**", @"#test3", @"#test3\", @"\#test3\foo", @"\#test3")]
     [InlineData(@"**\[#!]*", @"#test3", "#this is a comment", @"\#test3")]
@@ -103,7 +104,9 @@ public class GlobTests
 
         foreach (var testString in testStrings)
         {
-            var match = glob.IsMatch(testString);
+            ReadOnlySpan<char> path = testString;
+
+            var match = glob.IsMatch(path);
             
             Assert.True(match, $"glob {pattern} failed to match test string: {testString}");
         }

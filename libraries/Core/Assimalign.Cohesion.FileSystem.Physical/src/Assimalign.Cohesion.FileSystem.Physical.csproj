@@ -5,7 +5,4 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 	</ItemGroup>
-	<ItemGroup>
-		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.FileSystem.cs" />
-	</ItemGroup>
 </Project>

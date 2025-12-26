@@ -1,4 +1,4 @@
-﻿#pragma warning disable CS0162, CS1574, CS9191, CS9195
+﻿#pragma warning disable CS0162, CS1574, CS9191, CS9195, CS8767, CS8765, CS8603
 
 using System.Buffers;
 using System.Buffers.Binary;

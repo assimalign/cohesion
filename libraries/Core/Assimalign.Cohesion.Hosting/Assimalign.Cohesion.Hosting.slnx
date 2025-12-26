@@ -1,8 +1,17 @@
 <Solution>
-  <Folder Name="/src/">
+  <Folder Name="/Assimalign.Cohesion.Hosting/">
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.Hosting/docs/">
+    <File Path="docs/design.md" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.Hosting/refs/">
+    <Project Path="../Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.Hosting/src/">
     <Project Path="src/Assimalign.Cohesion.Hosting.csproj" />
   </Folder>
-  <Folder Name="/tests/">
+  <Folder Name="/Assimalign.Cohesion.Hosting/tests/">
     <Project Path="tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
   </Folder>
 </Solution>

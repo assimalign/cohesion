@@ -23,7 +23,7 @@ public enum FileSystemErrorCode
     PathTooLong,
 
     /// <summary>
-    /// 
+    /// An exception when there is not enough space within the given file system.
     /// </summary>
     NotEnoughSpace,
 

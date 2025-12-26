@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
+using static System.IO.Glob;
 
 namespace System.IO;
 
@@ -177,7 +178,7 @@ public sealed partial class Glob
 
             next = position + 1;
 
-            bool contains = false;
+            bool contains = ContainsMatch(value);
 
             if (ignoreCase)
             {
@@ -208,6 +209,19 @@ public sealed partial class Glob
             {
                 return contains;
             }
+        }
+
+        private bool ContainsMatch(char containsChar)
+        {
+            for (int i = 0; i < Characters.Length; i++)
+            {
+                if (Characters[i].Equals(containsChar))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
     internal class RangeToken : NegatableGlobToken
@@ -738,6 +752,27 @@ public sealed partial class Glob
             }
 
             return true;
+        }
+    }
+
+    internal class BraceExpansionToken : CompositeGlobToken
+    {
+        public BraceExpansionToken(TokenBase[] tokens) : base(tokens)
+        {
+        }
+
+
+        public override TokenKind Kind { get; } = TokenKind.BraceGrouping;
+        public override int ConsumesMinLength => ConsumesAnyMinLength;
+        public override bool ConsumesVariableLength { get; } = true;
+
+        public override string Value => throw new NotImplementedException();
+
+        public override TokenKind Kind => throw new NotImplementedException();
+
+        public override bool Test(ReadOnlySpan<char> path, CultureInfo cultureInfo, bool ignoreCase, int position, out int next)
+        {
+            throw new NotImplementedException();
         }
     }
 }

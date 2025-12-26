@@ -1,14 +1,11 @@
-﻿using System;
-using System.Text;
+﻿using System.Text;
 using System.Diagnostics;
 using System.Globalization;
 
 namespace System.IO;
 
-using Assimalign.Cohesion.Internal;
-
 /// <summary>
-/// 
+/// The glob type is base implementation for utilizing wildcards to for single pattern match of strings values.
 /// </summary>
 [DebuggerDisplay("{ToString()}")]
 public sealed partial class Glob 
@@ -32,49 +29,48 @@ public sealed partial class Glob
     /// </summary>
     public Token[] Tokens => _tokens;
 
-
     #region Methods
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="value"></param>
     /// <returns></returns>
-    public bool IsMatch(FileSystemPath path)
+    public bool IsMatch(ReadOnlySpan<char> value)
     {
-        return IsMatch(path, CultureInfo.InvariantCulture);
+        return IsMatch(value, CultureInfo.InvariantCulture);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="value"></param>
     /// <param name="caseInSensitive"></param>
     /// <returns></returns>
-    public bool IsMatch(FileSystemPath path, bool caseInSensitive)
+    public bool IsMatch(ReadOnlySpan<char> value, bool caseInSensitive)
     {
-        return IsMatch(path, CultureInfo.InvariantCulture, caseInSensitive);
+        return IsMatch(value, CultureInfo.InvariantCulture, caseInSensitive);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="value"></param>
     /// <param name="cultureInfo"></param>
     /// <returns></returns>
-    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo)
+    public bool IsMatch(ReadOnlySpan<char> value, CultureInfo cultureInfo)
     {
-        return IsMatch(path, cultureInfo, false);
+        return IsMatch(value, cultureInfo, false);
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="path"></param>
+    /// <param name="value"></param>
     /// <param name="cultureInfo"></param>
     /// <param name="caseInSensitive"></param>
     /// <returns></returns>
-    public bool IsMatch(FileSystemPath path, CultureInfo cultureInfo, bool caseInSensitive)
+    public bool IsMatch(ReadOnlySpan<char> value, CultureInfo cultureInfo, bool caseInSensitive)
     {
         bool consumesVariableLength = _tokens.Length == 0;
         int consumesMinLength = 0;
@@ -95,30 +91,28 @@ public sealed partial class Glob
 
         if (!consumesVariableLength)
         {
-            if ((path.Length - position) != consumesMinLength)
+            if ((value.Length - position) != consumesMinLength)
             {
                 // can't possibly match as tokens require a fixed length and the string length is different.
                 return false;
             }
         }
-        else if ((path.Length - position) < consumesMinLength)
+        else if ((value.Length - position) < consumesMinLength)
         {
             // can't possibly match as tokens require a minimum length and the string is too short.
             return false;
         }
 
-        var span = path.AsSpan();
-
         for (int i = 0; i < _tokens.Length; i++)
         {
-            if (!_tokens[i].Test(span, cultureInfo, caseInSensitive, position, out position))
+            if (!_tokens[i].Test(value, cultureInfo, caseInSensitive, position, out position))
             {
                 return false;
             }
         }
 
         // if all tokens matched but still more text then fail!
-        if (position < path.Length - 1)
+        if (position < value.Length - 1)
         {
             return false;
         }
@@ -128,15 +122,15 @@ public sealed partial class Glob
     }
 
     /// <summary>
-    /// 
+    /// Returns a Glob object from the provided pattern.
     /// </summary>
-    /// <param name="pattern"></param>
+    /// <param name="pattern">The glob pattern to parse.</param>
     /// <returns></returns>
     public static Glob Parse(string pattern)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(pattern);
 
-        var tokens = _parser.Tokenize(pattern);
+        TokenBase[] tokens = _parser.Tokenize(pattern);
 
         return new Glob(tokens);
     }
@@ -250,7 +244,7 @@ public sealed partial class Glob
         /// <summary>
         /// '{*.cs, *.ts}'
         /// </summary>
-        //BraceGrouping
+        BraceGrouping
     }
 
     /// <summary>
