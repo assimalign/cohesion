@@ -206,6 +206,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         // Get the base Directory for all code generation output
         DirectoryInfo basePath = new DirectoryInfo(CodeGenOutputPath!);
 
+        if (!basePath.Exists)
+        {
+            basePath.Create();
+        }
 
         IEnumerable<FileInfo> files = basePath.EnumerateFiles("*.cs", new EnumerationOptions()
         {
