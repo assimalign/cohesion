@@ -1,5 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using static System.IO.Glob;
@@ -754,25 +756,37 @@ public sealed partial class Glob
             return true;
         }
     }
-
-    internal class BraceExpansionToken : CompositeGlobToken
+    internal class BraceGroupingToken : TokenBase
     {
-        public BraceExpansionToken(TokenBase[] tokens) : base(tokens)
+        public BraceGroupingToken(TokenBase[] alternatives)
         {
+            Alternatives = alternatives;
+            ConsumesMinLength = alternatives.Min(p => p.ConsumesMinLength);
+            Value = "{" + string.Join(',', alternatives.Select(alt => alt.Value)) + "}";
         }
 
-
+        public TokenBase[] Alternatives { get; }
         public override TokenKind Kind { get; } = TokenKind.BraceGrouping;
-        public override int ConsumesMinLength => ConsumesAnyMinLength;
+        public override int ConsumesMinLength { get; }
         public override bool ConsumesVariableLength { get; } = true;
-
-        public override string Value => throw new NotImplementedException();
-
-        public override TokenKind Kind => throw new NotImplementedException();
+        public override string Value { get; }
 
         public override bool Test(ReadOnlySpan<char> path, CultureInfo cultureInfo, bool ignoreCase, int position, out int next)
         {
-            throw new NotImplementedException();
+            next = position;
+
+            foreach (var alternative in Alternatives)
+            {
+                int tempNext = position;
+
+                if (alternative.Test(path, cultureInfo, ignoreCase, tempNext, out tempNext))
+                {
+                    next = tempNext;
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

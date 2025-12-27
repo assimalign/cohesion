@@ -1,154 +1,162 @@
-﻿using System.Collections.Generic;
+﻿using System.Buffers;
+using System.Collections.Generic;
+using System.Reflection.PortableExecutable;
+using System.Runtime.CompilerServices;
 using System.Text;
+using static System.IO.Glob;
 
 namespace System.IO;
 
 public sealed partial class Glob
 {
-    internal partial class Lexer : StringReader
+
+    internal ref struct Lexer
     {
-        private readonly string _text;
-        private int _currentIndex;
-        public const int FailedRead = -1;
-        public const char NullChar = (char)0;
+        private static ReadOnlySpan<char> _separators => new char[] { '/', '\\' };
+        private static ReadOnlySpan<char> _starting => new char[] { Star, OpenBracket, QuestionMark, OpenBrace };
 
-        public const char ExclamationMarkChar = '!';
-        public const char StarChar = '*';
-        public const char OpenBracketChar = '[';
-        public const char CloseBracketChar = ']';
-        public const char DashChar = '-';
-        public const char QuestionMarkChar = '?';
+        private readonly ReadOnlySpan<char> _pattern;
+        private int _index;
 
-        /// <summary>
-        /// Tokens can start with the following characters.
-        /// </summary>
-        public static char[] BeginningOfTokenCharacters = { StarChar, OpenBracketChar, QuestionMarkChar };
 
-        public static char[] AllowedNonAlphaNumericChars = { '.', ' ', '!', '#', '-', ';', '=', '@', '~', '_', ':' };
-
-        /// <summary>
-        /// The current delimiters
-        /// </summary>
-        private static readonly char[] PathSeparators = { '/', '\\' };
-
-        public Lexer(string text) : base(text)
+        public Lexer(ReadOnlySpan<char> pattern)
         {
-            _text = text;
-            _currentIndex = -1;
+            _pattern = pattern;
+            _index = -1;
         }
 
-        #region Properties
 
-        public int CurrentIndex
+        public const char ExclamationMark = '!';
+        public const char Star = '*';
+        public const char OpenBracket = '[';
+        public const char CloseBracket = ']';
+        public const char OpenBrace = '{';
+        public const char CloseBrace = '}';
+        public const char Dash = '-';
+        public const char QuestionMark = '?';
+
+
+        public ref readonly char Current
         {
-            get { return _currentIndex; }
-            private set
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get { return ref _pattern[_index]; }
+        }
+
+        public bool IsSeparator
+        {
+            get { return (Current == _separators[0] || Current == _separators[1]); }
+        }
+
+        // [ ]
+        public bool IsStartOfRangeOrList
+        {
+            get { return Current == OpenBracket; }
+        }
+
+        //
+        public bool IsEndOfRangeOrList
+        {
+            get { return Current == CloseBracket; }
+        }
+
+        //
+        public bool IsBeginningOfBraceGrouping
+        {
+            get { return Current == OpenBrace; }
+        }
+        public bool IsEndOfBraceGrouping
+        {
+            get { return Current == CloseBrace; }
+        }
+        public bool IsSingleCharacterMatch
+        {
+            get { return Current == QuestionMark; }
+        }
+        public bool IsWildcardCharacterMatch
+        {
+            get { return Current == Star && Peek() != Star; }
+        }
+        // **
+        public bool IsStartOfDirectoryWildcard
+        {
+            get { return Current == Star && Peek() == Star; }
+        }
+
+        public bool End
+        {
+            get
             {
-                _currentIndex = value;
-                LastChar = _text[_currentIndex - 1];
-                CurrentChar = _text[_currentIndex];
+                int pos = _index + 1;
+                if (pos > _pattern.Length)
+                {
+                    return true;
+                }
+
+                return false;
             }
         }
-        public char LastChar { get; private set; }
-        public char CurrentChar { get; private set; }
-        public bool HasReachedEnd => base.Peek() == -1;
-        public bool IsWhiteSpace => char.IsWhiteSpace(CurrentChar);
-        public bool IsBeginningOfRangeOrList => CurrentChar == OpenBracketChar;
-        public bool IsEndOfRangeOrList => CurrentChar == CloseBracketChar;
-        public bool IsSingleCharacterMatch => CurrentChar == QuestionMarkChar;
-        public bool IsWildcardCharacterMatch => CurrentChar == StarChar && Peek() != StarChar;
-        public bool IsBeginningOfDirectoryWildcard => CurrentChar == StarChar && Peek() == StarChar;
 
-        #endregion
+
+        public int Read()
+        {
+            if (TryRead())
+            {
+                return 1;
+            }
+
+            return -1;
+        }
 
         public bool TryRead()
         {
-            return Read() != FailedRead;
-        }
-        public override int Read()
-        {
-            var result = base.Read();
-            if (result != FailedRead)
+            int num = _index + 1;
+            if (num < _pattern.Length)
             {
-                _currentIndex++;
-                LastChar = CurrentChar;
-                CurrentChar = (char)result;
-                return result;
+                _index = num;
+                return true;
+            }
+            return false;
+        }
+
+        public char Peek()
+        {
+            if (TryPeek(out char next))
+            {
+                return next;
             }
 
-            return result;
+            return (char)0;
         }
-        public override int Read(char[] buffer, int index, int count)
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryPeek(out char c)
         {
-            var read = base.Read(buffer, index, count);
-            CurrentIndex += read;
-            CurrentChar = _text[CurrentIndex];
-            return read;
-        }
-        public override int ReadBlock(char[] buffer, int index, int count)
-        {
-            var read = base.ReadBlock(buffer, index, count);
-            CurrentIndex += read;
-            return read;
-        }
-        public override string ReadLine()
-        {
-            var readLine = base.ReadLine();
-            if (readLine != null)
+            int num = _index + 1;
+            if (num < _pattern.Length)
             {
-                CurrentIndex += readLine.Length;
+                c = _pattern[num];
+                return true;
             }
-            return readLine!;
+            c = default(char);
+            return false;
         }
-        public string ReadPathSegment()
-        {
-            var segmentBuilder = new StringBuilder();
-            while (TryRead())
-            {
-                if (!IsPathSeparator(CurrentChar))
-                {
-                    segmentBuilder.Append(CurrentChar);
-                }
-                else
-                {
-                    break;
-                }
-            }
-            return segmentBuilder.ToString();
-        }
-        public override string ReadToEnd()
-        {
-            CurrentIndex = _text.Length - 1;
-            return base.ReadToEnd();
-        }
-        public new char Peek()
-        {
-            if (HasReachedEnd)
-            {
-                return NullChar;
-            }
-            return (char)base.Peek();
-        }
-        public bool IsPathSeparator()
-        {
-            return IsPathSeparator(CurrentChar);
-        }
+
+
         public static bool IsPathSeparator(char character)
         {
-
-            var isCurrentCharacterStartOfDelimiter = character == PathSeparators[0] ||
-                                                     character == PathSeparators[1];
-
-            return isCurrentCharacterStartOfDelimiter;
-
+            return character == _separators[0] || character == _separators[1];
         }
         public static bool IsNotStartOfToken(char character)
         {
-            return !BeginningOfTokenCharacters.Contains(character);
+            return !_starting.Contains(character);
         }
     }
+
     internal partial class Parser
     {
+        private static readonly Dictionary<string, TokenBase[]> _cache = new Dictionary<string, TokenBase[]>();
+        private static readonly Dictionary<string, TokenBase[]>.AlternateLookup<ReadOnlySpan<char>> _lookup = _cache.GetAlternateLookup<ReadOnlySpan<char>>();
+
         private readonly StringBuilder _buffer;
 
         public Parser()
@@ -158,63 +166,77 @@ public sealed partial class Glob
 
         public TokenBase[] Tokenize(string pattern)
         {
-            var tokens = new List<TokenBase>();
-
-            using (var reader = new Lexer(pattern))
+            // Check cache for existing parsed pattern
+            if (_lookup.TryGetValue(pattern, out TokenBase[]? cache))
             {
-                while (reader.TryRead())
-                {
-                    if (reader.IsBeginningOfRangeOrList)
-                    {
-                        tokens.Add(ParseRangeOrCharacterSet(reader));
-                    }
-                    else if (reader.IsSingleCharacterMatch)
-                    {
-                        tokens.Add(ParseSingleCharacterMatch());
-                    }
-                    else if (reader.IsWildcardCharacterMatch)
-                    {
-                        tokens.Add(ParseWildcard(reader));
-                    }
-                    else if (reader.IsPathSeparator())
-                    {
-                        var sepToken = ParsePathSeparator(reader);
-                        tokens.Add(sepToken);
-                    }
-                    else if (reader.IsBeginningOfDirectoryWildcard)
-                    {
-                        if (tokens.Count > 0)
-                        {
-                            if (tokens[tokens.Count - 1] is PathSeparatorToken lastToken)
-                            {
-                                tokens.Remove(lastToken);
-                                tokens.Add(ParseDirectoryWildcard(reader, lastToken));
-                                continue;
-                            }
-                        }
+                return cache!;
+            }
 
-                        tokens.Add(ParseDirectoryWildcard(reader, null!));
-                    }
-                    else
+            List<TokenBase> tokens = new List<TokenBase>();
+            ReadOnlySpan<char> span = pattern.AsSpan();
+            Lexer lexer = new Lexer(span);
+
+            while (lexer.TryRead())
+            {
+                if (lexer.IsStartOfRangeOrList)
+                {
+                    tokens.Add(ParseRangeOrCharacterSet(ref lexer));
+                }
+                else if (lexer.IsBeginningOfBraceGrouping)
+                {
+                    tokens.Add(ParseBraceGrouping(ref lexer));
+                }
+                else if (lexer.IsSingleCharacterMatch)
+                {
+                    tokens.Add(ParseSingleCharacterMatch());
+                }
+                else if (lexer.IsWildcardCharacterMatch)
+                {
+                    tokens.Add(ParseWildcard(ref lexer));
+                }
+                else if (lexer.IsSeparator)
+                {
+                    var sepToken = ParsePathSeparator(ref lexer);
+                    tokens.Add(sepToken);
+                }
+                else if (lexer.IsStartOfDirectoryWildcard)
+                {
+                    if (tokens.Count > 0)
                     {
-                        tokens.Add(ParseLiteral(reader));
+                        if (tokens[tokens.Count - 1] is PathSeparatorToken lastToken)
+                        {
+                            tokens.Remove(lastToken);
+                            tokens.Add(ParseDirectoryWildcard(ref lexer, lastToken));
+                            continue;
+                        }
                     }
+
+                    tokens.Add(ParseDirectoryWildcard(ref lexer, null!));
+                }
+                else
+                {
+                    tokens.Add(ParseLiteral(ref lexer));
                 }
             }
+
 
             _buffer.Clear();
 
             return tokens.ToArray();
         }
-        private TokenBase[] ParseComposite(Lexer reader)
+        private TokenBase[] ParseComposite(ref Lexer reader)
         {
             var tokens = new List<TokenBase>();
 
             while (reader.TryRead())
             {
-                if (reader.IsBeginningOfRangeOrList)
+                if (reader.IsStartOfRangeOrList)
                 {
-                    tokens.Add(ParseRangeOrCharacterSet(reader));
+                    tokens.Add(ParseRangeOrCharacterSet(ref reader));
+                }
+                else if (reader.IsBeginningOfBraceGrouping)
+                {
+                    tokens.Add(ParseBraceGrouping(ref reader));
                 }
                 else if (reader.IsSingleCharacterMatch)
                 {
@@ -222,93 +244,89 @@ public sealed partial class Glob
                 }
                 else if (reader.IsWildcardCharacterMatch)
                 {
-                    tokens.Add(ParseWildcard(reader));
+                    tokens.Add(ParseWildcard(ref reader));
                 }
-                else if (reader.IsPathSeparator())
+                else if (reader.IsSeparator)
                 {
-                    var sepToken = ParsePathSeparator(reader);
+                    var sepToken = ParsePathSeparator(ref reader);
                     tokens.Add(sepToken);
                 }
-                else if (reader.IsBeginningOfDirectoryWildcard)
+                else if (reader.IsStartOfDirectoryWildcard)
                 {
                     if (tokens.Count > 0)
                     {
                         if (tokens[tokens.Count - 1] is PathSeparatorToken lastToken)
                         {
                             tokens.Remove(lastToken);
-                            tokens.Add(ParseDirectoryWildcard(reader, lastToken));
+                            tokens.Add(ParseDirectoryWildcard(ref reader, lastToken));
                             continue;
                         }
                     }
 
-                    tokens.Add(ParseDirectoryWildcard(reader, null!));
+                    tokens.Add(ParseDirectoryWildcard(ref reader, null!));
                 }
                 else
                 {
-                    tokens.Add(ParseLiteral(reader));
+                    tokens.Add(ParseLiteral(ref reader));
                 }
             }
 
             return tokens.ToArray();
         }
-        private TokenBase ParseDirectoryWildcard(Lexer reader, PathSeparatorToken leadingPathSeparatorToken)
+        private TokenBase ParseDirectoryWildcard(ref Lexer reader, PathSeparatorToken leadingPathSeparatorToken)
         {
             reader.TryRead();
 
             if (Lexer.IsPathSeparator(reader.Peek()))
             {
                 reader.TryRead();
-                var trailingSeparator = ParsePathSeparator(reader);
+                var trailingSeparator = ParsePathSeparator(ref reader);
 
                 return new WildcardDirectoryToken(
                     leadingPathSeparatorToken,
                     (PathSeparatorToken)trailingSeparator,
-                    ParseComposite(reader));
+                    ParseComposite(ref reader));
             }
 
             return new WildcardDirectoryToken(
                 leadingPathSeparatorToken,
                 null!,
-                ParseComposite(reader)); // this shouldn't happen unless a pattern ends with ** which is weird. **sometext is not legal.
+                ParseComposite(ref reader)); // this shouldn't happen unless a pattern ends with ** which is weird. **sometext is not legal.
         }
-        private TokenBase ParseLiteral(Lexer reader)
+        private TokenBase ParseLiteral(ref Lexer reader)
         {
-            AcceptCurrentChar(reader);
+            _buffer.Append(reader.Current);
 
-            while (!reader.HasReachedEnd)
+            while (!reader.End)
             {
-                var peek = reader.Peek();
-                var isValid = Lexer.IsNotStartOfToken(peek) && !Lexer.IsPathSeparator(peek);
+                char peek = reader.Peek();
+                bool isValid = Lexer.IsNotStartOfToken(peek) && !Lexer.IsPathSeparator(peek);
 
-                if (isValid)
-                {
-                    if (reader.TryRead())
-                    {
-                        AcceptCurrentChar(reader);
-                    }
-                    else
-                    {
-                        // potentially hit end of string.
-                        break;
-                    }
-                }
-                else
+                if (!isValid)
                 {
                     // we have hit a character that may not be a valid literal (could be unsupported, or start of a token for instance).
                     break;
                 }
+
+                if (!reader.TryRead())
+                {
+                    // potentially hit end of string.
+                    break;
+                }
+                _buffer.Append(reader.Current);
             }
 
             return new LiteralToken(GetBufferAndReset());
         }
-        private TokenBase ParseRangeOrCharacterSet(Lexer reader) // Parses a token for a range or list globbing expression.
+        private TokenBase ParseRangeOrCharacterSet(ref Lexer reader) // Parses a token for a range or list globbing expression.
         {
             bool isNegated = false;
-            bool isNumberRange = false;
-            bool isLetterRange = false;
-            bool isCharList = false;
+            bool isNumberRange = false; // example: [0-1]   = match any number within the given range
+            bool isLetterRange = false; // example: [A-b]   = match any character within the given range
+            bool isCharList = false;    // example: [Abrt]  = match one of the characters
 
-            if (reader.Peek() == Lexer.ExclamationMarkChar)
+            // Check if the range is negated
+            if (reader.Peek() == Lexer.ExclamationMark)
             {
                 isNegated = true;
                 reader.Read();
@@ -319,9 +337,9 @@ public sealed partial class Glob
             {
                 reader.Read();
                 nextChar = reader.Peek();
-                if (nextChar == Lexer.DashChar)
+                if (nextChar == Lexer.Dash)
                 {
-                    if (Char.IsLetter(reader.CurrentChar))
+                    if (Char.IsLetter(reader.Current))
                     {
                         isLetterRange = true;
                     }
@@ -335,13 +353,13 @@ public sealed partial class Glob
                     isCharList = true;
                 }
 
-                AcceptCurrentChar(reader);
+                _buffer.Append(reader.Current);
             }
             else
             {
                 isCharList = true;
                 reader.Read();
-                AcceptCurrentChar(reader);
+                _buffer.Append(reader.Current);
             }
 
             if (isLetterRange || isNumberRange)
@@ -357,9 +375,9 @@ public sealed partial class Glob
                     var peekChar = reader.Peek();
                     // Close brackets within brackets are escaped with another
                     // Close bracket. e.g. [a]] matches a[
-                    if (peekChar == Lexer.CloseBracketChar)
+                    if (peekChar == Lexer.CloseBracket)
                     {
-                        AcceptCurrentChar(reader);
+                        _buffer.Append(reader.Current);
                     }
                     else
                     {
@@ -368,7 +386,7 @@ public sealed partial class Glob
                 }
                 else
                 {
-                    AcceptCurrentChar(reader);
+                    _buffer.Append(reader.Current);
                 }
             }
 
@@ -394,13 +412,88 @@ public sealed partial class Glob
 
             return result;
         }
-        private TokenBase ParsePathSeparator(Lexer reader)
+        private TokenBase ParseBraceGrouping(ref Lexer reader)
+        {
+            //List<CompositeGlobToken> alternatives = new List<CompositeGlobToken>();
+            List<TokenBase> alternatives = new List<TokenBase>();
+
+            while (reader.TryRead())
+            {
+                if (reader.IsEndOfBraceGrouping)
+                {
+                    //// Add the last alternative before closing
+                    //if (currentAlternative.Count > 0 || alternatives.Count > 0)
+                    //{
+                    //    alternatives.Add(new BraceGroupingToken(currentAlternative.ToArray()));
+                    //}
+                    break;
+                }
+                else if (reader.Current == ',')
+                {
+                    continue;
+                    //// Comma separates alternatives
+                    //alternatives.Add(new BraceGroupingToken(currentAlternative.ToArray()));
+                    //currentAlternative = new List<TokenBase>();
+                }
+                else if (reader.IsStartOfRangeOrList)
+                {
+                    alternatives.Add(ParseRangeOrCharacterSet(ref reader));
+                }
+                else if (reader.IsSingleCharacterMatch)
+                {
+                    alternatives.Add(ParseSingleCharacterMatch());
+                }
+                else if (reader.IsWildcardCharacterMatch)
+                {
+                    alternatives.Add(ParseWildcard(ref reader));
+                }
+                else if (reader.IsSeparator)
+                {
+                    alternatives.Add(ParsePathSeparator(ref reader));
+                }
+                else
+                {
+                    alternatives.Add(ParseLiteralInBraceGroup(ref reader));
+                }
+            }
+
+            return new BraceGroupingToken(alternatives.ToArray());
+        }
+
+        private TokenBase ParseLiteralInBraceGroup(ref Lexer reader)
+        {
+            _buffer.Append(reader.Current);
+
+            while (!reader.End)
+            {
+                char peek = reader.Peek();
+                // Stop at comma, closing brace, or any start token, or separator
+                bool isValid = Lexer.IsNotStartOfToken(peek) && 
+                               !Lexer.IsPathSeparator(peek) && 
+                               peek != ',' && 
+                               peek != Lexer.CloseBrace;
+
+                if (!isValid)
+                {
+                    break;
+                }
+
+                if (!reader.TryRead())
+                {
+                    break;
+                }
+                _buffer.Append(reader.Current);
+            }
+
+            return new LiteralToken(GetBufferAndReset());
+        }
+        private TokenBase ParsePathSeparator(ref Lexer reader)
         {
             return new PathSeparatorToken();
         }
-        private TokenBase ParseWildcard(Lexer reader)
+        private TokenBase ParseWildcard(ref Lexer reader)
         {
-            var children = ParseComposite(reader);
+            var children = ParseComposite(ref reader);
 
             return new WildcardToken(children);
         }
@@ -408,17 +501,8 @@ public sealed partial class Glob
         {
             return new AnyCharacterToken();
         }
-        private void AcceptCurrentChar(Lexer reader)
-        {
-            //if (reader.CurrentChar == '\\')
-            //{
-            //    _buffer.Append('/'); // Normalize any backslashes to forward slashes
-            //}
-            //else
-            //{
-                _buffer.Append(reader.CurrentChar);
-            //}
-        }
+
+
         private string GetBufferAndReset()
         {
             var text = _buffer.ToString();
@@ -426,10 +510,5 @@ public sealed partial class Glob
             _buffer.Clear();
             return text;
         }
-
-        //private void AcceptChar(char character)
-        //{
-        //    _buffer.Append(character);
-        //}
     }
 }

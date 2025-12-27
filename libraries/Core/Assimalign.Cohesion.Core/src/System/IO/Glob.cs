@@ -178,7 +178,7 @@ public sealed partial class Glob
     #region Operators
 
     /// <summary>
-    /// 
+    /// Implicitly converts a string into Glob.
     /// </summary>
     /// <param name="pattern"></param>
     public static implicit operator Glob(string pattern)

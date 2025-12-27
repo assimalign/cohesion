@@ -22,7 +22,7 @@
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): General Props -->
-	<PropertyGroup Condition="'$(Configuration)' == 'Release' and $(IsSourcePackage)">
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' and $(IsSourceProject)">
 		<PackageVersion>$(CohesionVersion)</PackageVersion>
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>

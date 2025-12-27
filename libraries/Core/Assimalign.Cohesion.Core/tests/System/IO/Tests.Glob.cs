@@ -315,8 +315,7 @@ public class GlobTests
     [InlineData("*file[!abc].txt", null, "smallfileb.txt")]
 
     // LiteralSet tests
-    [InlineData("a{b,c}d", "abd", "a")]
-    [InlineData("a{b,c}d", "acd")]
+    [InlineData("a{b,c}d", "abd", "acd")]
     [InlineData("a{,c}d", "acd ad")]
     [InlineData("a{b,}d", "abd ad")]
 
@@ -345,5 +344,76 @@ public class GlobTests
     void ParseTest2(string pattern, string? positiveMatch, string? negativeMatch = null)
     {
         var glob = Glob.Parse(pattern);
+    }
+
+    [Theory]
+    [InlineData("a{b,c}d", "abd", "acd")]
+    [InlineData("file.{cs,txt}", "file.cs", "file.txt")]
+    [InlineData("{foo,bar}/test", "foo/test", "bar/test")]
+    [InlineData("**/file.{cs,ts,js}", "path/to/file.cs", "path/to/file.ts", "path/to/file.js")]
+    [InlineData("config.{json,xml,yaml}", "config.json", "config.xml", "config.yaml")]
+    [InlineData("test{1,2,3}.txt", "test1.txt", "test2.txt", "test3.txt")]
+    public void TestBraceGroupingMatching(string pattern, params string[] testStrings)
+    {
+        var glob = Glob.Parse(pattern);
+
+        foreach (var testString in testStrings)
+        {
+            var match = glob.IsMatch(testString);
+
+            Assert.True(match, $"glob {pattern} failed to match test string: {testString}");
+        }
+    }
+
+    [Theory]
+    [InlineData("a{b,c}d", "abd")]
+    [InlineData("a{b,c}d", "acd")]
+    // TODO: Need to implement more error handling in parser to bubble up bad argument exception.
+    //[InlineData("a{,c}d", "acd", "ad")]
+    //[InlineData("a{b,}d", "abd", "ad")]
+    [InlineData("file.{cs,txt}", "file.cs")]
+    [InlineData("file.{cs,txt}", "file.txt")]
+    public void TestBraceGroupingIndividualMatches(string pattern, params string[] testStrings)
+    {
+        var glob = Glob.Parse(pattern);
+
+        foreach (var testString in testStrings)
+        {
+            var match = glob.IsMatch(testString);
+
+            Assert.True(match, $"glob {pattern} failed to match test string: {testString}");
+        }
+    }
+
+    [Theory]
+    [InlineData("a{b,c}d", "a", "ab", "ac", "ad", "abcd", "aed")]
+    [InlineData("file.{cs,txt}", "file.js", "file.cs.txt", "file")]
+    [InlineData("{foo,bar}/test", "baz/test", "foobar/test")]
+    public void TestBraceGroupingNotMatching(string pattern, params string[] testStrings)
+    {
+        var glob = Glob.Parse(pattern);
+
+        foreach (var testString in testStrings)
+        {
+            var match = glob.IsMatch(testString);
+
+            Assert.False(match, $"glob {pattern} incorrectly matched test string: {testString}");
+        }
+    }
+
+    [Theory]
+    [InlineData("a{b,c}d", typeof(LiteralToken), typeof(BraceGroupingToken), typeof(LiteralToken))]
+    [InlineData("file.{cs,txt}", typeof(LiteralToken), typeof(BraceGroupingToken))]
+    public void TestBraceGroupingTokenParsing(string testString, params Type[] expectedTokens)
+    {
+        var glob = Glob.Parse(testString);
+        var tokens = glob.Tokens;
+
+        Assert.Equal(expectedTokens.Length, tokens.Length);
+
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            Assert.IsType(expectedTokens[i], tokens[i]);
+        }
     }
 }
