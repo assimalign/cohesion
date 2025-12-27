@@ -50,10 +50,7 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     {
         bool isAllowed = (fileMode != FileMode.Open || fileAccess != FileAccess.Read) && FileSystem.IsReadOnly;
 
-        if (!isAllowed)
-        {
-            ThrowHelper.ThrowInvalidOperationException("");
-        }
+        InvalidOperationException.ThrowIf(!isAllowed);
 
         return File.Open(Path, fileMode, fileAccess, fileShare);
     }

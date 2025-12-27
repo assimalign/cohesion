@@ -22,10 +22,11 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         _watcher = new FileSystemWatcher(fileSystemInfo.Path);
         _watcher.EnableRaisingEvents = true;
         _watcher.IncludeSubdirectories = true;
-        _watcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
-        _watcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
-        _watcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
-        _watcher.Renamed += (sender, args) => Notify(sender, args, ChangeType.Rename);
+        _watcher.Created += (sender, args) => Notify(sender, args, FileSystemEventType.Created);
+        _watcher.Deleted += (sender, args) => Notify(sender, args, FileSystemEventType.Deleted);
+        _watcher.Changed += (sender, args) => Notify(sender, args, FileSystemEventType.Changed);
+        _watcher.Renamed += (sender, args) => Notify(sender, args, FileSystemEventType.Renamed);
+
     }
 
     public void Dispose()
@@ -43,7 +44,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
         var disposable = new Subscriber<T?>()
         {
-            ChangeType = ChangeType.Changed,
+            ChangeType = FileSystemEventType.Changed,
             State = state,
             Callback = callback,
             OnDispose = subscriber => _subscribers.Remove(subscriber)
@@ -59,7 +60,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
         var disposable = new Subscriber<T?>()
         {
-            ChangeType = ChangeType.Created,
+            ChangeType = FileSystemEventType.Created,
             State = state,
             Callback = callback,
             OnDispose = Subscriber => _subscribers.Remove(Subscriber)
@@ -75,7 +76,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
         var disposable = new Subscriber<T?>()
         {
-            ChangeType = ChangeType.Deleted,
+            ChangeType = FileSystemEventType.Deleted,
             State = state,
             Callback = callback,
             OnDispose = Subscriber => _subscribers.Remove(Subscriber)
@@ -85,13 +86,13 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
         return disposable;
     }
-    public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T>> callback, T state)
+    public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state)
     {
         ArgumentNullException.ThrowIfNull(callback);
 
         var disposable = new RenameSubscriber<T>()
         {
-            ChangeType = ChangeType.Rename,
+            ChangeType = FileSystemEventType.Renamed,
             State = state,
             Callback = callback,
             OnDispose = Subscriber => _subscribers.Remove(Subscriber)
@@ -102,7 +103,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         return disposable;
     }
 
-    private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
+    private void Notify(object sender, FileSystemEventArgs args, FileSystemEventType changeType)
     {
         FileSystemPath fileSystemPath = args.FullPath;
         IFileSystem fileSystem = _fileSystemInfo.FileSystem;
@@ -132,7 +133,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
     abstract partial class Subscriber : IDisposable
     {
-        public required ChangeType ChangeType { get; init; }
+        public required FileSystemEventType ChangeType { get; init; }
         public Action<Subscriber> OnDispose { get; init; } = default!;
         public abstract void Invoke(FileSystemEventArgs args);
         public void Dispose()
@@ -147,7 +148,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         public required Action<FileSystemEvent<T>> Callback { get; init; } = default!;
         public override void Invoke(FileSystemEventArgs args)
         {
-            Callback.Invoke(new FileSystemEvent<T>(args.FullPath, State));
+            Callback.Invoke(new FileSystemEvent<T>(args.FullPath, State, ChangeType));
         }
     }
 
@@ -159,7 +160,7 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         {
             var renameArgs = (RenamedEventArgs)args;
 
-            Callback.Invoke(new FileSystemRenameEvent<T>(renameArgs.OldFullPath, renameArgs.FullPath, State));
+            Callback.Invoke(new FileSystemRenameEvent<T>(renameArgs.OldFullPath, renameArgs.FullPath, State, ChangeType));
         }
     }
 }

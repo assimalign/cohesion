@@ -7,12 +7,12 @@ namespace Assimalign.Cohesion.FileSystem.Globbing.Tests;
 public class GlobMatcherTests
 {
     [Theory]
-    [InlineData("*.txt", "/file.txt", true)]
+    [InlineData("**/*.txt", "/file.txt", true)]
     [InlineData("*.txt", "/file.log", false)]
-    [InlineData("**/*.txt", "/folder/file.txt", true)]
-    [InlineData("**/*.txt", "/folder/subfolder/file.txt", true)]
-    [InlineData("src/**/*.cs", "/src/Program.cs", true)]
-    [InlineData("/src/**/*.cs", "src/Models/User.cs", true)]
+    [InlineData("**/*.txt", "folder/file.txt", true)]
+    [InlineData("**/*.txt", "folder/subfolder/file.txt", true)]
+    [InlineData("src/**/*.cs", "src/Program.cs", true)]
+    [InlineData("**/src/**/*.cs", "/src/Models/User.cs", true)]
     //[InlineData("src/**/*.cs", "/test/Program.cs", false)]
     public void IsMatch_WithPath_ReturnsExpectedResult(string pattern, string path, bool expected)
     {

@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
+internal abstract class PhysicalFileSystemInfo : IFileSystemInfo, IDisposable
 {
     private readonly FileSystemInfo _fileSystemInfo;
     private readonly PhysicalFileSystem _fileSystem;
@@ -35,7 +35,14 @@ internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
         catch (Exception exception) 
         when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-           ThrowHelper.ThrowPathNotFound(Path, exception);
+            if (exception is FileNotFoundException fnf)
+            {
+                FileSystemException.ThrowFileNotFound(Path, fnf);
+            }
+            if  (exception is DirectoryNotFoundException dnf)
+            {
+                FileSystemException.ThrowDirectoryNotFound(Path, dnf);
+            }
         }
     }
 
@@ -48,5 +55,10 @@ internal abstract class PhysicalFileSystemInfo : IFileSystemInfo
             IgnoreInaccessible = true,
             ReturnSpecialDirectories = true
         };
+    }
+
+    public virtual void Dispose()
+    {
+       
     }
 }

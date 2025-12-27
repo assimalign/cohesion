@@ -84,26 +84,30 @@ public class PhysicalFileSystem : IFileSystem
 
             if (info.Exists)
             {
-                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path);
+                FileSystemException.ThrowDirectoryNotFound(path);
             }
 
             info.Create();
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(path, exception);
+            FileSystemException.ThrowPathTooLong(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path, exception);
+            FileSystemException.ThrowDirectoryNotFound(path);
+        }
+        catch (DirectoryNotFoundException exception)
+        {
+            FileSystemException.ThrowDirectoryNotFound(path, exception);
         }
 
         return new PhysicalFileSystemDirectory(this, info);
@@ -400,9 +404,6 @@ public class PhysicalFileSystem : IFileSystem
 
     private void CheckIfReadOnly(string? operation = null)
     {
-        if (IsReadOnly)
-        {
-            ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
-        }
+        InvalidOperationException.ThrowIf(IsReadOnly, $"The operation {operation} is not allowed. FileSystem is read-only.");
     }
 }

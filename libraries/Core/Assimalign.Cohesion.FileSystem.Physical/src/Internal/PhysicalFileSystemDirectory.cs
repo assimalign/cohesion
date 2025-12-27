@@ -4,11 +4,9 @@ using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Security;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.FileSystem.Internal;
 
 /// <summary>
