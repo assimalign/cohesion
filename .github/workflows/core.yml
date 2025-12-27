@@ -29,7 +29,7 @@ jobs:
             # 'Assimalign.Cohesion.Configuration.Ini',
             # 'Assimalign.Cohesion.Configuration.Json',
             # 'Assimalign.Cohesion.Configuration.Xml',
-            "Assimalign.Cohesion.Core",
+            # "Assimalign.Cohesion.Core",
             # 'Assimalign.Cohesion.DependencyInjection',
             # 'Assimalign.Cohesion.Diagnostics',
             # "Assimalign.Cohesion.FileSystem",
@@ -73,7 +73,7 @@ jobs:
 
       - name: ".NET Unit Tests: ${{ matrix.projects }}"
         if: hashFiles(format('./libraries/Core/{0}/tests/{1}.Tests.csproj', matrix.projects, matrix.projects)) != ''
-        run: dotnet test --no-restore
+        run: dotnet test --configuration Release --no-restore
         working-directory: "./libraries/Core/${{ matrix.projects }}/tests"
 
     # - name: '.NET Benchmarks: ${{ matrix.projects }}'
