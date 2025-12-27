@@ -32,6 +32,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             {
                 string meta = string.Empty;
 
+                Log.LogMessage(
+                    MessageImportance.High,
+                    "Generating Value Type Context for '{0}'.",
+                    item.ItemSpec);
 
                 // Set File System information
                 var context = new ValueTypeContext()
@@ -109,46 +113,60 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
                 contexts.Add(context);
             }
 
+
+            Log.LogMessage(MessageImportance.High, "Removing old code generated files.");
             RemoveOldGeneratedFiles(contexts);
+
+            var created = new List<ITaskItem>();
+
+            foreach (var context in contexts)
+            {
+                Log.LogMessage(MessageImportance.High,
+                    "Starting Code Generation for Value Type: '{0}'.",
+                    context.Name);
+
+                var builder = new StringBuilder();
+
+                GenerateValueType(builder, context);
+
+                var directory = new DirectoryInfo(Path.GetDirectoryName(context.FilePath)!);
+
+                Log.LogMessage(MessageImportance.High,
+                    "Ensuring Directory Exists: '{0}'.",
+                    directory.FullName);
+
+                if (!directory.Exists)
+                {
+                    directory.Create();
+                }
+
+
+                Log.LogMessage(MessageImportance.High,
+                    "Creating Code Generation File: '{0}'.",
+                    context.FilePath);
+
+                using var stream = File.Open(context.FilePath!, FileMode.Create, FileAccess.ReadWrite);
+
+                byte[] bytes = Encoding.UTF8.GetBytes(builder.ToString());
+
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush();
+
+                var taskItem = new TaskItem(context.Item?.ItemSpec);
+                taskItem.SetMetadata("ObjectType", context.Type.ToString());
+                taskItem.SetMetadata("ObjectName", context.Name);
+                taskItem.SetMetadata("ObjectNamespace", context.Namespace);
+                taskItem.SetMetadata("ObjectFilePath", context.FilePath);
+                created.Add(context!.Item!);
+            }
+
+            ValueTypesCreated = created.ToArray();
         }
         catch (Exception exception)
         {
-            Log.LogErrorFromException(exception);
+            Log.LogError("An unexpected error occurred. Error Messafe: '{0}'.", exception.GetBaseException().Message);
             return false;
         }
-
-
-        var created = new List<ITaskItem>();
-
-        foreach (var context in contexts)
-        {
-            var builder = new StringBuilder();
-
-            GenerateValueType(builder, context);
-
-            var directory = new DirectoryInfo(Path.GetDirectoryName(context.FilePath)!);
-
-            if (!directory.Exists)
-            {
-                directory.Create();
-            }
-
-            using var stream = File.Open(context.FilePath!, FileMode.Create);
-
-            byte[] bytes = Encoding.UTF8.GetBytes(builder.ToString());
-
-            stream.Write(bytes, 0, bytes.Length);
-            stream.Flush();
-
-            var taskItem = new TaskItem(context.Item?.ItemSpec);
-            taskItem.SetMetadata("ObjectType", context.Type.ToString());
-            taskItem.SetMetadata("ObjectName", context.Name);
-            taskItem.SetMetadata("ObjectNamespace", context.Namespace);
-            taskItem.SetMetadata("ObjectFilePath", context.FilePath);
-            created.Add(context!.Item!);
-        }
-
-        ValueTypesCreated = created.ToArray();
 
         return true;
     }
