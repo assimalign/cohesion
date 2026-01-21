@@ -11,14 +11,13 @@ public static partial class HostExtensions
         /// <summary>
         /// Runs the <see cref="IHost"/> synchronously.
         /// </summary>
-        /// <param name="host"></param>
         public void Run()
         {
             host.RunAsync().GetAwaiter().GetResult();
         }
 
         /// <summary>
-        /// 
+        /// Converts a <see cref="IHost"/> to run as a <see cref="IHostService"/>.
         /// </summary>
         /// <returns></returns>
         public IHostService AsService()

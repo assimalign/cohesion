@@ -51,6 +51,9 @@ public abstract class BackgroundService : IHostService, IDisposable
         finally
         {
             await _task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+            _task = null;
+            _cancellationTokenSource = null;
         }
     }
 

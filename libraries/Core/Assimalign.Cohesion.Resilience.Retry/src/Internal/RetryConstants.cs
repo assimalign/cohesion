@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Resilience.Retry.Internal;
+namespace Assimalign.Cohesion.Resilience.Internal;
 
 internal static class RetryConstants
 {

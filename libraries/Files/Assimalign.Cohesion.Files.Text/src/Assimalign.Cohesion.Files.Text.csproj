@@ -1,8 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Files</RootNamespace>
-	</PropertyGroup>
-	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Files" />
-	</ItemGroup>
-</Project>

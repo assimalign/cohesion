@@ -18,175 +18,119 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
     public override bool Execute()
     {
-        var contexts = new List<ValueTypeContext>();
+        // Ensure Value Types where provided
+        if (ValueTypes is null || ValueTypes.Length == 0)
+        {
+            Log.LogError("No ValueTypes were specified for code generation.");
+            return false;
+        }
 
         try
         {
-            if (ValueTypes is null || ValueTypes.Length == 0)
-            {
-                Log.LogError("No ValueTypes were specified for code generation.");
-                return false;
-            }
+            StringBuilder? builder = null;
+            DirectoryInfo? directoryInfo = null;
+            List<ValueTypeContext> contexts = new List<ValueTypeContext>();
+            List<ITaskItem> created = new List<ITaskItem>();
 
-            foreach (var item in ValueTypes)
+            foreach (var valueType in ValueTypes)
             {
-                string meta = string.Empty;
+                // Set Current Execution Stage
+                Log.LogMessage("Beginning Value Type Generation: {0}", valueType.ItemSpec);
 
-                Log.LogMessage(
-                    MessageImportance.High,
-                    "Generating Value Type Context for '{0}'.",
-                    item.ItemSpec);
+                string name = Path.GetFileNameWithoutExtension(valueType.ItemSpec);
+                string fileName = Path.GetFileName(valueType.ItemSpec);
+                string fileDirectory = Path.GetDirectoryName(valueType.ItemSpec)!;
+                string filePath = string.IsNullOrEmpty(fileDirectory) ?
+                         Path.Combine(CodeGenOutputPath!, fileName) :
+                         Path.Combine(CodeGenOutputPath!, fileDirectory!, fileName);
 
                 // Set File System information
                 var context = new ValueTypeContext()
                 {
-                    Name = Path.GetFileNameWithoutExtension(item.ItemSpec),
-                    FileDirectory = Path.GetDirectoryName(item.ItemSpec)
+                    FileName = fileName,
+                    FileDirectory = fileDirectory,
+                    FilePath = filePath,
+                    ObjectName = name,
+                    ObjectRuntimeType = valueType.GetMetadata<ObjectRuntimeType>("ObjectRuntimeType", isRequired: true),
+                    ObjectNamespace = valueType.GetMetadata<string>("ObjectNamespace", isRequired: true)!,
+                    ObjectAccessModifier = valueType.GetMetadata<ObjectAccessModifier>("ObjectAccessModifier"),
+                    ObjectKind = valueType.GetMetadata<ObjectKind>("ObjectKind"),
+                    ObjectHasImplicitOperators = valueType.GetMetadata<bool>("ObjectHasImplicitOperators"),
+                    ObjectHasIsValidMethod = valueType.GetMetadata<bool>("ObjectHasIsValidMethod"),
+                    Item = valueType
                 };
 
-                context.FileName = context.FileName;
-
-                if (string.IsNullOrEmpty(context.FileDirectory))
+                // If no ObjectKind parameter was supplied, then default to struct
+                if (context.ObjectKind == ObjectKind.None)
                 {
-                    context.FilePath = Path.Combine(CodeGenOutputPath!, $"{context.Name!}.cs");
-                }
-                else
-                {
-                    context.FilePath = Path.Combine(CodeGenOutputPath!, context.FileDirectory, $"{context.Name!}.cs");
+                    context.ObjectKind = ObjectKind.Struct;
                 }
 
-                // Set metadata information
-                if (string.IsNullOrEmpty((meta = item.GetMetadata("ObjectNamespace"))))
-                {
-                    Log.LogError("The Metadata attribute 'Namespace' is required for item: {0}", item.ItemSpec);
-                    return false;
-                }
-
-                context.Namespace = meta;
-                meta = null!;
-
-                if (!string.IsNullOrEmpty((meta = item.GetMetadata("ObjectAccessModifier"))))
-                {
-                    context.AccessModifier = meta;
-                }
-
-                meta = null!;
-
-                if (string.IsNullOrEmpty((meta = item.GetMetadata("ObjectType"))) || !Enum.TryParse<UnderlyingType>(meta, out var runtimeType))
-                {
-                    Log.LogError("The Metadata attribute 'RuntimeType' is required for item: {0}", item.ItemSpec);
-                    return false;
-                }
-                else
-                {
-                    context.Type = runtimeType;
-                    meta = null!;
-                }
-
-                if (!string.IsNullOrEmpty((meta = item.GetMetadata("IncludeIsValidMethod"))) &&
-                    meta.Equals("true", StringComparison.OrdinalIgnoreCase))
-                {
-                    context.IncludeIsValidMethod = true;
-                }
-
-                if (!string.IsNullOrEmpty((meta = item.GetMetadata("IncludeIsValidMethod"))) &&
-                    meta.Equals("true", StringComparison.OrdinalIgnoreCase))
-                {
-                    context.IncludeIsValidMethod = true;
-                }
-
-                if (!string.IsNullOrEmpty((meta = item.GetMetadata("IncludeImplicitOperators"))) &&
-                    meta.Equals("true", StringComparison.OrdinalIgnoreCase))
-                {
-                    context.IncludeImplicitOperators = true;
-                }
-
-                if (!string.IsNullOrEmpty((meta = item.GetMetadata("ObjectKind"))) &&
-                   meta.Equals("class", StringComparison.OrdinalIgnoreCase))
-                {
-                    context.IsClass = true;
-                    context.IsStruct = false;
-                }
-
-                context.Item = item;
-
-                contexts.Add(context);
-            }
-
-
-            Log.LogMessage(MessageImportance.High, "Removing old code generated files.");
-            RemoveOldGeneratedFiles(contexts);
-
-            var created = new List<ITaskItem>();
-
-            foreach (var context in contexts)
-            {
-                Log.LogMessage(MessageImportance.High,
-                    "Starting Code Generation for Value Type: '{0}'.",
-                    context.Name);
-
-                var builder = new StringBuilder();
-
+                // Generate Code
+                builder ??= new StringBuilder();
                 GenerateValueType(builder, context);
 
-                var directory = new DirectoryInfo(Path.GetDirectoryName(context.FilePath)!);
-
-                Log.LogMessage(MessageImportance.High,
-                    "Ensuring Directory Exists: '{0}'.",
-                    directory.FullName);
-
-                if (!directory.Exists)
+                // Get and Create directory if not existing. 
+                directoryInfo = new DirectoryInfo(Path.GetDirectoryName(context.FilePath)!);
+                if (!directoryInfo.Exists)
                 {
-                    directory.Create();
+                    directoryInfo.Create();
                 }
 
-
-                Log.LogMessage(MessageImportance.High,
-                    "Creating Code Generation File: '{0}'.",
-                    context.FilePath);
-
+                // Create Code File
                 using var stream = File.Open(context.FilePath!, FileMode.Create, FileAccess.ReadWrite);
 
-                byte[] bytes = Encoding.UTF8.GetBytes(builder.ToString());
+                string content = builder.ToString();
+                byte[] bytes = Encoding.UTF8.GetBytes(content);
 
                 stream.Write(bytes, 0, bytes.Length);
                 stream.Flush();
 
-                var taskItem = new TaskItem(context.Item?.ItemSpec);
-                taskItem.SetMetadata("ObjectType", context.Type.ToString());
-                taskItem.SetMetadata("ObjectName", context.Name);
-                taskItem.SetMetadata("ObjectNamespace", context.Namespace);
+
+                TaskItem taskItem = new TaskItem(context.Item?.ItemSpec);
+                taskItem.SetMetadata("ObjectRuntimeType", context.ObjectRuntimeType.ToString());
+                taskItem.SetMetadata("ObjectName", context.ObjectName);
+                taskItem.SetMetadata("ObjectNamespace", context.ObjectNamespace);
                 taskItem.SetMetadata("ObjectFilePath", context.FilePath);
-                created.Add(context!.Item!);
+
+                contexts.Add(context);
+                created.Add(taskItem);
+
+                // Clear out existing data
+                builder.Clear();
             }
+
+            // Clean up old files
+            //RemoveOldGeneratedFiles(contexts);
 
             ValueTypesCreated = created.ToArray();
         }
         catch (Exception exception)
         {
-            Log.LogError("An unexpected error occurred. Error Messafe: '{0}'.", exception.GetBaseException().Message);
+            Log.LogError("An unexpected error occurred. Error Message: '{0}'.", exception.GetBaseException().Message);
             return false;
         }
 
         return true;
     }
 
+    #region Models
+
     partial class ValueTypeContext
     {
         public string? FileName { get; set; }
         public string? FileDirectory { get; set; }
         public string? FilePath { get; set; }
-        public string? Name { get; set; }
-        public string? Namespace { get; set; }
-        public bool IsClass { get; set; }
-        public bool IsStruct { get; set; } = true;
-        public bool IncludeIsValidMethod { get; set; }
-        public bool IncludeImplicitOperators { get; set; }
-        public string? AccessModifier { get; set; }
-        public UnderlyingType? Type { get; set; }
+        public required string ObjectName { get; set; }
+        public required string ObjectNamespace { get; set; }
+        public required ObjectRuntimeType ObjectRuntimeType { get; set; }
+        public ObjectKind ObjectKind { get; set; }
+        public ObjectAccessModifier ObjectAccessModifier { get; set; }
+        public bool ObjectHasIsValidMethod { get; set; }
+        public bool ObjectHasImplicitOperators { get; set; }
         public ITaskItem? Item { get; set; }
     }
-    enum UnderlyingType
+    enum ObjectRuntimeType
     {
         Int,
         Short,
@@ -200,6 +144,22 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         Guid,
         Ulid
     }
+    enum ObjectKind
+    {
+        None,
+        Struct,
+        Class
+    }
+    enum ObjectAccessModifier
+    {
+        None,
+        Public,
+        Internal
+    }
+
+
+
+    #endregion
 
     private void RemoveOldGeneratedFiles(List<ValueTypeContext> contexts)
     {
@@ -217,11 +177,10 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             RecurseSubdirectories = true,
         });
 
-
         foreach (var file in files)
         {
             // If there is no file matching the exiting Value Types items then remove.
-            if (!contexts.Any(context => context.FilePath ==  file.FullName))
+            if (!contexts.Any(context => context.FilePath == file.FullName))
             {
                 file.Delete();
             }
@@ -230,16 +189,16 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
     private static void GenerateValueType(StringBuilder builder, ValueTypeContext context)
     {
-        var modifier = string.IsNullOrEmpty(context.AccessModifier) ? "partial " : $"{context.AccessModifier} partial";
+        var modifier = context.ObjectAccessModifier == ObjectAccessModifier.None ? "partial " : $"{context.ObjectAccessModifier.ToString().ToLower()} partial";
         builder.AppendLine($$"""
 		using System;
 
 		#pragma warning disable CS8604, CS8625
 		
-		namespace {{context.Namespace}}
+		namespace {{context.ObjectNamespace}}
 		{
-		    [global::System.Text.Json.Serialization.JsonConverter(typeof({{context.Name}}JsonConverter))]
-			{{modifier}} {{GetIdentifier()}} {{context.Name}} :
+		    [global::System.Text.Json.Serialization.JsonConverter(typeof({{context.ObjectName}}JsonConverter))]
+			{{modifier}} {{context.ObjectKind.ToString().ToLower()}} {{context.ObjectName}} :
 		""");
 
         GenerateValueTypeInterfaces(builder, context);
@@ -255,65 +214,52 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 
         builder.AppendLine("    }");
         builder.AppendLine("}");
-
-        string GetIdentifier()
-        {
-            if (context.IsClass)
-            {
-                return "class";
-            }
-            if (context.IsStruct)
-            {
-                return "struct";
-            }
-            return string.Empty;
-        }
     }
 
     private static void GenerateValueTypeJsonConverter(StringBuilder builder, ValueTypeContext context)
     {
-        var readMethod = context.Type switch
+        var readMethod = context.ObjectRuntimeType switch
         {
-            UnderlyingType.Int => "GetInt32()",
-            UnderlyingType.Short => "GetInt16()",
-            UnderlyingType.Long => "GetInt64()",
-            UnderlyingType.UInt => "GetUInt32()",
-            UnderlyingType.UShort => "GetUInt16()",
-            UnderlyingType.ULong => "GetUInt64()",
-            UnderlyingType.Double => "GetDouble()",
-            UnderlyingType.Decimal => "GetDecimal()",
-            UnderlyingType.String => "GetString()",
-            UnderlyingType.Guid => "GetGuid()",
-            UnderlyingType.Ulid => "GetString()"
+            ObjectRuntimeType.Int => "GetInt32()",
+            ObjectRuntimeType.Short => "GetInt16()",
+            ObjectRuntimeType.Long => "GetInt64()",
+            ObjectRuntimeType.UInt => "GetUInt32()",
+            ObjectRuntimeType.UShort => "GetUInt16()",
+            ObjectRuntimeType.ULong => "GetUInt64()",
+            ObjectRuntimeType.Double => "GetDouble()",
+            ObjectRuntimeType.Decimal => "GetDecimal()",
+            ObjectRuntimeType.String => "GetString()",
+            ObjectRuntimeType.Guid => "GetGuid()",
+            ObjectRuntimeType.Ulid => "GetString()"
         };
-        var writeMethod = context.Type switch
+        var writeMethod = context.ObjectRuntimeType switch
         {
-            UnderlyingType.Int => "WriteNumberValue(value.Value)",
-            UnderlyingType.Short => "WriteNumberValue(value.Value)",
-            UnderlyingType.Long => "WriteNumberValue(value.Value)",
-            UnderlyingType.UInt => "WriteNumberValue(value.Value)",
-            UnderlyingType.UShort => "WriteNumberValue(value.Value)",
-            UnderlyingType.ULong => "WriteNumberValue(value.Value)",
-            UnderlyingType.Double => "WriteNumberValue(value.Value)",
-            UnderlyingType.Decimal => "WriteNumberValue(value.Value)",
-            UnderlyingType.String => "WriteStringValue(value.Value)",
-            UnderlyingType.Guid => "WriteStringValue(value.Value)",
-            UnderlyingType.Ulid => "WriteStringValue(value.Value.ToString())"
+            ObjectRuntimeType.Int => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.Short => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.Long => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.UInt => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.UShort => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.ULong => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.Double => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.Decimal => "WriteNumberValue(value.Value)",
+            ObjectRuntimeType.String => "WriteStringValue(value.Value)",
+            ObjectRuntimeType.Guid => "WriteStringValue(value.Value)",
+            ObjectRuntimeType.Ulid => "WriteStringValue(value.Value.ToString())"
         };
 
-        if (context.Type == UnderlyingType.Ulid)
+        if (context.ObjectRuntimeType == ObjectRuntimeType.Ulid)
         {
             builder.AppendTabbedLine(2, $$"""
-            partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
+            partial class {{context.ObjectName}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.ObjectName}}>
             {
-                public override {{context.Name}} Read(
+                public override {{context.ObjectName}} Read(
                     ref global::System.Text.Json.Utf8JsonReader reader, 
                     global::System.Type typeToConvert, 
-                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.Name}}({{GetNormalizedName(context.Type)}}.Parse(reader.{{readMethod}}));
+                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(reader.{{readMethod}}));
             
                 public override void Write(
                     global::System.Text.Json.Utf8JsonWriter writer, 
-                    {{context.Name}} value, 
+                    {{context.ObjectName}} value, 
                     global::System.Text.Json.JsonSerializerOptions options)
                     => writer.{{writeMethod}};
             }
@@ -322,16 +268,16 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         else
         {
             builder.AppendTabbedLine(2, $$"""
-            partial class {{context.Name}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.Name}}>
+            partial class {{context.ObjectName}}JsonConverter : global::System.Text.Json.Serialization.JsonConverter<{{context.ObjectName}}>
             {
-                public override {{context.Name}} Read(
+                public override {{context.ObjectName}} Read(
                     ref global::System.Text.Json.Utf8JsonReader reader, 
                     global::System.Type typeToConvert, 
-                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.Name}}(reader.{{readMethod}});
+                    global::System.Text.Json.JsonSerializerOptions options) => new {{context.ObjectName}}(reader.{{readMethod}});
             
                 public override void Write(
                     global::System.Text.Json.Utf8JsonWriter writer, 
-                    {{context.Name}} value, 
+                    {{context.ObjectName}} value, 
                     global::System.Text.Json.JsonSerializerOptions options)
                     => writer.{{writeMethod}};
             }
@@ -342,37 +288,37 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
     private static void GenerateValueTypeInterfaces(StringBuilder builder, ValueTypeContext context)
     {
         // ISpanParsable
-        if (context.Type != UnderlyingType.String)
+        if (context.ObjectRuntimeType != ObjectRuntimeType.String)
         {
             builder.AppendTabbedLine(2, $$"""
-			global::System.Numerics.IEqualityOperators<{{context.Name}}, {{context.Name}}, bool>,
-			global::System.Numerics.IComparisonOperators<{{context.Name}}, {{context.Name}}, bool>,
-			global::System.IComparable<{{context.Name}}>,
-			global::System.IEquatable<{{context.Name}}>,
+			global::System.Numerics.IEqualityOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
+			global::System.Numerics.IComparisonOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
+			global::System.IComparable<{{context.ObjectName}}>,
+			global::System.IEquatable<{{context.ObjectName}}>,
 			global::System.IFormattable
 			""");
         }
         else
         {
             builder.AppendTabbedLine(2, $$"""
-            global::System.Numerics.IEqualityOperators<{{context.Name}}, {{context.Name}}, bool>,
-            global::System.Numerics.IComparisonOperators<{{context.Name}}, {{context.Name}}, bool>,
-            global::System.IComparable<{{context.Name}}>,
-            global::System.IEquatable<{{context.Name}}>
+            global::System.Numerics.IEqualityOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
+            global::System.Numerics.IComparisonOperators<{{context.ObjectName}}, {{context.ObjectName}}, bool>,
+            global::System.IComparable<{{context.ObjectName}}>,
+            global::System.IEquatable<{{context.ObjectName}}>
             """);
         }
     }
     private static void GenerateValueTypeConstructor(StringBuilder builder, ValueTypeContext info)
     {
         builder.Append("        public ");
-        builder.Append(info.Name);
+        builder.Append(info.ObjectName);
         builder.Append("(");
-        builder.Append(GetNormalizedName(info.Type));
+        builder.Append(GetNormalizedName(info.ObjectRuntimeType));
         builder.Append(" ");
         builder.AppendLine("value)");
         builder.AppendLine("        {");
 
-        if (info.IncludeIsValidMethod)
+        if (info.ObjectHasIsValidMethod)
         {
             builder.AppendLine("			if (!IsValid(value, out string message))");
             builder.AppendLine("			{");
@@ -387,7 +333,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
     private static void GenerateValueTypeProperties(StringBuilder builder, ValueTypeContext context)
     {
         builder.AppendTabbedLine(2, $$"""
-            public {{GetNormalizedName(context.Type)}} Value { get; }
+            public {{GetNormalizedName(context.ObjectRuntimeType)}} Value { get; }
             """);
     }
     private static void GenerateValueTypeOperators(StringBuilder builder, ValueTypeContext context)
@@ -407,15 +353,15 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             };
 
             builder.AppendTabbedLine(2, $$"""
-                public static bool operator {{op}}({{context.Name}} a, {{context.Name}} b) => {{body}}
+                public static bool operator {{op}}({{context.ObjectName}} a, {{context.ObjectName}} b) => {{body}}
                 """);
         }
 
-        if (context.IncludeImplicitOperators)
+        if (context.ObjectHasImplicitOperators)
         {
             builder.AppendTabbedLine(2, $$"""
-                public static implicit operator {{GetNormalizedName(context.Type)}}({{context.Name}} item) => item.Value;
-                public static implicit operator {{context.Name}}({{GetNormalizedName(context.Type)}} item) => new {{context.Name}}(item);
+                public static implicit operator {{GetNormalizedName(context.ObjectRuntimeType)}}({{context.ObjectName}} item) => item.Value;
+                public static implicit operator {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}} item) => new {{context.ObjectName}}(item);
                 """);
         }
     }
@@ -423,40 +369,40 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
     {
         builder.AppendTabbedLine(2, $$"""
 		public override int GetHashCode() => Value.GetHashCode();
-		public override string ToString() => {{GetToString(context.Type)}}
-		public override bool Equals(object? obj) => ReferenceEquals(null, obj) || obj is not {{context.Name}} instance ? false : Equals(instance);
+		public override string ToString() => {{GetToString(context.ObjectRuntimeType)}}
+		public override bool Equals(object? obj) => ReferenceEquals(null, obj) || obj is not {{context.ObjectName}} instance ? false : Equals(instance);
 		""");
 
-        string GetToString(UnderlyingType? type) => type switch
+        string GetToString(ObjectRuntimeType? type) => type switch
         {
-            UnderlyingType.Guid => "Value.ToString();",
-            UnderlyingType.Ulid => "Value.ToString();",
-            UnderlyingType.String => "Value;",
+            ObjectRuntimeType.Guid => "Value.ToString();",
+            ObjectRuntimeType.Ulid => "Value.ToString();",
+            ObjectRuntimeType.String => "Value;",
             _ => "Value.ToString(global::System.Globalization.CultureInfo.InvariantCulture);"
         };
 
     }
     private static void GenerateValueTypeMethods(StringBuilder builder, ValueTypeContext context)
     {
-        if (context.IncludeIsValidMethod)
+        if (context.ObjectHasIsValidMethod)
         {
             builder.Append("		public partial bool IsValid(");
-            builder.Append(GetNormalizedName(context.Type));
+            builder.Append(GetNormalizedName(context.ObjectRuntimeType));
             builder.AppendLine(" value, out string message);");
         }
 
         // Write CompareTo
         builder.Append("		public int CompareTo(");
-        builder.Append(context.Name);
+        builder.Append(context.ObjectName);
         builder.AppendLine(" other) => Value.CompareTo(other.Value);");
 
         // Write IEquality
-        builder.AppendTabbedLine(2, $"public bool Equals({context.Name} other) => Value.Equals(other.Value);");
+        builder.AppendTabbedLine(2, $"public bool Equals({context.ObjectName} other) => Value.Equals(other.Value);");
 
         // Write IFormattable
-        var toStringBody = context.Type switch
+        var toStringBody = context.ObjectRuntimeType switch
         {
-            UnderlyingType.String => "Value.ToString(formatProvider);",
+            ObjectRuntimeType.String => "Value.ToString(formatProvider);",
             _ => " Value.ToString(format, formatProvider);"
         };
 
@@ -467,21 +413,21 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             """);
 
         // IParsable<>
-        if (context.Type != UnderlyingType.String)
+        if (context.ObjectRuntimeType != ObjectRuntimeType.String)
         {
             builder.AppendTabbedLine(2, $$"""
-			public static {{context.Name}} Parse(string value) =>  new {{context.Name}}({{GetNormalizedName(context.Type)}}.Parse(value));
-			public static {{context.Name}} Parse(string value, global::System.IFormatProvider provider) => Parse(value.AsSpan());
-			public static bool TryParse([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, global::System.IFormatProvider? provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.Name}} result) => TryParse(value.AsSpan(), provider, out result);
-			public static {{context.Name}} Parse(global::System.ReadOnlySpan<char> span) => Parse(span, null);
-			public static {{context.Name}} Parse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider) => new {{context.Name}}({{GetNormalizedName(context.Type)}}.Parse(span, provider));
-			public static bool TryParse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.Name}} result)
+			public static {{context.ObjectName}} Parse(string value) =>  new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(value));
+			public static {{context.ObjectName}} Parse(string value, global::System.IFormatProvider provider) => Parse(value.AsSpan());
+			public static bool TryParse([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, global::System.IFormatProvider? provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.ObjectName}} result) => TryParse(value.AsSpan(), provider, out result);
+			public static {{context.ObjectName}} Parse(global::System.ReadOnlySpan<char> span) => Parse(span, null);
+			public static {{context.ObjectName}} Parse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider) => new {{context.ObjectName}}({{GetNormalizedName(context.ObjectRuntimeType)}}.Parse(span, provider));
+			public static bool TryParse(global::System.ReadOnlySpan<char> span, global::System.IFormatProvider provider, [global::System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out {{context.ObjectName}} result)
 			{
 				result = default;
 				
-				if ({{GetNormalizedName(context.Type)}}.TryParse(span, provider, out {{GetNormalizedName(context.Type)}} value))
+				if ({{GetNormalizedName(context.ObjectRuntimeType)}}.TryParse(span, provider, out {{GetNormalizedName(context.ObjectRuntimeType)}} value))
 				{
-					result = new {{context.Name}}(value);
+					result = new {{context.ObjectName}}(value);
 					return true;
 				}
 				
@@ -490,34 +436,34 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 			""");
         }
 
-        if (context.Type == UnderlyingType.Guid)
+        if (context.ObjectRuntimeType == ObjectRuntimeType.Guid)
         {
             // Generate a static NewId method for Guid types
             builder.AppendTabbedLine(2, $$"""
-                public static {{context.Name}}  New() => new {{context.Name}} ({{GetNormalizedName(context.Type)}}.NewGuid());
-                public static readonly {{context.Name}}  Empty = new {{context.Name}} ({{GetNormalizedName(context.Type)}}.Empty);
+                public static {{context.ObjectName}}  New() => new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.NewGuid());
+                public static readonly {{context.ObjectName}}  Empty = new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.Empty);
                 """);
 
         }
 
-        if (context.Type == UnderlyingType.Ulid)
+        if (context.ObjectRuntimeType == ObjectRuntimeType.Ulid)
         {
             // Generate a static NewId method for Guid types
             builder.AppendTabbedLine(2, $$"""
-                public static {{context.Name}}  New() => new {{context.Name}} ({{GetNormalizedName(context.Type)}}.NewUlid());
-                public static readonly {{context.Name}}  Empty = new {{context.Name}} ({{GetNormalizedName(context.Type)}}.Empty);
+                public static {{context.ObjectName}}  New() => new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.NewUlid());
+                public static readonly {{context.ObjectName}}  Empty = new {{context.ObjectName}} ({{GetNormalizedName(context.ObjectRuntimeType)}}.Empty);
                 """);
 
         }
 
         builder.AppendLine();
     }
-    private static string GetNormalizedName(UnderlyingType? underlyingType)
+    private static string GetNormalizedName(ObjectRuntimeType? underlyingType)
     {
         return underlyingType!.Value switch
         {
-            UnderlyingType.Guid => "global::System.Guid",
-            UnderlyingType.Ulid => "global::System.Ulid",
+            ObjectRuntimeType.Guid => "global::System.Guid",
+            ObjectRuntimeType.Ulid => "global::System.Ulid",
             _ => underlyingType.Value.ToString().ToLower()
         };
     }

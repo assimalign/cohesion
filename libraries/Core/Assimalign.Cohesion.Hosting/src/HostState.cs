@@ -2,7 +2,7 @@
 
 public enum HostState
 {
-    Unknown = 0,
+    Idle = 0,
     Starting,
     Started,
     Running = Started,

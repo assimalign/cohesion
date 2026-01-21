@@ -1,0 +1,48 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Synthara/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+        <File Path="README.md" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara/">
+        <File Path="Assimalign.Cohesion.Synthara/README.md" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara/src/">
+        <Project Path="Assimalign.Cohesion.Synthara/src/Assimalign.Cohesion.Synthara.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara/tests/">
+        <Project Path="Assimalign.Cohesion.Synthara/tests/Assimalign.Cohesion.Synthara.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Discovery/">
+        <File Path="Assimalign.Cohesion.Synthara.Discovery/README.md" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Discovery/src/">
+        <Project Path="Assimalign.Cohesion.Synthara.Discovery/src/Assimalign.Cohesion.Synthara.Discovery.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Discovery/tests/">
+        <Project Path="Assimalign.Cohesion.Synthara.Discovery/tests/Assimalign.Cohesion.Synthara.Discovery.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Kubernetes/">
+        <File Path="Assimalign.Cohesion.Synthara.Kubernetes/README.md" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Kubernetes/src/">
+        <Project Path="Assimalign.Cohesion.Synthara.Kubernetes/src/Assimalign.Cohesion.Synthara.Kubernetes.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Kubernetes/tests/">
+        <Project Path="Assimalign.Cohesion.Synthara.Kubernetes/tests/Assimalign.Cohesion.Synthara.Kubernetes.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Local/">
+        <File Path="Assimalign.Cohesion.Synthara.Local/README.md" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Local/src/">
+        <Project Path="Assimalign.Cohesion.Synthara.Local/src/Assimalign.Cohesion.Synthara.Local.csproj" />
+    </Folder>
+    <Folder Name="/Synthara/Assimalign.Cohesion.Synthara.Local/tests/">
+        <Project Path="Assimalign.Cohesion.Synthara.Local/tests/Assimalign.Cohesion.Synthara.Local.Tests.csproj" />
+    </Folder>
+</Solution>

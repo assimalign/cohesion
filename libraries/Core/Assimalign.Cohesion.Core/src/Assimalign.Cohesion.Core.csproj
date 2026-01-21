@@ -5,6 +5,16 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Remove="Shared\**" Visible="true" />
+		<EmbeddedResource Remove="Shared\**" />
+		<None Include="Shared\**\*.cs">
+			<Visible>true</Visible>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Remove="System\Net\CidrBlock.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<Compile Update="Properties\ErrorMessages.Designer.cs">
 			<DesignTime>True</DesignTime>
 			<AutoGen>True</AutoGen>
@@ -16,5 +26,8 @@
 			<Generator>ResXFileCodeGenerator</Generator>
 			<LastGenOutput>ErrorMessages.Designer.cs</LastGenOutput>
 		</EmbeddedResource>
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="System\Decorators\" />
 	</ItemGroup>
 </Project>

@@ -1,0 +1,29 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Dns/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns/">
+        <File Path="Assimalign.Cohesion.Dns/README.md" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns/src/">
+        <Project Path="Assimalign.Cohesion.Dns/src/Assimalign.Cohesion.Dns.csproj" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns/tests/">
+        <Project Path="Assimalign.Cohesion.Dns/tests/Assimalign.Cohesion.Dns.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns.Client/">
+        <File Path="Assimalign.Cohesion.Dns.Client/README.md" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns.Client/src/">
+        <Project Path="Assimalign.Cohesion.Dns.Client/src/Assimalign.Cohesion.Dns.Client.csproj" />
+    </Folder>
+    <Folder Name="/Dns/Assimalign.Cohesion.Dns.Client/tests/">
+        <Project Path="Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
+    </Folder>
+</Solution>

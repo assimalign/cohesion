@@ -1,10 +1,8 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
 
-namespace Assimalign.Cohesion.Resilience.Retry;
-
-using Internal;
-
-#pragma warning disable CA1815 // Override equals and operator equals on value types
+namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
 /// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.OnRetry"/> for handling the retry event.
@@ -13,7 +11,7 @@ using Internal;
 /// <remarks>
 /// Always use the constructor when creating this struct, otherwise we do not guarantee binary compatibility.
 /// </remarks>
-public readonly struct OnRetryArguments<TResult> : IOutcomeArguments<TResult>
+public readonly struct OnRetryArguments
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="OnRetryArguments{TResult}"/> struct.
@@ -23,7 +21,7 @@ public readonly struct OnRetryArguments<TResult> : IOutcomeArguments<TResult>
     /// <param name="attemptNumber">The zero-based attempt number.</param>
     /// <param name="retryDelay">The delay before the next retry.</param>
     /// <param name="duration">The duration of this attempt.</param>
-    public OnRetryArguments(ResilienceContextO context, OutcomeO<TResult> outcome, int attemptNumber, TimeSpan retryDelay, TimeSpan duration)
+    public OnRetryArguments(IResilienceContext context, Outcome outcome, int attemptNumber, TimeSpan retryDelay, TimeSpan duration)
     {
         Context = context;
         Outcome = outcome;
@@ -35,12 +33,12 @@ public readonly struct OnRetryArguments<TResult> : IOutcomeArguments<TResult>
     /// <summary>
     /// Gets the outcome that will be retried.
     /// </summary>
-    public OutcomeO<TResult> Outcome { get; }
+    public Outcome Outcome { get; }
 
     /// <summary>
     /// Gets the context of this event.
     /// </summary>
-    public ResilienceContextO Context { get; }
+    public IResilienceContext Context { get; }
 
     /// <summary>
     /// Gets the zero-based attempt number.

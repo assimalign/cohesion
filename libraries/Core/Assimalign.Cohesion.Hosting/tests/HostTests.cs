@@ -15,10 +15,11 @@ public class HostTests
     [Fact(DisplayName = DisplayPrefix + "Ensure Lifecycle Service Start & Stop Order")]
     public async Task TestLifecycleServiceOrder()
     {
-        var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var queue = new Queue<TestLifecycleService.Lifecycle>();
 
         var hostOptions = new TestHostOptions();
+
         hostOptions.HostedServices.Add(new TestLifecycleService(queue.Enqueue));
 
         var host = new TestHost(hostOptions);

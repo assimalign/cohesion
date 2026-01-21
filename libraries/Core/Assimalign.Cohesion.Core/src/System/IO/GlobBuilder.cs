@@ -1,10 +1,92 @@
-﻿//using System;
-//using System.Collections.Generic;
-//using System.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 
-//namespace System.IO;
+namespace System.IO;
 
 //using static System.IO.Glob;
+
+//public class Test
+//{
+//    public Test()
+//    {
+//        var glob = GlobBuilder.FromAnySegment()
+//            .
+//    }
+//}
+
+//public sealed class GlobSegmentDescriptor
+//{
+     
+//}
+
+//public sealed class GlobBuilder
+//{
+//    private readonly StringBuilder _buffer;
+//    private bool _built;
+
+//    private GlobBuilder(StringBuilder buffer)
+//    {
+//        _buffer = buffer;
+//    }
+
+//    public GlobSegmentDescriptor 
+
+
+
+
+
+
+//    public GlobBuilder OneOf(params char[] characters)
+//    {
+//        _actions.Add(new CharacterSetToken(characters, false));
+//        return this;
+//    }
+//    public GlobBuilder Literal(string text)
+//    {
+//        _actions.Add(new LiteralToken(text));
+//        return this;
+//    }
+
+
+
+//    public Glob Build()
+//    {
+//        string pattern = _buffer.ToString();
+
+//        Glob glob = Glob.Parse(pattern);
+
+//        return glob;
+//    }
+
+
+//    private void EnsureInitializeCheck()
+//    {
+
+//    }
+
+//    /// <summary>
+//    /// Creates a glob builder to begin a match at the end of a given directory.
+//    /// </summary>
+//    /// <param name="path">A rooted path</param>
+//    /// <returns></returns>
+//    public static GlobBuilder FromRootedSegment(FileSystemPath path)
+//    {
+//        ArgumentException.ThrowIf(!path.HasRoot(), "");
+
+//        return new GlobBuilder(new StringBuilder(path).Append('/'));
+//    }
+
+//    /// <summary>
+//    /// Creates a Glob Builder to match any string that falls after the given patter '**/{remaining patterm}'
+//    /// </summary>
+//    /// <returns></returns>
+//    public static GlobBuilder FromAnySegment()
+//    {
+//        return new GlobBuilder(new StringBuilder("**").Append('/'));
+//    }
+//}
 
 
 //public class Temp
@@ -142,7 +224,7 @@
 
 //    public Glob Build()
 //    {
-        
+
 //        return new Glob(_actions.ToArray());
 //    }
 //}

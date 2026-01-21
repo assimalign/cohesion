@@ -11,7 +11,7 @@ public abstract class HostOptions<TContext> where TContext : HostContext
 {
     protected HostOptions()
     {
-        EventListeners = new List<HostEventListener>();
+        
     }
 
     /// <summary>
@@ -38,9 +38,4 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     /// Sets the environment name of the Host. The environment name can be set manually. Otherwise it is set via environment variables within the process.
     /// </summary>
     public string? Environment { get; set; } = AppEnvironment.GetEnvironmentName();
-
-    /// <summary>
-    /// Returns a collection of Telemetry Listeners.
-    /// </summary>
-    public List<HostEventListener> EventListeners { get; } 
 }

@@ -26,13 +26,13 @@ public class GlobMatcherTests
     }
 
     [Theory]
-    [InlineData("*.TXT", "/file.txt", true)]
-    [InlineData("*.txt", "/file.TXT", true)]
-    [InlineData("SRC/**/*.cs", "/src/Program.cs", true)]
+    [InlineData("*.TXT", "file.txt", true)]
+    [InlineData("*.txt", "file.TXT", true)]
+    [InlineData("SRC/**/*.cs", "src/Program.cs", true)]
     public void IsMatch_WithIgnoreCase_MatchesCaseInsensitively(string pattern, string path, bool expected)
     {
         var options = new GlobMatcherOptions() 
-        { 
+        {
             IgnoreCase = true 
         };
         var builder = new GlobMatcherBuilder(options);
@@ -82,33 +82,35 @@ public class GlobMatcherTests
                .AddInclude(Glob.Parse("*.md"));
         var matcher = builder.Build();
 
-        Assert.True(matcher.IsMatch(FileSystemPath.Parse("/file.txt")));
-        Assert.True(matcher.IsMatch(FileSystemPath.Parse("/readme.md")));
-        Assert.False(matcher.IsMatch(FileSystemPath.Parse("/file.log")));
+        Assert.True(matcher.IsMatch(FileSystemPath.Parse("file.txt")));
+        Assert.True(matcher.IsMatch(FileSystemPath.Parse("readme.md")));
+        Assert.False(matcher.IsMatch(FileSystemPath.Parse("file.log")));
     }
 
     [Fact]
     public void IsMatch_WithMultipleExcludes_ExcludesAllMatchingPatterns()
     {
         var builder = new GlobMatcherBuilder();
+
         builder.AddInclude(Glob.Parse("*.*"))
                .AddExclude(Glob.Parse("*.log"))
                .AddExclude(Glob.Parse("*.tmp"));
+
         var matcher = builder.Build();
 
-        Assert.True(matcher.IsMatch(FileSystemPath.Parse("/file.txt")));
-        Assert.False(matcher.IsMatch(FileSystemPath.Parse("/file.log")));
-        Assert.False(matcher.IsMatch(FileSystemPath.Parse("/file.tmp")));
+        Assert.True(matcher.IsMatch(FileSystemPath.Parse("file.txt")));
+        Assert.False(matcher.IsMatch(FileSystemPath.Parse("file.log")));
+        Assert.False(matcher.IsMatch(FileSystemPath.Parse("file.tmp")));
     }
 
     [Theory]
-    [InlineData("test?.txt", "/test1.txt", true)]
-    [InlineData("test?.txt", "/testa.txt", true)]
-    [InlineData("test?.txt", "/test12.txt", false)]
-    [InlineData("file[0-9].txt", "/file5.txt", true)]
-    [InlineData("file[0-9].txt", "/filea.txt", false)]
-    [InlineData("file[abc].txt", "/filea.txt", true)]
-    [InlineData("file[abc].txt", "/filed.txt", false)]
+    [InlineData("/test?.txt", "/test1.txt", true)]
+    [InlineData("/test?.txt", "/testa.txt", true)]
+    [InlineData("/test?.txt", "/test12.txt", false)]
+    [InlineData("/file[0-9].txt", "/file5.txt", true)]
+    [InlineData("/file[0-9].txt", "/filea.txt", false)]
+    [InlineData("/file[abc].txt", "/filea.txt", true)]
+    [InlineData("/file[abc].txt", "/filed.txt", false)]
     public void IsMatch_WithSpecialPatterns_HandlesCorrectly(string pattern, string path, bool expected)
     {
         var builder = new GlobMatcherBuilder();

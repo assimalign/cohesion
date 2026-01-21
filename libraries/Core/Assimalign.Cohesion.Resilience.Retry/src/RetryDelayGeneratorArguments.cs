@@ -1,8 +1,4 @@
-namespace Assimalign.Cohesion.Resilience.Retry;
-
-using Internal;
-
-#pragma warning disable CA1815 // Override equals and operator equals on value types
+﻿namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
 /// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.DelayGenerator"/> for generating the next retry delay.
@@ -11,15 +7,15 @@ using Internal;
 /// <remarks>
 /// Always use the constructor when creating this struct, otherwise we do not guarantee binary compatibility.
 /// </remarks>
-public readonly struct RetryDelayGeneratorArguments<TResult>
+public readonly struct RetryDelayGeneratorArguments
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="RetryDelayGeneratorArguments{TResult}"/> struct.
+    /// Initializes a new instance of the <see cref="RetryDelayGeneratorArguments"/> struct.
     /// </summary>
     /// <param name="outcome">The context in which the resilience operation or event occurred.</param>
     /// <param name="context">The outcome of the resilience operation or event.</param>
     /// <param name="attemptNumber">The zero-based attempt number.</param>
-    public RetryDelayGeneratorArguments(ResilienceContextO context, OutcomeO<TResult> outcome, int attemptNumber)
+    public RetryDelayGeneratorArguments(IResilienceContext context, Outcome outcome, int attemptNumber)
     {
         Context = context;
         Outcome = outcome;
@@ -29,12 +25,12 @@ public readonly struct RetryDelayGeneratorArguments<TResult>
     /// <summary>
     /// Gets the outcome of the resilience operation or event.
     /// </summary>
-    public OutcomeO<TResult> Outcome { get; }
+    public Outcome Outcome { get; }
 
     /// <summary>
     /// Gets the context in which the resilience operation or event occurred.
     /// </summary>
-    public ResilienceContextO Context { get; }
+    public IResilienceContext Context { get; }
 
     /// <summary>
     /// Gets The zero-based attempt number.

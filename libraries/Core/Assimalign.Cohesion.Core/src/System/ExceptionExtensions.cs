@@ -108,7 +108,7 @@ public static class ArgumentNullExceptionExtensions
         /// <returns></returns>
         /// <exception cref="ArgumentNullException"></exception>
         public static T ThrowIfNullOrNone<T>(
-            [NotNull] T argument,
+            [NotNull] T? argument,
             [CallerArgumentExpression(nameof(argument))] string? paramName = null) where T : IEnumerable
         {
             switch (argument)

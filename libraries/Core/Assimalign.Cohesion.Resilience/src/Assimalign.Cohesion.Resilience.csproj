@@ -1,13 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-	  <Compile Remove="_old\Internal\Utilities\CancellationTokenSourcePool.cs" />
-	  <Compile Remove="_old\Internal\Utilities\CancellationTokenSourcePool.Pooled.cs" />
-	  <Compile Remove="_old\Internal\Utilities\DefaultPredicates.cs" />
-	  <Compile Remove="_old\Internal\Utilities\RandomUtil.cs" />
-	  <Compile Remove="_old\Internal\Utilities\TimeProviderExtensions.cs" />
+	  <Compile Remove="_old\**" />
+	  <EmbeddedResource Remove="_old\**" />
+	  <None Remove="_old\**" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectPool" />
+	</ItemGroup>
+	<ItemGroup>
+		<!--<CohesionCodeGenValueType
+			Include="ValueTypes\PipelineName.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.Resilience"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />-->
+		<CohesionCodeGenValueType
+			Include="ValueTypes\OperationKey.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.Resilience"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

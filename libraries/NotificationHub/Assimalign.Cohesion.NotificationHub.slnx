@@ -1,0 +1,24 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/NotificationHub/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub/" />
+    <Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub/src/">
+        <Project Path="Assimalign.Cohesion.NotificationHub/src/Assimalign.Cohesion.NotificationHub.csproj" />
+    </Folder>
+    <Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/">
+        <File Path="Assimalign.Cohesion.NotificationHub.Client/README.md" />
+    </Folder>
+    <Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/">
+        <Project Path="Assimalign.Cohesion.NotificationHub.Client/src/Assimalign.Cohesion.NotificationHub.Client.csproj" />
+    </Folder>
+    <Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/">
+        <Project Path="Assimalign.Cohesion.NotificationHub.Client/tests/Assimalign.Cohesion.NotificationHub.Client.Tests.csproj" />
+    </Folder>
+</Solution>

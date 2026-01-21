@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Resilience.Retry;
+namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
 /// The backoff type used by the strategies.

@@ -10,7 +10,7 @@ using Cohesion.Internal;
 
 public class ConsoleLogger : ILogger
 {
-    public IScopeLogger BeginScope(ILoggerEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
 
 
@@ -24,7 +24,7 @@ public class ConsoleLogger : ILogger
     }
 
 
-    partial class ScopeConsoleLogger : IScopeLogger
+    partial class ScopeConsoleLogger : IScopedLogger
     {
         public ScopeConsoleLogger(LogId parentId)
         {
@@ -33,7 +33,7 @@ public class ConsoleLogger : ILogger
 
         public LogId ParentId { get; }
 
-        public IScopeLogger BeginScope(ILoggerEntry entry)
+        public IScopedLogger BeginScope(ILoggerEntry entry)
         {
             throw new NotImplementedException();
         }

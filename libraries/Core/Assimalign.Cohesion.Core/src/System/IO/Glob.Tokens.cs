@@ -777,6 +777,9 @@ public sealed partial class Glob
 
             foreach (var alternative in Alternatives)
             {
+                // Since brace grouping technically represents one or more glob patterns
+                // we need to copy over the current position. If one of the evaluation
+                // succeeds then we can override the next position to continue to.
                 int tempNext = position;
 
                 if (alternative.Test(path, cultureInfo, ignoreCase, tempNext, out tempNext))

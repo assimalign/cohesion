@@ -1,7 +1,4 @@
-﻿// Ignore Spelling: awaiter
-
-using System;
-using System.Buffers;
+﻿using System;
 using System.IO.Pipelines;
 using System.Net;
 using System.Net.Sockets;
@@ -18,8 +15,6 @@ internal sealed class SocketTransportConnectionSettings
     public PipeScheduler ReceiverScheduler { get; init; } = default!;
     public PipeScheduler SenderScheduler { get; init; } = default!;
     public bool WaitForDataBeforeAllocatingBuffer { get; set; }
-    public TransportTrace? Trace { get; set; } = default!;
-
 
 
     public static SocketTransportConnectionSettings[] GetIOQueueSettings(
@@ -27,11 +22,10 @@ internal sealed class SocketTransportConnectionSettings
         bool unsafePreferInLineScheduling = false,
         bool waitForDataBeforeAllocatingBuffer = false,
         long? maxReadBufferSize = 0,
-        long? maxWriteBufferSize = 0,
-        TransportTrace? trace = default!)
+        long? maxWriteBufferSize = 0)
     {
         var options = new SocketTransportConnectionSettings[count];
-        var memoryPool = PipelineMemoryPool.Create();
+        var memoryPool = PipeMemoryPool.Create();
         var applicationScheduler = unsafePreferInLineScheduling ?
             PipeScheduler.Inline :
             PipeScheduler.ThreadPool;
@@ -63,8 +57,7 @@ internal sealed class SocketTransportConnectionSettings
                     maxWriteBufferSize ?? 0,
                     maxWriteBufferSize ?? 0 / 2,
                     useSynchronizationContext: false),
-                WaitForDataBeforeAllocatingBuffer = waitForDataBeforeAllocatingBuffer,
-                Trace = trace is null ? (a,b,c) => { } : trace
+                WaitForDataBeforeAllocatingBuffer = waitForDataBeforeAllocatingBuffer
             };
         }
 

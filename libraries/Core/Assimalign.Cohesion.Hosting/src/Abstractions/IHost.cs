@@ -15,7 +15,7 @@ public interface IHost : IDisposable, IAsyncDisposable
     HostId Id { get; }
 
     /// <summary>
-    /// The Host Context.
+    /// Gets the Host Context.
     /// </summary>
     IHostContext Context { get; }
 

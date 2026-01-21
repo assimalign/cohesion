@@ -10,6 +10,7 @@
 		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
 		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
 		<CohesionOutputPathForCodeGen>$(CohesionOutputPath)\code-generation</CohesionOutputPathForCodeGen>
+		<CohesionOutputPathForDevScripts>$(CohesionRepositoryDirectory)scripts\modules</CohesionOutputPathForDevScripts>
 	</PropertyGroup>
 	<!-- Cohesion Build Properties -->
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">

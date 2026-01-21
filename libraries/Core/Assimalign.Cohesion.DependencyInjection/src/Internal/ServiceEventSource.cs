@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.DependencyInjection.Internal;
 
 
-[EventSource(Name = "Assimalign-Extensions-DependencyInjection")]
+[EventSource(Name = "Assimalign-Cohesion-DependencyInjection")]
 internal sealed class ServiceEventSource : EventSource
 {
     public static readonly ServiceEventSource Log = new ServiceEventSource();

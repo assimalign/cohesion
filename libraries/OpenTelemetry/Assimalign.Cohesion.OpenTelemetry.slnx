@@ -1,0 +1,15 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/OpenTelemetry/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/" />
+    <Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/">
+        <Project Path="Assimalign.Cohesion.OpenTelemetry/src/Assimalign.Cohesion.OpenTelemetry.csproj" />
+    </Folder>
+</Solution>

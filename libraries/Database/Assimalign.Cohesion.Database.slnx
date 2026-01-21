@@ -1,0 +1,153 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Database/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database/src/">
+        <Project Path="Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Blob/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Blob/src/">
+        <Project Path="Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Blob.Storage/">
+        <File Path="Assimalign.Cohesion.Database.Blob.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Blob.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.Blob.Storage/src/Assimalign.Cohesion.Database.Blob.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Blob.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Blob.Storage/tests/Assimalign.Cohesion.Database.Blob.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Cache/">
+        <File Path="Assimalign.Cohesion.Database.Cache/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Cache/src/">
+        <Project Path="Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Cache/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Cache/tests/Assimalign.Cohesion.Database.Cache.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Documents/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Documents/src/">
+        <Project Path="Assimalign.Cohesion.Database.Documents/src/Assimalign.Cohesion.Database.Documents.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Documents.Storage/">
+        <File Path="Assimalign.Cohesion.Database.Documents.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Documents.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.Documents.Storage/src/Assimalign.Cohesion.Database.Documents.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Documents.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Documents.Storage/tests/Assimalign.Cohesion.Database.Documents.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Embedded/">
+        <File Path="Assimalign.Cohesion.Database.Embedded/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Embedded/src/">
+        <Project Path="Assimalign.Cohesion.Database.Embedded/src/Assimalign.Cohesion.Database.Embedded.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Embedded/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Embedded/tests/Assimalign.Cohesion.Database.Embedded.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Engine/">
+        <File Path="Assimalign.Cohesion.Database.Engine/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Engine/src/">
+        <Project Path="Assimalign.Cohesion.Database.Engine/src/Assimalign.Cohesion.Database.Engine.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Engine/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Engine/tests/Assimalign.Cohesion.Database.Engine.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Execution/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Execution/src/">
+        <Project Path="Assimalign.Cohesion.Database.Execution/src/Assimalign.Cohesion.Database.Execution.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Graph/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Graph/src/">
+        <Project Path="Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Graph.Storage/">
+        <File Path="Assimalign.Cohesion.Database.Graph.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Graph.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.Graph.Storage/src/Assimalign.Cohesion.Database.Graph.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Graph.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Graph.Storage/tests/Assimalign.Cohesion.Database.Graph.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair/src/">
+        <Project Path="Assimalign.Cohesion.Database.KeyValuePair/src/Assimalign.Cohesion.Database.KeyValuePair.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/">
+        <File Path="Assimalign.Cohesion.Database.KeyValuePair.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.KeyValuePair.Storage/src/Assimalign.Cohesion.Database.KeyValuePair.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/Assimalign.Cohesion.Database.KeyValuePair.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language/src/">
+        <Project Path="Assimalign.Cohesion.Database.Language/src/Assimalign.Cohesion.Database.Language.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Gql/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Gql/src/">
+        <Project Path="Assimalign.Cohesion.Database.Language.Gql/src/Assimalign.Cohesion.Database.Language.Gql.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Oql/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Oql/src/">
+        <Project Path="Assimalign.Cohesion.Database.Language.Oql/src/Assimalign.Cohesion.Database.Language.Oql.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Sql/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Language.Sql/src/">
+        <Project Path="Assimalign.Cohesion.Database.Language.Sql/src/Assimalign.Cohesion.Database.Language.Sql.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Logs/">
+        <File Path="Assimalign.Cohesion.Database.Logs/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Logs/src/">
+        <Project Path="Assimalign.Cohesion.Database.Logs/src/Assimalign.Cohesion.Database.Logs.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Logs/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Logs/tests/Assimalign.Cohesion.Database.Logs.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Partitions/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Partitions/src/">
+        <Project Path="Assimalign.Cohesion.Database.Partitions/src/Assimalign.Cohesion.Database.Partitions.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Sql/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Sql/src/">
+        <Project Path="Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/">
+        <File Path="Assimalign.Cohesion.Database.Sql.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.Sql.Storage/src/Assimalign.Cohesion.Database.Sql.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Sql.Storage/tests/Assimalign.Cohesion.Database.Sql.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Storage/">
+        <File Path="Assimalign.Cohesion.Database.Storage/README.md" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Storage/src/">
+        <Project Path="Assimalign.Cohesion.Database.Storage/src/Assimalign.Cohesion.Database.Storage.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Storage/tests/">
+        <Project Path="Assimalign.Cohesion.Database.Storage/tests/Assimalign.Cohesion.Database.Storage.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Types/" />
+    <Folder Name="/Database/Assimalign.Cohesion.Database.Types/src/">
+        <Project Path="Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
+    </Folder>
+</Solution>

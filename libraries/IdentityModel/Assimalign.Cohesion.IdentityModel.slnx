@@ -1,0 +1,19 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/IdentityModel/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/" />
+    <Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
+        <Project Path="Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+    </Folder>
+    <Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.JsonWebToken/" />
+    <Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.JsonWebToken/src/">
+        <Project Path="Assimalign.Cohesion.IdentityModel.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.JsonWebToken.csproj" />
+    </Folder>
+</Solution>

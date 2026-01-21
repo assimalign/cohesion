@@ -1,8 +1,21 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.Http.Transports.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.Http.Connection.Tests.csproj" />
-  </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.Http.Transports/">
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Http.Transports/src/">
+		<Project Path="src/Assimalign.Cohesion.Http.Transports.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Http.Transports/tests/">
+		<Project Path="tests/Assimalign.Cohesion.Http.Connection.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Http.Transports/refs/" >
+		<Project Path="../Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
+		<Project Path="../../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../Core/Assimalign.Cohesion.Transports/src/Assimalign.Cohesion.Transports.csproj" />
+	</Folder>
 </Solution>

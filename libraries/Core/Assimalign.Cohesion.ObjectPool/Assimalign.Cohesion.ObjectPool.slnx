@@ -1,8 +1,19 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.ObjectPool.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.ObjectPool.Tests.csproj" />
-  </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.ObjectPool/">
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.ObjectPool/docs/">
+		<File Path="docs/design.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.ObjectPool/src/">
+		<Project Path="src/Assimalign.Cohesion.ObjectPool.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.ObjectPool/tests/">
+		<Project Path="tests/Assimalign.Cohesion.ObjectPool.Tests.csproj" />
+	</Folder>
 </Solution>

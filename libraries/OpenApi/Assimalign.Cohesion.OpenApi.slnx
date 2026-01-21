@@ -1,0 +1,20 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/OpenApi/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/">
+        <File Path="Assimalign.Cohesion.OpenApi/README.md" />
+    </Folder>
+    <Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/src/">
+        <Project Path="Assimalign.Cohesion.OpenApi/src/Assimalign.Cohesion.OpenApi.csproj" />
+    </Folder>
+    <Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
+        <Project Path="Assimalign.Cohesion.OpenApi/tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
+    </Folder>
+</Solution>

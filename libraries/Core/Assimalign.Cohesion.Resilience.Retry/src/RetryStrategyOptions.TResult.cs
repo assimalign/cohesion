@@ -1,25 +1,24 @@
-using System;
+﻿using System;
+using System.Threading.Tasks;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Resilience.Retry;
+namespace Assimalign.Cohesion.Resilience;
 
 using Internal;
 
-/// <summary>
-/// Represents the options used to configure a retry strategy.
-/// </summary>
-/// <typeparam name="TResult">The type of result the retry strategy handles.</typeparam>
-[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Addressed with DynamicDependency on ValidationHelper.Validate method")]
-public class RetryStrategyOptions<TResult> : ResilienceStrategyOptions
+public sealed class RetryStrategyOptions<TResult>
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RetryStrategyOptions{TResult}"/> class.
     /// </summary>
-    public RetryStrategyOptions() => Name = RetryConstants.DefaultName;
+    public RetryStrategyOptions() { } // => Name = RetryConstants.DefaultName;
 
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
     /// <summary>
     /// Gets or sets the maximum number of retries to use, in addition to the original call.
     /// </summary>
@@ -76,7 +75,7 @@ public class RetryStrategyOptions<TResult> : ResilienceStrategyOptions
     /// <value>
     /// The default value is 2 seconds.
     /// </value>
-    [Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
+    //[Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
     public TimeSpan Delay { get; set; } = RetryConstants.DefaultBaseDelay;
 
     /// <summary>
@@ -90,7 +89,8 @@ public class RetryStrategyOptions<TResult> : ResilienceStrategyOptions
     /// <value>
     /// The default value is <see langword="null"/>.
     /// </value>
-    [Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
+    //[Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
+    //[UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
     public TimeSpan? MaxDelay { get; set; }
 
     /// <summary>
@@ -99,8 +99,7 @@ public class RetryStrategyOptions<TResult> : ResilienceStrategyOptions
     /// <value>
     /// The default is a delegate that retries on any exception except <see cref="OperationCanceledException"/>. This property is required.
     /// </value>
-    [Required]
-    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> ShouldHandle { get; set; } = DefaultPredicates<RetryPredicateArguments<TResult>, TResult>.HandleOutcome;
+    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> ShouldHandle { get; set; } = args => new ValueTask<bool>(!args.Outcome.If(out Exception e));
 
     /// <summary>
     /// Gets or sets a generator that calculates the delay between retries.
@@ -134,6 +133,5 @@ public class RetryStrategyOptions<TResult> : ResilienceStrategyOptions
     /// The default value is thread-safe randomizer that returns values between 0.0 and 1.0.
     /// </value>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    [Required]
     public Func<double> Randomizer { get; set; } = Random.Shared.NextDouble;
 }

@@ -1,18 +1,18 @@
 ﻿using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.ObjectPool;
+namespace Assimalign.Cohesion.ObjectPool.Internal;
 
 internal sealed class ObjectPoolDisposable<T> : DefaultObjectPool<T>, IDisposable where T : class
 {
     private volatile bool isDisposed;
 
-    public ObjectPoolDisposable(IObjectPoolPolicy<T> policy)
+    public ObjectPoolDisposable(ObjectPoolPolicy<T> policy)
         : base(policy)
     {
     }
 
-    public ObjectPoolDisposable(IObjectPoolPolicy<T> policy, int maximumRetained)
+    public ObjectPoolDisposable(ObjectPoolPolicy<T> policy, int maximumRetained)
         : base(policy, maximumRetained)
     {
     }
@@ -45,7 +45,7 @@ internal sealed class ObjectPoolDisposable<T> : DefaultObjectPool<T>, IDisposabl
     {
         bool returnedTooPool = false;
 
-        if (_isDefaultPolicy || (_fastPolicy?.Return(instance) ?? _poolPolicy.Return(instance)))
+        if (_isDefaultPolicy || (_fastPolicy?.CanReturn(instance) ?? _policy.Return(instance)))
         {
             if (firstElement == null && Interlocked.CompareExchange(ref firstElement, instance, null) == null)
             {
@@ -53,7 +53,7 @@ internal sealed class ObjectPoolDisposable<T> : DefaultObjectPool<T>, IDisposabl
             }
             else
             {
-                var items = _poolElements;
+                var items = _objects;
                 for (var i = 0; i < items.Length && !(returnedTooPool = Interlocked.CompareExchange(ref items[i].Element, instance, null) == null); i++)
                 {
                 }
@@ -70,7 +70,7 @@ internal sealed class ObjectPoolDisposable<T> : DefaultObjectPool<T>, IDisposabl
         DisposeItem(firstElement);
         firstElement = null;
 
-        ObjectWrapper[] items = _poolElements;
+        ObjectWrapper[] items = _objects;
         for (var i = 0; i < items.Length; i++)
         {
             DisposeItem(items[i].Element);

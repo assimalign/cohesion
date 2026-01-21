@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -7,61 +8,57 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting;
 
+/// <summary>
+/// Provides an abstract base class for hosting and managing the lifecycle of services within a configurable execution
+/// context.
+/// </summary>
+/// <remarks>
+/// The Host<TContext> class coordinates the startup, execution, and shutdown of hosted services,
+/// managing their lifecycle events and state transitions. It is intended to be subclassed to implement specific hosting
+/// behaviors and to provide a strongly-typed context for hosted services. Thread safety and proper disposal are managed
+/// internally. Derived classes should override lifecycle methods to customize startup and shutdown logic as
+/// needed.
+/// </remarks>
+/// <typeparam name="TContext">The type of the host context used by the host. Must derive from HostContext.</typeparam>
 public abstract class Host<TContext> : IHost where TContext : HostContext
 {
     private readonly HostOptions<TContext> _options;
-    private readonly HostEventListener _telemetry;
 
+    // Execution Context Info
+    private CancellationTokenSource? _cancellationTokenSource;
+    private TaskCompletionSource<Host<TContext>>? _taskCompletionSource;
+
+    // State Flags
     private bool _isDisposed;
+    private bool _isInit;
+
 
     protected Host(HostOptions<TContext> options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _options = options;
-        _telemetry = HostEventListener.Create(options.EventListeners);
+        // Set Options
+        _options = ArgumentNullException.ThrowIfNull<HostOptions<TContext>>(options);
     }
 
     public HostId Id => Context.HostId;
     public abstract TContext Context { get; }
     IHostContext IHost.Context => Context;
 
-    public async Task RunAsync(CancellationToken cancellationToken = default)
-    {
-        // Create a cancellation token source to pass
-        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        // Let's control the task completion of 'RunAsync()` by manually setting the 
-        // results when Cancellation is Requested
-        var taskCompletionSource = new TaskCompletionSource<Host<TContext>>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        // Set the Shutdown handle
-        Context.ShutdownCallback = () =>
-        {
-            cancellationTokenSource.Cancel();
-        };
-
-        // Let's register a callback to complete the task 
-        cancellationTokenSource.Token.Register(state =>
-        {
-            var source = (TaskCompletionSource<Host<TContext>>)state!;
-
-            source.SetResult(this);
-
-        }, taskCompletionSource);
-
-        await (this as IHost).StartAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-
-        await taskCompletionSource.Task.ConfigureAwait(false);
-
-        await (this as IHost).StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-    }
-
 
     async Task IHost.StartAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        // Check if the host is already running
+        if (Context.State.IsAny(HostState.Running!, HostState.Starting!))
+        {
+            return;
+        }
+
+        Init(cancellationToken);
+
         SetState(HostState.Starting);
-        ReportEvent(new HostEvent("Starting", "Debug"));
+
+        await OnStartingAsync(cancellationToken).ConfigureAwait(false);
 
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -98,8 +95,8 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 concurrent,
                 abortOnFirstException,
                 exceptions,
-                (service, token) => service.StartingAsync(token))
-                .ConfigureAwait(false);
+                (service, token) => service.StartingAsync(token)
+            ).ConfigureAwait(false);
 
             ThrowIfError();
         }
@@ -129,8 +126,9 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             ThrowIfError();
         }
 
-        SetState(HostState.Running);
-        ReportEvent(new HostEvent("Started", "Debug"));
+        SetState(HostState.Started);
+
+        await OnStartedAsync(cancellationToken).ConfigureAwait(false);
 
         void ThrowIfError()
         {
@@ -140,22 +138,27 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 {
                     // Rethrow if it's a single error
                     Exception exception = exceptions[0];
-                    ReportEvent(new HostEvent("StartFailure", "Error"), exception);
                     ExceptionDispatchInfo.Capture(exception).Throw();
                 }
                 else
                 {
-                    var exception = new AggregateException("One or more hosted services failed to start.", exceptions);
-                    ReportEvent(new HostEvent("StartFailure", "Error"), exception);
-                    throw exception;
+                    throw new AggregateException("One or more hosted services failed to start.", exceptions);
                 }
             }
         }
     }
+
     async Task IHost.StopAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        // Check 
+        if (Context.State.IsAny(HostState.Starting!, HostState.Stopping!, HostState.Stopped!))
+        {
+            return;
+        }
+
         SetState(HostState.Stopping);
-        ReportEvent(new HostEvent("Stopping", "Debug"));
 
         InvalidOperationException.ThrowIf(Context.ShutdownCallback is null, "Host has not started.");
 
@@ -208,9 +211,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 .ConfigureAwait(false);
         }
 
-
         SetState(HostState.Stopped);
-        ReportEvent(new HostEvent("Stopped", "Debug"));
 
         if (exceptions.Count > 0)
         {
@@ -218,41 +219,135 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             {
                 // Rethrow if it's a single error
                 Exception exception = exceptions[0];
-                ReportEvent(new HostEvent("StopFailure", "Error"), exception);
                 ExceptionDispatchInfo.Capture(exception).Throw();
             }
             else
             {
-                var exception = new AggregateException("One or more hosted services failed to start.", exceptions);
-                ReportEvent(new HostEvent("StopFailure", "Error"), exception);
-                throw exception;
+                throw new AggregateException("One or more hosted services failed to start.", exceptions);
             }
         }
     }
+
     void IDisposable.Dispose()
     {
         (this as IAsyncDisposable).DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
+
     async ValueTask IAsyncDisposable.DisposeAsync()
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, nameof(Host<TContext>));
-        await (this as IHost).StopAsync();
-        _isDisposed = true;
+        await DisposeAsync(disposing: true);
+        GC.SuppressFinalize(this);
     }
+
+    public async Task RunAsync(CancellationToken cancellationToken = default)
+    {
+        Init(cancellationToken);
+
+        await (this as IHost).StartAsync(_cancellationTokenSource!.Token).ConfigureAwait(false);
+
+        await _taskCompletionSource!.Task.ConfigureAwait(false);
+
+        await (this as IHost).StopAsync(_cancellationTokenSource.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A lifecycle method for Host startup process.
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    protected virtual Task OnStartingAsync(CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    protected virtual Task OnStartedAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    protected virtual Task OnStoppingAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    protected virtual Task OnStoppedAsync(CancellationToken cancellationToken = default)
+    {
+        _cancellationTokenSource = null;
+        _taskCompletionSource = null;
+        Context.ShutdownCallback = null;
+
+
+        return Task.CompletedTask;
+    }
+
+    protected virtual async ValueTask DisposeAsync(bool disposing)
+    {
+        if (!_isDisposed)
+        {
+            if (disposing)
+            {
+                await (this as IHost).StopAsync();
+            }
+
+            _isDisposed = true;
+        }
+    }
+
+
+    private void Init(CancellationToken cancellationToken)
+    {
+        if (_isInit)
+        {
+            return;
+        }
+
+        // Create a cancellation token source to pass
+        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Let's control the task completion of 'RunAsync()` by manually setting the 
+        // results when Cancellation is Requested
+        _taskCompletionSource = new TaskCompletionSource<Host<TContext>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Set the Shutdown handle
+        Context.ShutdownCallback = () =>
+        {
+            _cancellationTokenSource.Cancel();
+        };
+
+        // Let's register a callback to complete the task 
+        _cancellationTokenSource.Token.Register(state =>
+        {
+            var source = (TaskCompletionSource<Host<TContext>>)state!;
+
+            source.SetResult(this);
+
+        }, _taskCompletionSource);
+
+        _isInit = true;
+    }
+
+    
 
     private void SetState(HostState state)
     {
         Context.SetState(state);
     }
-    private void ReportEvent(HostEvent hostEvent, Exception? exception = null)
-    {
-        _telemetry.Write(new HostEventArgs(
-            Context.HostId,
-            Context.State,
-            Context.Environment,
-            hostEvent,
-            exception));
-    }
+
     private static List<IHostLifecycleService>? GetLifecycleServices(IEnumerable<IHostService> services)
     {
         List<IHostLifecycleService>? lifecycleServices = null;

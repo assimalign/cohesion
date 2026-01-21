@@ -3,8 +3,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-public abstract class ServerTransport<TConnection> : ITransport
-    where TConnection : ITransportConnection
+public abstract class ServerTransport<TConnection> : ITransport where TConnection : ITransportConnection
 {
     protected ServerTransport()
     {

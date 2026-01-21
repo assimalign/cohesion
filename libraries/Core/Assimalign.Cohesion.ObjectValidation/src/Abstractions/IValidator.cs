@@ -30,7 +30,7 @@ public interface IValidator
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     /// <remarks></remarks>
-    Task<ValidationResult> ValidateAsync<T>(T instance, CancellationToken cancellationToken);
+    Task<ValidationResult> ValidateAsync<T>(T instance, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
@@ -45,5 +45,5 @@ public interface IValidator
     /// <param name="context"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task<ValidationResult> ValidateAsync(IValidationContext context, CancellationToken cancellationToken);
+    Task<ValidationResult> ValidateAsync(IValidationContext context, CancellationToken cancellationToken = default);
 }

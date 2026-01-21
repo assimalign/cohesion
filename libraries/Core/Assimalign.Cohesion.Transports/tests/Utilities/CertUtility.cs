@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -123,6 +124,7 @@ internal static class CertUtility
         // Sign
         return certificateRequest.CreateSelfSigned(timestamp, timestamp.AddDays(365)); // 14 days is the max duration of a certificate for this
 
+
         // TODO: Fix export and load issue
         //certificate = X509CertificateLoader.LoadCertificate(crt.Export(X509ContentType.Pfx));
 
@@ -130,5 +132,75 @@ internal static class CertUtility
         //store.Add(certificate);
 
         //return certificate;
+    }
+
+
+
+    private static X509Certificate2 GenerateTestCertificateWithAlgorithm(string algorithmType, string keyPassword, string certificatePath, string keyPath)
+    {
+        var distinguishedName = new X500DistinguishedName($"CN=test.{algorithmType}.local");
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddDnsName($"test.{algorithmType}.local");
+
+        X509Certificate2 certificate;
+        string keyPem;
+
+        switch (algorithmType)
+        {
+            case "RSA":
+                using (var rsa = RSA.Create(2048))
+                {
+                    var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    certificate = CreateTestCertificate(request, sanBuilder);
+                    keyPem = ExportKeyToPem(rsa, keyPassword);
+                }
+                break;
+
+            case "ECDsa":
+                using (var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+                {
+                    var request = new CertificateRequest(distinguishedName, ecdsa, HashAlgorithmName.SHA256);
+                    certificate = CreateTestCertificate(request, sanBuilder);
+                    keyPem = ExportKeyToPem(ecdsa, keyPassword);
+                }
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown algorithm type: {algorithmType}");
+        }
+
+        if (certificatePath.EndsWith(".pem", StringComparison.OrdinalIgnoreCase))
+        {
+            // Export the certificate in PEM format
+            File.WriteAllText(certificatePath, certificate.ExportCertificatePem());
+        }
+        else
+        {
+            // Export the certificate in DER format
+            File.WriteAllBytes(certificatePath, certificate.Export(X509ContentType.Cert));
+        }
+
+        File.WriteAllText(keyPath, keyPem);
+
+        return certificate;
+    }
+
+    private static X509Certificate2 CreateTestCertificate(CertificateRequest request, SubjectAlternativeNameBuilder sanBuilder)
+    {
+        request.CertificateExtensions.Add(sanBuilder.Build());
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], critical: false)); // Server Authentication
+
+        var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
+        var notAfter = DateTimeOffset.UtcNow.AddYears(1);
+
+        return request.CreateSelfSigned(notBefore, notAfter);
+    }
+
+    private static string ExportKeyToPem(AsymmetricAlgorithm key, string password)
+    {
+        return password is null
+            ? key.ExportPkcs8PrivateKeyPem()
+            : key.ExportEncryptedPkcs8PrivateKeyPem(password.AsSpan(), new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 100_000));
     }
 }

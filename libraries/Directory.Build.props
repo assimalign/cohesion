@@ -10,14 +10,14 @@
 				/ Library
 					/src
 					/test
-		-->
-	<PropertyGroup>
+					-->
+					<PropertyGroup>
 		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
 		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
 		<RollForward>LatestPatch</RollForward>
 		<!-- AOT-->
-		<!-- <IsAotCompatible>true</IsAotCompatible>
-		<StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols> -->
+		<IsAotCompatible>true</IsAotCompatible>
+		<!-- <StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols> -->
 	</PropertyGroup>
 	<!-- #endregion -->
 

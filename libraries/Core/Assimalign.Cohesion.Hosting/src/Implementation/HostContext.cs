@@ -15,7 +15,7 @@ public abstract class HostContext : IHostContext
     {
         _lock = new Lock();
         _hostId = HostId.New();
-        _state = HostState.Unknown;
+        _state = HostState.Idle;
     }
 
     public HostId HostId => _hostId;

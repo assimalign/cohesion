@@ -1,8 +1,8 @@
-namespace Assimalign.Cohesion.Resilience.Retry;
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
 
-using Internal;
-
-#pragma warning disable CA1815 // Override equals and operator equals on value types
+namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
 /// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.ShouldHandle"/> for determining whether a retry should be performed.
@@ -11,7 +11,7 @@ using Internal;
 /// <remarks>
 /// Always use the constructor when creating this struct, otherwise we do not guarantee binary compatibility.
 /// </remarks>
-public readonly struct RetryPredicateArguments<TResult> : IOutcomeArguments<TResult>
+public readonly struct RetryPredicateArguments
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RetryPredicateArguments{TResult}"/> struct.
@@ -19,7 +19,7 @@ public readonly struct RetryPredicateArguments<TResult> : IOutcomeArguments<TRes
     /// <param name="outcome">The context in which the resilience operation or event occurred.</param>
     /// <param name="context">The outcome of the resilience operation or event.</param>
     /// <param name="attemptNumber">The zero-based attempt number.</param>
-    public RetryPredicateArguments(ResilienceContextO context, OutcomeO<TResult> outcome, int attemptNumber)
+    public RetryPredicateArguments(IResilienceContext context, Outcome outcome, int attemptNumber)
     {
         Context = context;
         Outcome = outcome;
@@ -29,12 +29,12 @@ public readonly struct RetryPredicateArguments<TResult> : IOutcomeArguments<TRes
     /// <summary>
     /// Gets the outcome of the user-specified callback.
     /// </summary>
-    public OutcomeO<TResult> Outcome { get; }
+    public Outcome Outcome { get; }
 
     /// <summary>
     /// Gets the context of this event.
     /// </summary>
-    public ResilienceContextO Context { get; }
+    public IResilienceContext Context { get; }
 
     /// <summary>
     /// Gets the zero-based attempt number.

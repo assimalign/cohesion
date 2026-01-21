@@ -6,8 +6,6 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Logging;
 
-using Assimalign.Cohesion.Internal;
-
 public class LoggerEntry : ILoggerEntry
 {
 

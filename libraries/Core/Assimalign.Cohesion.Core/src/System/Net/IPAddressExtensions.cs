@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Text;
-
-namespace System.Net;
-
-using Assimalign.Cohesion.Internal;
+﻿namespace System.Net;
 
 public static class IPAddressExtensions
 {

@@ -18,7 +18,7 @@ internal sealed class CompositeLogger : ILogger
         throw new NotImplementedException();
     }
 
-    public IScopeLogger BeginScope(ILoggerEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
         throw new NotImplementedException();
     }

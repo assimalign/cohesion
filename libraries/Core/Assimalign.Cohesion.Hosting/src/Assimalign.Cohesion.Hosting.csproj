@@ -2,19 +2,17 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
-	
 	<ItemGroup>
-		<CohesionCodeGenValueType
-			Include="ValueTypes\HostId.cs"
-			ObjectType="Ulid"
-			ObjectNamespace="Assimalign.Cohesion.Hosting"
-			ObjectAccessModifier="public"
-			IncludeImplicitOperators="true" />
-		<CohesionCodeGenValueType 
-			Include="ValueTypes\ServiceId.cs" 
-			ObjectType="Ulid" 
-			ObjectNamespace="Assimalign.Cohesion.Hosting" 
-			ObjectAccessModifier="public" 
-			IncludeImplicitOperators="true" />
+		<CohesionCodeGenValueType Include="ValueTypes\HostId.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.Hosting" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionCodeGenValueType Include="ValueTypes\ServiceId.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.Hosting" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Compile Remove="C:\Source\repos\assimalign\cohesion\_out\code-generation\create-value-types\ValueTypes\HostId.cs" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Compile Remove="C:\Source\repos\assimalign\cohesion\_out\code-generation\create-value-types\ValueTypes\HostId.cs" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Compile Remove="C:\Source\repos\assimalign\cohesion\_out\code-generation\create-value-types\ValueTypes\HostId.cs" />
 	</ItemGroup>
 </Project>

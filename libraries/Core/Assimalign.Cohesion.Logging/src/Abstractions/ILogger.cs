@@ -1,7 +1,17 @@
 ﻿namespace Assimalign.Cohesion.Logging;
 
+/// <summary>
+/// 
+/// </summary>
 public interface ILogger
 {
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="level"></param>
+    /// <returns></returns>
+    bool IsEnabled(LogLevel level);
+
     /// <summary>
     /// 
     /// </summary>
@@ -12,5 +22,5 @@ public interface ILogger
     /// 
     /// </summary>
     /// <returns></returns>
-    IScopeLogger BeginScope(ILoggerEntry entry);
+    IScopedLogger BeginScope(ILoggerEntry entry);
 }

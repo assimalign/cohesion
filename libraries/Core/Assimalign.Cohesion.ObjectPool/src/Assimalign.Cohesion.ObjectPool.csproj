@@ -1,16 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
-	<!--<ItemGroup>
-		<None Include="..\..\..\..\.assimalign.logo.png">
-			<Pack>True</Pack>
-			<PackagePath></PackagePath>
-		</None>
+	<ItemGroup>
+	  <Compile Remove="Internal\ObjectPoolDisposable.cs" />
 	</ItemGroup>
 	<ItemGroup>
-		<None Include="README.md">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>-->
-	
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
 </Project>

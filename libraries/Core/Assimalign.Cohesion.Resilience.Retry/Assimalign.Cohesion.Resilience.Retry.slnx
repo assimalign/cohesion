@@ -1,8 +1,21 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.Resilience.Retry.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.Resilience.Retry.Tests.csproj" />
-  </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.Resilience.Retry/">
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Resilience.Retry/src/">
+		<Project Path="src/Assimalign.Cohesion.Resilience.Retry.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Resilience.Retry/tests/">
+		<Project Path="tests/Assimalign.Cohesion.Resilience.Retry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Resilience.Retry/refs/" >
+		<Project Path="../Assimalign.Cohesion.Resilience/src/Assimalign.Cohesion.Resilience.csproj" />
+		<Project Path="../Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
+	</Folder>
 </Solution>

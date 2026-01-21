@@ -6,21 +6,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 
-
 namespace Assimalign.Cohesion.Transports;
-
-using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Transports.Internal;
 
 /// <summary>
 /// A generic wrapper for turning a <see cref="ITransportConnectionPipe"/> into a stream.
 /// </summary>
 public sealed class PipeStream : Stream
 {
-    private readonly bool _throwOnCanceled;
-
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
+    private readonly bool _throwOnCanceled;
 
     private volatile bool _isCancelCalled;
 
@@ -28,24 +23,27 @@ public sealed class PipeStream : Stream
     /// 
     /// </summary>
     /// <param name="pipe"></param>
-    public PipeStream(ITransportConnectionPipe pipe) 
-        : this(pipe.Input, pipe.Output) 
+    /// <param name="throwOnCancelled"></param>
+    public PipeStream(ITransportConnectionPipe pipe, bool throwOnCancelled = false) 
+        : this(pipe.Input, pipe.Output, throwOnCancelled) 
     {
-
     }
+
     /// <summary>
     /// 
     /// </summary>
     /// <param name="input"></param>
     /// <param name="output"></param>
+    /// <param name="throwOnCancelled"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public PipeStream(PipeReader input, PipeWriter output)
+    public PipeStream(PipeReader input, PipeWriter output, bool throwOnCancelled = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
 
         _input = input;
         _output = output;
+        _throwOnCanceled = throwOnCancelled;
     }
 
     /// <summary>
@@ -148,8 +146,8 @@ public sealed class PipeStream : Stream
     {
         while (true)
         {
-            var result = await _input.ReadAsync(cancellationToken);
-            var readableBuffer = result.Buffer;
+            ReadResult result = await _input.ReadAsync(cancellationToken);
+            ReadOnlySequence<byte> readableBuffer = result.Buffer;
             try
             {
                 if (_throwOnCanceled && result.IsCanceled && _isCancelCalled)
@@ -178,5 +176,4 @@ public sealed class PipeStream : Stream
             }
         }
     }
-    
 }

@@ -7,21 +7,17 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
-		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ResourceId.cs">
-			<Name>ResourceId</Name>
-			<RuntimeType>Ulid</RuntimeType>
-			<IsStruct>true</IsStruct>
-			<Namespace>Assimalign.Cohesion.Hosting</Namespace>
-			<IncludeIsValidMethod>false</IncludeIsValidMethod>
-			<IncludeImplicitOperators>true</IncludeImplicitOperators>
-		</ValueObject>
-		<ValueObject Include="$(MSBuildProjectDirectory)\ValueObjects\ResourceName.cs">
-			<Name>ResourceName</Name>
-			<RuntimeType>String</RuntimeType>
-			<IsStruct>true</IsStruct>
-			<Namespace>Assimalign.Cohesion.Hosting</Namespace>
-			<IncludeIsValidMethod>false</IncludeIsValidMethod>
-			<IncludeImplicitOperators>true</IncludeImplicitOperators>
-		</ValueObject>
+		<CohesionCodeGenValueType
+			Include="ValueTypes\ResourceId.cs"
+			ObjectRuntimeType="Ulid"
+			ObjectNamespace="Assimalign.Cohesion.Hosting"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
+		<CohesionCodeGenValueType
+			Include="ValueTypes\ResourceName.cs"
+			ObjectRuntimeType="string"
+			ObjectNamespace="Assimalign.Cohesion.Hosting"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

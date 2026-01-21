@@ -1,0 +1,26 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Amqp/" />
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp/">
+        <File Path="Assimalign.Cohesion.Amqp/README.md" />
+    </Folder>
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp/src/">
+        <Project Path="Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
+    </Folder>
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp/tests/">
+        <Project Path="Assimalign.Cohesion.Amqp/tests/Assimalign.Cohesion.Amqp.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/">
+        <File Path="Assimalign.Cohesion.Amqp.Transports/README.md" />
+    </Folder>
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/src/">
+        <Project Path="Assimalign.Cohesion.Amqp.Transports/src/Assimalign.Cohesion.Amqp.Transports.csproj" />
+    </Folder>
+    <Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/">
+        <Project Path="Assimalign.Cohesion.Amqp.Transports/tests/Assimalign.Cohesion.Amqp.Transports.Tests.csproj" />
+    </Folder>
+</Solution>

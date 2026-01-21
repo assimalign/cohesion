@@ -1,0 +1,17 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/ML/" />
+    <Folder Name="/ML/Assimalign.Cohesion.ML/">
+        <File Path="Assimalign.Cohesion.ML/README.md" />
+    </Folder>
+    <Folder Name="/ML/Assimalign.Cohesion.ML/src/">
+        <Project Path="Assimalign.Cohesion.ML/src/Assimalign.Cohesion.ML.csproj" />
+    </Folder>
+    <Folder Name="/ML/Assimalign.Cohesion.ML/tests/">
+        <Project Path="Assimalign.Cohesion.ML/tests/Assimalign.Cohesion.ML.Tests.csproj" />
+    </Folder>
+</Solution>

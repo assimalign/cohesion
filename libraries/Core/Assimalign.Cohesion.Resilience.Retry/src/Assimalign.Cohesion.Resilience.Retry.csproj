@@ -3,13 +3,5 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience" />
 	</ItemGroup>
-	<ItemGroup>
-		<Compile Include="..\..\Assimalign.Cohesion.Resilience\src\Internal\Utilities\TelemetryUtil.cs" Link="Internal\TelemetryUtil.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.Resilience\src\Internal\Utilities\DisposeHelper.cs" Link="Internal\DisposeHelper.cs" />
-		<!--<Compile Include="..\..\Assimalign.Cohesion.Resilience\src\Internal\Utilities\**\*.cs">
-			<Link>Internal\%(RecursiveDir)%(Filename)%(Extension)</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Compile>-->
-	</ItemGroup>
 
 </Project>

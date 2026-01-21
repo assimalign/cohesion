@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
 
-internal class HostToServiceWrapper : IHostService
+internal sealed class HostToServiceWrapper : BackgroundService
 {
     private readonly IHost _host;
 
@@ -12,13 +12,28 @@ internal class HostToServiceWrapper : IHostService
     {
         _host = host;
     }
-    public ServiceId Id => (Ulid)_host.Id;
-    public Task StartAsync(CancellationToken cancellationToken = default)
+
+    public override ServiceId Id => (Ulid)_host.Id;
+
+    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        return _host.StartAsync(cancellationToken);
-    }
-    public Task StopAsync(CancellationToken cancellationToken = default)
-    {
-        return _host.StopAsync(cancellationToken);
+        await _host.StartAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (!_host.Context.State.Equals(HostState.Running))
+                {
+                    break;
+                }
+            }
+
+            await _host.StopAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await _host.StopAsync().ConfigureAwait(false);
+        }
     }
 }

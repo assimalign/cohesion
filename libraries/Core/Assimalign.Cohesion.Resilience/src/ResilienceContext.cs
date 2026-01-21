@@ -1,0 +1,46 @@
+﻿using System;
+using System.Threading;
+
+namespace Assimalign.Cohesion.Resilience;
+
+using Internal;
+
+public abstract class ResilienceContext : IResilienceContext
+{
+    private OperationKey? _operationKey;
+    private CancellationToken _cancellationToken;
+    private bool _continueOnCapturedContext;
+
+    protected ResilienceContext()
+    {
+        
+    }
+
+    /// <inheritdoc />
+    public OperationKey? OperationKey => _operationKey;
+
+    /// <inheritdoc />
+    public CancellationToken CancellationToken => _cancellationToken;
+
+    /// <inheritdoc />
+    public bool ContinueOnCapturedContext => _continueOnCapturedContext;
+
+
+
+    internal bool TryReset()
+    {
+        _operationKey = null;
+        _cancellationToken = default(CancellationToken);
+        _continueOnCapturedContext = false;
+
+        return true;
+    }
+    internal bool TryInitialize(ResilienceContextCreationArguments args)
+    {
+        _operationKey = args.OperationKey;
+        _cancellationToken = args.CancellationToken;
+        _continueOnCapturedContext = args.ContinueOnCapturedContext ?? false;
+
+        return true;
+    }
+}

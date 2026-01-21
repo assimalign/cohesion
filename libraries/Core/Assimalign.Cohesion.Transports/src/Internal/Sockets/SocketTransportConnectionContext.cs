@@ -1,10 +1,10 @@
 ﻿using System;
-using System.Net;
+using System.Collections.Generic;
 using System.IO.Pipelines;
+using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Transports.Internal;
 
@@ -47,7 +47,6 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
             this.Output = clientPipe.Writer;
         }
 
-        this.Trace = settings.Trace;
         this.Socket = settings.Socket;
         this.LocalEndPoint = settings?.Socket.LocalEndPoint!;
         this.RemoteEndPoint = settings?.Socket.RemoteEndPoint!;
@@ -55,21 +54,22 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         this.Receiver = new SocketPipeReceiver(settings.ReceiverScheduler);
     }
 
-    public bool IsConnected => RemoteEndPoint is not null;
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
-    public ConnectionState State => this._state;
+    public ConnectionState State => _state;
     public ITransportConnectionPipe Pipe { get; set; }
     public EndPoint LocalEndPoint { get; set; }
     public EndPoint RemoteEndPoint { get; set; }
     public Action OnDispose { get; set; } = default!;
     public Action OnOpen { get; set; } = default!;
+    public ConnectionId ConnectionId { get; } = ConnectionId.New();
+    public TransportId TransportId { get; set; }
+    public TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
 
     public readonly PipeWriter Output;
     public readonly PipeReader Input;
     public readonly SocketPipeReceiver Receiver;
     public readonly SocketPipeSenderPool SenderPool;
     public readonly Socket Socket;
-    public readonly TransportTrace? Trace;
     public Exception? ConnectionError;
 
 
@@ -144,13 +144,13 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
             while (true)
             {
                 // Ensure we have some reasonable amount of buffer space
-                var buffer = Output.GetMemory(PipelineMemoryPool.BlockSize / 2);
+                var buffer = Output.GetMemory(PipeMemoryPool.BlockSize / 2);
                 var result = await Receiver.ReceiveAsync(Socket, buffer);
 
                 if (result.BytesTransferred == 0)
                 {
-                    // FIN
-                    Trace?.Invoke(SocketTraceCode.Finished, Items, "The remote host has finished sending data.");
+                    // Finished: The remote host has finished sending data
+                    TransportEventSource.Log.TransportConnectionFinished(Protocol, TransportId, ConnectionId);
                     break;
                 }
 
@@ -161,15 +161,16 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
 
                 if (flushResultTask.IsCompleted)
                 {
-                    // TODO: Add 'Connection Paused' Trace
-                    Trace?.Invoke(SocketTraceCode.Paused, Items, "The connection has been paused receiving data.");
+                    // Paused - The connection has been paused receiving data
+                    TransportEventSource.Log.TransportConnectionPaused(Protocol, TransportId, ConnectionId);
                 }
 
                 var flushResult = await flushResultTask;
 
                 if (flushResultTaskPaused)
                 {
-                    Trace?.Invoke(SocketTraceCode.Resumed, Items, "The connection has resumed receiving data.");
+                    // Resumed - The connection has resumed receiving data
+                    TransportEventSource.Log.TransportConnectionResumed(Protocol, TransportId, ConnectionId);
                 }
                 if (flushResult.IsCompleted || flushResult.IsCanceled)
                 {
@@ -187,7 +188,7 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
             // Both logs will have the same ConnectionId. I don't think it's worthwhile to lock just to avoid this.
             if (!_isSocketDisposed)
             {
-                Trace?.Invoke(SocketTraceCode.Reset, Items, exception.Message);
+                TransportEventSource.Log.TransportConnectionReset(Protocol, TransportId, ConnectionId);
             }
         }
         catch (Exception exception)
@@ -200,12 +201,16 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
                 if (!_isSocketDisposed)
                 {
                     // This is unexpected if the Socket hasn't been disposed yet.
-                    Trace?.Invoke(SocketTraceCode.Error, Items, exception.Message);
+                    TransportEventSource.Log.TransportConnectionError(Protocol, TransportId, ConnectionId, exception.Message);
                 }
             }
             else
             {
-                Trace?.Invoke(SocketTraceCode.Error, Items, $"A connection error occurred while receiving data: {exception.Message}");
+                TransportEventSource.Log.TransportConnectionError(
+                    Protocol,
+                    TransportId,
+                    ConnectionId,
+                    $"A connection error occurred while receiving data: {exception.Message}");
             }
         }
         finally
@@ -239,7 +244,7 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         {
             while (true)
             {
-                var result = await Input.ReadAsync();
+                ReadResult result = await Input.ReadAsync();
 
                 if (result.IsCanceled)
                 {
@@ -300,7 +305,8 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         when (SocketHelper.IsConnectionResetError(exception.SocketErrorCode))
         {
             error = new SocketConnectionResetException(exception.Message, exception);
-            Trace?.Invoke(SocketTraceCode.Reset, Items, $"The connection was reset for the following reason: {error.Message}");
+            // Trace?.Invoke(SocketTraceCode.Reset, Items, $"The connection was reset for the following reason: {error.Message}");
+            TransportEventSource.Log.TransportConnectionReset(Protocol, TransportId, ConnectionId);
         }
         catch (Exception exception)
         when ((exception is SocketException socketEx && SocketHelper.IsConnectionAbortError(socketEx.SocketErrorCode)) || exception is ObjectDisposedException)
@@ -311,7 +317,11 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         catch (Exception exception)
         {
             error = exception;
-            Trace?.Invoke(SocketTraceCode.Error, Items, $"A connection error occurred while sending data: {exception.Message}");
+            TransportEventSource.Log.TransportConnectionError(
+                   Protocol,
+                   TransportId,
+                   ConnectionId,
+                   $"A connection error occurred while sending data: {exception.Message}");
         }
         finally
         {
