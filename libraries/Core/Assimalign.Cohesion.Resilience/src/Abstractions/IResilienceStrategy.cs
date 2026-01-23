@@ -7,11 +7,10 @@ public interface IResilienceStrategy
     /// <summary>
     /// 
     /// </summary>
-    /// <typeparam name="TState"></typeparam>
     /// <param name="callback"></param>
     /// <returns></returns>
-    ValueTask ExecuteAsync<TState>(
-        ResilienceStrategyCallback<TState> callback,
+    ValueTask<Outcome> ExecuteAsync(
+        ResilienceCallback callback,
         IResilienceContext context,
-        TState state);
+        object? state);
 }

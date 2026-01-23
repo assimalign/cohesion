@@ -14,9 +14,7 @@ public static class TimeoutResilienceExtensions
 
             ArgumentNullException.ThrowIfNull<Action<TimeoutStrategyOptions>>(configure).Invoke(options);
 
-            (builder as IResiliencePipelineBuilder).UseStrategy(new TimeoutResilienceStrategy(options));
-
-            return builder;
+            return builder.UseStrategy(new TimeoutResilienceStrategy(options));
         }
     }
 
@@ -28,9 +26,7 @@ public static class TimeoutResilienceExtensions
 
             ArgumentNullException.ThrowIfNull<Action<TimeoutStrategyOptions>>(configure).Invoke(options);
 
-            (builder as IResiliencePipelineBuilder<TResult>).UseStrategy(new TimeoutResilienceStrategy<TResult>(options));
-
-            return builder;
+            return builder.UseStrategy(new TimeoutResilienceStrategy<TResult>(options));
         }
     }
 }

@@ -9,11 +9,11 @@ public static partial class ResilienceExtensions
 {
     extension(ResiliencePipeline pipeline)
     {
-        public void Execute<TState>(
-            ResiliencePipelineCallback<TState> callback,
-            TState state)
+        public void Execute(
+            ResilienceCallback callback,
+            object? state)
         {
-            pipeline.ExecuteAsync<TState>(callback, state)
+            pipeline.ExecuteAsync(callback, state)
                 .ConfigureAwait(false)
                 .GetAwaiter()
                 .GetResult();
@@ -22,9 +22,9 @@ public static partial class ResilienceExtensions
 
     extension<TResult>(ResiliencePipeline<TResult> pipeline)
     {
-        public TResult Execute<TState>(
-            ResiliencePipelineCallback<TResult, TState> callback,
-            TState state)
+        public TResult Execute(
+            ResilienceCallback<TResult> callback,
+            object? state)
         {
             return pipeline.ExecuteAsync(callback, state)
                 .ConfigureAwait(false)

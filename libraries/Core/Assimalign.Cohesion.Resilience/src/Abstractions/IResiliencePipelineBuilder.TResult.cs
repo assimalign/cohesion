@@ -11,7 +11,7 @@ public interface IResiliencePipelineBuilder<TResult>
     /// </summary>
     /// <param name="strategy"></param>
     /// <returns></returns>
-    IResiliencePipelineBuilder<TResult> UseStrategy(IResilienceStrategy<TResult> strategy);
+    IResiliencePipelineBuilder<TResult> UseStrategy(Func<ResilienceStrategy<TResult>, ResilienceStrategy<TResult>> strategy);
 
     /// <summary>
     /// 

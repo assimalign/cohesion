@@ -20,6 +20,7 @@
 		<CohesionPackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience.Retry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience.Timeout" />
 	</ItemGroup>
 	<ItemGroup>

@@ -6,10 +6,10 @@ namespace Assimalign.Cohesion.Resilience;
 /// 
 /// </summary>
 /// <typeparam name="TResult"></typeparam>
-/// <typeparam name="TState"></typeparam>
 /// <param name="context"></param>
 /// <param name="state"></param>
 /// <returns></returns>
-public delegate ValueTask<Outcome<TResult>> ResilienceStrategyCallback<TResult, TState>(
+public delegate ValueTask<Outcome<TResult>> ResilienceStrategy<TResult>(
+    ResilienceCallback<TResult> callback,
     IResilienceContext context, 
-    TState state);
+    object? state);

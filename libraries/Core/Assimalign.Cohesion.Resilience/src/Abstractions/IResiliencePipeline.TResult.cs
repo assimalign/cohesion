@@ -17,13 +17,12 @@ public interface IResiliencePipeline<TResult>
     /// <summary>
     /// 
     /// </summary>
-    /// <typeparam name="TState"></typeparam>
     /// <param name="callback"></param>
     /// <param name="context"></param>
     /// <param name="state"></param>
     /// <returns></returns>
-    ValueTask<TResult> ExecuteAsync<TState>(
-        ResiliencePipelineCallback<TResult, TState> callback,
+    ValueTask<TResult> ExecuteAsync(
+        ResilienceCallback<TResult> callback,
         IResilienceContext context,
-        TState state);
+        object? state);
 }

@@ -10,7 +10,7 @@ internal class StrategyWrapper : ResilienceStrategy
     {
         _strategy = strategy;
     }
-    public override ValueTask ExecuteAsync<TState>(ResilienceStrategyCallback<TState> callback, IResilienceContext context, TState state)
+    public override ValueTask ExecuteAsync<TState>(ResilienceStrategy<TState> callback, IResilienceContext context, TState state)
     {
         return _strategy.ExecuteAsync(callback, context, state);
     }

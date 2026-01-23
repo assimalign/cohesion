@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal sealed class RetryResilienceStrategy : ResilienceStrategy
+internal sealed class RetryResilienceStrategy : IResilienceStrategy
 {
     private readonly TimeProvider _timeProvider;
     private readonly Func<double> _randomizer;
@@ -33,10 +33,10 @@ internal sealed class RetryResilienceStrategy : ResilienceStrategy
     public Func<RetryDelayGeneratorArguments, ValueTask<TimeSpan?>>? DelayGenerator { get; }
     public Func<OnRetryArguments, ValueTask>? OnRetry { get; }
 
-    public override async ValueTask ExecuteAsync<TState>(
-        ResilienceStrategyCallback<TState> callback, 
-        IResilienceContext context, 
-        TState state)
+    public async ValueTask<Outcome> ExecuteAsync(
+        ResilienceCallback callback,
+        IResilienceContext context,
+        object? state)
     {
         double retryState = 0;
         int attempt = 0;
@@ -45,10 +45,12 @@ internal sealed class RetryResilienceStrategy : ResilienceStrategy
         {
             long startTimestamp = _timeProvider.GetTimestamp();
             Outcome outcome;
-            
+
             try
             {
-                outcome = await callback(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
+                await callback.Invoke(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
+
+                outcome = true;
             }
             catch (Exception ex)
             {
@@ -71,7 +73,7 @@ internal sealed class RetryResilienceStrategy : ResilienceStrategy
 
             if (isLastAttempt || !handle)
             {
-                return;
+                return outcome;
             }
 
             TimeSpan delay = RetryHelper.GetRetryDelay(BackoffType, UseJitter, attempt, BaseDelay, MaxDelay, ref retryState, _randomizer);
@@ -102,24 +104,20 @@ internal sealed class RetryResilienceStrategy : ResilienceStrategy
             //    await DisposeHelper.TryDisposeSafeAsync(resultValue, context.IsSynchronous).ConfigureAwait(context.ContinueOnCapturedContext);
             //}
 
-            context.CancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                context.CancellationToken.ThrowIfCancellationRequested();
 
-            //try
-            //{
-            //    context.CancellationToken.ThrowIfCancellationRequested();
-
-            //    // stryker disable once all : no means to test this
-            //    if (delay > TimeSpan.Zero)
-            //    {
-            //        await _timeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);
-            //    }
-
-            //}
-            //catch (OperationCanceledException e)
-            //{
-            //    Outcome
-            //    return Outcome.FromException<T>(e);
-            //}
+                // stryker disable once all : no means to test this
+                if (delay > TimeSpan.Zero)
+                {
+                    //await _timeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);
+                }
+            }
+            catch (OperationCanceledException exception)
+            {
+                return exception;
+            }
 
             if (incrementAttempts)
             {

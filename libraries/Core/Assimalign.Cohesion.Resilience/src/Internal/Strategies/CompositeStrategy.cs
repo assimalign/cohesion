@@ -15,7 +15,7 @@ internal class CompositeStrategy : ResilienceStrategy, IAsyncDisposable
     }
 
     public override ValueTask ExecuteAsync<TState>(
-        ResilienceStrategyCallback<TState> callback, 
+        ResilienceStrategy<TState> callback, 
         IResilienceContext context, 
         TState state)
     {

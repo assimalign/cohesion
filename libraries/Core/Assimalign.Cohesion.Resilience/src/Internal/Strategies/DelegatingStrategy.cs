@@ -15,7 +15,7 @@ internal class DelegatingStrategy : ResilienceStrategy, IAsyncDisposable
     public ResilienceStrategy? Next { get; set; }
 
     public override ValueTask ExecuteAsync<TState>(
-        ResilienceStrategyCallback<TState> callback, 
+        ResilienceStrategy<TState> callback, 
         IResilienceContext context, 
         TState state)
     {

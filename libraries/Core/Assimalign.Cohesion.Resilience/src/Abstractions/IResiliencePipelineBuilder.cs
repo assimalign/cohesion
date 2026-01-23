@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Resilience;
+﻿using System;
+
+namespace Assimalign.Cohesion.Resilience;
 
 public interface IResiliencePipelineBuilder
 {
@@ -7,7 +9,7 @@ public interface IResiliencePipelineBuilder
     /// </summary>
     /// <param name="strategy"></param>
     /// <returns></returns>
-    IResiliencePipelineBuilder UseStrategy(IResilienceStrategy strategy);
+    IResiliencePipelineBuilder UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> strategy);
 
     /// <summary>
     /// 

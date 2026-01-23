@@ -7,23 +7,23 @@ using Internal;
 
 public sealed partial class ResiliencePipeline : IResiliencePipeline
 {
-    private readonly ResilienceContextPool _pool = ResilienceContextPool.Shared;
     private readonly ResilienceStrategy _strategy;
+    private readonly ResilienceContextPool _pool = ResilienceContextPool.Shared;
 
     internal ResiliencePipeline(ResilienceStrategy strategy)
     {
         _strategy = strategy;
     }
 
-    public ValueTask ExecuteAsync<TState>(
-        ResiliencePipelineCallback<TState> callback,
-        TState state)
+    public ValueTask ExecuteAsync(
+        ResilienceCallback callback,
+        object? state)
     {
         ResilienceContext context = _pool.Rent(false);
 
         try
         {
-            return (this as IResiliencePipeline).ExecuteAsync<TState>(
+            return (this as IResiliencePipeline).ExecuteAsync(
                 callback,
                 context,
                 state);
@@ -34,28 +34,15 @@ public sealed partial class ResiliencePipeline : IResiliencePipeline
         }
     }
 
-    async ValueTask IResiliencePipeline.ExecuteAsync<TState>(
-        ResiliencePipelineCallback<TState> callback,
+    async ValueTask IResiliencePipeline.ExecuteAsync(
+        ResilienceCallback callback,
         IResilienceContext context,
-        TState state)
+        object? state)
     {
-        await _strategy.ExecuteAsync<TState>(
-            async (context, state) =>
-            {
-                Outcome outcome = true;
+        Outcome outcome = await _strategy
+            .Invoke(callback, context, state)
+            .ConfigureAwait(context.ContinueOnCapturedContext);
 
-                try
-                {
-                    await callback.Invoke(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
-                }
-                catch (Exception exception)
-                {
-                    outcome = exception;
-                }
-
-                return outcome;
-            },
-            context,
-            state).ConfigureAwait(context.ContinueOnCapturedContext);
+        outcome.ThrowIfException();
     }
 }

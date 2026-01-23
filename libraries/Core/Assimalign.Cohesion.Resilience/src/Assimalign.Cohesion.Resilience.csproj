@@ -1,8 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-	  <Compile Remove="_old\**" />
-	  <EmbeddedResource Remove="_old\**" />
-	  <None Remove="_old\**" />
+		<Compile Remove="Internal\Strategies\**" />
+		<Compile Remove="_old\**" />
+		<EmbeddedResource Remove="Internal\Strategies\**" />
+		<EmbeddedResource Remove="_old\**" />
+		<None Remove="Internal\Strategies\**" />
+		<None Remove="_old\**" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
@@ -15,11 +18,6 @@
 			ObjectNamespace="Assimalign.Cohesion.Resilience"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />-->
-		<CohesionCodeGenValueType
-			Include="ValueTypes\OperationKey.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.Resilience"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
+		<CohesionCodeGenValueType Include="ValueTypes\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

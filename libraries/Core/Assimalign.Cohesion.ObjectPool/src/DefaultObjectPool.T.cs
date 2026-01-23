@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Collections.Concurrent;
 
-namespace Assimalign.Cohesion.ObjectPool;
+namespace Assimalign.Cohesion.ObjectPool.Internal;
 
 public class DefaultObjectPool<T> : ObjectPool<T> where T : class
 {

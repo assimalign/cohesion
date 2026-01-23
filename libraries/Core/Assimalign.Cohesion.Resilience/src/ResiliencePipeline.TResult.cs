@@ -17,14 +17,14 @@ public sealed class ResiliencePipeline<TResult> : IResiliencePipeline<TResult>
     }
 
     public ValueTask<TResult> ExecuteAsync<TState>(
-        ResiliencePipelineCallback<TResult, TState> callback,
+        ResilienceCallback<TResult> callback,
         TState state)
     {
         ResilienceContext context = _pool.Rent();
 
         try
         {
-            return (this as IResiliencePipeline<TResult>).ExecuteAsync<TState>(
+            return (this as IResiliencePipeline<TResult>).ExecuteAsync(
                 callback,
                 context,
                 state);
@@ -35,30 +35,17 @@ public sealed class ResiliencePipeline<TResult> : IResiliencePipeline<TResult>
         }
     }
 
-    ValueTask<TResult> IResiliencePipeline<TResult>.ExecuteAsync<TState>(
-       ResiliencePipelineCallback<TResult, TState> callback,
+    async ValueTask<TResult> IResiliencePipeline<TResult>.ExecuteAsync(
+       ResilienceCallback<TResult> callback,
        IResilienceContext context,
-       TState state)
+       object? state)
     {
-        return _strategy.ExecuteAsync<TState>(
-            async (context, state) =>
-            {
-                Outcome<TResult> outcome;
+        Outcome<TResult> outcome = await _strategy
+            .Invoke(callback, context, state)
+            .ConfigureAwait(context.ContinueOnCapturedContext);
 
-                try
-                {
-                    outcome = await callback.Invoke(context, state);
-                }
-                catch (Exception exception)
-                {
-                    outcome = exception;
-                }
+        outcome.ThrowIfException();
 
-                outcome.ThrowIfException();
-
-                return outcome;
-            },
-            context,
-            state);
+        return (TResult)outcome;
     }
 }

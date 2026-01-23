@@ -2,6 +2,7 @@
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+using Assimalign.Cohesion.ObjectPool.Internal;
 using ObjectPool;
 
 internal class ResilienceContextPool : DefaultObjectPool<ResilienceContext, ResilienceContextCreationArguments>

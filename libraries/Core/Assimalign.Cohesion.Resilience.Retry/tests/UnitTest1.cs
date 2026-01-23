@@ -21,22 +21,19 @@ public class UnitTest1
                 options.Delay = TimeSpan.FromSeconds(1);
                 options.ShouldRetry = static async args =>
                 {
-                    if (args.Outcome.If(out Exception exception))
-                    {
-                        return true;
-                    }
+                    //if (args.Outcome.If(out Exception exception))
+                    //{
+                    //    return true;
+                    //}
 
                     return false;
                 };
             })
             .Build();
 
-        int i = 0;
-
         bool result = await pipeline.ExecuteAsync(async (_, state) =>
         {
-            i++;
-            return await state.SendAsync();
+            return await ((TestClient)state!).SendAsync();
         }, client);
 
         Assert.Equal(3, client.RetryCount);
@@ -63,7 +60,7 @@ public class UnitTest1
 
         var exception = await Assert.ThrowsAsync<TestException>(async () =>
         {
-            await pipeline.ExecuteAsync(static async (_, state) => await state.SendAsync(), client).AsTask();
+            await pipeline.ExecuteAsync(static async (_, state) => await ((TestClient)state!).SendAsync(), client).AsTask();
         });
 
         Assert.Equal(2, client.RetryCount);

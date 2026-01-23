@@ -3,6 +3,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+using Assimalign.Cohesion.ObjectPool.Internal;
 using ObjectPool;
 
 internal class CancellationTokenSourcePool : DefaultObjectPool<CancellationTokenSource, TimeSpan>
