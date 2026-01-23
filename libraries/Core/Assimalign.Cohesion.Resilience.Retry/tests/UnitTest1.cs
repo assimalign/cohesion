@@ -21,10 +21,10 @@ public class UnitTest1
                 options.Delay = TimeSpan.FromSeconds(1);
                 options.ShouldRetry = static async args =>
                 {
-                    //if (args.Outcome.If(out Exception exception))
-                    //{
-                    //    return true;
-                    //}
+                    if (!args.Outcome.IsSuccess)
+                    {
+                        return true;
+                    }
 
                     return false;
                 };
