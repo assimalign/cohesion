@@ -34,7 +34,7 @@
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): README-->
-	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+	<!-- <PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
@@ -42,7 +42,7 @@
 			<Pack>true</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
-	</ItemGroup>
+	</ItemGroup> -->
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): License File -->

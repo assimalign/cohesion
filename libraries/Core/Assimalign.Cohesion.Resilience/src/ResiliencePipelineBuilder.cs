@@ -13,6 +13,15 @@ public sealed class ResiliencePipelineBuilder : IResiliencePipelineBuilder
         _strategies = new List<Func<ResilienceStrategy, ResilienceStrategy>>();
     }
 
+    /// <summary>
+    /// Adds a custom resilience strategy to the pipeline. The specified strategy is executed before any subsequent
+    /// strategies in the pipeline.
+    /// </summary>
+    /// <remarks>If the provided strategy does not indicate success, the next strategy in the pipeline is
+    /// executed. This method enables advanced customization of the pipeline's behavior by allowing integration of
+    /// user-defined strategies.</remarks>
+    /// <param name="strategy">The resilience strategy to add to the pipeline. Cannot be null.</param>
+    /// <returns>The current <see cref="ResiliencePipelineBuilder"/> instance for method chaining.</returns>
     public ResiliencePipelineBuilder UseStrategy(IResilienceStrategy strategy)
     {
         ArgumentNullException.ThrowIfNull(strategy);
@@ -47,18 +56,14 @@ public sealed class ResiliencePipelineBuilder : IResiliencePipelineBuilder
 
     public ResiliencePipeline Build()
     {
-        var strategy = new ResilienceStrategy(async (callback, context, state) =>
+        if (_strategies.Count == 0)
         {
-            try
-            {
-                await callback.Invoke(context, state);
+            throw new InvalidOperationException("");
+        }
 
-                return true;
-            }
-            catch (Exception exception)
-            {
-                return exception;
-            }
+        ResilienceStrategy strategy = new ResilienceStrategy((callback, context, state) =>
+        {
+            throw new InvalidOperationException("The pipeline ");
         });
 
         for (int i = _strategies.Count - 1; i >= 0; i--)
@@ -68,7 +73,6 @@ public sealed class ResiliencePipelineBuilder : IResiliencePipelineBuilder
 
         return new ResiliencePipeline(strategy);
     }
-
     IResiliencePipelineBuilder IResiliencePipelineBuilder.UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> strategy)
     {
         ArgumentNullException.ThrowIfNull(strategy);

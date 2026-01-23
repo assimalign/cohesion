@@ -9,7 +9,7 @@ public interface IResiliencePipelineBuilder
     /// </summary>
     /// <param name="strategy"></param>
     /// <returns></returns>
-    IResiliencePipelineBuilder UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> strategy);
+    IResiliencePipelineBuilder UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> handler);
 
     /// <summary>
     /// 

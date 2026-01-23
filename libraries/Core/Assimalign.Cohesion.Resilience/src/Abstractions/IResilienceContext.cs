@@ -25,4 +25,9 @@ public interface IResilienceContext
     /// Gets a value indicating whether the execution should continue on the captured context.
     /// </summary>
     bool ContinueOnCapturedContext { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    IServiceProvider? ServiceProvider { get; }
 }

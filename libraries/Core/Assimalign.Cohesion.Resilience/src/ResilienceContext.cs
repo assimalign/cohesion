@@ -25,7 +25,7 @@ public abstract class ResilienceContext : IResilienceContext
     /// <inheritdoc />
     public virtual bool ContinueOnCapturedContext => _continueOnCapturedContext;
 
-
+    public IServiceProvider? ServiceProvider => throw new NotImplementedException();
 
     internal bool TryReset()
     {
