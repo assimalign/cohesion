@@ -12,13 +12,13 @@ public sealed class RetryStrategyOptions<TResult>
     /// <summary>
     /// Initializes a new instance of the <see cref="RetryStrategyOptions{TResult}"/> class.
     /// </summary>
-    public RetryStrategyOptions() { } // => Name = RetryConstants.DefaultName;
-
+    public RetryStrategyOptions() { }
 
     /// <summary>
     /// 
     /// </summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+    
     /// <summary>
     /// Gets or sets the maximum number of retries to use, in addition to the original call.
     /// </summary>
@@ -28,7 +28,6 @@ public sealed class RetryStrategyOptions<TResult>
     /// <remarks>
     /// To retry indefinitely use <see cref="int.MaxValue"/>. Note that the reported attempt number is capped at <see cref="int.MaxValue"/>.
     /// </remarks>
-    [Range(1, RetryConstants.MaxRetryCount)]
     public int MaxRetryAttempts { get; set; } = RetryConstants.DefaultRetryCount;
 
     /// <summary>
@@ -42,13 +41,14 @@ public sealed class RetryStrategyOptions<TResult>
     /// </value>
     public DelayBackoffType BackoffType { get; set; } = RetryConstants.DefaultBackoffType;
 
+    /*
+     See <see href="https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry#new-jitter-recommendation"/> for more details
+     on how jitter can improve the resilience when the retries are correlated.
+    */
+
     /// <summary>
     /// Gets or sets a value indicating whether jitter should be used when calculating the backoff delay between retries.
     /// </summary>
-    /// <remarks>
-    /// See <see href="https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry#new-jitter-recommendation"/> for more details
-    /// on how jitter can improve the resilience when the retries are correlated.
-    /// </remarks>
     /// <value>
     /// The default value is <see langword="false"/>.
     /// </value>
@@ -75,7 +75,6 @@ public sealed class RetryStrategyOptions<TResult>
     /// <value>
     /// The default value is 2 seconds.
     /// </value>
-    //[Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
     public TimeSpan Delay { get; set; } = RetryConstants.DefaultBaseDelay;
 
     /// <summary>
@@ -89,8 +88,6 @@ public sealed class RetryStrategyOptions<TResult>
     /// <value>
     /// The default value is <see langword="null"/>.
     /// </value>
-    //[Range(typeof(TimeSpan), "00:00:00", "1.00:00:00")]
-    //[UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "<Pending>")]
     public TimeSpan? MaxDelay { get; set; }
 
     /// <summary>
@@ -99,7 +96,19 @@ public sealed class RetryStrategyOptions<TResult>
     /// <value>
     /// The default is a delegate that retries on any exception except <see cref="OperationCanceledException"/>. This property is required.
     /// </value>
-    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> ShouldHandle { get; set; } = args => new ValueTask<bool>(!args.Outcome.If(out Exception e));
+    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> ShouldRetry { get; set; } = static async args =>
+    {
+        Outcome<TResult> outcome = args.Outcome;
+
+        if (!outcome.IsSuccess)
+        {
+            Exception exception = (Exception)outcome;
+
+            return exception is not OperationCanceledException;
+        }
+
+        return false;
+    };
 
     /// <summary>
     /// Gets or sets a generator that calculates the delay between retries.

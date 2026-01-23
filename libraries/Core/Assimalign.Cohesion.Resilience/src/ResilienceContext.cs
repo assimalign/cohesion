@@ -17,13 +17,13 @@ public abstract class ResilienceContext : IResilienceContext
     }
 
     /// <inheritdoc />
-    public OperationKey? OperationKey => _operationKey;
+    public virtual OperationKey? OperationKey => _operationKey;
 
     /// <inheritdoc />
-    public CancellationToken CancellationToken => _cancellationToken;
+    public virtual CancellationToken CancellationToken => _cancellationToken;
 
     /// <inheritdoc />
-    public bool ContinueOnCapturedContext => _continueOnCapturedContext;
+    public virtual bool ContinueOnCapturedContext => _continueOnCapturedContext;
 
 
 

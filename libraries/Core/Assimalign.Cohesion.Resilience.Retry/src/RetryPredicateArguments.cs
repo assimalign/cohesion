@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Assimalign.Cohesion.Resilience;
+﻿namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
-/// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.ShouldHandle"/> for determining whether a retry should be performed.
+/// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.ShouldRetry"/> for determining whether a retry should be performed.
 /// </summary>
 /// <typeparam name="TResult">The type of result.</typeparam>
 /// <remarks>
@@ -18,12 +14,12 @@ public readonly struct RetryPredicateArguments
     /// </summary>
     /// <param name="outcome">The context in which the resilience operation or event occurred.</param>
     /// <param name="context">The outcome of the resilience operation or event.</param>
-    /// <param name="attemptNumber">The zero-based attempt number.</param>
-    public RetryPredicateArguments(IResilienceContext context, Outcome outcome, int attemptNumber)
+    /// <param name="attempts">The zero-based attempt number.</param>
+    public RetryPredicateArguments(IResilienceContext context, Outcome outcome, int attempts)
     {
         Context = context;
         Outcome = outcome;
-        AttemptNumber = attemptNumber;
+        Attempts = attempts;
     }
 
     /// <summary>
@@ -39,5 +35,5 @@ public readonly struct RetryPredicateArguments
     /// <summary>
     /// Gets the zero-based attempt number.
     /// </summary>
-    public int AttemptNumber { get; }
+    public int Attempts { get; }
 }

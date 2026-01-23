@@ -50,7 +50,7 @@ jobs:
             # 'Assimalign.Cohesion.Resilience.Hedging',
             # 'Assimalign.Cohesion.Resilience.RateLimiting',
             'Assimalign.Cohesion.Resilience.Retry',
-            # 'Assimalign.Cohesion.Resilience.Timeout',
+            'Assimalign.Cohesion.Resilience.Timeout',
           ]
     steps:
       - uses: actions/checkout@v2

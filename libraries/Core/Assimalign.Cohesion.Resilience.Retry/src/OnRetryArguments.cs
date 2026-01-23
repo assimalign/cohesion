@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Assimalign.Cohesion.Resilience;
 
@@ -18,14 +16,14 @@ public readonly struct OnRetryArguments
     /// </summary>
     /// <param name="context">The context in which the resilience operation or event occurred.</param>
     /// <param name="outcome">The outcome of the resilience operation or event.</param>
-    /// <param name="attemptNumber">The zero-based attempt number.</param>
+    /// <param name="attempts">The zero-based attempt number.</param>
     /// <param name="retryDelay">The delay before the next retry.</param>
     /// <param name="duration">The duration of this attempt.</param>
-    public OnRetryArguments(IResilienceContext context, Outcome outcome, int attemptNumber, TimeSpan retryDelay, TimeSpan duration)
+    public OnRetryArguments(IResilienceContext context, Outcome outcome, int attempts, TimeSpan retryDelay, TimeSpan duration)
     {
         Context = context;
         Outcome = outcome;
-        AttemptNumber = attemptNumber;
+        Attempts = attempts;
         RetryDelay = retryDelay;
         Duration = duration;
     }
@@ -43,7 +41,7 @@ public readonly struct OnRetryArguments
     /// <summary>
     /// Gets the zero-based attempt number.
     /// </summary>
-    public int AttemptNumber { get; }
+    public int Attempts { get; }
 
     /// <summary>
     /// Gets the delay before the next retry.

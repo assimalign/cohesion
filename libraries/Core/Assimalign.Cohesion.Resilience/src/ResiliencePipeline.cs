@@ -34,28 +34,28 @@ public sealed partial class ResiliencePipeline : IResiliencePipeline
         }
     }
 
-    ValueTask IResiliencePipeline.ExecuteAsync<TState>(
+    async ValueTask IResiliencePipeline.ExecuteAsync<TState>(
         ResiliencePipelineCallback<TState> callback,
         IResilienceContext context,
         TState state)
     {
-        return _strategy.ExecuteAsync<TState>(
+        await _strategy.ExecuteAsync<TState>(
             async (context, state) =>
             {
-                Outcome outcome;
+                Outcome outcome = true;
 
                 try
                 {
-                    await callback.Invoke(context, state);
+                    await callback.Invoke(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
                 }
                 catch (Exception exception)
                 {
                     outcome = exception;
                 }
 
-                return (outcome = true);
+                return outcome;
             },
             context,
-            state);
+            state).ConfigureAwait(context.ContinueOnCapturedContext);
     }
 }

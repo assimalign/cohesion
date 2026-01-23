@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-
 internal class CompositeStrategy<TResult> : ResilienceStrategy<TResult>, IAsyncDisposable
 {
     private readonly ResilienceStrategy<TResult> _strategy;
@@ -14,7 +13,6 @@ internal class CompositeStrategy<TResult> : ResilienceStrategy<TResult>, IAsyncD
     {
         _strategy = Compose(strategies);
     }
-
 
     public override ValueTask<TResult> ExecuteAsync<TState>(
         ResilienceStrategyCallback<TResult, TState> callback,

@@ -35,7 +35,9 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
 
     IResiliencePipelineBuilder<TResult> IResiliencePipelineBuilder<TResult>.UseStrategy(IResilienceStrategy<TResult> strategy)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(strategy);
+
+        return UseStrategy(new StrategyWrapper<TResult>(strategy));
     }
 
     IResiliencePipeline<TResult> IResiliencePipelineBuilder<TResult>.Build()

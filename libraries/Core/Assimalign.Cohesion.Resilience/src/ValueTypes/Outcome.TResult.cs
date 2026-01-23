@@ -4,23 +4,23 @@ using System.Runtime.ExceptionServices;
 namespace Assimalign.Cohesion.Resilience;
 
 /// <summary>
-/// 
+/// A sum type representing a either a <typeparamref name="TResult"/> or <see cref="=Exception"/>.
 /// </summary>
 /// <typeparam name="TResult"></typeparam>
 public readonly struct Outcome<TResult> : IEither
 {
     private readonly int _typeIndex;
-    private readonly object? _value;
+    private readonly object? _typeValue;
 
     public Outcome(TResult value)
     {
-        _value = value;
+        _typeValue = value;
         _typeIndex = 1;
     }
 
     public Outcome(Exception value)
     {
-        _value = ExceptionDispatchInfo.Capture(value);
+        _typeValue = ExceptionDispatchInfo.Capture(value);
         _typeIndex = 2;
     }
 
@@ -29,19 +29,54 @@ public readonly struct Outcome<TResult> : IEither
     Type IEither.Type => _typeIndex switch
     {
         1 => typeof(TResult),
-        2 => typeof(Exception),
+        2 => AsT2!.GetType(),
         _ => throw new InvalidOperationException()
     };
-    object? IEither.Value => _value;
-    TResult AsT1 => (TResult)_value!;
-    Exception AsT2 => ((ExceptionDispatchInfo)_value!).SourceException;
-
-    public static implicit operator Outcome<TResult>(TResult value) => new Outcome<TResult>(value);
-    public static implicit operator Outcome<TResult>(Exception value) => new Outcome<TResult>(value);
-    public static explicit operator TResult(Outcome<TResult> either) => either.AsT1;
-    public static explicit operator Exception(Outcome<TResult> either) => either.AsT2;
+    object? IEither.Value => _typeValue;
+    TResult AsT1 => (TResult)_typeValue!;
+    Exception AsT2 => ((ExceptionDispatchInfo)_typeValue!).SourceException;
 
 
+    /// <summary>
+    /// Gets a value indicating whether the operation completed successfully.
+    /// </summary>
+    public bool IsSuccess => _typeIndex == 1;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="match1"></param>
+    /// <param name="match2"></param>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    public T Match<T>(Func<TResult, T> match1, Func<Exception, T> match2) => _typeIndex switch
+    {
+        1 => match1.Invoke(AsT1),
+        2 => match2.Invoke(AsT2),
+        _ => throw new InvalidOperationException()
+    };
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="TResult1"></typeparam>
+    /// <param name="ifT1"></param>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    public Outcome<TResult1> Match<TResult1>(Func<TResult, TResult1> ifT1) => _typeIndex switch
+    {
+        1 => ifT1(AsT1),
+        2 => AsT2,
+        _ => throw new InvalidOperationException()
+    };
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="ifTResult"></param>
+    /// <param name="ifException"></param>
+    /// <exception cref="InvalidOperationException"></exception>
     public void Switch(Action<TResult> ifTResult, Action<Exception> ifException)
     {
         switch (_typeIndex)
@@ -52,12 +87,29 @@ public readonly struct Outcome<TResult> : IEither
         }
     }
 
-    public Outcome<TResult1> Match<TResult1>(Func<TResult, TResult1> ifT1) => _typeIndex switch
+    /// <summary>
+    /// 
+    /// </summary>
+    public void ThrowIfException()
     {
-        1 => ifT1(AsT1),
-        2 => AsT2,
-        _ => throw new InvalidOperationException()
-    };
+        if (!IsSuccess && _typeIndex == 2)
+        {
+            throw ((Exception)this);
+        }
+    }
+
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        return $"{(this as IEither)?.Type?.Name}:{_typeValue}";
+    }
+
+    public static implicit operator Outcome<TResult>(TResult value) => new Outcome<TResult>(value);
+    public static implicit operator Outcome<TResult>(Exception value) => new Outcome<TResult>(value);
+    public static explicit operator TResult(Outcome<TResult> either) => either.AsT1;
+    public static explicit operator Exception(Outcome<TResult> either) => either.AsT2;
+
+    
 
     //public ValueEither<T1, TResult2> Match<TResult2>(Func<T2, TResult2> ifT2) => _typeIndex switch
     //{
@@ -143,47 +195,7 @@ public readonly struct Outcome<TResult> : IEither
     //        _ => throw new InvalidOperationException()
     //    };
 
-    public bool If(out TResult @if) => If(out @if, out _);
-    public bool If(out TResult @if, out Exception @else)
-    {
-        switch (_typeIndex)
-        {
-            case 1:
-                @if = AsT1;
-                @else = default!;
-                return true;
-            case 2:
-                @if = default!;
-                @else = AsT2;
-                return false;
-            default:
-                throw new InvalidOperationException();
-        }
-    }
-    public bool If(out Exception @if) => If(out @if, out _);
-    public bool If(out Exception @if, out TResult @else)
-    {
-        switch (_typeIndex)
-        {
-            case 1:
-                @if = default!;
-                @else = AsT1;
-                return false;
-            case 2:
-                @if = AsT2;
-                @else = default!;
-                return true;
-            default:
-                throw new InvalidOperationException();
-        }
-    }
-    public void ThrowIfException()
-    {
-        if (If(out Exception exception))
-        {
-            throw exception;
-        }
-    }
 
-    public override string ToString() => $"{(this as IEither)?.Type?.Name}:{_value}";
+    
+    
 }

@@ -1,12 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Assimalign.Cohesion.Resilience;
 
 using Internal;
 
-public static class RetryExtensions
+public static class RetryResilienceExtensions
 {
     extension(ResiliencePipelineBuilder builder)
     {
@@ -16,7 +14,7 @@ public static class RetryExtensions
 
             ArgumentNullException.ThrowIfNull<Action<RetryStrategyOptions>>(configure).Invoke(options);
 
-            return builder.UseStrategy(new RetryStrategy(options));
+            return builder.UseStrategy(new RetryResilienceStrategy(options));
         }
     }
 
@@ -28,7 +26,7 @@ public static class RetryExtensions
 
             ArgumentNullException.ThrowIfNull<Action<RetryStrategyOptions<TResult>>>(configure).Invoke(options);
 
-            return builder.UseStrategy(new RetryStrategy<TResult>(options));
+            return builder.UseStrategy(new RetryResilienceStrategy<TResult>(options));
         }
     }
 }

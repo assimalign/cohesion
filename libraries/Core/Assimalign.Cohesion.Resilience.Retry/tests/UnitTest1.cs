@@ -1,47 +1,98 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Xunit.Sdk;
 
 namespace Assimalign.Cohesion.Resilience.Retry.Tests;
 
 public class UnitTest1
 {
     [Fact]
-    public async Task Test1()
+    public async Task SuccessResultRetryTest()
     {
-        using HttpClient client = new HttpClient();
+        TestClient client = new TestClient();
 
-        ResiliencePipeline<TestResult> pipeline = new ResiliencePipelineBuilder<TestResult>()
+        ResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
             .UseRetry(options =>
             {
+                options.MaxRetryAttempts = 5;
+                options.Delay = TimeSpan.FromSeconds(1);
+                options.ShouldRetry = static async args =>
+                {
+                    if (args.Outcome.If(out Exception exception))
+                    {
+                        return true;
+                    }
 
+                    return false;
+                };
+            })
+            .Build();
+
+        int i = 0;
+
+        bool result = await pipeline.ExecuteAsync(async (_, state) =>
+        {
+            i++;
+            return await state.SendAsync();
+        }, client);
+
+        Assert.Equal(3, client.RetryCount);
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task FailureRetryTest()
+    {
+        TestClient client = new TestClient();
+
+        ResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
+            .UseRetry(options =>
+            {
+                options.MaxRetryAttempts = 1;
+                options.Delay = TimeSpan.FromSeconds(1);
+                options.ShouldRetry = static async args =>
+                {
+                    return true;
+                };
             })
             .Build();
 
 
-
-        TestResult result = await pipeline.ExecuteAsync(static async (context, state) =>
+        var exception = await Assert.ThrowsAsync<TestException>(async () =>
         {
-            HttpResponseMessage httpResponseMessage = await state.SendAsync(new HttpRequestMessage()
+            await pipeline.ExecuteAsync(static async (_, state) => await state.SendAsync(), client).AsTask();
+        });
+
+        Assert.Equal(2, client.RetryCount);
+    }
+
+
+
+    public class TestClient
+    {
+        private int _retryCount = 0;
+
+        public int RetryCount => _retryCount;
+
+        public async Task<bool> SendAsync()
+        {
+            await Task.Delay(1000);
+            
+            _retryCount++;
+
+            if (_retryCount < 3)
             {
 
-            });
+               
+                throw new TestException();
+            }
 
-
-            httpResponseMessage.EnsureSuccessStatusCode();
-
-            using Stream stream = httpResponseMessage.Content.ReadAsStream();
-
-            return JsonSerializer.Deserialize<TestResult>(stream);
-
-        }, client);
-
+            return true;
+        }
     }
 
-
-    public class TestResult
-    {
-
-    }
+    public class TestException : Exception;
 }

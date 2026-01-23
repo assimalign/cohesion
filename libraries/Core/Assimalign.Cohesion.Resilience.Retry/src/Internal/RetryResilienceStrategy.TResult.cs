@@ -7,15 +7,15 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal sealed class RetryStrategy<TResult> : ResilienceStrategy<TResult>
+internal sealed class RetryResilienceStrategy<TResult> : ResilienceStrategy<TResult>
 {
     private readonly TimeProvider _timeProvider;
     private readonly Func<double> _randomizer;
 
 
-    public RetryStrategy(RetryStrategyOptions<TResult>  options)
+    public RetryResilienceStrategy(RetryStrategyOptions<TResult>  options)
     {
-        ShouldHandle = options.ShouldHandle;
+        ShouldHandle = options.ShouldRetry;
         BaseDelay = options.Delay;
         MaxDelay = options.MaxDelay;
         BackoffType = options.BackoffType;
@@ -46,7 +46,7 @@ internal sealed class RetryStrategy<TResult> : ResilienceStrategy<TResult>
 
         while (true)
         {
-            var startTimestamp = _timeProvider.GetTimestamp();
+            long startTimestamp = _timeProvider.GetTimestamp();
             Outcome<TResult> outcome;
             try
             {
@@ -54,7 +54,7 @@ internal sealed class RetryStrategy<TResult> : ResilienceStrategy<TResult>
             }
             catch (Exception ex)
             {
-                outcome = new(ex);
+                outcome = new Outcome<TResult>(ex);
             }
 
             var shouldRetryArgs = new RetryPredicateArguments<TResult>(context, outcome, attempt);
@@ -73,7 +73,9 @@ internal sealed class RetryStrategy<TResult> : ResilienceStrategy<TResult>
 
             if (isLastAttempt || !handle)
             {
-               // return outcome;
+                outcome.ThrowIfException();
+
+                return (TResult)outcome;
             }
 
             var delay = RetryHelper.GetRetryDelay(BackoffType, UseJitter, attempt, BaseDelay, MaxDelay, ref retryState, _randomizer);

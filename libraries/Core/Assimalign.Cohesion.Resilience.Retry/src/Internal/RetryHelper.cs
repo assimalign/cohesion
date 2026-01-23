@@ -6,7 +6,6 @@ namespace Assimalign.Cohesion.Resilience.Internal;
 internal static class RetryHelper
 {
     private const double JitterFactor = 0.5;
-
     private const double ExponentialFactor = 2.0;
 
     // Upper-bound to prevent overflow beyond TimeSpan.MaxValue. Potential truncation during conversion from double to long
@@ -75,22 +74,25 @@ internal static class RetryHelper
         };
     }
 
-    /// <summary>
-    /// Generates sleep durations in an exponentially backing-off, jittered manner, making sure to mitigate any correlations.
-    /// For example: 850ms, 1455ms, 3060ms.
-    /// Per discussion in Polly issue https://github.com/App-vNext/Polly/issues/530, the jitter of this implementation exhibits fewer spikes and a smoother distribution than the AWS jitter formula.
-    /// </summary>
-    /// <param name="attempt">The current attempt.</param>
-    /// <param name="baseDelay">The median delay to target before the first retry, call it <c>f (= f * 2^0).</c>
-    /// Choose this value both to approximate the first delay, and to scale the remainder of the series.
-    /// Subsequent retries will (over a large sample size) have a median approximating retries at time <c>f * 2^1, f * 2^2 ... f * 2^t</c> etc for try t.
-    /// The actual amount of delay-before-retry for try t may be distributed between 0 and <c>f * (2^(t+1) - 2^(t-1)) for t >= 2;</c>
-    /// or between 0 and <c>f * 2^(t+1)</c>, for t is 0 or 1.</param>
-    /// <param name="prev">The previous state value used for calculations.</param>
-    /// <param name="randomizer">The generator to use.</param>
-    /// <remarks>
-    /// This code was adopted from https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/master/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs.
-    /// </remarks>
+    /*  
+        <summary>
+            Generates sleep durations in an exponentially backing-off, jittered manner, making sure to mitigate any correlations.
+            For example: 850ms, 1455ms, 3060ms.
+            Per discussion in Polly issue https://github.com/App-vNext/Polly/issues/530, the jitter of this implementation exhibits fewer spikes and a smoother distribution than the AWS jitter formula.
+        </summary>
+        <param name="attempt">The current attempt.</param>
+        <param name="baseDelay">
+            The median delay to target before the first retry, call it <c>f (= f * 2^0).</c>
+            Choose this value both to approximate the first delay, and to scale the remainder of the series.
+            Subsequent retries will (over a large sample size) have a median approximating retries at time <c>f * 2^1, f * 2^2 ... f * 2^t</c> etc for try t.
+            The actual amount of delay-before-retry for try t may be distributed between 0 and <c>f * (2^(t+1) - 2^(t-1)) for t >= 2;</c>
+            or between 0 and <c>f * 2^(t+1)</c>, for t is 0 or 1.
+        </param>
+        <param name="prev">The previous state value used for calculations.</param>
+        <param name="randomizer">The generator to use.</param>
+        <remarks>
+         This code was adopted from https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/master/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs.
+    */
     private static TimeSpan DecorrelatedJitterBackoffV2(int attempt, TimeSpan baseDelay, ref double prev, Func<double> randomizer)
     {
         // The original author/credit for this jitter formula is @george-polevoy .

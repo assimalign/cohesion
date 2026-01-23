@@ -2,7 +2,6 @@ using System;
 
 namespace Assimalign.Cohesion.Resilience;
 
-
 #pragma warning disable CA1815 // Override equals and operator equals on value types
 
 /// <summary>
@@ -19,14 +18,14 @@ public readonly struct OnRetryArguments<TResult>
     /// </summary>
     /// <param name="context">The context in which the resilience operation or event occurred.</param>
     /// <param name="outcome">The outcome of the resilience operation or event.</param>
-    /// <param name="attemptNumber">The zero-based attempt number.</param>
+    /// <param name="attempts">The zero-based attempt number.</param>
     /// <param name="retryDelay">The delay before the next retry.</param>
     /// <param name="duration">The duration of this attempt.</param>
-    public OnRetryArguments(IResilienceContext context, Outcome<TResult> outcome, int attemptNumber, TimeSpan retryDelay, TimeSpan duration)
+    public OnRetryArguments(IResilienceContext context, Outcome<TResult> outcome, int attempts, TimeSpan retryDelay, TimeSpan duration)
     {
         Context = context;
         Outcome = outcome;
-        AttemptNumber = attemptNumber;
+        Attempts = attempts;
         RetryDelay = retryDelay;
         Duration = duration;
     }
@@ -44,7 +43,7 @@ public readonly struct OnRetryArguments<TResult>
     /// <summary>
     /// Gets the zero-based attempt number.
     /// </summary>
-    public int AttemptNumber { get; }
+    public int Attempts { get; }
 
     /// <summary>
     /// Gets the delay before the next retry.
