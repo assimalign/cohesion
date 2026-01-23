@@ -33,16 +33,16 @@ public static partial class ResilienceExtensions
         }
 
 
-        public ValueTask<TResult> ExecuteAsync<TState>(
-            ResilienceCallback<TResult> callback,
-            IResilienceContext context,
-            TState? state)
-        {
-            return pipeline.ExecuteAsync((callback, context, state)=>
-            {
-                return callback.ExecuteAsync(context, state)
-            })
-        }
+        //public ValueTask<TResult> ExecuteAsync<TState>(
+        //    ResilienceCallback<TResult> callback,
+        //    IResilienceContext context,
+        //    TState? state)
+        //{
+        //    return pipeline.ExecuteAsync((callback, context, state)=>
+        //    {
+        //        return callback.ExecuteAsync(context, state)
+        //    })
+        //}
     }
 
 

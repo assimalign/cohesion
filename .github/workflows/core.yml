@@ -43,7 +43,8 @@ jobs:
             'Assimalign.Cohesion.ObjectMapping',
             "Assimalign.Cohesion.ObjectPool",
             "Assimalign.Cohesion.ObjectValidation",
-            "Assimalign.Cohesion.Transports",
+            # TODO: Need to figure out certificate issue
+            # "Assimalign.Cohesion.Transports",  
             # 'Assimalign.Cohesion.Security.Cryptography',
             'Assimalign.Cohesion.Resilience',
             # 'Assimalign.Cohesion.Resilience.CircuitBreaker',
