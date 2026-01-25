@@ -1,11 +1,16 @@
 ﻿namespace Assimalign.Cohesion.Resilience.Internal;
 
 using ObjectPool;
+using System.Threading;
 
 internal class ResilienceContextPoolPolicy : ObjectPoolPolicy<ResilienceContext>
 {
-    public override bool CanReturn(ResilienceContext instance)
+    public override bool CanReturn(ResilienceContext context)
     {
-        return instance.TryReset();
+        context.OperationKey = null;
+        context.CancellationToken = default(CancellationToken);
+        context.ContinueOnCapturedContext = false;
+
+        return true;
     }
 }

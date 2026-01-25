@@ -165,23 +165,6 @@
     <Folder Name="/Core/Assimalign.Cohesion.DependencyInjection.Configuration/tests/">
         <Project Path="Assimalign.Cohesion.DependencyInjection.Configuration/tests/Assimalign.Cohesion.DependencyInjection.Configuration.Tests.csproj" />
     </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Diagnostics/" />
-    <Folder Name="/Core/Assimalign.Cohesion.Diagnostics/src/" />
-    <Folder Name="/Core/Assimalign.Cohesion.Diagnostics/src/obj/">
-        <File Path="Assimalign.Cohesion.Diagnostics/src/obj/Assimalign.Cohesion.Diagnostics.csproj.nuget.dgspec.json" />
-        <File Path="Assimalign.Cohesion.Diagnostics/src/obj/Assimalign.Cohesion.Diagnostics.csproj.nuget.g.props" />
-        <File Path="Assimalign.Cohesion.Diagnostics/src/obj/Assimalign.Cohesion.Diagnostics.csproj.nuget.g.targets" />
-        <File Path="Assimalign.Cohesion.Diagnostics/src/obj/project.assets.json" />
-        <File Path="Assimalign.Cohesion.Diagnostics/src/obj/project.nuget.cache" />
-    </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Diagnostics/tests/" />
-    <Folder Name="/Core/Assimalign.Cohesion.Diagnostics/tests/obj/">
-        <File Path="Assimalign.Cohesion.Diagnostics/tests/obj/Assimalign.Cohesion.Diagnostics.Tests.csproj.nuget.dgspec.json" />
-        <File Path="Assimalign.Cohesion.Diagnostics/tests/obj/Assimalign.Cohesion.Diagnostics.Tests.csproj.nuget.g.props" />
-        <File Path="Assimalign.Cohesion.Diagnostics/tests/obj/Assimalign.Cohesion.Diagnostics.Tests.csproj.nuget.g.targets" />
-        <File Path="Assimalign.Cohesion.Diagnostics/tests/obj/project.assets.json" />
-        <File Path="Assimalign.Cohesion.Diagnostics/tests/obj/project.nuget.cache" />
-    </Folder>
     <Folder Name="/Core/Assimalign.Cohesion.FileSystem/">
         <File Path="Assimalign.Cohesion.FileSystem/README.md" />
     </Folder>

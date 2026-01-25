@@ -24,10 +24,14 @@ internal class ResilienceContextPool : DefaultObjectPool<ResilienceContext, Resi
     public ResilienceContext Rent(bool continueOnCapturedContext, CancellationToken cancellationToken = default)
         => Rent(new ResilienceContextCreationArguments(null, continueOnCapturedContext, cancellationToken));
 
-    public override ResilienceContext Rent(ResilienceContextCreationArguments arguments)
+    public override ResilienceContext Rent(ResilienceContextCreationArguments args)
     {
-        var context = base.Rent(arguments);
-        context.TryInitialize(arguments);
+        ResilienceContext context = base.Rent(args);
+
+        context.OperationKey = args.OperationKey;
+        context.CancellationToken = args.CancellationToken;
+        context.ContinueOnCapturedContext = args.ContinueOnCapturedContext ?? false;
+
         return context;
     }
 

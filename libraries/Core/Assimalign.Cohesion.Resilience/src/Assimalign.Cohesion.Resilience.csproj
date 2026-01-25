@@ -18,6 +18,11 @@
 			ObjectNamespace="Assimalign.Cohesion.Resilience"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />-->
-		<CohesionCodeGenValueType Include="ValueTypes\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionCodeGenValueType 
+			Include="ValueTypes\OperationKey.cs" 
+			ObjectRuntimeType="String" 
+			ObjectNamespace="Assimalign.Cohesion.Resilience" 
+			ObjectAccessModifier="public" 
+			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

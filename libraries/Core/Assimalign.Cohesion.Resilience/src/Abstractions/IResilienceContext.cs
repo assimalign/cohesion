@@ -27,7 +27,7 @@ public interface IResilienceContext
     bool ContinueOnCapturedContext { get; }
 
     /// <summary>
-    /// 
+    /// Optional service provider for the resilience pipeline.
     /// </summary>
     IServiceProvider? ServiceProvider { get; }
 }

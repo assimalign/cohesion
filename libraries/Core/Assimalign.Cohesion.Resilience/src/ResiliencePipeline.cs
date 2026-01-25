@@ -20,7 +20,6 @@ public sealed partial class ResiliencePipeline : IResiliencePipeline
         object? state)
     {
         ResilienceContext context = _pool.Rent(false);
-
         try
         {
             return (this as IResiliencePipeline).ExecuteAsync(
@@ -42,7 +41,8 @@ public sealed partial class ResiliencePipeline : IResiliencePipeline
         Outcome outcome = await _strategy
             .Invoke(callback, context, state)
             .ConfigureAwait(context.ContinueOnCapturedContext);
-
+        
+        // Bubble up exception
         outcome.ThrowIfException();
     }
 }

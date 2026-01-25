@@ -1,4 +1,5 @@
 ﻿using Assimalign.Cohesion.ObjectPool;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
@@ -6,9 +7,11 @@ internal class ResilienceContextPoolFactory : ObjectPoolFactory<ResilienceContex
 {
     public override ResilienceContext Create(ResilienceContextCreationArguments args)
     {
-        ResilienceContext context = new DefaultResilienceContext();
+        ResilienceContext context = new ResilienceContext();
 
-        context.TryInitialize(args);
+        context.OperationKey = args.OperationKey;
+        context.CancellationToken = args.CancellationToken;
+        context.ContinueOnCapturedContext = args.ContinueOnCapturedContext ?? false;
 
         return context;
     }

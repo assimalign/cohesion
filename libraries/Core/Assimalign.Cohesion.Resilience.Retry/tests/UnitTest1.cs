@@ -57,7 +57,7 @@ public class UnitTest1
                         return true;
                     }
 
-                    return true;
+                    return false;
                 };
             })
             .Build();
@@ -65,7 +65,10 @@ public class UnitTest1
 
         var exception = await Assert.ThrowsAsync<TestException>(async () =>
         {
-            await pipeline.ExecuteAsync(static async (_, state) => await ((TestClient)state!).SendAsync(), client).AsTask();
+            bool result = await pipeline.ExecuteAsync(static async (_, state) => await ((TestClient)state!).SendAsync(), client).AsTask();
+
+
+
         });
 
         Assert.Equal(2, client.RetryCount);

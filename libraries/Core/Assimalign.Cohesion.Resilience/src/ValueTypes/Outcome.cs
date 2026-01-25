@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 
 namespace Assimalign.Cohesion.Resilience;
@@ -6,6 +8,8 @@ namespace Assimalign.Cohesion.Resilience;
 /// <summary>
 /// 
 /// </summary>
+[DebuggerDisplay("Outcome: {ToString()}")]
+[DebuggerTypeProxy(typeof(DebuggerView))]
 public readonly struct Outcome : IEither
 {
     private readonly int _typeIndex;
@@ -34,17 +38,61 @@ public readonly struct Outcome : IEither
     bool AsT1 => (bool)_typeValue!;
     Exception AsT2 => ((ExceptionDispatchInfo)_typeValue!).SourceException;
 
-    /// <summary>
-    /// Gets a value indicating whether the operation completed successfully.
-    /// </summary>
-    public bool IsSuccess => _typeIndex == 1;
 
     /// <summary>
     /// 
     /// </summary>
-    /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool Is<T>() => _typeValue is T;
+    public static Outcome Success() => true;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public static Outcome Failure(Exception exception) => exception; 
+
+    /// <summary>
+    /// Gets a value indicating whether the operation completed successfully.
+    /// </summary>
+    public bool IsSuccess() => _typeIndex == 1;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public bool IsFailure([NotNullWhen(true)] out Exception? exception)
+    {
+        exception = null;
+
+        if (_typeIndex == 2)
+        {
+            exception = AsT2;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="TException"></typeparam>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public bool IsFailure<TException>([NotNullWhen(true)] out TException? exception) where TException : Exception
+    {
+        exception = null;
+
+        if (_typeIndex == 2 && AsT2 is TException ex)
+        {
+            exception = ex;
+            return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// 
@@ -83,10 +131,21 @@ public readonly struct Outcome : IEither
     /// </summary>
     public void ThrowIfException()
     {
-        if (!IsSuccess && _typeIndex == 2)
+        if (IsFailure(out Exception? exception))
         {
-            throw ((Exception)this);
+            throw exception;
         }
+    }
+
+
+    public override string ToString()
+    {
+        if (IsFailure(out Exception? exception))
+        {
+            return "Failure - " + exception.ToString();
+        }
+
+        return "Success";
     }
 
 
@@ -94,4 +153,22 @@ public readonly struct Outcome : IEither
     public static implicit operator Outcome(Exception value) => new Outcome(value);
     public static explicit operator bool(Outcome either) => either.AsT1;
     public static explicit operator Exception(Outcome either) => either.AsT2;
+
+
+
+
+    partial class DebuggerView
+    {
+        public DebuggerView(Outcome outcome)
+        {
+            if (outcome.IsFailure(out Exception? exception))
+            {
+                Exception = exception;
+                
+            }
+        }
+
+        public bool IsSuccess => Exception is null;
+        public Exception? Exception { get; set; }
+    }
 }

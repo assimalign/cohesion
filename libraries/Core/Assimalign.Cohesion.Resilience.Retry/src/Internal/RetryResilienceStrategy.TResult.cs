@@ -81,7 +81,7 @@ internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TRe
             {
                 var delayArgs = new RetryDelayGeneratorArguments<TResult>(context, outcome, attempt);
 
-                if (await DelayGenerator(delayArgs).ConfigureAwait(false) is TimeSpan newDelay && RetryHelper.IsValidDelay(newDelay))
+                if (await DelayGenerator.Invoke(delayArgs).ConfigureAwait(false) is TimeSpan newDelay && RetryHelper.IsValidDelay(newDelay))
                 {
                     delay = newDelay;
                 }
@@ -96,7 +96,7 @@ internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TRe
 
             if (OnRetry is not null)
             {
-                await OnRetry(onRetryArgs).ConfigureAwait(context.ContinueOnCapturedContext);
+                await OnRetry.Invoke(onRetryArgs).ConfigureAwait(context.ContinueOnCapturedContext);
             }
 
             //if (outcome.TryGetResult(out var resultValue))
