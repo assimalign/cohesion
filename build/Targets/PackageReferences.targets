@@ -4,6 +4,7 @@
         <_CohesionPackage Include="Sharprompt" Version="3.0.0" />
         <_CohesionPackage Include="KubernetesClient" Version="17.0.4" />
         <_CohesionPackage Include="NUlid" Version="1.7.2" />
+        <_CohesionPackage Include="System.Threading.RateLimiting" Version="10.0.0"/>
     </ItemGroup>
 
     <!-- Analyzer & Build Dependencies -->
@@ -33,7 +34,8 @@
 
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
-        <_CohesionPackage Include="FluentAssertions" Version="8.5.0" />
+        <_CohesionPackage Include="Shouldly" Version="4.3.0" />
+        <_CohesionPackage Include="FluentAssertions" Version="8.8.0" />
         <_CohesionPackage Include="xunit" Version="2.9.3" />
         <_CohesionPackage Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
         <_CohesionPackage Include="xunit.runner.visualstudio" Version="3.1.5"

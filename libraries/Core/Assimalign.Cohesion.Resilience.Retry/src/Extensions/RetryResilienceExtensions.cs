@@ -6,9 +6,9 @@ using Internal;
 
 public static class RetryResilienceExtensions
 {
-    extension(ResiliencePipelineBuilder builder)
+    extension(IResiliencePipelineBuilder builder)
     {
-        public ResiliencePipelineBuilder UseRetry(Action<RetryStrategyOptions> configure)
+        public IResiliencePipelineBuilder UseRetry(Action<RetryStrategyOptions> configure)
         {
             RetryStrategyOptions options = new RetryStrategyOptions();
 
@@ -18,9 +18,9 @@ public static class RetryResilienceExtensions
         }
     }
 
-    extension<TResult>(ResiliencePipelineBuilder<TResult> builder)
+    extension<TResult>(IResiliencePipelineBuilder<TResult> builder)
     {
-        public ResiliencePipelineBuilder<TResult> UseRetry(Action<RetryStrategyOptions<TResult>> configure)
+        public IResiliencePipelineBuilder<TResult> UseRetry(Action<RetryStrategyOptions<TResult>> configure)
         {
             RetryStrategyOptions<TResult> options = new RetryStrategyOptions<TResult>();
 

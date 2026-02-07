@@ -5,7 +5,7 @@ using Internal;
 #pragma warning disable CA1815 // Override equals and operator equals on value types
 
 /// <summary>
-/// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.ShouldRetry"/> for determining whether a retry should be performed.
+/// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.Retry"/> for determining whether a retry should be performed.
 /// </summary>
 /// <typeparam name="TResult">The type of result.</typeparam>
 /// <remarks>

@@ -14,14 +14,16 @@ public class UnitTest1
     {
         TestClient client = new TestClient();
 
-        ResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
+        IResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
             .UseRetry(options =>
             {
                 options.MaxRetryAttempts = 5;
                 options.Delay = TimeSpan.FromSeconds(1);
-                options.ShouldRetry = static async args =>
+                options.Retry = static async args =>
                 {
-                    if (!args.Outcome.IsSuccess)
+                    Outcome<bool> outcome = args.Outcome;
+
+                    if (!outcome.IsSuccess(out var result))
                     {
                         return true;
                     }
@@ -45,14 +47,14 @@ public class UnitTest1
     {
         TestClient client = new TestClient();
 
-        ResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
+        IResiliencePipeline<bool> pipeline = new ResiliencePipelineBuilder<bool>()
             .UseRetry(options =>
             {
                 options.MaxRetryAttempts = 1;
                 options.Delay = TimeSpan.FromSeconds(1);
-                options.ShouldRetry = static async args =>
+                options.Retry = static async args =>
                 {
-                    if (!args.Outcome.IsSuccess)
+                    if (!args.Outcome.IsSuccess(out var _))
                     {
                         return true;
                     }

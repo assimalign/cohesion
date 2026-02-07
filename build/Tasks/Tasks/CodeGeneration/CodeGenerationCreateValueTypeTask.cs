@@ -198,6 +198,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
 		namespace {{context.ObjectNamespace}}
 		{
 		    [global::System.Text.Json.Serialization.JsonConverter(typeof({{context.ObjectName}}JsonConverter))]
+		    [global::System.Diagnostics.DebuggerDisplay("{Value}")]
 			{{modifier}} {{context.ObjectKind.ToString().ToLower()}} {{context.ObjectName}} :
 		""");
 

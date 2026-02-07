@@ -10,6 +10,9 @@ public interface IResiliencePipeline
     /// <summary>
     /// 
     /// </summary>
+    /// <remarks>
+    /// The pipeline should execute in the following fail over. 
+    /// </remarks>
     /// <param name="callback"></param>
     /// <param name="context"></param>
     /// <param name="state"></param>

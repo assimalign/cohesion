@@ -99,14 +99,12 @@ public sealed class RetryStrategyOptions
     /// <value>
     /// The default is a delegate that retries on any exception except <see cref="OperationCanceledException"/>. This property is required.
     /// </value>
-    public Func<RetryPredicateArguments, ValueTask<bool>> ShouldRetry { get; set; } = static async args =>
+    public Func<RetryPredicateArguments, ValueTask<bool>> Retry { get; set; } = static async args =>
     {
         Outcome outcome = args.Outcome;
 
-        if (!outcome.IsSuccess)
+        if (outcome.IsFailure(out Exception? exception))
         {
-            Exception exception = (Exception)outcome;
-
             return exception is not OperationCanceledException;
         }
 

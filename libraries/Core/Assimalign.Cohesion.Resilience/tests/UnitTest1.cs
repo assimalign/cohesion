@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Xunit;
 
 namespace Assimalign.Cohesion.Resilience.Tests;
@@ -13,8 +14,8 @@ public class UnitTest1
             {
                 try
                 {
-                    await callback(context, state);
-                    return true;
+                    await callback.Invoke(context, state);
+                    return Outcome.Success();
                 }
                 catch (Exception ex)
                 {
@@ -52,10 +53,18 @@ public class UnitTest1
         pipeline.Execute((context, state) =>
         {
             i++;
-            throw new MyException(i);
+            switch (i)
+            {
+                case 1: throw new MyException1();
+                case 2: throw new MyException2();
+                case 3: throw new MyException3();
+            }
+            throw new MyException1();
+        
         }, null);
-
     }
 
-    public class MyException(int Index) : Exception;
+    public class MyException1() : Exception;
+    public class MyException2() : Exception;
+    public class MyException3() : Exception;
 }

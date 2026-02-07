@@ -3,7 +3,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal class ResilienceContextPoolFactory : ObjectPoolFactory<ResilienceContext, ResilienceContextCreationArguments>
+internal class ResilienceContextPoolFactory : ObjectPoolFactory<ResilienceContext, ResilienceContextCreationArguments> 
 {
     public override ResilienceContext Create(ResilienceContextCreationArguments args)
     {

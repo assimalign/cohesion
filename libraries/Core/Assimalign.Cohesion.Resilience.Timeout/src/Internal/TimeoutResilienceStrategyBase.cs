@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+using ObjectPool;
+
 internal abstract class TimeoutResilienceStrategyBase
 {
     protected TimeoutResilienceStrategyBase(TimeoutStrategyOptions options)
@@ -32,26 +34,31 @@ internal abstract class TimeoutResilienceStrategyBase
         {
             timeout = await TimeoutGenerator!.Invoke(new TimeoutGeneratorArguments(context)).ConfigureAwait(context.ContinueOnCapturedContext);
         }
-        if (!TimeoutUtil.ShouldApplyTimeout(timeout))
+        if (!(timeout > TimeSpan.Zero))
         {
             // do nothing
             outcome = await callback.Invoke(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
         }
         else
         {
+            // Copy the previous cancellation token
             CancellationToken previousCancellationToken = context.CancellationToken;
             CancellationTokenSource cancellationTokenSource = CancellationTokenSourcePool.Rent(timeout);
-            TimeoutResilienceContext wrapper = new TimeoutResilienceContext(
-                cancellationTokenSource.Token,
-                context.ContinueOnCapturedContext,
-                context.OperationKey);
+
+
+            cancellationTokenSource.Token.ThrowIfCancellationRequested();
+
+            using IScopedResilienceContext scoped = context.CreateScoped(arguments =>
+            {
+                arguments.CancellationToken = cancellationTokenSource.Token;
+            });
 
             CancellationTokenRegistration cancellationTokenRegistration =
                 previousCancellationToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), cancellationTokenSource);
 
-            outcome = await callback.Invoke(wrapper, state);
+            outcome = await callback.Invoke(scoped, state);
 
-            // Set flags
+            // Check cancellation requests
             bool isPreviousCancellationRequested = previousCancellationToken.IsCancellationRequested;
             bool isCancellationRequested = cancellationTokenSource.IsCancellationRequested;
 

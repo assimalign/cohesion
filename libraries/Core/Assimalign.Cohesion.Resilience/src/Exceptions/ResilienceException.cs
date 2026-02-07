@@ -2,43 +2,69 @@
 
 namespace Assimalign.Cohesion.Resilience;
 
+using Properties;
 
-public enum ResilienceErrorCode
-{
-    /// <summary>
-    /// Exception thrown when a policy rejects execution of a delegate.
-    /// <remarks>More specific exceptions which derive from this type, are generally thrown.</remarks>
-    /// </summary>
-    ExecutionRejected,
-
-    /// <summary>
-    /// 
-    /// </summary>
-    PipelineFailure,
-
-    /// <summary>
-    /// 
-    /// </summary>
-    StrategyFailure
-}
-
+/// <summary>
+/// 
+/// </summary>
 public class ResilienceException : Exception
 {
-    public ResilienceException(ResilienceErrorCode code, string message) 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="code"></param>
+    /// <param name="message"></param>
+    /// <param name="innerException"></param>
+    public ResilienceException(ResilienceErrorCode code, OperationKey operationKey, string message) 
         : base(message)
     {
         Code = code;
-    }
-
-    public ResilienceException(ResilienceErrorCode code, string message, Exception? innerException) 
-        : base(message, innerException)
-    {
-        Code = code;
+        OperationKey = operationKey;
     }
 
     /// <summary>
     /// 
     /// </summary>
-    public ResilienceErrorCode Code { get; }
+    /// <param name="code"></param>
+    /// <param name="message"></param>
+    /// <param name="operationKey"></param>
+    /// <param name="innerException"></param>
+    public ResilienceException(ResilienceErrorCode code, OperationKey operationKey, string message, Exception? innerException)
+        : base(message, innerException)
+    {
+        Code = code;
+        OperationKey = operationKey;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public OperationKey OperationKey { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public virtual ResilienceErrorCode Code { get; }
+
+
+    public static ResilienceException PipelineFailure(OperationKey operationKey = default, Exception? innerException = default)
+    {
+        return new ResilienceException(
+            code: ResilienceErrorCode.PipelineFailure,
+            operationKey: operationKey,
+            message: ErrorMessages.PipelineFailure,
+            innerException: innerException);
+    }
+
+    public static ResilienceException StrategyFailure(OperationKey operationKey = default, Exception? innerException = default)
+    {
+        return new ResilienceException(
+            code: ResilienceErrorCode.StrategyFailure,
+            message: "",
+            operationKey: operationKey,
+            innerException: innerException);
+    }
 }
 
+
+public sealed class 

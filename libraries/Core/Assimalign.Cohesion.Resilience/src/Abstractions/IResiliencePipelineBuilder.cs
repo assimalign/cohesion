@@ -2,6 +2,9 @@
 
 namespace Assimalign.Cohesion.Resilience;
 
+/// <summary>
+/// 
+/// </summary>
 public interface IResiliencePipelineBuilder
 {
     /// <summary>
@@ -9,7 +12,21 @@ public interface IResiliencePipelineBuilder
     /// </summary>
     /// <param name="strategy"></param>
     /// <returns></returns>
-    IResiliencePipelineBuilder UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> handler);
+    IResiliencePipelineBuilder UseStrategy(IResilienceStrategy strategy);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="strategy"></param>
+    /// <returns></returns>
+    IResiliencePipelineBuilder UseStrategy(ResilienceStrategy strategy);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="strategy"></param>
+    /// <returns></returns>
+    IResiliencePipelineBuilder UseStrategy(Func<ResilienceStrategy, ResilienceStrategy> strategy);
 
     /// <summary>
     /// 
@@ -17,3 +34,4 @@ public interface IResiliencePipelineBuilder
     /// <returns></returns>
     IResiliencePipeline Build();
 }
+

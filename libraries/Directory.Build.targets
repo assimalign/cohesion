@@ -1,3 +1,10 @@
 <Project>
 	<Import Project="..\Directory.Build.targets" />
+
+	<ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\Shared')">
+		<Compile Remove="Shared\**" />
+		<None Include="Shared\**\*.cs">
+			<Visible>true</Visible>
+		</None>
+	</ItemGroup>
 </Project>

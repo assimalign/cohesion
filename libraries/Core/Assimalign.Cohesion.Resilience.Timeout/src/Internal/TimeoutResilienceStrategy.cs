@@ -11,33 +11,29 @@ internal class TimeoutResilienceStrategy : TimeoutResilienceStrategyBase, IResil
     public ValueTask<Outcome> ExecuteAsync(ResilienceCallback callback, IResilienceContext context, object? state)
     {
         return InvokeAsync<Outcome>(
-            async (c, s) =>
+            async (context1, state1) =>
             {
+                Outcome outcome = Outcome.Success;
+
                 try
                 {
-                    await callback.Invoke(c, s).ConfigureAwait(c.ContinueOnCapturedContext);
-
-                    return true;
+                    await callback.Invoke(context1, state1).ConfigureAwait(context1.ContinueOnCapturedContext);
                 }
                 catch (Exception exception)
                 {
-                    return exception;
+                    outcome = exception;
                 }
+
+                return outcome;
             },
             (exception) => exception,
             context,
             state);
-
     }
 
     protected override bool IsOutcomeOperationCancelledException<TOutcome>(TOutcome outcome, out OperationCanceledException exception)
     {
         exception = default!;
-        if (outcome is Outcome o && !o.IsSuccess && ((Exception)o) is OperationCanceledException e)
-        {
-            exception = e;
-            return true;
-        }
-        return false;
+        return outcome is Outcome o && o.IsFailure<OperationCanceledException>(out exception!);
     }
 }

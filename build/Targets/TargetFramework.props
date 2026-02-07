@@ -9,6 +9,6 @@
         <TargetFrameworkForBuild>$(TargetFrameworkLatest)</TargetFrameworkForBuild>
     </PropertyGroup>
     <PropertyGroup>
-        <LangVersion>Latest</LangVersion>
+        <LangVersion>Preview</LangVersion>
     </PropertyGroup>
 </Project>

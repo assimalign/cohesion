@@ -24,7 +24,7 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
     /// user-defined strategies.</remarks>
     /// <param name="strategy">The resilience strategy to add to the pipeline. Cannot be null.</param>
     /// <returns>The current <see cref="ResiliencePipelineBuilder"/> instance for method chaining.</returns>
-    public ResiliencePipelineBuilder<TResult> UseStrategy(IResilienceStrategy<TResult> strategy)
+    public IResiliencePipelineBuilder<TResult> UseStrategy(IResilienceStrategy<TResult> strategy)
     {
         ArgumentNullException.ThrowIfNull(strategy);
 
@@ -36,43 +36,84 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
     /// </summary>
     /// <param name="strategy"></param>
     /// <returns></returns>
-    public ResiliencePipelineBuilder<TResult> UseStrategy(ResilienceStrategy<TResult> strategy)
+    public IResiliencePipelineBuilder<TResult> UseStrategy(ResilienceStrategy<TResult> strategy)
     {
-        ArgumentNullException.ThrowIfNull(strategy);
+        ResilienceStrategy<TResult> strategy1 = ArgumentNullException.ThrowIfNull<ResilienceStrategy<TResult>>(strategy);
 
-        ResilienceStrategy<TResult> strategy2 = strategy;
-
-        (this as IResiliencePipelineBuilder<TResult>).UseStrategy((ResilienceStrategy<TResult> next) => async (ResilienceCallback<TResult> callback, IResilienceContext context, object? state) =>
+        return UseStrategy((ResilienceStrategy<TResult> next) => async (ResilienceCallback<TResult> callback, IResilienceContext context, object? state) =>
         {
-            Outcome<TResult> first = await strategy2.Invoke(callback, context, state);
+            Outcome<TResult> first = await strategy1.Invoke(callback, context, state);
 
-            if (first.IsSuccess)
+            if (!first.IsFailure(out Exception? exception1))
             {
                 return first;
             }
 
+            // Let's invoke the next strategy in the pipeline and check the outcome for end of pipeline exception
             Outcome<TResult> second = await next.Invoke(callback, context, state);
 
             // If at the end of the pipeline we need to check for the Resilience exception
-            if (!second.IsSuccess && ((Exception)second) is ResilienceException exception && exception.Code == ResilienceErrorCode.PipelineFailure)
+            if (!second.IsFailure(out Exception? exception2))
             {
-                return first;
+                return second;
             }
 
-            return second;
+            // Check if reached end of pipeline
+            if (exception2 is ResilienceException exception2_1 && exception2_1.Code == ResilienceErrorCode.PipelineFailure)
+            {
+                ResilienceException exception1_1 = default!;
+
+                // Wrap first exception in 
+                if (exception1 is ResilienceException exception1_2)
+                {
+                    exception1_1 = exception1_2;
+                }
+                else
+                {
+                    exception1_1 = ResilienceException.StrategyFailure(context.OperationKey, exception1);
+                }
+
+                // Spread other failures
+                Exception[] failures = { exception1_1 };
+
+                if (exception2_1.InnerException is AggregateException aggregate)
+                {
+                    failures = [.. failures, .. aggregate.InnerExceptions];
+                }
+
+                return ResilienceException.PipelineFailure(context.OperationKey, new AggregateException(failures));
+            }
+
+            return exception2;
         });
 
         return this;
     }
 
-    public ResiliencePipeline<TResult> Build()
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="strategy"></param>
+    /// <returns></returns>
+    public IResiliencePipelineBuilder<TResult> UseStrategy(Func<ResilienceStrategy<TResult>, ResilienceStrategy<TResult>> strategy)
+    {
+        ArgumentNullException.ThrowIfNull(strategy);
+        _strategies.Add(strategy);
+        return this;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public IResiliencePipeline<TResult> Build()
     {
         InvalidOperationException.ThrowIf(_strategies.Count == 0, "No strategies where added to the pipeline.");
 
-        ResilienceStrategy<TResult> strategy = new ResilienceStrategy<TResult>((_, _, _) =>
-            ValueTask.FromResult(new Outcome<TResult>(new ResilienceException(
-                ResilienceErrorCode.PipelineFailure,
-                "The pipeline has reach the end. No successful strategy was applied to the callback."))));
+        ResilienceStrategy<TResult> strategy = new ResilienceStrategy<TResult>((_, context, _) =>
+        {
+            return ValueTask.FromResult(new Outcome<TResult>(ResilienceException.PipelineFailure(context.OperationKey)));
+        });
 
         for (int i = _strategies.Count - 1; i >= 0; i--)
         {
@@ -80,16 +121,5 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
         }
 
         return new ResiliencePipeline<TResult>(strategy);
-    }
-
-    IResiliencePipeline<TResult> IResiliencePipelineBuilder<TResult>.Build()
-    {
-        return Build();
-    }
-    IResiliencePipelineBuilder<TResult> IResiliencePipelineBuilder<TResult>.UseStrategy(Func<ResilienceStrategy<TResult>, ResilienceStrategy<TResult>> strategy)
-    {
-        ArgumentNullException.ThrowIfNull(strategy);
-        _strategies.Add(strategy);
-        return this;
     }
 }

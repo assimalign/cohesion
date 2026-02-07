@@ -2,14 +2,14 @@
 using System.Collections.Concurrent;
 using System.Threading;
 
-namespace Assimalign.Cohesion.ObjectPool.Internal;
+namespace Assimalign.Cohesion.ObjectPool;
 
 public class DefaultObjectPool<T, TArgs> : ObjectPool<T, TArgs> where T : class
 {
     private protected readonly ConcurrentQueue<T> _objects;
     private protected T? _firstElement;
 
-    private readonly int _maxCapacity;
+    private readonly int _maxCapacity = (Environment.ProcessorCount * 2) - 1;
     private int _numItems;
 
 

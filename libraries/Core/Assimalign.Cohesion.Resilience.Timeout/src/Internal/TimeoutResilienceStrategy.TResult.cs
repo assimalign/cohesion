@@ -30,11 +30,6 @@ internal class TimeoutResilienceStrategy<TResult> : TimeoutResilienceStrategyBas
     protected override bool IsOutcomeOperationCancelledException<TOutcome>(TOutcome outcome, out OperationCanceledException exception)
     {
         exception = default!;
-        if (outcome is Outcome<TResult> o && !o.IsSuccess && ((Exception)o) is OperationCanceledException e)
-        {
-            exception = e;
-            return true;
-        }
-        return false;
+        return outcome is Outcome<TResult> o && o.IsFailure<OperationCanceledException>(out exception!);
     }
 }

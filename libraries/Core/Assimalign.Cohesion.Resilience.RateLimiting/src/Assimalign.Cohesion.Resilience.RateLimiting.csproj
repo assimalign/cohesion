@@ -1,9 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Resilience</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="System.Threading.RateLimiting" />
+	</ItemGroup>
 </Project>

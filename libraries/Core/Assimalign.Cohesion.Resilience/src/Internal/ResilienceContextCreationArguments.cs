@@ -12,7 +12,7 @@ internal readonly struct ResilienceContextCreationArguments
     /// <param name="operationKey">The operation key, if any.</param>
     /// <param name="continueOnCapturedContext">Value indicating whether to continue on captured context.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public ResilienceContextCreationArguments(OperationKey? operationKey, bool? continueOnCapturedContext, CancellationToken cancellationToken)
+    public ResilienceContextCreationArguments(OperationKey operationKey, bool? continueOnCapturedContext, CancellationToken cancellationToken)
     {
         OperationKey = operationKey;
         ContinueOnCapturedContext = continueOnCapturedContext;
@@ -22,7 +22,7 @@ internal readonly struct ResilienceContextCreationArguments
     /// <summary>
     /// Gets the operation key, if any.
     /// </summary>
-    public OperationKey? OperationKey { get; }
+    public OperationKey OperationKey { get; }
 
     /// <summary>
     /// Gets the value indicating whether to continue on captured context, if any.

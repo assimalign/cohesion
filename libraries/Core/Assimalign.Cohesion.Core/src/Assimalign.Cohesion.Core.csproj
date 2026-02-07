@@ -5,13 +5,6 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Remove="Shared\**" Visible="true" />
-		<EmbeddedResource Remove="Shared\**" />
-		<None Include="Shared\**\*.cs">
-			<Visible>true</Visible>
-		</None>
-	</ItemGroup>
-	<ItemGroup>
 		<Compile Remove="System\Net\CidrBlock.cs" />
 	</ItemGroup>
 	<ItemGroup>
@@ -28,6 +21,6 @@
 		</EmbeddedResource>
 	</ItemGroup>
 	<ItemGroup>
-	  <Folder Include="System\Decorators\" />
+		<Folder Include="System\Decorators\" />
 	</ItemGroup>
 </Project>

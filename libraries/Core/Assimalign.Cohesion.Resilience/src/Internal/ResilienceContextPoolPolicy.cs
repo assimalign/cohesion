@@ -7,7 +7,7 @@ internal class ResilienceContextPoolPolicy : ObjectPoolPolicy<ResilienceContext>
 {
     public override bool CanReturn(ResilienceContext context)
     {
-        context.OperationKey = null;
+        context.OperationKey = default;
         context.CancellationToken = default(CancellationToken);
         context.ContinueOnCapturedContext = false;
 

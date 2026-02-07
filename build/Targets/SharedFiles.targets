@@ -18,6 +18,6 @@
 		<CohesionSharedFile Update="@(CohesionSharedFile)" FilePath="%(CohesionSharedFile.ProjectDirectory)/%(CohesionSharedFile.File)" />
 		<Compile Include="@(CohesionSharedFile->'%(FilePath)')" />
         <Compile Update="@(CohesionSharedFile->'%(FilePath)')" Link="%(CohesionSharedFile.FileDirectory)/%(Compile.Filename)"/>
-        <CohesionSharedFile Remove="@(CohesionSharedFile)" />
+        <!-- <CohesionSharedFile Remove="@(CohesionSharedFile)" /> -->
 	</ItemGroup>
 </Project>

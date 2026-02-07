@@ -1,44 +1,33 @@
-﻿using Assimalign.Cohesion.Resilience.Internal;
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Diagnostics;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TResult>
+internal sealed class RetryResilienceStrategy<TResult> : RetryResilienceStrategyBase, IResilienceStrategy<TResult>
 {
-    private readonly TimeProvider _timeProvider;
-    private readonly Func<double> _randomizer;
-
-
-    public RetryResilienceStrategy(RetryStrategyOptions<TResult>  options)
+    public RetryResilienceStrategy(RetryStrategyOptions<TResult>  options) 
+        : base(
+            options.MaxRetryAttempts,
+            options.TimeProvider,
+            options.Randomizer,
+            options.Delay,
+            options.MaxDelay,
+            options.UseJitter,
+            options.BackoffType)
     {
-        ShouldHandle = options.ShouldRetry;
-        BaseDelay = options.Delay;
-        MaxDelay = options.MaxDelay;
-        BackoffType = options.BackoffType;
-        RetryCount = options.MaxRetryAttempts;
+        Retry = options.Retry;
         OnRetry = options.OnRetry;
         DelayGenerator = options.DelayGenerator;
-        UseJitter = options.UseJitter;
-
-        _timeProvider = options.TimeProvider;
-        _randomizer = options.Randomizer;
     }
 
-    public TimeSpan BaseDelay { get; }
-    public TimeSpan? MaxDelay { get; }
-    public int RetryCount { get; }
-    public bool UseJitter { get; }
-    public DelayBackoffType BackoffType { get; }
-    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> ShouldHandle { get; }
+    public Func<RetryPredicateArguments<TResult>, ValueTask<bool>> Retry { get; }
     public Func<RetryDelayGeneratorArguments<TResult>, ValueTask<TimeSpan?>>? DelayGenerator { get; }
     public Func<OnRetryArguments<TResult>, ValueTask>? OnRetry { get; }
     public async ValueTask<Outcome<TResult>> ExecuteAsync(
         ResilienceCallback<TResult> callback, 
-        IResilienceContext context, 
+        IResilienceContext context,
         object? state)
     {
         double retryState = 0;
@@ -46,68 +35,65 @@ internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TRe
 
         while (true)
         {
-            long startTimestamp = _timeProvider.GetTimestamp();
             Outcome<TResult> outcome;
+
+            long timestamp = TimeProvider.GetTimestamp();
+
             try
             {
+                context.CancellationToken.ThrowIfCancellationRequested();
+
                 outcome = await callback(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                outcome = new Outcome<TResult>(ex);
+                outcome = exception;
             }
 
-            var shouldRetryArgs = new RetryPredicateArguments<TResult>(context, outcome, attempt);
-            var handle = await ShouldHandle(shouldRetryArgs).ConfigureAwait(context.ContinueOnCapturedContext);
-            var executionTime = _timeProvider.GetElapsedTime(startTimestamp);
+            // Check whether the 
+            bool shouldRetry = await Retry.Invoke(new RetryPredicateArguments<TResult>(context, outcome, attempt))
+                .ConfigureAwait(context.ContinueOnCapturedContext);
+            
+            // Set Execution Time
+            TimeSpan executionTime = TimeProvider.GetElapsedTime(timestamp);
 
-            var isLastAttempt = IsLastAttempt(attempt, out bool incrementAttempts);
-            //if (isLastAttempt)
-            //{
-            //    TelemetryUtil.ReportFinalExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
-            //}
-            //else
-            //{
-            //    TelemetryUtil.ReportExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
-            //}
-
-            if (isLastAttempt || !handle)
+            if (IsLastAttempt(attempt, out bool incrementAttempts) || !shouldRetry)
             {
+                //    TelemetryUtil.ReportFinalExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
                 return outcome;
             }
+            else
+            {
+                //    TelemetryUtil.ReportExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
+            }
 
-            var delay = RetryHelper.GetRetryDelay(BackoffType, UseJitter, attempt, BaseDelay, MaxDelay, ref retryState, _randomizer);
+            TimeSpan delay = RetryHelper.GetRetryDelay(BackoffType, UseJitter, attempt, Delay, MaxDelay, ref retryState, Randomizer);
+            
             if (DelayGenerator is not null)
             {
-                var delayArgs = new RetryDelayGeneratorArguments<TResult>(context, outcome, attempt);
+                TimeSpan? span = await DelayGenerator.Invoke(new RetryDelayGeneratorArguments<TResult>(context, outcome, attempt))
+                    .ConfigureAwait(false);
 
-                if (await DelayGenerator.Invoke(delayArgs).ConfigureAwait(false) is TimeSpan newDelay && RetryHelper.IsValidDelay(newDelay))
+                if (span is TimeSpan newDelay && RetryHelper.IsValidDelay(newDelay))
                 {
                     delay = newDelay;
                 }
             }
 
-#pragma warning disable S3236 // Remove this argument from the method call; it hides the caller information.
             Debug.Assert(delay >= TimeSpan.Zero, "The delay cannot be negative.");
-#pragma warning restore S3236 // Remove this argument from the method call; it hides the caller information.
 
-            var onRetryArgs = new OnRetryArguments<TResult>(context, outcome, attempt, delay, executionTime);
+            OnRetryArguments<TResult> onRetryArgs = new OnRetryArguments<TResult>(context, outcome, attempt, delay, executionTime);
+            
             //_telemetry.Report<OnRetryArguments<T>, T>(new(ResilienceEventSeverity.Warning, RetryConstants.OnRetryEvent), onRetryArgs);
 
             if (OnRetry is not null)
             {
                 await OnRetry.Invoke(onRetryArgs).ConfigureAwait(context.ContinueOnCapturedContext);
             }
-
             //if (outcome.TryGetResult(out var resultValue))
             //{
             //    await DisposeHelper.TryDisposeSafeAsync(resultValue, context.IsSynchronous).ConfigureAwait(context.ContinueOnCapturedContext);
             //}
-
-            //_timeProvider
-
-            
-
             try
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
@@ -115,7 +101,7 @@ internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TRe
                 // stryker disable once all : no means to test this
                 if (delay > TimeSpan.Zero)
                 {
-                    //await _timeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);
+                    await TimeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);
                 }
             }
             catch (OperationCanceledException exception)
@@ -128,17 +114,5 @@ internal sealed class RetryResilienceStrategy<TResult> : IResilienceStrategy<TRe
                 attempt++;
             }
         }
-    }
-
-    internal bool IsLastAttempt(int attempt, out bool incrementAttempts)
-    {
-        if (attempt == int.MaxValue)
-        {
-            incrementAttempts = false;
-            return false;
-        }
-
-        incrementAttempts = true;
-        return attempt >= RetryCount;
     }
 }

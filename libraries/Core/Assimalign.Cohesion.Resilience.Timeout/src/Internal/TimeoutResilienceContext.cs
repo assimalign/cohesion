@@ -5,7 +5,7 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal class TimeoutResilienceContext : ResilienceContext
+internal class TimeoutResilienceContext : IResilienceContext
 {
     private readonly CancellationToken _cancellationToken;
 
@@ -16,7 +16,8 @@ internal class TimeoutResilienceContext : ResilienceContext
         OperationKey = operationKey;
     }
 
-    public override bool ContinueOnCapturedContext { get; }
-    public override OperationKey? OperationKey { get; }
-    public override CancellationToken CancellationToken =>  _cancellationToken;
+    public bool ContinueOnCapturedContext { get; }
+    public OperationKey? OperationKey { get; }
+    public CancellationToken CancellationToken =>  _cancellationToken;
+    public IServiceProvider? ServiceProvider => throw new NotImplementedException();
 }

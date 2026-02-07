@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 
 namespace Assimalign.Cohesion.Resilience;
@@ -7,9 +9,11 @@ namespace Assimalign.Cohesion.Resilience;
 /// A sum type representing a either a <typeparamref name="TResult"/> or <see cref="=Exception"/>.
 /// </summary>
 /// <typeparam name="TResult"></typeparam>
+[DebuggerDisplay("Outcome: {ToString()}")]
+//[DebuggerTypeProxy(typeof(DebuggerView))]
 public readonly struct Outcome<TResult> : IEither
 {
-    private readonly int _typeIndex;
+    private readonly int _typeIndex = -1;
     private readonly object? _typeValue;
 
     public Outcome(TResult value)
@@ -36,11 +40,73 @@ public readonly struct Outcome<TResult> : IEither
     TResult AsT1 => (TResult)_typeValue!;
     Exception AsT2 => ((ExceptionDispatchInfo)_typeValue!).SourceException;
 
+    /// <summary>
+    /// Determines whether the current result represents a successful outcome.
+    /// </summary>
+    /// <returns>true if the result is successful; otherwise, false.</returns>
+    public bool IsSuccess()
+    {
+        return _typeIndex == 1;
+    }
 
     /// <summary>
     /// Gets a value indicating whether the operation completed successfully.
     /// </summary>
-    public bool IsSuccess => _typeIndex == 1;
+    public bool IsSuccess([NotNullWhen(true)] out TResult result)
+    {
+        result = default!;
+        if (_typeIndex == 2)
+        {
+            result = AsT1!;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public bool IsFailure([NotNullWhen(true)] out Exception? exception)
+    {
+        exception = null;
+        if (_typeIndex == 2)
+        {
+            exception = AsT2;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="TException"></typeparam>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public bool IsFailure<TException>([NotNullWhen(true)] out TException? exception) where TException : Exception
+    {
+        exception = null;
+        if (_typeIndex == 2 && AsT2 is TException ex)
+        {
+            exception = ex;
+            return true;
+        }
+        return false;
+    }
+
+    public bool IsFailure([NotNullWhen(true)] out ExceptionDispatchInfo? dispatchInfo)
+    {
+        dispatchInfo = null;
+
+        if (_typeIndex == 2)
+        {
+            dispatchInfo = ((ExceptionDispatchInfo)_typeValue!);
+        }
+
+        return dispatchInfo is not null;
+    }
 
     /// <summary>
     /// 
@@ -92,9 +158,9 @@ public readonly struct Outcome<TResult> : IEither
     /// </summary>
     public void ThrowIfException()
     {
-        if (!IsSuccess && _typeIndex == 2)
+        if (_typeIndex == 2)
         {
-            throw ((Exception)this);
+            ((ExceptionDispatchInfo)_typeValue!).Throw();
         }
     }
 
@@ -108,94 +174,4 @@ public readonly struct Outcome<TResult> : IEither
     public static implicit operator Outcome<TResult>(Exception value) => new Outcome<TResult>(value);
     public static explicit operator TResult(Outcome<TResult> either) => either.AsT1;
     public static explicit operator Exception(Outcome<TResult> either) => either.AsT2;
-
-    
-
-    //public ValueEither<T1, TResult2> Match<TResult2>(Func<T2, TResult2> ifT2) => _typeIndex switch
-    //{
-    //    1 => AsT1,
-    //    2 => ifT2(AsT2),
-    //    _ => throw new InvalidOperationException()
-    //};
-
-
-    //public ValueEither<TResult1, T2> Match<TResult1>(Func<T1, ValueEither<TResult1, T2>> ifT1) => _typeIndex switch
-    //{
-    //    1 => ifT1(AsT1),
-    //    2 => AsT2,
-    //    _ => throw new InvalidOperationException()
-    //};
-    //public ValueEither<T1, TResult2> Match<TResult2>(Func<T2, ValueEither<T1, TResult2>> ifT2) => _typeIndex switch
-    //{
-    //    1 => AsT1,
-    //    2 => ifT2(AsT2),
-    //    _ => throw new InvalidOperationException()
-    //};
-
-
-    //public T2 Match
-    //    (Func<T1, T2> ifT1) => _typeIndex switch
-    //    {
-    //        1 => ifT1(AsT1),
-    //        2 => AsT2,
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public ValueEither<T1, T2> Match
-    //    (Func<T1, T2> ifT1, Func<T1, bool> when) => _typeIndex switch
-    //    {
-    //        1 when (when(AsT1)) => ifT1(AsT1),
-    //        2 => AsT2,
-    //        1 => AsT1,
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public T1 Match
-    //    (Func<T2, T1> ifT2) => _typeIndex switch
-    //    {
-    //        1 => AsT1,
-    //        2 => ifT2(AsT2),
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public ValueEither<T1, T2> Match
-    //    (Func<T2, T1> ifT2, Func<T2, bool> when) => _typeIndex switch
-    //    {
-    //        1 => AsT1,
-    //        2 when (when(AsT2)) => ifT2(AsT2),
-    //        2 => AsT2,
-    //        _ => throw new InvalidOperationException()
-    //    };
-
-    //public T2 ThrowIf
-    //    (Func<T1, Exception> ifT1) => _typeIndex switch
-    //    {
-    //        1 => throw ifT1(AsT1),
-    //        2 => AsT2,
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public ValueEither<T1, T2> ThrowIf
-    //    (Func<T1, Exception> ifT1, Func<T1, bool> when) => _typeIndex switch
-    //    {
-    //        1 when (when(AsT1)) => throw ifT1(AsT1),
-    //        2 => AsT2,
-    //        1 => AsT1,
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public T1 ThrowIf
-    //    (Func<T2, Exception> ifT2) => _typeIndex switch
-    //    {
-    //        1 => AsT1,
-    //        2 => throw ifT2(AsT2),
-    //        _ => throw new InvalidOperationException()
-    //    };
-    //public ValueEither<T1, T2> ThrowIf
-    //    (Func<T2, Exception> ifT2, Func<T2, bool> when) => _typeIndex switch
-    //    {
-    //        1 => AsT1,
-    //        2 when (when(AsT2)) => throw ifT2(AsT2),
-    //        2 => AsT2,
-    //        _ => throw new InvalidOperationException()
-    //    };
-
-
-    
-    
 }

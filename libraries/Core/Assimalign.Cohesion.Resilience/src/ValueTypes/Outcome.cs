@@ -12,19 +12,19 @@ namespace Assimalign.Cohesion.Resilience;
 [DebuggerTypeProxy(typeof(DebuggerView))]
 public readonly struct Outcome : IEither
 {
-    private readonly int _typeIndex;
+    private readonly int _typeIndex = -1;
     private readonly object? _typeValue;
 
     public Outcome(bool isSuccess)
     {
-        _typeValue = isSuccess;
         _typeIndex = 1;
+        _typeValue = isSuccess;
     }
 
     public Outcome(Exception exception)
     {
-        _typeValue = ExceptionDispatchInfo.Capture(exception);
         _typeIndex = 2;
+        _typeValue = ExceptionDispatchInfo.Capture(exception);
     }
 
     int IEither.TypeIndex => _typeIndex;
@@ -38,24 +38,13 @@ public readonly struct Outcome : IEither
     bool AsT1 => (bool)_typeValue!;
     Exception AsT2 => ((ExceptionDispatchInfo)_typeValue!).SourceException;
 
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
-    public static Outcome Success() => true;
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="exception"></param>
-    /// <returns></returns>
-    public static Outcome Failure(Exception exception) => exception; 
-
     /// <summary>
     /// Gets a value indicating whether the operation completed successfully.
     /// </summary>
-    public bool IsSuccess() => _typeIndex == 1;
+    public bool IsSuccess()
+    {
+        return _typeIndex == 1;
+    }
 
     /// <summary>
     /// 
@@ -69,10 +58,9 @@ public readonly struct Outcome : IEither
         if (_typeIndex == 2)
         {
             exception = AsT2;
-            return true;
         }
 
-        return false;
+        return exception is not null;
     }
 
     /// <summary>
@@ -85,13 +73,24 @@ public readonly struct Outcome : IEither
     {
         exception = null;
 
-        if (_typeIndex == 2 && AsT2 is TException ex)
+        if (_typeIndex == 2 && AsT2 is TException exception1)
         {
-            exception = ex;
-            return true;
+            exception = exception1;
         }
 
-        return false;
+        return exception is not null;
+    }
+
+    public bool IsFailure([NotNullWhen(true)] out ExceptionDispatchInfo? dispatchInfo)
+    {
+        dispatchInfo = null;
+
+        if (_typeIndex == 2)
+        {
+            dispatchInfo = ((ExceptionDispatchInfo)_typeValue!);
+        }
+
+        return dispatchInfo is not null;
     }
 
     /// <summary>
@@ -112,32 +111,31 @@ public readonly struct Outcome : IEither
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="ifTResult"></param>
+    /// <param name="ifSuccess"></param>
     /// <param name="ifException"></param>
     /// <exception cref="InvalidOperationException"></exception>
-    public void Switch(Action<bool> ifTResult, Action<Exception> ifException)
+    public void Switch(Action<bool> ifSuccess, Action<Exception> ifException)
     {
         switch (_typeIndex)
         {
-            case 1: ifTResult(AsT1); break;
+            case 1: ifSuccess(AsT1); break;
             case 2: ifException(AsT2); break;
             default: throw new InvalidOperationException();
         }
     }
-
 
     /// <summary>
     /// 
     /// </summary>
     public void ThrowIfException()
     {
-        if (IsFailure(out Exception? exception))
+        if (_typeIndex == 2)
         {
-            throw exception;
+            ((ExceptionDispatchInfo)_typeValue!).Throw();
         }
     }
 
-
+    /// <inheritdoc />
     public override string ToString()
     {
         if (IsFailure(out Exception? exception))
@@ -148,6 +146,19 @@ public readonly struct Outcome : IEither
         return "Success";
     }
 
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public static Outcome Success => true;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="exception"></param>
+    /// <returns></returns>
+    public static Outcome Failure(Exception exception) => exception;
 
     public static implicit operator Outcome(bool value) => new Outcome(value);
     public static implicit operator Outcome(Exception value) => new Outcome(value);
