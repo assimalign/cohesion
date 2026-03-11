@@ -5,4 +5,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\Assimalign.Cohesion.Resilience\src\Internal\Shared\ResilienceContextExtensions.Utilities.cs" Link="Internal\Shared\ResilienceContextExtensions.Utilities.cs" />
+	</ItemGroup>
 </Project>

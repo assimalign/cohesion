@@ -1,0 +1,71 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.Database.Sql.Internal;
+
+using Assimalign.Cohesion.Database.Sql.Storage;
+
+/// <summary>
+/// Internal implementation of a SQL database instance.
+/// </summary>
+internal sealed class SqlDatabaseInstance : ISqlDatabase
+{
+    private readonly SqlStorage _storage;
+    private bool _disposed;
+
+    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage)
+    {
+        Name = name;
+        Engine = engine;
+        _storage = storage;
+    }
+
+    /// <inheritdoc />
+    public DatabaseName Name { get; }
+
+    /// <inheritdoc />
+    public IDatabaseEngine Engine { get; }
+
+    /// <inheritdoc />
+    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var journal = _storage.GetJournalLogger();
+        var executor = new SqlQueryExecutor(_storage, journal);
+        var session = new SqlDatabaseSession(this, _storage, executor);
+
+        return new ValueTask<IDatabaseSession>(session);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _storage.Dispose();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        await _storage.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+}

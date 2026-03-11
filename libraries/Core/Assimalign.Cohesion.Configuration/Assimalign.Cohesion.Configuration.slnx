@@ -1,8 +1,29 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.Configuration.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.Configuration.Tests.csproj" />
-  </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.Configuration/">
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Configuration/assets/">
+		<File Path="assets/configuration-sample.json" />
+		<File Path="assets/configuration-sample.xml" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Configuration/docs/">
+		<File Path="docs/Design.md" />
+		<File Path="docs/Overview.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Configuration/docs/Assembly/" />
+	<Folder Name="/Assimalign.Cohesion.Configuration/docs/Assembly/Assimalign.Cohesion.Configuration/" />
+	<Folder Name="/Assimalign.Cohesion.Configuration/src/">
+		<Project Path="src/Assimalign.Cohesion.Configuration.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Configuration/tests/">
+		<Project Path="tests/Assimalign.Cohesion.Configuration.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Configuration/refs/" >
+		<Project Path="../Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

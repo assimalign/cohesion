@@ -3,17 +3,18 @@
 namespace Assimalign.Cohesion.Configuration;
 
 /// <summary>
-/// Represents a single configuration entry.
+///  <see cref="IConfigurationEntry"/> represents the base for IConfigurationSection and IConfigurationValue which 
+///  enables hierarchical configuration.
 /// </summary>
 public interface IConfigurationEntry
 {
     /// <summary>
-    /// The entry key.
+    /// The key of the entry.
     /// </summary>
     Key Key { get; }
 
     /// <summary>
-    /// The complete path of the entry.
+    /// The full path of the entry.
     /// </summary>
     Path Path { get; }
 

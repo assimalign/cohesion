@@ -86,8 +86,6 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
 
             return exception2;
         });
-
-        return this;
     }
 
     /// <summary>

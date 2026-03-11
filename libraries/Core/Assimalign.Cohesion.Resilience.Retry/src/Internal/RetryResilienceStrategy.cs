@@ -37,25 +37,33 @@ internal sealed class RetryResilienceStrategy : RetryResilienceStrategyBase, IRe
 
         while (true)
         {
-            Outcome outcome;
-            long startTimestamp = TimeProvider.GetTimestamp();
+            // Softly check if the pipeline has been cancelled
+            if (context.IsPipelineCancelled(out OperationCanceledException? cancelled))
+            {
+                return cancelled;
+            }
+
+            Outcome outcome = Outcome.Success;
+
+            long timestamp = TimeProvider.GetTimestamp();
 
             try
             {
                 await callback.Invoke(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
-
-                outcome = Outcome.Success();
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                outcome = new Outcome(ex);
+                outcome = exception;
             }
 
-            RetryPredicateArguments shouldRetryArgs = new RetryPredicateArguments(context, outcome, attempt);
-            bool handle = await Retry.Invoke(shouldRetryArgs).ConfigureAwait(context.ContinueOnCapturedContext);
-            TimeSpan executionTime = TimeProvider.GetElapsedTime(startTimestamp);
+            TimeSpan executionTime = TimeProvider.GetElapsedTime(timestamp);
 
-            if (IsLastAttempt(attempt, out bool incrementAttempts) || !handle)
+            // Check if the callback should be retried
+            bool retry = await Retry
+                .Invoke(new RetryPredicateArguments(context, outcome, attempt))
+                .ConfigureAwait(context.ContinueOnCapturedContext);
+
+            if (IsLastAttempt(attempt, out bool incrementAttempts) || !retry)
             {
                 //    TelemetryUtil.ReportFinalExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
                 return outcome;
@@ -92,9 +100,6 @@ internal sealed class RetryResilienceStrategy : RetryResilienceStrategyBase, IRe
             //}
             try
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                // stryker disable once all : no means to test this
                 if (delay > TimeSpan.Zero)
                 {
                     await TimeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);

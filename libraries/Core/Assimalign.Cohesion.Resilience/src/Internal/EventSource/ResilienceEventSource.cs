@@ -23,12 +23,3 @@ internal class ResilienceEventSource : EventSource
     }
 }
 
-
-public static class ResilienceAppEnvironment
-{
-
-    extension(ResilienceEventSource environment)
-    {
-        
-    }
-}

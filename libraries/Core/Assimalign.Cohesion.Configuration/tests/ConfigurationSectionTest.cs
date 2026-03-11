@@ -44,7 +44,7 @@ namespace Assimalign.Cohesion.Configuration.Tests
             }
 
             public override string Name => throw new NotImplementedException();
-            public override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+            protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
             {
                 entries["Azure:Identity:ClientSecret"] = "asdflkajdsf";
                 entries["Azure:Identity:ClientId"] = Guid.NewGuid().ToString();

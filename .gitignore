@@ -3,7 +3,10 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# Extensions & Local Tooling
 *.obsidian
+*.claude
+CLAUDE.md
 .nuke/temp
 .linqpad
 scripts/**/*.txt

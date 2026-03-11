@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,7 +18,7 @@ public sealed class ConfigurationManager : IConfigurationManager
     private readonly ConfigurationBuilderContext _context;
     private readonly Dictionary<string, object> _properties;
 
-    private ConfigurationRoot _root;
+    private Configuration _root;
     private bool _isDisposed;
 
     /// <summary>
@@ -30,7 +31,7 @@ public sealed class ConfigurationManager : IConfigurationManager
         _lock = new Lock();
         _options = options;
         _properties = new Dictionary<string, object>();
-        _root = new ConfigurationRoot(options);
+        _root = new Configuration(options);
         _context = new ConfigurationBuilderContext(options.Providers);
     }
 
@@ -63,14 +64,26 @@ public sealed class ConfigurationManager : IConfigurationManager
     {
         ArgumentNullException.ThrowIfNull(configure);
 
+        using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource(_options.LoadTimeout);
+
         try
         {
-            IConfigurationProvider provider = configure.Invoke(_context)
+            CancellationToken cancellationToken = cancellationTokenSource.Token;
+            ConfiguredTaskAwaitable<IConfigurationProvider>.ConfiguredTaskAwaiter awaiter = configure.Invoke(_context)
                 .ConfigureAwait(false)
-                .GetAwaiter()
-                .GetResult();
+                .GetAwaiter();
 
-            ArgumentNullException.ThrowIfNull(provider);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (awaiter.IsCompleted)
+                {
+                    break;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            IConfigurationProvider provider = awaiter.GetResult();
 
             lock (_lock)
             {
@@ -107,7 +120,7 @@ public sealed class ConfigurationManager : IConfigurationManager
 
     public IEnumerator<IConfigurationEntry> GetEnumerator()
     {
-        lock(_lock)
+        lock (_lock)
         {
             return _root.GetEnumerator();
         }
@@ -127,23 +140,13 @@ public sealed class ConfigurationManager : IConfigurationManager
         throw new NotImplementedException();
     }
 
-    IConfigurationBuilder IConfigurationBuilder.AddProvider(IConfigurationProvider provider)
+    IConfigurationManager IConfigurationManager.AddProvider(IConfigurationProvider provider)
     {
         return AddProvider(_ => provider);
     }
 
-    IConfigurationBuilder IConfigurationBuilder.AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider)
+    IConfigurationManager IConfigurationManager.AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider)
     {
         return AddProvider(provider);
-    }
-
-    IConfigurationRoot IConfigurationBuilder.Build()
-    {
-        return this;
-    }
-
-    ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
-    {
-        return ValueTask.FromResult<IConfigurationRoot>(this);
     }
 }

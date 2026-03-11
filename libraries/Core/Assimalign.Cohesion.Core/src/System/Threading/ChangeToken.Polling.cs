@@ -42,7 +42,7 @@ public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
     }
 
 
-    public virtual IDisposable OnChange(Action<object> callback, object state)
+    public virtual IDisposable OnChange(Action<object?> callback, object? state)
     {
         if (callback is not Action<T>)
         {

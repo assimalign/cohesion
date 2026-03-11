@@ -17,8 +17,11 @@ public interface IResilienceContext
     OperationKey OperationKey { get; }
 
     /// <summary>
-    /// Gets the <see cref="CancellationToken"/> associated with the execution.
+    /// Gets the <see cref="CancellationToken"/> associated with the execution of a given pipeline. 
     /// </summary>
+    /// <remarks>
+    /// This cancellation token should be used as a way to cancel the overall pipeline. 
+    /// </remarks>
     CancellationToken CancellationToken { get; }
 
     /// <summary>

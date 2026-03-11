@@ -9,8 +9,9 @@ namespace Assimalign.Cohesion.Configuration.Internal;
 /// <summary>
 /// 
 /// </summary>
-[DebuggerDisplay("{Key} = {Value}")]
-internal class ConfigurationValue : ConfigurationEntry, IConfigurationValue
+[DebuggerDisplay("(V) {Key}: {Value}")]
+[DebuggerTypeProxy(typeof(DebuggerView))]
+internal sealed class ConfigurationValue : ConfigurationEntry, IConfigurationValue
 {
     private readonly Lock _lock;
 
@@ -34,7 +35,7 @@ internal class ConfigurationValue : ConfigurationEntry, IConfigurationValue
         get => _value;
         set
         {
-            ObjectDisposedException.ThrowIf(_isReadOnly, "The configuration value is read-only.");
+            InvalidOperationException.ThrowIf(_isReadOnly, "The configuration value is read-only.");
 
             lock (_lock)
             {
@@ -42,9 +43,6 @@ internal class ConfigurationValue : ConfigurationEntry, IConfigurationValue
             }
         }
     }
-
-
-
 
 
     /// <summary>
@@ -63,5 +61,18 @@ internal class ConfigurationValue : ConfigurationEntry, IConfigurationValue
     public static implicit operator string?(ConfigurationValue value)
     {
         return value.Value;
+    }
+
+    partial class DebuggerView
+    {
+        private readonly ConfigurationValue _value;
+        public DebuggerView(ConfigurationValue value)
+        {
+            _value = value;
+        }
+
+        public Key Key => _value.Key;
+        public Path Path => _value.Path;
+        public string? Value => _value.Value;
     }
 }

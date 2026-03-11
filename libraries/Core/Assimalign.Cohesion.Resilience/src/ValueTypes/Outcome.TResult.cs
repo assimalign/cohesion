@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Resilience;
 /// A sum type representing a either a <typeparamref name="TResult"/> or <see cref="=Exception"/>.
 /// </summary>
 /// <typeparam name="TResult"></typeparam>
-[DebuggerDisplay("Outcome: {ToString()}")]
-//[DebuggerTypeProxy(typeof(DebuggerView))]
+[DebuggerDisplay("{ToString()}")]
+[DebuggerTypeProxy(typeof(Outcome<>.DebuggerView))]
 public readonly struct Outcome<TResult> : IEither
 {
     private readonly int _typeIndex = -1;
@@ -18,16 +18,17 @@ public readonly struct Outcome<TResult> : IEither
 
     public Outcome(TResult value)
     {
-        _typeValue = value;
         _typeIndex = 1;
+        _typeValue = value;
     }
 
-    public Outcome(Exception value)
+    public Outcome(Exception exception)
     {
-        _typeValue = ExceptionDispatchInfo.Capture(value);
-        _typeIndex = 2;
-    }
+        ArgumentNullException.ThrowIfNull(exception);
 
+        _typeIndex = 2;
+        _typeValue = ExceptionDispatchInfo.Capture(exception);
+    }
 
     int IEither.TypeIndex => _typeIndex;
     Type IEither.Type => _typeIndex switch
@@ -52,10 +53,10 @@ public readonly struct Outcome<TResult> : IEither
     /// <summary>
     /// Gets a value indicating whether the operation completed successfully.
     /// </summary>
-    public bool IsSuccess([NotNullWhen(true)] out TResult result)
+    public bool IsSuccess([NotNullWhen(true)] out TResult? result)
     {
         result = default!;
-        if (_typeIndex == 2)
+        if (_typeIndex == 1)
         {
             result = AsT1!;
             return true;
@@ -66,17 +67,27 @@ public readonly struct Outcome<TResult> : IEither
     /// <summary>
     /// 
     /// </summary>
+    /// <returns></returns>
+    public bool IsFailure()
+    {
+        return _typeIndex == 2;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
     /// <param name="exception"></param>
     /// <returns></returns>
     public bool IsFailure([NotNullWhen(true)] out Exception? exception)
     {
         exception = null;
+
         if (_typeIndex == 2)
         {
             exception = AsT2;
-            return true;
         }
-        return false;
+
+        return exception is not null;
     }
 
     /// <summary>
@@ -88,67 +99,62 @@ public readonly struct Outcome<TResult> : IEither
     public bool IsFailure<TException>([NotNullWhen(true)] out TException? exception) where TException : Exception
     {
         exception = null;
-        if (_typeIndex == 2 && AsT2 is TException ex)
-        {
-            exception = ex;
-            return true;
-        }
-        return false;
-    }
 
-    public bool IsFailure([NotNullWhen(true)] out ExceptionDispatchInfo? dispatchInfo)
-    {
-        dispatchInfo = null;
-
-        if (_typeIndex == 2)
+        if (_typeIndex == 2 && AsT2 is TException exception1)
         {
-            dispatchInfo = ((ExceptionDispatchInfo)_typeValue!);
+            exception = exception1;
         }
 
-        return dispatchInfo is not null;
+        return exception is not null;
     }
 
     /// <summary>
     /// 
     /// </summary>
     /// <typeparam name="T"></typeparam>
-    /// <param name="match1"></param>
-    /// <param name="match2"></param>
+    /// <param name="onSuccess"></param>
+    /// <param name="onFailure"></param>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    public T Match<T>(Func<TResult, T> match1, Func<Exception, T> match2) => _typeIndex switch
+    public T Match<T>(Func<TResult, T> onSuccess, Func<Exception, T> onFailure)
     {
-        1 => match1.Invoke(AsT1),
-        2 => match2.Invoke(AsT2),
-        _ => throw new InvalidOperationException()
-    };
+        return _typeIndex switch
+        {
+            1 => onSuccess.Invoke(AsT1),
+            2 => onFailure.Invoke(AsT2),
+            _ => throw new InvalidOperationException()
+        };
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <typeparam name="TResult1"></typeparam>
-    /// <param name="ifT1"></param>
+    /// <param name="onSuccess"></param>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    public Outcome<TResult1> Match<TResult1>(Func<TResult, TResult1> ifT1) => _typeIndex switch
+    public Outcome<TResult1> Match<TResult1>(Func<TResult, TResult1> onSuccess)
     {
-        1 => ifT1(AsT1),
-        2 => AsT2,
-        _ => throw new InvalidOperationException()
-    };
+        return _typeIndex switch
+        {
+            1 => onSuccess(AsT1),
+            2 => AsT2,
+            _ => throw new InvalidOperationException()
+        };
+    }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="ifTResult"></param>
-    /// <param name="ifException"></param>
+    /// <param name="onSuccess"></param>
+    /// <param name="onFailure"></param>
     /// <exception cref="InvalidOperationException"></exception>
-    public void Switch(Action<TResult> ifTResult, Action<Exception> ifException)
+    public void Switch(Action<TResult> onSuccess, Action<Exception> onFailure)
     {
         switch (_typeIndex)
         {
-            case 1: ifTResult(AsT1); break;
-            case 2: ifException(AsT2); break;
+            case 1: onSuccess(AsT1); break;
+            case 2: onFailure(AsT2); break;
             default: throw new InvalidOperationException();
         }
     }
@@ -167,11 +173,58 @@ public readonly struct Outcome<TResult> : IEither
     /// <inheritdoc />
     public override string ToString()
     {
-        return $"{(this as IEither)?.Type?.Name}:{_typeValue}";
+        if (IsFailure())
+        {
+            return "Failure: " + _typeValue!.GetType().Name;
+        }
+
+        if (IsSuccess())
+        {
+            return "Success: " + _typeValue!.GetType().Name;
+        }
+
+        return "Outcome: none";
     }
 
-    public static implicit operator Outcome<TResult>(TResult value) => new Outcome<TResult>(value);
-    public static implicit operator Outcome<TResult>(Exception value) => new Outcome<TResult>(value);
-    public static explicit operator TResult(Outcome<TResult> either) => either.AsT1;
-    public static explicit operator Exception(Outcome<TResult> either) => either.AsT2;
+    public static implicit operator Outcome<TResult>(TResult value)
+    {
+        return new Outcome<TResult>(value);
+    }
+
+    public static implicit operator Outcome<TResult>(Exception value)
+    {
+        return new Outcome<TResult>(value);
+    }
+
+    public static explicit operator TResult(Outcome<TResult> either)
+    {
+        return either.AsT1;
+    }
+
+    public static explicit operator Exception(Outcome<TResult> either)
+    {
+        return either.AsT2;
+    }
+
+
+
+    partial class DebuggerView
+    {
+        public DebuggerView(Outcome<TResult> outcome)
+        {
+            if (outcome.IsFailure(out Exception? exception))
+            {
+                Exception = exception;
+            }
+
+            if (outcome.IsSuccess(out TResult? result))
+            {
+                Result = result;
+            }
+        }
+
+        public bool IsSuccess => Exception is null;
+        public TResult? Result { get; }
+        public Exception? Exception { get; }
+    }
 }

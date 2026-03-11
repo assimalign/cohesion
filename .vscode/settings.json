@@ -35,5 +35,8 @@
         "**/.github/workflows/**/*.yml": "github-actions-workflow"
     },
     "dotnet.preferCSharpExtension": true,
-    "dotnet.defaultSolution": "Assimalign.Cohesion.sln"
+    "dotnet.defaultSolution": "Assimalign.Cohesion.sln",
+    "chat.tools.terminal.autoApprove": {
+        "ForEach-Object": true
+    }
 }

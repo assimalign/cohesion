@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 
@@ -8,6 +9,7 @@ internal static class TypeHelper
 {
     extension(Assembly assembly)
     {
+        [RequiresUnreferencedCode("Calls System.Reflection.Assembly.GetType(String)")]
         public Type Resolve(string name, string ns = "")
         {
             Type? type;

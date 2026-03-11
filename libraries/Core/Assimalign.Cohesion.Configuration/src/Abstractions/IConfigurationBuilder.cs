@@ -28,7 +28,7 @@ public interface IConfigurationBuilder
     /// the providers. "<see cref="IConfigurationProvider.Load"/>"
     /// </summary>
     /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered sources.</returns>
-    IConfigurationRoot Build();
+    IConfiguration Build();
 
     /// <summary>
     /// Asynchronously builds the <see cref="IConfigurationRoot"/> by loading 
@@ -36,5 +36,5 @@ public interface IConfigurationBuilder
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask<IConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default);
+    ValueTask<IConfiguration> BuildAsync(CancellationToken cancellationToken = default);
 }

@@ -11,6 +11,14 @@ namespace Assimalign.Cohesion.Configuration;
 [JsonConverter(typeof(KeyJsonConverter))]
 public readonly struct Key : IEquatable<Key>, IComparable<Key>
 {
+    public readonly string _value;
+
+
+    public Key(string value) : this(value.AsSpan())
+    {
+        
+    }
+
     /// <summary>
     /// 
     /// </summary>
@@ -23,18 +31,18 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
             span.ContainsAny(Path.Delimiters),
             $"Key value cannot have any path delimiters: {string.Join(',', [.. Path.Delimiters])}");
 
-        Value = new string(span);
+        _value = new string(span);
     }
 
     /// <summary>
     /// The raw key value.
     /// </summary>
-    public string Value { get; }
+    
 
     /// <summary>
     /// Checks whether the key is empty.
     /// </summary>
-    public bool IsEmpty => string.IsNullOrEmpty(Value);
+    public bool IsEmpty => string.IsNullOrEmpty(_value);
 
     /// <summary>
     /// 
@@ -42,7 +50,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public ReadOnlySpan<char> AsSpan()
     {
-        return Value.AsSpan();
+        return _value.AsSpan();
     }
 
     /// <summary>
@@ -95,12 +103,12 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public bool StartsWith(Key other, KeyComparison comparison)
     {
-        if (other.Value.Length > Value.Length)
+        if (other._value.Length > _value.Length)
         {
             return false;
         }
 
-        return Value.StartsWith(other.Value, (StringComparison)comparison);
+        return _value.StartsWith(other._value, (StringComparison)comparison);
     }
 
     public bool EndsWith(Key other)
@@ -110,11 +118,11 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
 
     public bool EndsWith(Key other, KeyComparison comparison)
     {
-        if (other.Value.Length > Value.Length)
+        if (other._value.Length > _value.Length)
         {
             return false;
         }
-        return Value.EndsWith(other.Value, (StringComparison)comparison);
+        return _value.EndsWith(other._value, (StringComparison)comparison);
     }
 
     /// <summary>
@@ -154,10 +162,20 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <summary>
     /// 
     /// </summary>
+    /// <param name="comparison"></param>
+    /// <returns></returns>
+    public int GetHashCode(KeyComparison comparison)
+    {
+        return _value.GetHashCode((StringComparison)comparison);
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
     /// <returns></returns>
     public override string ToString()
     {
-        return Value;
+        return _value;
     }
 
     /// <summary>
@@ -166,7 +184,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public override int GetHashCode()
     {
-        return Value.GetHashCode();
+        return _value.GetHashCode();
     }
 
     /// <summary>

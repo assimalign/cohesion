@@ -35,14 +35,18 @@ internal sealed class RetryResilienceStrategy<TResult> : RetryResilienceStrategy
 
         while (true)
         {
+            // Softly check if the pipeline has been cancelled
+            if (context.IsPipelineCancelled(out OperationCanceledException? cancelled))
+            {
+                return cancelled;
+            }
+
             Outcome<TResult> outcome;
 
             long timestamp = TimeProvider.GetTimestamp();
 
             try
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
                 outcome = await callback(context, state).ConfigureAwait(context.ContinueOnCapturedContext);
             }
             catch (Exception exception)
@@ -50,14 +54,15 @@ internal sealed class RetryResilienceStrategy<TResult> : RetryResilienceStrategy
                 outcome = exception;
             }
 
-            // Check whether the 
-            bool shouldRetry = await Retry.Invoke(new RetryPredicateArguments<TResult>(context, outcome, attempt))
-                .ConfigureAwait(context.ContinueOnCapturedContext);
-            
             // Set Execution Time
             TimeSpan executionTime = TimeProvider.GetElapsedTime(timestamp);
 
-            if (IsLastAttempt(attempt, out bool incrementAttempts) || !shouldRetry)
+            // Check whether the the callback should be retried 
+            bool retry = await Retry
+                .Invoke(new RetryPredicateArguments<TResult>(context, outcome, attempt))
+                .ConfigureAwait(context.ContinueOnCapturedContext);
+
+            if (IsLastAttempt(attempt, out bool incrementAttempts) || !retry)
             {
                 //    TelemetryUtil.ReportFinalExecutionAttempt(_telemetry, context, outcome, attempt, executionTime, handle);
                 return outcome;
@@ -71,7 +76,8 @@ internal sealed class RetryResilienceStrategy<TResult> : RetryResilienceStrategy
             
             if (DelayGenerator is not null)
             {
-                TimeSpan? span = await DelayGenerator.Invoke(new RetryDelayGeneratorArguments<TResult>(context, outcome, attempt))
+                TimeSpan? span = await DelayGenerator
+                    .Invoke(new RetryDelayGeneratorArguments<TResult>(context, outcome, attempt))
                     .ConfigureAwait(false);
 
                 if (span is TimeSpan newDelay && RetryHelper.IsValidDelay(newDelay))
@@ -96,9 +102,6 @@ internal sealed class RetryResilienceStrategy<TResult> : RetryResilienceStrategy
             //}
             try
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                // stryker disable once all : no means to test this
                 if (delay > TimeSpan.Zero)
                 {
                     await TimeProvider.DelayAsync(delay, context).ConfigureAwait(context.ContinueOnCapturedContext);

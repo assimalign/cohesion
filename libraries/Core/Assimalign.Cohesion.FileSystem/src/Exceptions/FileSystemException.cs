@@ -4,6 +4,8 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.FileSystem;
 
+using Properties;
+
 public class FileSystemException : SystemException
 {
     public FileSystemException(string message) 
@@ -39,10 +41,10 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] DirectoryNotFoundException? innerException = null)
     {
-        var message = string.Format("The directory does not exist `{0}`.", path);        
+        var message = string.Format(ErrorMessages.DirectoryNotFound, path);        
         throw new FileSystemException(
-            FileSystemErrorCode.NotFound,
-            message,
+            code: FileSystemErrorCode.NotFound,
+            message: message,
             innerException ?? new DirectoryNotFoundException(message));
     }
 
@@ -57,7 +59,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] FileNotFoundException? innerException = null)
     {
-        var message = string.Format("The file does not exist `{0}`.", path);
+        var message = string.Format(ErrorMessages.FileNotFound, path);
         throw new FileSystemException(
             FileSystemErrorCode.NotFound,
             message,
@@ -75,7 +77,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format("The provided path is too long `{0}`.", path);
+        var message = string.Format(ErrorMessages.PathTooLong, path);
         throw new FileSystemException(
             FileSystemErrorCode.PathTooLong,
             message,
@@ -93,7 +95,7 @@ public class FileSystemException : SystemException
         [NotNull] FileSystemPath path,
         [AllowNull] Exception? innerException = null)
     {
-        var message = string.Format("Access to the path is denied `{0}`.", path);
+        var message = string.Format(ErrorMessages.AccessDeniedToPath, path);
         throw new FileSystemException(
             FileSystemErrorCode.AccessDenied,
             message,
@@ -146,7 +148,7 @@ public class FileSystemException : SystemException
     {
         throw new FileSystemException(
             FileSystemErrorCode.NotEnoughSpace,
-            "Unable to carry out operation. The file system does not have enough space.",
+            ErrorMessages.NotEnoughSpace,
             innerException);
     }
 }

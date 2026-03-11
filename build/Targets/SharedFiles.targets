@@ -1,4 +1,5 @@
 <Project>
+    <!-- DON'T USE. THIS IS NOT READY -->
     <!-- 
         <CohesionSharedFile 
             Include="{ The Project name. Exclude '.csproj' }"

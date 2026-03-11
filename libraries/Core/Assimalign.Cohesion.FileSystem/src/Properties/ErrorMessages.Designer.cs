@@ -59,5 +59,50 @@ namespace Assimalign.Cohesion.FileSystem.Properties {
                 resourceCulture = value;
             }
         }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Access to the path is denied `{0}`..
+        /// </summary>
+        internal static string AccessDeniedToPath {
+            get {
+                return ResourceManager.GetString("AccessDeniedToPath", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The directory does not exist `{0}`..
+        /// </summary>
+        internal static string DirectoryNotFound {
+            get {
+                return ResourceManager.GetString("DirectoryNotFound", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The file does not exist `{0}`..
+        /// </summary>
+        internal static string FileNotFound {
+            get {
+                return ResourceManager.GetString("FileNotFound", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Unable to carry out operation. The file system does not have enough space..
+        /// </summary>
+        internal static string NotEnoughSpace {
+            get {
+                return ResourceManager.GetString("NotEnoughSpace", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The provided path is too long `{0}`..
+        /// </summary>
+        internal static string PathTooLong {
+            get {
+                return ResourceManager.GetString("PathTooLong", resourceCulture);
+            }
+        }
     }
 }

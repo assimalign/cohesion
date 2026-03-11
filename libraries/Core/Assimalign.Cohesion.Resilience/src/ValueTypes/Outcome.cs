@@ -15,7 +15,7 @@ public readonly struct Outcome : IEither
     private readonly int _typeIndex = -1;
     private readonly object? _typeValue;
 
-    public Outcome(bool isSuccess)
+    Outcome(bool isSuccess)
     {
         _typeIndex = 1;
         _typeValue = isSuccess;
@@ -23,6 +23,8 @@ public readonly struct Outcome : IEither
 
     public Outcome(Exception exception)
     {
+        ArgumentNullException.ThrowIfNull(exception);
+
         _typeIndex = 2;
         _typeValue = ExceptionDispatchInfo.Capture(exception);
     }
@@ -44,6 +46,15 @@ public readonly struct Outcome : IEither
     public bool IsSuccess()
     {
         return _typeIndex == 1;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <returns></returns>
+    public bool IsFailure()
+    {
+        return _typeIndex == 2;
     }
 
     /// <summary>
@@ -81,45 +92,36 @@ public readonly struct Outcome : IEither
         return exception is not null;
     }
 
-    public bool IsFailure([NotNullWhen(true)] out ExceptionDispatchInfo? dispatchInfo)
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="onSuccess"></param>
+    /// <param name="onFailure"></param>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    public T Match<T>(Func<T> onSuccess, Func<Exception, T> onFailure)
     {
-        dispatchInfo = null;
-
-        if (_typeIndex == 2)
+        return _typeIndex switch
         {
-            dispatchInfo = ((ExceptionDispatchInfo)_typeValue!);
-        }
-
-        return dispatchInfo is not null;
+            1 => onSuccess.Invoke(),
+            2 => onFailure.Invoke(AsT2),
+            _ => throw new InvalidOperationException()
+        };
     }
 
     /// <summary>
     /// 
     /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="match1"></param>
-    /// <param name="match2"></param>
-    /// <returns></returns>
+    /// <param name="onSuccess"></param>
+    /// <param name="onFailure"></param>
     /// <exception cref="InvalidOperationException"></exception>
-    public T Match<T>(Func<bool, T> match1, Func<Exception, T> match2) => _typeIndex switch
-    {
-        1 => match1.Invoke(AsT1),
-        2 => match2.Invoke(AsT2),
-        _ => throw new InvalidOperationException()
-    };
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="ifSuccess"></param>
-    /// <param name="ifException"></param>
-    /// <exception cref="InvalidOperationException"></exception>
-    public void Switch(Action<bool> ifSuccess, Action<Exception> ifException)
+    public void Switch(Action onSuccess, Action<Exception> onFailure)
     {
         switch (_typeIndex)
         {
-            case 1: ifSuccess(AsT1); break;
-            case 2: ifException(AsT2); break;
+            case 1: onSuccess(); break;
+            case 2: onFailure(AsT2); break;
             default: throw new InvalidOperationException();
         }
     }
@@ -138,20 +140,24 @@ public readonly struct Outcome : IEither
     /// <inheritdoc />
     public override string ToString()
     {
-        if (IsFailure(out Exception? exception))
+        if (IsFailure())
         {
-            return "Failure - " + exception.ToString();
+            return "Failure: " + _typeValue!.GetType().Name;
         }
 
-        return "Success";
-    }
+        if (IsSuccess())
+        {
+            return "Success: " + _typeValue!.GetType().Name;
+        }
 
+        return "Outcome: null";
+    }
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public static Outcome Success => true;
+    public static Outcome Success { get; } = new Outcome(true);
 
     /// <summary>
     /// 
@@ -160,12 +166,33 @@ public readonly struct Outcome : IEither
     /// <returns></returns>
     public static Outcome Failure(Exception exception) => exception;
 
-    public static implicit operator Outcome(bool value) => new Outcome(value);
-    public static implicit operator Outcome(Exception value) => new Outcome(value);
-    public static explicit operator bool(Outcome either) => either.AsT1;
-    public static explicit operator Exception(Outcome either) => either.AsT2;
 
+    /// <summary>
+    /// Implicitly converts a ResilienceException instance to an Outcome.
+    /// </summary>
+    /// <remarks>
+    /// This conversion enables seamless handling of ResilienceException objects within APIs or
+    /// methods that expect an Outcome, simplifying error propagation and response management.
+    /// </remarks>
+    /// <param name="value">The ResilienceException instance to convert.</param>
+    public static implicit operator Outcome(Exception value)
+    {
+        return new Outcome(value);
+    }
 
+    /// <summary>
+    /// Converts the specified Outcome instance to an Exception by extracting the encapsulated exception value.
+    /// </summary>
+    /// <remarks>
+    /// Use this explicit conversion operator to retrieve the underlying Exception from an Outcome
+    /// that represents a failure. If the Outcome does not contain an Exception, accessing this operator may result in
+    /// an invalid operation.
+    /// </remarks>
+    /// <param name="either">The Outcome instance to convert. This instance must contain an Exception in its AsT2 property.</param>
+    public static explicit operator Exception(Outcome either)
+    {
+        return either.AsT2;
+    }
 
 
     partial class DebuggerView
@@ -175,10 +202,8 @@ public readonly struct Outcome : IEither
             if (outcome.IsFailure(out Exception? exception))
             {
                 Exception = exception;
-                
             }
         }
-
         public bool IsSuccess => Exception is null;
         public Exception? Exception { get; set; }
     }

@@ -5,6 +5,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Remove="Internal\TypeHelper.cs" />
 		<Compile Remove="System\Net\CidrBlock.cs" />
 	</ItemGroup>
 	<ItemGroup>

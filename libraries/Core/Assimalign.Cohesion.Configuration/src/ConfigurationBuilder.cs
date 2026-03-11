@@ -64,7 +64,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
 
         _builds.Add(async context =>
         {
-            var provider = await configure.Invoke(context);
+            IConfigurationProvider provider = await configure.Invoke(context);
 
             InvalidOperationException.ThrowIf(
                 context.HasProvider(provider.Name),
@@ -79,7 +79,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// 
     /// </summary>
     /// <returns></returns>
-    public ConfigurationRoot Build()
+    public Configuration Build()
     {
         return BuildAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
@@ -89,9 +89,9 @@ public class ConfigurationBuilder : IConfigurationBuilder
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async ValueTask<ConfigurationRoot> BuildAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<Configuration> BuildAsync(CancellationToken cancellationToken = default)
     {
-        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         // Set the timeout period for loading the configurations
         cancellationTokenSource.CancelAfter(_options.LoadTimeout);
@@ -115,7 +115,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
         }
 
 
-        return new ConfigurationRoot(_options);
+        return new Configuration(_options);
     }
 
     /// <summary>
@@ -142,11 +142,11 @@ public class ConfigurationBuilder : IConfigurationBuilder
     {
         return AddProvider(provider);
     }
-    IConfigurationRoot IConfigurationBuilder.Build()
+    IConfiguration IConfigurationBuilder.Build()
     {
         return Build();
     }
-    async ValueTask<IConfigurationRoot> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
+    async ValueTask<IConfiguration> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
     {
         return await BuildAsync(cancellationToken);
     }

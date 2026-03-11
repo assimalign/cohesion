@@ -4,25 +4,31 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Configuration;
 
-using Assimalign.Cohesion.Configuration.Internal;
+using Internal;
 
-[DebuggerDisplay("Configuration Provider: {Name}")]
+[DebuggerDisplay("Provider: {Name} = {_data.Count}")]
+[DebuggerTypeProxy(typeof(DebuggerView))]
 public abstract class ConfigurationProvider : IConfigurationProvider
 {
     private readonly KeyComparison _comparison;
-    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>> _data;
-    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+    private readonly ConcurrentDictionary<Key, IConfigurationEntry> _data;
+    private readonly ConcurrentDictionary<Key, IConfigurationEntry>.AlternateLookup<ReadOnlySpan<char>> _lookup;
     private readonly CancellationTokenSource _cancellationTokenSource;
-    private readonly Lock _lock;
     private readonly bool _isReadOnly;
 
-    private bool _isLoaded;
     private bool _isLoading;
+    private bool _isDisposed;
 
     protected ConfigurationProvider() : this(KeyComparison.OrdinalIgnoreCase, Timeout.InfiniteTimeSpan)
+    {
+    }
+
+    protected ConfigurationProvider(KeyComparison comparison) : this(comparison, Timeout.InfiniteTimeSpan)
     {
     }
 
@@ -33,38 +39,51 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     protected ConfigurationProvider(KeyComparison comparison, TimeSpan timeout, bool isReadOnly = false)
     {
         _comparison = comparison;
-        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(KeyComparer.FromComparison(comparison));
+        _data = new ConcurrentDictionary<Key, IConfigurationEntry>(KeyComparer.FromComparison(comparison));
         _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
         _cancellationTokenSource = new CancellationTokenSource(timeout);
         _isReadOnly = isReadOnly;
-        _lock = new Lock();
     }
 
     /// <inheritdoc />
     public abstract string Name { get; }
 
     /// <inheritdoc />
-    public bool TryGet(Path path, out string value)
+    public bool Exists(Path path)
     {
-        value = null!;
+        return GetEntry(path) is not null;
+    }
 
-        Key key = path[0];
+    /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException"></exception>
+    public bool TryGet(Path path, [NotNullWhen(true)] out string? value)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        if (!_lookup.TryGetValue(key, out var either))
+        value = null;
+
+        if (_isLoading)
         {
             return false;
         }
 
-        if (either.If(out IConfigurationValue val, out IConfigurationSection section))
+        Key key = path[0];
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
         {
+            return false;
+        }
+        else if (entry.IsValue(out IConfigurationValue? val))
+        {
+            // If result is a value, but the key is composite then return false
             if (path.IsComposite)
             {
                 return false;
             }
 
-            value = val?.Value!;
+            value = val.Value!;
         }
-        else
+        else if (entry.IsSection(out IConfigurationSection? section))
         {
             if (path.IsComposite)
             {
@@ -78,6 +97,9 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <inheritdoc />
     public bool TrySet(Path path, string? value)
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        // Only allow value sets on readonly and internal reloads
         if (_isReadOnly && !_isLoading)
         {
             return false;
@@ -86,25 +108,23 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         Key key = path[0];
 
         // If No Entry
-        if (!_lookup.TryGetValue(key, out var either))
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? item))
         {
             if (path.Count > 1)
             {
-                var entryPath = path.Subpath(0, 1);
-                var entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
+                Path entryPath = path.Subpath(0, 1);
+                ConfigurationSection entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
 
                 entry[path] = value;
 
-                _data.Add(key, entry);
+                return _data.TryAdd(key, entry);
             }
             else
             {
-                _data.Add(key, new ConfigurationValue(path, value, Name, _isReadOnly));
+                return _data.TryAdd(key, new ConfigurationValue(path, value, Name, _isReadOnly));
             }
-
-            return true;
         }
-        else if (either.If(out IConfigurationValue val))
+        if (item.IsValue(out IConfigurationValue? val))
         {
             if (path.Count == 1)
             {
@@ -112,25 +132,33 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             }
             else
             {
-                var entryPath = path.Subpath(0, 1);
-                var entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
+                Path entryPath = path.Subpath(0, 1);
+                ConfigurationSection entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
 
                 entry[path] = value;
 
                 // Remove the value and replace with a section.
-                _data.Remove(key, out var old);
-                _data.Add(key, entry);
+                if (!_data.TryRemove(key, out var _))
+                {
+                    return false;
+                }
+
+                return _data.TryAdd(key, entry);
             }
 
             return true;
         }
-        else if (either.If(out IConfigurationSection section))
+        else if (item.IsSection(out IConfigurationSection? section))
         {
             // Remove section and replace with value.
             if (path.Count == 1)
             {
-                _data.Remove(key);
-                _data.Add(key, new ConfigurationValue(path, value, Name));
+                if (!_data.TryRemove(key, out var _))
+                {
+                    return false;
+                }
+
+                return _data.TryAdd(key, new ConfigurationValue(path, value, Name));
             }
             else
             {
@@ -145,48 +173,37 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <inheritdoc />
     public IConfigurationEntry? GetEntry(Path path)
     {
-        IConfigurationEntry? entry = default;
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        for (int i = 0; i < path.Count; i++)
+        IConfigurationEntry? item = default;
+        Key key = path[0];
+
+        if (_lookup.TryGetValue(key, out IConfigurationEntry? entry))
         {
-            Key key = path[i];
-
-            if (!_data.TryGetValue(key, out Either<IConfigurationValue, IConfigurationSection>? either))
+            item = entry switch
             {
-                return entry;
-            }
-
-            if (either.If(out IConfigurationSection section))
-            {
-                if (path.Count > section.Path.Count)
-                {
-                    return section.GetEntry(path);
-                }
-
-                return section;
-            }
-
-            if (either.If(out IConfigurationValue value))
-            {
-                return value;
-            }
+                IConfigurationSection section => section.GetEntry(path),
+                IConfigurationValue value => value,
+                _ => default
+            };
         }
 
-        return entry;
+        return item;
     }
 
     /// <inheritdoc />
     public virtual IEnumerable<IConfigurationEntry> GetEntries()
     {
-        return _data.Values.Select(either =>
-        {
-            return either.If(out IConfigurationSection section, out IConfigurationValue value) ?
-                (IConfigurationEntry)section :
-                value;
-        });
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        return _data.Values;
     }
 
-    public abstract Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default);
+    protected abstract Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default);
+
+    protected virtual ValueTask OnDisposeAsync(IEnumerable<IConfigurationEntry> entries)
+    {
+        return ValueTask.CompletedTask;
+    }
 
     /// <inheritdoc />
     public virtual void Load()
@@ -204,10 +221,13 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     /// <inheritdoc />
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        using var cancellationTokenSource = CancellationTokenSource
-            .CreateLinkedTokenSource(_cancellationTokenSource.Token, cancellationToken);
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        var entries = new Dictionary<Path, string?>(KeyComparer.FromComparison(_comparison));
+        using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+            _cancellationTokenSource.Token, 
+            cancellationToken);
+
+        Dictionary<Path, string?> entries = new Dictionary<Path, string?>(KeyComparer.FromComparison(_comparison));
 
         try
         {
@@ -215,7 +235,9 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
             await OnLoadAsync(entries, cancellationTokenSource.Token).ConfigureAwait(false);
 
-            foreach (var (path, value) in entries)
+            _data.Clear();
+
+            foreach ((Path path, string? value) in entries)
             {
                 if (TrySet(path, value))
                 {
@@ -233,29 +255,54 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         }
     }
 
-    /// <inheritdoc />
-    public virtual void Dispose()
+    public async ValueTask DisposeAsync()
+    {
+        if (!_isDisposed)
+        {
+            await OnDisposeAsync(_data.Values);
+
+            _data.Clear();
+
+            _isDisposed = true;
+            _isLoading = false;
+
+            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
+            // TODO: set large fields to null
+
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    public void Dispose()
     {
         DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
-    /// <inheritdoc />
-    public virtual ValueTask DisposeAsync()
-    {
-        _data.Clear();
-        return ValueTask.CompletedTask;
-    }
 
-    public void CheckIfLoaded()
+    partial class DebuggerView
     {
-        if (_isLoaded)
+        private readonly ConfigurationProvider _provider;
+        public DebuggerView(ConfigurationProvider provider)
         {
-            return;
+            _provider = provider;
         }
-         
-        lock (_lock)
+
+        [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
+        public IConfigurationEntry[] Entries
         {
-            Load();
+            get
+            {
+                IConfigurationEntry[] entries = new IConfigurationEntry[_provider._data.Count];
+
+                int i = 0;
+                foreach (var entry in _provider.GetEntries())
+                {
+                    entries[i] = entry;
+                    i++;
+                }
+
+                return entries;
+            }
         }
     }
 }

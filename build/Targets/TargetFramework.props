@@ -10,5 +10,6 @@
     </PropertyGroup>
     <PropertyGroup>
         <LangVersion>Preview</LangVersion>
+        <EnablePreviewFeatures>true</EnablePreviewFeatures>
     </PropertyGroup>
 </Project>

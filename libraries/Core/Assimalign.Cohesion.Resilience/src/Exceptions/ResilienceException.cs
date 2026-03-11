@@ -44,9 +44,15 @@ public class ResilienceException : Exception
     /// <summary>
     /// 
     /// </summary>
-    public virtual ResilienceErrorCode Code { get; }
+    public ResilienceErrorCode Code { get; }
 
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="operationKey"></param>
+    /// <param name="innerException"></param>
+    /// <returns></returns>
     public static ResilienceException PipelineFailure(OperationKey operationKey = default, Exception? innerException = default)
     {
         return new ResilienceException(
@@ -56,6 +62,12 @@ public class ResilienceException : Exception
             innerException: innerException);
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="operationKey"></param>
+    /// <param name="innerException"></param>
+    /// <returns></returns>
     public static ResilienceException StrategyFailure(OperationKey operationKey = default, Exception? innerException = default)
     {
         return new ResilienceException(
@@ -65,6 +77,3 @@ public class ResilienceException : Exception
             innerException: innerException);
     }
 }
-
-
-public sealed class 

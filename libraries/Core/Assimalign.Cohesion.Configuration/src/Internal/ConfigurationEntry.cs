@@ -3,14 +3,13 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-
-
 internal abstract class ConfigurationEntry : IConfigurationEntry
 {
     private readonly Key _key;
     private readonly Path _path;
     private readonly Lazy<ConfigurationChangeToken> _token;
     private readonly string _providerName;
+    private readonly bool _isReadOnly;
 
     internal ConfigurationEntry(Path path, string providerName)
     {
@@ -47,6 +46,6 @@ internal abstract class ConfigurationEntry : IConfigurationEntry
     protected T NotifyChanged<T>(T? previous = default, T? current = default)
     {
         _token.Value.Notify();
-        return current;
+        return current!;
     }
 }

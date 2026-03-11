@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Configuration;
 
 
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 public delegate bool ConfigurationFinder(Path path);

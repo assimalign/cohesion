@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Reflection.Metadata.Ecma335;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -98,7 +99,7 @@ public class KeyComparer :
 
     public int GetHashCode(ReadOnlySpan<char> alternate)
     {
-        return Create(alternate).GetHashCode();
+        return Create(alternate).GetHashCode(_comparison);
     }
 
     public Key Create(ReadOnlySpan<char> alternate)

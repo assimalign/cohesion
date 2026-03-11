@@ -3,27 +3,25 @@ using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Assimalign.Cohesion.Configuration;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
-
-
 
 /// <summary>
 /// Represents a section of application configuration values.
 /// </summary>
-[DebuggerDisplay("{Key} = {Count}")]
+[DebuggerDisplay("(S) {Key} = [{Count}]")]
+[DebuggerTypeProxy(typeof(DebuggerView))]
 internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 {
     private readonly bool _isReadOnly;
     private readonly KeyComparison _comparison = KeyComparison.Ordinal;
-    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>> _data;
-    private readonly Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+    private readonly Dictionary<Key, IConfigurationEntry> _data;
+    private readonly Dictionary<Key, IConfigurationEntry>.AlternateLookup<ReadOnlySpan<char>> _lookup;
 
     internal ConfigurationSection(Path path, string providerName) 
         : base(path, providerName)
     {
-        _data = new Dictionary<Key, Either<IConfigurationValue, IConfigurationSection>>(KeyComparer.FromComparison(_comparison));
+        _data = new Dictionary<Key, IConfigurationEntry>(KeyComparer.FromComparison(_comparison));
         _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
@@ -55,8 +53,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         {
             return null;
         }
-
-        if (either.If(out IConfigurationValue value, out IConfigurationSection section))
+        else if (either.IsValue(out IConfigurationValue? value))
         {
             if (path.Count > 1)
             {
@@ -64,7 +61,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
             }
             return value;
         }
-        else
+        else if (either.IsSection(out IConfigurationSection? section))
         {
             if (path.Count > 1)
             {
@@ -72,6 +69,8 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
             }
             return null;
         }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -83,13 +82,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
     /// <inheritdoc />
     public IEnumerator<IConfigurationEntry> GetEnumerator()
     {
-        return _data.Values.Select(either =>
-        {
-            return either.If(out IConfigurationSection section, out IConfigurationValue value) ?
-                (IConfigurationEntry)section :
-                value;
-
-        }).GetEnumerator();
+        return _data.Values.GetEnumerator();
     }
 
     /// <inheritdoc />
@@ -107,7 +100,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
             return null;
         }
 
-        if (either.If(out IConfigurationValue value, out IConfigurationSection section))
+        else if (either.IsValue(out IConfigurationValue? value))
         {
             if (path.IsComposite)
             {
@@ -116,7 +109,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             return value.Value;
         }
-        else
+        else if (either.IsSection(out IConfigurationSection? section))
         {
             if (path.IsComposite)
             {
@@ -125,6 +118,8 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             return null;
         }
+
+        return null;
     }
     private void SetConfigurationValue(in Path path, string? input)
     {
@@ -154,7 +149,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             NotifyChanged();
         }
-        else if (either.If(out IConfigurationValue value))
+        else if (either.IsValue(out IConfigurationValue? value))
         {
             if (path.Count == Path.Count + 1)
             {
@@ -174,7 +169,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             NotifyChanged();
         }
-        else if (either.If(out IConfigurationSection section))
+        else if (either.IsSection(out IConfigurationSection? section))
         {
             // Remove section and replace with value.
             if (path.Count < Path.Count + 1)
@@ -189,5 +184,38 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             NotifyChanged();
         }
+    }
+
+
+    partial class DebuggerView
+    {
+        private readonly ConfigurationSection _section;
+        public DebuggerView(ConfigurationSection section)
+        {
+            _section = section;
+        }
+
+        //public Key Key => _section.Key;
+        //public Path Path => _section.Path;
+
+        [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
+        public IConfigurationEntry[] Entries
+        {
+            get
+            {
+                IConfigurationEntry[] entries = new IConfigurationEntry[_section.Count];
+
+                int i = 0;
+                foreach (var entry in _section)
+                {
+                    entries[i] = entry;
+                    i++;
+                }
+
+                return entries;
+            }
+        }
+
+        //public int? Count => _section.Value;
     }
 }

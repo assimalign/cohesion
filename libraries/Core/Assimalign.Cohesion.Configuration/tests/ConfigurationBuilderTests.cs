@@ -15,10 +15,10 @@ public class ConfigurationBuilderTests
             
         });
 
-        builder.AddProvider(context =>
-        {
+        //builder.AddProvider(context =>
+        //{
             
-        });
+        //});
 
         //builder.AddProvider(context =>
         //{

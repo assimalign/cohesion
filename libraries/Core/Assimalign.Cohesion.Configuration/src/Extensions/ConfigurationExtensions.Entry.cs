@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace Assimalign.Cohesion.Configuration;
@@ -15,7 +16,7 @@ public static partial class ConfigurationExtensions
         /// </summary>
         /// <param name="value"></param>
         /// <returns></returns>
-        public bool IsValue(out IConfigurationValue? value)
+        public bool IsValue([NotNullWhen(true)] out IConfigurationValue? value)
         {
             ArgumentNullException.ThrowIfNull(entry);
 
@@ -35,7 +36,7 @@ public static partial class ConfigurationExtensions
         /// </summary>
         /// <param name="section"></param>
         /// <returns></returns>
-        public bool IsSection(out IConfigurationSection? section)
+        public bool IsSection([NotNullWhen(true)] out IConfigurationSection? section)
         {
             ArgumentNullException.ThrowIfNull(entry);
 

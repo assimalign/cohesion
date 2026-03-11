@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -13,14 +12,17 @@ namespace Assimalign.Cohesion.Configuration;
 /// </remarks>
 public interface IConfiguration : IEnumerable<IConfigurationEntry>
 {
-    // TODO: Move IConfiguration.this[Path path] to an extension block.
-
     /// <summary>
     /// Gets or sets the <see cref="IConfigurationValue.Value"/>, if any.
     /// </summary>
     /// <param name="path"></param>
     /// <returns></returns>
     string? this[Path path] { get; set; }
+
+    /// <summary>
+    /// Returns a collection of <see cref="IConfigurationProvider"/>.
+    /// </summary>
+    IEnumerable<IConfigurationProvider> Providers { get; }
 
     /// <summary>
     /// Returns either a <see cref="IConfigurationValue"/> or <see cref="IConfigurationSection"/>, if any.

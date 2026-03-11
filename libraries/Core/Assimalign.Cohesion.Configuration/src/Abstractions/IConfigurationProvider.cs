@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -16,19 +17,26 @@ public interface IConfigurationProvider : IDisposable, IAsyncDisposable
     string Name { get; }
 
     /// <summary>
-    /// 
+    /// Determines whether the given path exists in the available configurations.
     /// </summary>
     /// <param name="path"></param>
-    /// <param name="value"></param>
     /// <returns></returns>
-    bool TryGet(Path path, out string? value);
+    bool Exists(Path path);
 
     /// <summary>
-    /// 
+    /// Attempts to retrieve the value associated with the specified path.
     /// </summary>
-    /// <param name="path"></param>
-    /// <param name="value"></param>
-    /// <returns></returns>
+    /// <param name="path">The path to the value being retrieved. This parameter cannot be null.</param>
+    /// <param name="value">When this method returns <see langword="true"/>, contains the value associated with the specified path; otherwise, <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if the value was found; otherwise, <see langword="false"/>.</returns>
+    bool TryGet(Path path, [NotNullWhen(true)] out string? value);
+
+    /// <summary>
+    /// Attempts to set the specified value at the given path within the configuration provider.
+    /// </summary>
+    /// <param name="path">The path at which to set the value. This parameter cannot be null.</param>
+    /// <param name="value">The value to assign at the specified path. If null, the value at the path will be removed.</param>
+    /// <returns><see langword="true"/> if the value was successfully set; otherwise, <see langword="false"/>.</returns>
     bool TrySet(Path path, string? value);
 
     /// <summary>

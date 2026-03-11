@@ -82,6 +82,9 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
     [Parameter(Mandatory = false, Position = 5)]
     public SwitchParameter Force { get; set; } = false;
 
+    [Parameter(Mandatory = false, Position = 5)]
+    public CohesionDotnetSolutionGroupingInput[] Grouping { get; set; }
+
     #endregion
 
     internal string FilePath
@@ -169,16 +172,41 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
         // If the SolutionRootFolder was provided let's not get the parent
         if (!string.IsNullOrEmpty(SolutionRootFolder))
         {
-            solutionFolderRoot = SolutionRootFolder;
+            solutionFolderRoot = SolutionRootFolder.Trim('/').Trim('\\');
         }
         else
         {
             solutionFolderParent = Directory.GetParent(solutionPath)?.FullName;
-            solutionFolderRoot = solutionPath.Replace(solutionFolderParent!, "");
+            solutionFolderRoot = solutionPath.Replace(solutionFolderParent!, "").Trim('/').Trim('\\');
         }
 
         // Get only ending directory name
         solutionFolderName = System.IO.Path.Join(solutionFolderRoot, path.Replace(solutionPath, "")).Replace("\\", "/");
+
+        if (Grouping is not null && Grouping.Any())
+        {
+            var group = Grouping.FirstOrDefault(grouping =>
+            {
+                return grouping.Paths.Any(p =>
+                {
+                    var value = $"{solutionFolderRoot}{p}".Trim('/').Trim('\\') + "/";
+
+                    if (value.Length > solutionFolderName.Length + 1)
+                    {
+                        return false;
+                    }
+
+                   WriteVerbose($"{solutionFolderName}/ - sw -> {value}");
+
+                    return $"{solutionFolderName}/".StartsWith(value, StringComparison.OrdinalIgnoreCase);
+                });
+            });
+
+            if (group is not null)
+            {
+                solutionFolderName = $"/{solutionFolderRoot}/{group.Folder}" + $"/{solutionFolderName.TrimStart('/')}".Replace($"/{solutionFolderRoot}", "");
+            }
+        }
 
         // Ensure trailing slash is added
         if (!solutionFolderName.StartsWith("/"))
@@ -211,6 +239,48 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
 
         // Check if the current directory has any known MSBuild Project Files
         var hasSolutionProject = files.Any(p => _knownSolutionProjects.Contains(p.Extension));
+
+        //if (Grouping is not null && Grouping.Any())
+        //{
+        //    bool has = false;
+        //    var rootName = solutionFolderName.Trim('/').Split('/')[0];
+
+        //    foreach (var grouping in Grouping)
+        //    {
+        //        if (grouping.Paths.Any(p => {
+        //            var value = $"/{rootName}{p}";
+
+        //            if (value.Length > solutionFolderName.Length)
+        //            {
+        //                return false;
+        //            }
+
+        //            var found = solutionFolderName.StartsWith(value, StringComparison.OrdinalIgnoreCase);
+
+        //           WriteVerbose($"'{found}': {solutionFolderName} - sw -> {value}");
+
+
+        //            return found;
+
+        //        }))
+        //        {
+        //            var n = $"/{rootName}/{grouping.Folder}" + solutionFolderName.Replace($"/{rootName}", "");
+        //            WriteVerbose($"Replacing {solutionFolderName} --> {n}");
+        //            builder.AppendTabbed(1, $"<Folder Name=\"{n}\"");
+        //            has = true;
+        //            //solutionFolderName = grouping.Folder ?? solutionFolderName;
+        //            break;
+        //        }
+        //    }
+
+        //    if (!has)
+        //    {
+        //        builder.AppendTabbed(1, $"<Folder Name=\"{solutionFolderName}\"");
+        //    }
+        //}
+        //else
+        //{ 
+        //}
 
         builder.AppendTabbed(1, $"<Folder Name=\"{solutionFolderName}\"");
 

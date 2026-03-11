@@ -559,15 +559,6 @@
 	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Language.Sql/src/">
 		<Project Path="libraries/Database/Assimalign.Cohesion.Database.Language.Sql/src/Assimalign.Cohesion.Database.Language.Sql.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Logs/">
-		<File Path="libraries/Database/Assimalign.Cohesion.Database.Logs/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Logs/src/">
-		<Project Path="libraries/Database/Assimalign.Cohesion.Database.Logs/src/Assimalign.Cohesion.Database.Logs.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Logs/tests/">
-		<Project Path="libraries/Database/Assimalign.Cohesion.Database.Logs/tests/Assimalign.Cohesion.Database.Logs.Tests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Partitions/" />
 	<Folder Name="/cohesion/libraries/Database/Assimalign.Cohesion.Database.Partitions/src/">
 		<Project Path="libraries/Database/Assimalign.Cohesion.Database.Partitions/src/Assimalign.Cohesion.Database.Partitions.csproj" />
