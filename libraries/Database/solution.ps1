@@ -32,4 +32,4 @@ $Groupings = $Other + $ModelGroups
 New-CohesionDotnetSolution `
     -SolutionPath "C:\Source\repos\assimalign\cohesion\libraries\Database\Assimalign.Cohesion.Database.slnx" `
     -Force `
-    -Grouping $Groupings
+    -Grouping $Groupings -IncludeReferences

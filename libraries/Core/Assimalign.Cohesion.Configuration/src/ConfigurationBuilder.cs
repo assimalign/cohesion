@@ -23,7 +23,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
     public ConfigurationBuilder()
     {
         _builds = new List<Func<ConfigurationBuilderContext, Task>>();
-        _options ??= ConfigurationOptions.Default;
+        _options ??= new ConfigurationOptions();
     }
 
     /// <summary>

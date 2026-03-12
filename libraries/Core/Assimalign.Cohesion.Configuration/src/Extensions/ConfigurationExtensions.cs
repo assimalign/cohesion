@@ -99,48 +99,45 @@ public static partial class ConfigurationExtensions
         }
     }
 
-    extension(IConfigurationRoot configuration)
+    extension(IConfiguration configuration)
     {
         /// <summary>
-        /// 
+        /// Returns a provider by name.
         /// </summary>
-        /// <param name="name">The <see cref="IConfigurationProvider.Name"/> of  the </param>
-        /// <returns></returns>
+        /// <param name="name">The <see cref="IConfigurationProvider.Name"/> of the provider.</param>
+        /// <returns>The matching provider, or <see langword="null"/>.</returns>
         public IConfigurationProvider? GetProvider(string name)
         {
             return configuration.GetProvider(name, StringComparison.Ordinal);
         }
 
         /// <summary>
-        /// 
+        /// Returns a provider by name using the specified comparison.
         /// </summary>
-        /// <param name="name"></param>
-        /// <param name="comparison"></param>
-        /// <returns></returns>
+        /// <param name="name">The provider name.</param>
+        /// <param name="comparison">The string comparison to use.</param>
+        /// <returns>The matching provider, or <see langword="null"/>.</returns>
         public IConfigurationProvider? GetProvider(string name, StringComparison comparison)
         {
             ArgumentNullException.ThrowIfNull(configuration);
             ArgumentNullException.ThrowIfNull(name);
 
-            IConfigurationProvider? existing = default;
-
             foreach (var provider in configuration.Providers)
             {
                 if (name.Equals(provider.Name, comparison))
                 {
-                    existing = provider;
-                    break;
+                    return provider;
                 }
             }
 
-            return existing;
+            return null;
         }
 
         /// <summary>
-        /// 
+        /// Reloads all providers asynchronously.
         /// </summary>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
+        /// <param name="cancellationToken">A cancellation token.</param>
+        /// <returns>A task representing the reload operation.</returns>
         public async Task ReloadAsync(CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(configuration);

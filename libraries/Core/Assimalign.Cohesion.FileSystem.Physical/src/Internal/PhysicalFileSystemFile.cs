@@ -48,9 +48,10 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     }
     public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
     {
-        bool isAllowed = (fileMode != FileMode.Open || fileAccess != FileAccess.Read) && FileSystem.IsReadOnly;
-
-        InvalidOperationException.ThrowIf(!isAllowed);
+        if (FileSystem.IsReadOnly && (fileMode != FileMode.Open || fileAccess != FileAccess.Read))
+        {
+            throw new InvalidOperationException("The file system is read-only. Only FileMode.Open with FileAccess.Read is allowed.");
+        }
 
         return File.Open(Path, fileMode, fileAccess, fileShare);
     }

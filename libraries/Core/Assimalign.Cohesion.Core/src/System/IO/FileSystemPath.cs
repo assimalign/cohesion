@@ -84,7 +84,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
         if (HasRoot(out string root))
         {
             span = span.Slice(root.Length);
-            segments.Add(root.TrimEnd('/')); // add root as first segment
+            var trimmed = root.TrimEnd('/');
+            segments.Add(trimmed.Length > 0 ? trimmed : "/"); // add root as first segment
         }
 
         for (int i = 0; i < span.Length; i++)

@@ -16,7 +16,6 @@ public sealed class ConfigurationManager : IConfigurationManager
     private readonly Lock _lock;
     private readonly ConfigurationOptions _options;
     private readonly ConfigurationBuilderContext _context;
-    private readonly Dictionary<string, object> _properties;
 
     private Configuration _root;
     private bool _isDisposed;
@@ -30,7 +29,6 @@ public sealed class ConfigurationManager : IConfigurationManager
 
         _lock = new Lock();
         _options = options;
-        _properties = new Dictionary<string, object>();
         _root = new Configuration(options);
         _context = new ConfigurationBuilderContext(options.Providers);
     }
@@ -107,7 +105,10 @@ public sealed class ConfigurationManager : IConfigurationManager
 
     public IConfigurationValue? GetValue(Path path)
     {
-        throw new NotImplementedException();
+        lock (_lock)
+        {
+            return _root.GetValue(path);
+        }
     }
 
     public IConfigurationEntry? GetEntry(Path path)
@@ -133,11 +134,20 @@ public sealed class ConfigurationManager : IConfigurationManager
 
     public void Dispose()
     {
-
+        if (!_isDisposed)
+        {
+            _root.Dispose();
+            _isDisposed = true;
+        }
     }
-    public ValueTask DisposeAsync()
+
+    public async ValueTask DisposeAsync()
     {
-        throw new NotImplementedException();
+        if (!_isDisposed)
+        {
+            await _root.DisposeAsync();
+            _isDisposed = true;
+        }
     }
 
     IConfigurationManager IConfigurationManager.AddProvider(IConfigurationProvider provider)

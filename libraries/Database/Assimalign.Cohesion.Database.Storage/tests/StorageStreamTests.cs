@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
@@ -10,8 +9,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 
 public class StorageStreamTests
 {
-    [Fact]
-    [DisplayName("Cohesion Test [StorageStream] - WritePage/ReadPage: Should roundtrip page bytes")]
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - WritePage/ReadPage: Should roundtrip page bytes")]
     public void WritePageAndReadPage_ShouldRoundtripPageBytes()
     {
         using var stream = StorageStream.FromInMemory();
@@ -31,8 +29,7 @@ public class StorageStreamTests
         Assert.Equal(writeBuffer, readBuffer);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [StorageStream] - WritePage: Should seek to page offset")]
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - WritePage: Should seek to page offset")]
     public void WritePage_ShouldSeekToPageOffset()
     {
         using var stream = StorageStream.FromInMemory();
@@ -56,8 +53,7 @@ public class StorageStreamTests
         Assert.Equal(Page.Size * 2, stream.Length);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [StorageStream] - ReadPage: Should throw on truncated stream")]
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - ReadPage: Should throw on truncated stream")]
     public void ReadPage_ShouldThrowOnTruncatedStream()
     {
         using var memoryStream = new MemoryStream(new byte[16]);
@@ -68,8 +64,7 @@ public class StorageStreamTests
         Assert.Throws<StorageIOException>(() => stream.ReadPage((PageId)0L, buffer));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [StorageStream] - WritePageAsync/ReadPageAsync: Should roundtrip page bytes")]
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - WritePageAsync/ReadPageAsync: Should roundtrip page bytes")]
     public async Task WritePageAsyncAndReadPageAsync_ShouldRoundtripPageBytes()
     {
         await using var stream = StorageStream.FromInMemory();
@@ -86,8 +81,7 @@ public class StorageStreamTests
         Assert.Equal(writeBuffer, readBuffer);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [StorageStream] - FromFile: Should create and persist file-backed stream")]
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - FromFile: Should create and persist file-backed stream")]
     public void FromFile_ShouldCreateAndPersistFileBackedStream()
     {
         string path = Path.Combine(Path.GetTempPath(), $"cohesion-storage-{Guid.NewGuid():N}.db");

@@ -27,12 +27,24 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
 
     public void Dispose()
     {
-
+        _subscribers.Clear();
     }
 
     public IDisposable OnChange(Action<object?> callback, object? state)
     {
-        return OnChange(callback, state);
+        ArgumentNullException.ThrowIfNull(callback);
+
+        var disposable = new Subscriber<object?>()
+        {
+            ChangeType = ChangeType.Changed,
+            State = state,
+            Callback = args => callback(args.State),
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
+        };
+
+        _subscribers.Add(disposable);
+
+        return disposable;
     }
     public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
@@ -99,17 +111,14 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
         return disposable;
     }
 
-    private void Notify(object sender, FileSystemEventArgs args, ChangeType changeType)
+    private void Notify(object? sender, FileSystemEventArgs args, ChangeType changeType)
     {
         FileSystemPath fileSystemPath = args.FullPath;
-        IFileSystem fileSystem = _fileSystemInfo.FileSystem;
 
         if (!_glob.IsMatch(fileSystemPath))
         {
             return;
         }
-
-        IFileSystemInfo fileSystemInfo = fileSystem.GetInfo(fileSystemPath);
 
         foreach (var subscriber in _subscribers)
         {

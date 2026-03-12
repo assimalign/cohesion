@@ -20,9 +20,12 @@ internal class InMemoryFileSystemDispatcher : IDisposable
 
     public InMemoryFileSystemDispatcher(InMemoryFileSystemDispatcher parent)
     {
+        // Propagate events to the parent dispatcher so watchers on parent directories
+        // receive notifications about changes in child entries
         Changed += parent._onChanged;
-        Changed += parent._onDeleted;
-        //Changed += parent._onRenamed;
+        Created += parent._onCreated;
+        Deleted += parent._onDeleted;
+        Renamed += parent._onRenamed;
     }
 
 

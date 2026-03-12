@@ -118,7 +118,7 @@ public class Configuration : IConfiguration
 
     private void CheckIfDisposedOrDisposing()
     {
-        ObjectDisposedException.ThrowIf(_isDisposing || _isDisposing, this);
+        ObjectDisposedException.ThrowIf(_isDisposed || _isDisposing, this);
     }
 
     private IEnumerable<IConfigurationEntry> EnumeratorEntries()
@@ -156,28 +156,25 @@ public class Configuration : IConfiguration
     {
         CheckIfDisposedOrDisposing();
 
-        Key key = path[0];
-        IConfigurationEntry? entry = default;
-
-        for (int i = _providers.Count - 1; i >= 0; i--)
+        if (_setStrategy == ConfigurationSetStrategy.Distributed)
         {
-            IConfigurationProvider provider = _providers[i];
-
-            if (provider.TrySet(path, value))
+            // Set the value across all providers that accept it.
+            for (int i = _providers.Count - 1; i >= 0; i--)
             {
-                if (_setStrategy == ConfigurationSetStrategy.Distributed)
-                {
-
-                }
+                _providers[i].TrySet(path, value);
             }
-
-
-
-            entry = provider.GetEntry(key);
-
-            if (entry is not null)
+        }
+        if (_setStrategy == ConfigurationSetStrategy.ExistingOnly)
+        {
+            // ExistingOnly: set the value on the first provider that has the entry.
+            for (int i = _providers.Count - 1; i >= 0; i--)
             {
+                IConfigurationProvider provider = _providers[i];
 
+                if (provider.Exists(path) && provider.TrySet(path, value))
+                {
+                    return;
+                }
             }
         }
     }

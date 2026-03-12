@@ -96,13 +96,13 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     public int Count
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _keys.Length;
+        get => _keys?.Length ?? 0;
     }
 
     /// <summary>
     /// Checks whether the path has any keys.
     /// </summary>
-    public bool IsEmpty => _keys.Length == 0;
+    public bool IsEmpty => _keys is null || _keys.Length == 0;
 
     /// <summary>
     /// Checks if the path is made up of two or more keys.

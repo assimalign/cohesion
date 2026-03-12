@@ -4,14 +4,6 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Remove="Transports\Quic\**" />
-		<Compile Remove="Transports\Udp\**" />
-		<EmbeddedResource Remove="Transports\Quic\**" />
-		<EmbeddedResource Remove="Transports\Udp\**" />
-		<None Remove="Transports\Quic\**" />
-		<None Remove="Transports\Udp\**" />
-	</ItemGroup>
-	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>

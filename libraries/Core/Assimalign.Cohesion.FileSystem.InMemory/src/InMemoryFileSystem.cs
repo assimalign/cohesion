@@ -1,11 +1,10 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,6 +13,9 @@ namespace Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.FileSystem.Internal;
 using Assimalign.Cohesion.Internal;
 
+/// <summary>
+/// An in-memory implementation of <see cref="IFileSystem"/>.
+/// </summary>
 [DebuggerDisplay("{Name} - {Size}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, IFileSystem
@@ -31,9 +33,9 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
     private bool _isDisposed;
 
     /// <summary>
-    /// 
+    /// Creates a new in-memory file system with the specified options.
     /// </summary>
-    /// <param name="options"></param>
+    /// <param name="options">The configuration options for the in-memory file system.</param>
     public InMemoryFileSystem(InMemoryFileSystemOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -49,7 +51,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         };
     }
 
-
+    /// <inheritdoc />
     public string Name
     {
         get
@@ -59,6 +61,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public bool IsReadOnly
     {
         get
@@ -68,6 +71,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public Size Size
     {
         get
@@ -77,6 +81,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public Size SpaceAvailable
     {
         get
@@ -86,6 +91,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public Size SpaceUsed
     {
         get
@@ -95,6 +101,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public IFileSystemDirectory RootDirectory
     {
         get
@@ -104,27 +111,19 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public bool Exists(FileSystemPath path)
     {
         CheckIfDisposed();
         using var manager = new InMemoryFileSystemLockManager();
 
-        // When check if an object exist in the file system we need to lock the entire path for delete operations
-        // Whether the object is written to
         manager.Lock(this, LockPolicy.Delete);
 
         try
         {
-            // Format the path
             FileSystemPath absolute = FormatPath(path);
-
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
-
-            // Set the current path to begin from
+            FileSystemPath relative = GetRelativePath(absolute);
             FileSystemPath current = _root.Path;
-
-            // Get all directories in the path
             string[] names = relative.GetSegments();
 
             InMemoryFileSystemInfo state = _root;
@@ -162,25 +161,91 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public void CopyFile(FileSystemPath source, FileSystemPath destination)
     {
         CheckIfDisposed();
-        CheckIfReadOnly(nameof(CreateDirectory));
+        CheckIfReadOnly(nameof(CopyFile));
+
+        // Get the source file first
+        var sourceInfo = GetInfo(source);
+        if (sourceInfo is not InMemoryFileSystemFile sourceFile)
+        {
+            FileSystemException.ThrowFileNotFound(source);
+            return;
+        }
+
+        // Create the destination file
+        var destFile = (InMemoryFileSystemFile)CreateFile(destination);
+
+        // Copy the content
+        destFile.Content.CopyFrom(sourceFile.Content);
     }
 
+    /// <inheritdoc />
     public void Move(FileSystemPath source, FileSystemPath destination)
     {
         CheckIfDisposed();
-        CheckIfReadOnly(nameof(CreateDirectory));
-        // RootDirectory.Move(source, destination);
+        CheckIfReadOnly(nameof(Move));
+
+        using var manager = new InMemoryFileSystemLockManager();
+
+        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+
+        try
+        {
+            FileSystemPath absoluteSource = FormatPath(source);
+            FileSystemPath absoluteDest = FormatPath(destination);
+
+            // Navigate to source entry
+            var sourceEntry = NavigateToEntry(absoluteSource, manager);
+            if (sourceEntry is null)
+            {
+                ThrowHelper.ThrowPathNotFound(source);
+            }
+
+            // Find the parent directory of the source
+            var sourceParent = FindParentDirectory(absoluteSource, manager);
+            if (sourceParent is null)
+            {
+                ThrowHelper.ThrowPathNotFound(source);
+            }
+
+            // Check destination doesn't already exist
+            if (Exists(destination))
+            {
+                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(destination);
+            }
+
+            // Remove from source parent
+            sourceParent.Entries.Remove(absoluteSource);
+
+            // Recreate at destination
+            if (sourceEntry is InMemoryFileSystemFile sourceFile)
+            {
+                var destFile = (InMemoryFileSystemFile)CreateFile(destination);
+                destFile.Content.CopyFrom(sourceFile.Content);
+            }
+            else if (sourceEntry is InMemoryFileSystemDirectory sourceDir)
+            {
+                CreateDirectory(destination);
+                CopyDirectoryContents(sourceDir, absoluteDest);
+            }
+        }
+        finally
+        {
+            manager.Dispose();
+        }
     }
 
+    /// <inheritdoc />
     public IFileSystemEventToken Watch(Glob? pattern)
     {
         CheckIfDisposed();
-        throw new NotImplementedException();
+        return _root.Watch(pattern);
     }
 
+    /// <inheritdoc />
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
         CheckIfDisposed();
@@ -188,23 +253,15 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        // Lock operations that modify the directory structure, Reads are Allowed
         manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
 
         InMemoryFileSystemDirectory? result = default;
 
         try
         {
-            // Get the absolute path
             FileSystemPath absolute = FormatPath(path);
-
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
-
-            // Get all directories in the path
+            FileSystemPath relative = GetRelativePath(absolute);
             DirectoryName[] directories = relative.GetDirectoryNames();
-
-            // Set the current path to begin from
             FileSystemPath current = _root.Path;
 
             InMemoryFileSystemDirectory parent = _root;
@@ -215,13 +272,10 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
                 InMemoryFileSystemDirectory? existingOrCreated = default!;
 
-                // Set flags
                 bool isLast = current.Equals(absolute, _cultureInfo, _ignoreCase);
 
-                // Lock parent
                 manager.Lock(parent, LockPolicy.Write | LockPolicy.Delete);
 
-                // Get the current path
                 DirectoryName name = directories[i];
 
                 if (!parent.Lookup.TryGetValue(current, out InMemoryFileSystemInfo? info))
@@ -230,7 +284,6 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                 }
                 else if (info is InMemoryFileSystemFile || isLast)
                 {
-                    // TODO: Maybe use a different exception to disallow creating a directory over a file.
                     ThrowHelper.ThrowFileOrDirectoryAlreadyExists(absolute);
                 }
                 else
@@ -254,15 +307,16 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         {
             if (result is not null)
             {
-                //_root.Dispatcher.RaiseEvent(new FileSystemEventArgs(WatcherChangeTypes)
-                //{
-
-                //});
+                _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Created,
+                    result.Path,
+                    result.Name));
             }
             manager.Dispose();
         }
     }
 
+    /// <inheritdoc />
     public IFileSystemFile CreateFile(FileSystemPath path)
     {
         CheckIfDisposed();
@@ -270,23 +324,15 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        // Lock operations that modify the directory structure, Reads are Allowed
         manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
 
         InMemoryFileSystemFile result = default!;
 
         try
         {
-            // Get the absolute path
             FileSystemPath absolute = FormatPath(path);
-
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
-
-            // Set the current path to begin from
+            FileSystemPath relative = GetRelativePath(absolute);
             FileSystemPath current = _root.Path;
-
-            // Get all directories in the path
             string[] segments = relative.GetSegments();
 
             InMemoryFileSystemDirectory parent = _root;
@@ -295,7 +341,6 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             {
                 current += segments[i];
 
-                // Set flags
                 bool isLast = current.Equals(absolute, _cultureInfo, _ignoreCase);
 
                 manager.Lock(parent, LockPolicy.Write | LockPolicy.Delete);
@@ -303,7 +348,6 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                 InMemoryFileSystemFile file = default!;
                 InMemoryFileSystemDirectory existingOrCreated = parent;
 
-                // If no entry exists, create one
                 if (!parent.Lookup.TryGetValue(current, out InMemoryFileSystemInfo? info))
                 {
                     if (isLast)
@@ -314,11 +358,9 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                     {
                         parent.Entries[current] = existingOrCreated = new InMemoryFileSystemDirectory(segments[i], parent, this);
                     }
-                    //isNew = true;
                 }
                 else if (info is InMemoryFileSystemFile && isLast)
                 {
-                    // TODO: Maybe use a different exception to disallow creating a directory over a file.
                     ThrowHelper.ThrowFileOrDirectoryAlreadyExists(absolute);
                 }
                 else
@@ -340,223 +382,146 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
         finally
         {
+            if (result is not null)
+            {
+                _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Created,
+                    result.Path,
+                    result.Name));
+            }
             manager.Dispose();
         }
     }
 
+    /// <inheritdoc />
     public void DeleteDirectory(FileSystemPath path)
     {
         CheckIfDisposed();
         CheckIfReadOnly(nameof(DeleteDirectory));
 
-        // Place a exclusive lock on the directory, and recurse into children
-        // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
         using var manager = new InMemoryFileSystemLockManager();
 
-        // Lock operations that modify the directory structure, Reads are Allowed
         manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
 
-
-        InMemoryFileSystemFile result = default!;
-
-        try
-        {
-            // Get the absolute path
-            FileSystemPath absolute = FormatPath(path);
-
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
-
-            // Get all directories in the path
-            DirectoryName[] directories = relative.GetDirectoryNames();
-
-            // Set the current path to begin from
-            FileSystemPath current = _root.Path;
-
-
-
-            //directory = (InMemoryFileSystemDirectory)GetDirectory(path);
-
-            //var transaction = new FileSystemTransaction<InMemoryFileSystemDirectory, InMemoryFileSystemInfo>((parent, context) =>
-            //{
-            //    if (!context.Lookup.Remove(parent.Path))
-            //    {
-            //        throw new Exception("Failed to remove directory from lookup.");
-            //    }
-            //    return parent;
-            //});
-
-
-            //foreach (var item in directory.EnumerateFileSystem())
-            //{
-            //    //transaction.Enqueue(0, (parent, context, next) =>
-            //    //{
-            //    //    // Begin Child Lock. Lock the directory for writing and deleting
-            //    //    parent.Lock(LockPolicy.Write | LockPolicy.Delete, recurse: true);
-            //    //    var child = next.Invoke(parent, context);
-            //    //    parent.Unlock(recurse: true);
-            //    //    return child;
-            //    //});
-            //}
-
-
-            //transaction.Enqueue(0, (parent, context, next) =>
-            //{
-            //    // Begin Child Lock. Lock the directory for writing and deleting
-            //    parent.Lock(LockPolicy.Write | LockPolicy.Delete, recurse: true);
-            //    var child = next.Invoke(parent, context);
-            //    parent.Unlock(recurse: true);
-            //    return child;
-            //});
-
-
-            //transaction.Commit(directory, new InMemoryFileSystemTransactionContext<InMemoryFileSystemInfo>()
-            //{
-            //    Entries = _entries,
-            //    Lookup = _lookup
-            //});
-
-
-
-
-            //foreach (var item in directory.EnumerateFileSystem(new FileSystemEnumerationOptions() {  Recurse = true }))
-            //{
-            //    if (!_lookup.Remove(item.Path))
-            //    {
-            //        ((InMemoryFileSystemInfo)item).Dispatcher.
-            //    }
-            //}
-
-            //if (!_lookup.Remove(path))
-            //{
-
-
-        }
-        finally
-        {
-            //if (directory is not null)
-            //{
-            //    // Dispatch event
-            //    Dispatcher.RaiseEvent(new FileSystemEventArgs(
-            //        WatcherChangeTypes.Deleted,
-            //        directory.Path,
-            //        directory.Name));
-            //}
-
-            Unlock();
-        }
-    }
-
-    public void DeleteFile(FileSystemPath path)
-    {
-        CheckIfDisposed();
-        CheckIfReadOnly(nameof(DeleteDirectory));
-
-        // Place a exclusive lock on the directory, and recurse into children
-        // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
-        using var manager = new InMemoryFileSystemLockManager();
-
-        // Lock operations that modify the directory structure, Reads are Allowed
-        manager.Lock(this, LockPolicy.Exclusive);
-
-
-        InMemoryFileSystemFile result = default!;
+        InMemoryFileSystemDirectory? directory = default;
 
         try
         {
-            // Get the absolute path
             FileSystemPath absolute = FormatPath(path);
 
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
+            var entry = NavigateToEntry(absolute, manager);
 
-            // Get all directories in the path
-            DirectoryName[] directories = relative.GetDirectoryNames();
-
-            // Set the current path to begin from
-            FileSystemPath current = _root.Path;
-
-            // Get all directories in the path
-            string[] segments = relative.GetSegments();
-
-            InMemoryFileSystemDirectory parent = _root;
-
-            for (int i = 0; i < segments.Length; i++)
+            if (entry is not InMemoryFileSystemDirectory dir)
             {
-                current += segments[i];
-
-                // Set flags
-                bool isLast = current.Equals(absolute, _cultureInfo, _ignoreCase);
-
-                manager.Lock(parent, LockPolicy.Write | LockPolicy.Delete);
-
-                InMemoryFileSystemFile file = default!;
-                InMemoryFileSystemDirectory existingOrCreated = parent;
-
-                // If no entry exists, Throw exception
-                if (!parent.Lookup.TryGetValue(current, out InMemoryFileSystemInfo? info))
-                {
-                    FileSystemException.ThrowFileNotFound(absolute);
-                }
-                else if (info is not InMemoryFileSystemFile && isLast)
-                {
-                    FileSystemException.ThrowFileNotFound(absolute);
-                }
-                else if (!isLast)
-                {
-                    existingOrCreated = (InMemoryFileSystemDirectory)info;
-                }
-
-                if (file is not null && isLast)
-                {
-                    manager.Lock(file, LockPolicy.Exclusive);
-
-                    if (!parent.Entries.Remove(current))
-                    {
-                        // ThrowHelper.ThrowIOException(new IOException("Failed to remove file from entries."));
-                    }
-
-                    result = file;
-                }
-                else
-                {
-                    parent = existingOrCreated;
-                }
+                FileSystemException.ThrowDirectoryNotFound(path);
+                return;
             }
+
+            directory = dir;
+
+            var parentDir = FindParentDirectory(absolute, manager);
+
+            if (parentDir is null)
+            {
+                throw new InvalidOperationException("Cannot delete the root directory.");
+            }
+
+            // Lock the directory exclusively for deletion
+            manager.Lock(directory, LockPolicy.Exclusive);
+
+            // Recursively dispose all children
+            foreach (var (key, child) in directory.Entries.ToArray())
+            {
+                child.Dispose();
+            }
+
+            directory.Entries.Clear();
+
+            // Remove from parent
+            parentDir.Entries.Remove(absolute);
         }
         finally
         {
+            if (directory is not null)
+            {
+                _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Deleted,
+                    directory.Path,
+                    directory.Name));
+            }
             manager.Dispose();
         }
     }
 
+    /// <inheritdoc />
+    public void DeleteFile(FileSystemPath path)
+    {
+        CheckIfDisposed();
+        CheckIfReadOnly(nameof(DeleteFile));
+
+        using var manager = new InMemoryFileSystemLockManager();
+
+        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+
+        InMemoryFileSystemFile? file = default;
+
+        try
+        {
+            FileSystemPath absolute = FormatPath(path);
+
+            var entry = NavigateToEntry(absolute, manager);
+
+            if (entry is not InMemoryFileSystemFile foundFile)
+            {
+                FileSystemException.ThrowFileNotFound(path);
+                return;
+            }
+
+            file = foundFile;
+
+            var parentDir = FindParentDirectory(absolute, manager);
+
+            if (parentDir is null)
+            {
+                FileSystemException.ThrowFileNotFound(path);
+                return;
+            }
+
+            // Lock the file exclusively for deletion
+            manager.Lock(file, LockPolicy.Exclusive);
+
+            // Remove from parent
+            parentDir.Entries.Remove(absolute);
+        }
+        finally
+        {
+            if (file is not null)
+            {
+                _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+                    WatcherChangeTypes.Deleted,
+                    file.Path,
+                    file.Name));
+            }
+            manager.Dispose();
+        }
+    }
+
+    /// <inheritdoc />
     public IFileSystemInfo GetInfo(FileSystemPath path)
     {
         CheckIfDisposed();
-        CheckIfReadOnly(nameof(DeleteDirectory));
 
-        // Place a exclusive lock on the directory, and recurse into children
-        // If another process has a lock on any child, this will wait until the lock is released or throw an unauthorized access exception
         using var manager = new InMemoryFileSystemLockManager();
 
-        // Lock operations that modify the directory structure, Reads are Allowed
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
-
+        manager.Lock(this, LockPolicy.Delete);
 
         InMemoryFileSystemInfo result = _root!;
 
         try
         {
-            // Format the path
             FileSystemPath absolute = FormatPath(path);
-
-            // Get Relative path
-            FileSystemPath relative = absolute.Subpath(_root.Path.Length + 1);
-
-            // Set the current path to begin from
+            FileSystemPath relative = GetRelativePath(absolute);
             FileSystemPath current = _root.Path;
-
-            // Get all directories in the path
             string[] names = relative.GetSegments();
 
             for (int i = 0; i < names.Length; i++)
@@ -580,7 +545,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
                 if (!isLast)
                 {
-                    manager.Lock(result, LockPolicy.Write | LockPolicy.Delete);
+                    manager.Lock(result, LockPolicy.Delete);
                 }
             }
 
@@ -592,6 +557,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public IFileSystemFile GetFile(FileSystemPath path)
     {
         CheckIfDisposed();
@@ -608,6 +574,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         return file;
     }
 
+    /// <inheritdoc />
     public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
         CheckIfDisposed();
@@ -629,15 +596,20 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
     {
         return GetEnumerator();
     }
+
+    /// <inheritdoc />
     public void Dispose()
     {
-        CheckIfDisposed();
+        if (_isDisposed)
+        {
+            return;
+        }
+
         Lock(LockPolicy.Exclusive);
 
         try
         {
             _root.Dispose();
-
         }
         finally
         {
@@ -645,12 +617,15 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             Unlock();
         }
     }
+
+    /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
         Dispose();
         return ValueTask.CompletedTask;
     }
 
+    /// <inheritdoc />
     public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
     {
         CheckIfDisposed();
@@ -666,21 +641,117 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <inheritdoc />
     public IEnumerator<IFileSystemInfo> GetEnumerator()
     {
         return EnumerateFileSystem().GetEnumerator();
     }
 
-    internal void IncrementSpaceUsed(Size value)
+    internal void IncrementSpaceUsed(long value)
     {
         lock (_lock)
         {
-            if ((_spaceUsed + value) > SpaceAvailable)
+            long newUsed = _spaceUsed.Length + value;
+
+            if (newUsed < 0)
+            {
+                newUsed = 0;
+            }
+
+            if (newUsed > _size.Length)
             {
                 ThrowHelper.ThrowNotEnoughSpace(new IOException("There is not enough space in the file system to complete this operation."));
             }
 
-            _spaceUsed += value;
+            _spaceUsed = newUsed;
+        }
+    }
+
+    private InMemoryFileSystemInfo? NavigateToEntry(FileSystemPath absolute, InMemoryFileSystemLockManager manager)
+    {
+        FileSystemPath relative = GetRelativePath(absolute);
+        FileSystemPath current = _root.Path;
+        string[] names = relative.GetSegments();
+
+        InMemoryFileSystemInfo state = _root;
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            current += names[i];
+
+            bool isLast = current.Equals(absolute, _cultureInfo, _ignoreCase);
+
+            if (state is not InMemoryFileSystemDirectory directory)
+            {
+                return null;
+            }
+            if (!directory.Lookup.TryGetValue(current, out var info))
+            {
+                return null;
+            }
+            else
+            {
+                state = info;
+            }
+
+            if (!isLast)
+            {
+                manager.Lock(state, LockPolicy.Delete);
+            }
+        }
+
+        return state;
+    }
+
+    private InMemoryFileSystemDirectory? FindParentDirectory(FileSystemPath absolute, InMemoryFileSystemLockManager manager)
+    {
+        string pathStr = absolute.ToString();
+        int lastSep = pathStr.LastIndexOf('/');
+
+        if (lastSep <= 0)
+        {
+            return _root;
+        }
+
+        // Check if the absolute path ends with '/' (directory), if so find second-to-last separator
+        if (lastSep == pathStr.Length - 1)
+        {
+            lastSep = pathStr.LastIndexOf('/', lastSep - 1);
+            if (lastSep <= 0)
+            {
+                return _root;
+            }
+        }
+
+        FileSystemPath parentPath = pathStr[..lastSep] + "/";
+
+        var entry = NavigateToEntry(parentPath, manager);
+        return entry as InMemoryFileSystemDirectory;
+    }
+
+    private void CopyDirectoryContents(InMemoryFileSystemDirectory source, FileSystemPath destBase)
+    {
+        foreach (var (key, entry) in source.Entries)
+        {
+            string entryName = entry switch
+            {
+                InMemoryFileSystemFile f => f.Name.ToString(),
+                InMemoryFileSystemDirectory d => d.Name.ToString(),
+                _ => throw new InvalidOperationException()
+            };
+
+            FileSystemPath newPath = destBase.Join(entryName);
+
+            if (entry is InMemoryFileSystemFile file)
+            {
+                var newFile = (InMemoryFileSystemFile)CreateFile(newPath);
+                newFile.Content.CopyFrom(file.Content);
+            }
+            else if (entry is InMemoryFileSystemDirectory dir)
+            {
+                CreateDirectory(newPath);
+                CopyDirectoryContents(dir, newPath);
+            }
         }
     }
 
@@ -690,10 +761,19 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         return parentPath.Merge(path, _cultureInfo, _ignoreCase);
     }
+
+    private FileSystemPath GetRelativePath(FileSystemPath absolute)
+    {
+        FileSystemPath rootPath = _root.Path;
+        // When root is "/" the separator is already included, so don't add +1
+        int offset = rootPath.Equals("/") ? rootPath.Length : rootPath.Length + 1;
+        return absolute.Subpath(offset);
+    }
+
     private void CheckIfReadOnly(string? operation = null)
     {
         lock (_lock)
-        {   
+        {
             if (_isReadOnly)
             {
                 ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");

@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel;
 using System.IO;
 using System.Text;
 using Xunit;
@@ -18,8 +17,7 @@ public class SqlStorageTests
         return SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), name);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - Create: Should initialize new storage")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - Create: Should initialize new storage")]
     public void Create_ShouldInitializeNewStorage()
     {
         using var storage = CreateInMemory("users");
@@ -28,8 +26,7 @@ public class SqlStorageTests
         Assert.Equal(StorageModel.Sql, storage.Model);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - Create: Should accept StorageStream")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - Create: Should accept StorageStream")]
     public void Create_ShouldAcceptStorageStream()
     {
         using var data = StorageStream.FromInMemory();
@@ -40,8 +37,7 @@ public class SqlStorageTests
         Assert.NotEqual(default, storage.Id);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - InsertRow: Should return valid page and slot")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Should return valid page and slot")]
     public void InsertRow_ShouldReturnValidPageAndSlot()
     {
         using var storage = CreateInMemory("users");
@@ -56,8 +52,7 @@ public class SqlStorageTests
         Assert.Equal(0, slotIndex);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - ReadRow: Should return inserted data")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - ReadRow: Should return inserted data")]
     public void ReadRow_ShouldReturnInsertedData()
     {
         using var storage = CreateInMemory("users");
@@ -72,8 +67,7 @@ public class SqlStorageTests
         Assert.Equal(original, result.ToArray());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - InsertRow: Multiple inserts should produce sequential slots")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Multiple inserts should produce sequential slots")]
     public void InsertRow_MultipleInserts_ShouldProduceSequentialSlots()
     {
         using var storage = CreateInMemory("users");
@@ -96,8 +90,7 @@ public class SqlStorageTests
         Assert.Equal(page2, page3);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - ReadRow: Should preserve column values through roundtrip")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - ReadRow: Should preserve column values through roundtrip")]
     public void ReadRow_ShouldPreserveColumnValues()
     {
         using var storage = CreateInMemory("products");
@@ -114,8 +107,7 @@ public class SqlStorageTests
         Assert.Equal(19.95, BitConverter.ToDouble(result.Span.Slice(4)));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - UpdateRow: Should overwrite existing data")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - UpdateRow: Should overwrite existing data")]
     public void UpdateRow_ShouldOverwriteExistingData()
     {
         using var storage = CreateInMemory("users");
@@ -132,8 +124,7 @@ public class SqlStorageTests
         Assert.Equal(999, BitConverter.ToInt32(result.Span));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - DeleteRow: Should prevent reading deleted record")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - DeleteRow: Should prevent reading deleted record")]
     public void DeleteRow_ShouldPreventReadingDeletedRecord()
     {
         using var storage = CreateInMemory("users");
@@ -147,8 +138,7 @@ public class SqlStorageTests
         Assert.ThrowsAny<Exception>(() => storage.ReadRow(pageId, slotIndex));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - FlushChanges: Should not throw")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - FlushChanges: Should not throw")]
     public void FlushChanges_ShouldNotThrow()
     {
         using var storage = CreateInMemory("users");
@@ -157,8 +147,7 @@ public class SqlStorageTests
         storage.FlushChanges();
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - Open: Should reopen and read persisted data")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - Open: Should reopen and read persisted data")]
     public void Open_ShouldReopenAndReadPersistedData()
     {
         // Use a shared MemoryStream for data so we can reopen it.
@@ -199,8 +188,7 @@ public class SqlStorageTests
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - Open: Should reopen from raw Stream overload")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - Open: Should reopen from raw Stream overload")]
     public void Open_ShouldReopenFromRawStream()
     {
         var dataStream = new MemoryStream();
@@ -231,8 +219,7 @@ public class SqlStorageTests
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - GetUnitIterator: Should iterate all living rows")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - GetUnitIterator: Should iterate all living rows")]
     public void GetUnitIterator_ShouldIterateAllLivingRows()
     {
         using var storage = CreateInMemory("iter-test");
@@ -263,8 +250,7 @@ public class SqlStorageTests
         Assert.Equal(3, ids[1]);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - InsertRow: Large rows should span multiple pages")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Large rows should span multiple pages")]
     public void InsertRow_LargeRows_ShouldSpanMultiplePages()
     {
         using var storage = CreateInMemory("large-test");
@@ -287,8 +273,7 @@ public class SqlStorageTests
         Assert.Equal(bigRow1, result1.ToArray());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlStorage] - Dispose: Should be idempotent")]
+    [Fact(DisplayName = "Cohesion Test [SqlStorage] - Dispose: Should be idempotent")]
     public void Dispose_ShouldBeIdempotent()
     {
         var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "dispose-test");

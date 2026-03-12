@@ -1,15 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="coverlet.collector" />
-		<Reference Include="Microsoft.NET.Test.Sdk" />
-		<Reference Include="xunit.runner.visualstudio" />
-		<Reference Include="xunit" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="xunit" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Globbing" />
+	</ItemGroup>
+	<ItemGroup>
+		<Using Include="Xunit" />
 	</ItemGroup>
 </Project>

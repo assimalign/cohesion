@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Linq;
-using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 
@@ -47,7 +45,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
     {
         path = Path.Combine(path, _comparison);
 
-        Key key = path[0];
+        Key key = path[Path.Count];
 
         if (!_lookup.TryGetValue(key, out var either))
         {
@@ -55,7 +53,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         }
         else if (either.IsValue(out IConfigurationValue? value))
         {
-            if (path.Count > 1)
+            if (path.Count > Path.Count + 1)
             {
                 return null;
             }
@@ -63,11 +61,11 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         }
         else if (either.IsSection(out IConfigurationSection? section))
         {
-            if (path.Count > 1)
+            if (path.Count > Path.Count + 1)
             {
-                return section.GetEntry(path.Subpath(1));
+                return section.GetEntry(path);
             }
-            return null;
+            return section;
         }
 
         return null;
@@ -80,15 +78,9 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
     }
 
     /// <inheritdoc />
-    public IEnumerator<IConfigurationEntry> GetEnumerator()
+    public IEnumerable<IConfigurationEntry> GetChildren()
     {
-        return _data.Values.GetEnumerator();
-    }
-
-    /// <inheritdoc />
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
+        return _data.Values;
     }
 
     private string? GetConfigurationValue(in Path path)
@@ -102,7 +94,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
         else if (either.IsValue(out IConfigurationValue? value))
         {
-            if (path.IsComposite)
+            if (path.Count > Path.Count + 1)
             {
                 return null;
             }
@@ -111,9 +103,10 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         }
         else if (either.IsSection(out IConfigurationSection? section))
         {
-            if (path.IsComposite)
+            if (path.Count > Path.Count + 1)
             {
-                return section.GetValue(path.Subpath(1))?.Value;
+                var subEntry = section.GetEntry(path);
+                return subEntry is IConfigurationValue subValue ? subValue.Value : null;
             }
 
             return null;
@@ -179,7 +172,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
             }
             else
             {
-                section[path] = input;
+                ((ConfigurationSection)section)[path] = input;
             }
 
             NotifyChanged();
@@ -206,7 +199,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
                 IConfigurationEntry[] entries = new IConfigurationEntry[_section.Count];
 
                 int i = 0;
-                foreach (var entry in _section)
+                foreach (var entry in _section.GetChildren())
                 {
                     entries[i] = entry;
                     i++;

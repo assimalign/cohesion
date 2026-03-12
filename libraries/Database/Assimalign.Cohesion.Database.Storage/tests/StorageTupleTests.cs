@@ -1,5 +1,4 @@
-﻿using System;
-using System.ComponentModel;
+using System;
 using System.Text;
 using Xunit;
 
@@ -7,8 +6,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public class StorageTupleTests
 {
-	[Fact]
-	[DisplayName("Cohesion Test [StorageTuple] - ToBytes/FromBytes: Should roundtrip fields")]
+	[Fact(DisplayName = "Cohesion Test [StorageTuple] - ToBytes/FromBytes: Should roundtrip fields")]
 	public void ToBytesAndFromBytes_ShouldRoundtripFields()
 	{
 		var tuple = new StorageTuple(
@@ -30,8 +28,7 @@ public class StorageTupleTests
 		Assert.Equal(1, activeField.Value.Span[0]);
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [StorageTuple] - TryGetField: Should return false for missing field")]
+	[Fact(DisplayName = "Cohesion Test [StorageTuple] - TryGetField: Should return false for missing field")]
 	public void TryGetField_ShouldReturnFalseForMissingField()
 	{
 		var tuple = new StorageTuple(new StorageTupleField("id", BitConverter.GetBytes(7)));
@@ -41,8 +38,7 @@ public class StorageTupleTests
 		Assert.False(found);
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [StorageTuple] - FromBytes: Should reject malformed payload")]
+	[Fact(DisplayName = "Cohesion Test [StorageTuple] - FromBytes: Should reject malformed payload")]
 	public void FromBytes_ShouldRejectMalformedPayload()
 	{
 		byte[] malformed = { 1, 0, 0, 0, 2, 0, 0, 0, (byte)'i' };
@@ -50,8 +46,7 @@ public class StorageTupleTests
 		Assert.Throws<ArgumentException>(() => StorageTuple.FromBytes(malformed));
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [StorageTupleField] - Ctor: Should reject empty names")]
+	[Fact(DisplayName = "Cohesion Test [StorageTupleField] - Ctor: Should reject empty names")]
 	public void StorageTupleFieldCtor_ShouldRejectEmptyNames()
 	{
 		Assert.Throws<ArgumentException>(() => new StorageTupleField("", ReadOnlyMemory<byte>.Empty));

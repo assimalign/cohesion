@@ -84,7 +84,7 @@ public class PhysicalFileSystem : IFileSystem
 
             if (info.Exists)
             {
-                FileSystemException.ThrowDirectoryNotFound(path);
+                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path);
             }
 
             info.Create();

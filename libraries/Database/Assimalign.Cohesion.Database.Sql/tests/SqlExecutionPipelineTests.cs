@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -88,8 +87,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Session Lifecycle ──────────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - CreateSession: Should return open session")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CreateSession: Should return open session")]
     public async Task CreateSession_ShouldReturnOpenSession()
     {
         await using var engine = await CreateEngine();
@@ -102,8 +100,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Null(session.CurrentTransaction);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - DisposeSession: Should transition to closed state")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DisposeSession: Should transition to closed state")]
     public async Task DisposeSession_ShouldTransitionToClosedState()
     {
         await using var engine = await CreateEngine();
@@ -115,8 +112,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(SessionState.Closed, session.State);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - DisposeSession: Should be idempotent")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DisposeSession: Should be idempotent")]
     public async Task DisposeSession_ShouldBeIdempotent()
     {
         await using var engine = await CreateEngine();
@@ -129,8 +125,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Transaction Lifecycle ──────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - BeginTransaction: Should return active transaction")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - BeginTransaction: Should return active transaction")]
     public async Task BeginTransaction_ShouldReturnActiveTransaction()
     {
         await using var engine = await CreateEngine();
@@ -145,8 +140,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(tx, session.CurrentTransaction);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - BeginTransaction: Should throw when transaction already active")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - BeginTransaction: Should throw when transaction already active")]
     public async Task BeginTransaction_ShouldThrowWhenTransactionAlreadyActive()
     {
         await using var engine = await CreateEngine();
@@ -158,8 +152,7 @@ public class SqlExecutionPipelineTests : IDisposable
         await Assert.ThrowsAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - CommitTransaction: Should transition to committed state")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CommitTransaction: Should transition to committed state")]
     public async Task CommitTransaction_ShouldTransitionToCommittedState()
     {
         await using var engine = await CreateEngine();
@@ -172,8 +165,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(TransactionState.Committed, tx.State);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - RollbackTransaction: Should transition to rolledback state")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - RollbackTransaction: Should transition to rolledback state")]
     public async Task RollbackTransaction_ShouldTransitionToRolledBackState()
     {
         await using var engine = await CreateEngine();
@@ -186,8 +178,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(TransactionState.RolledBack, tx.State);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - DisposeTransaction: Should auto-rollback if active")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DisposeTransaction: Should auto-rollback if active")]
     public async Task DisposeTransaction_ShouldAutoRollbackIfActive()
     {
         await using var engine = await CreateEngine();
@@ -200,8 +191,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(TransactionState.RolledBack, tx.State);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - DisposeSession: Should auto-rollback active transaction")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DisposeSession: Should auto-rollback active transaction")]
     public async Task DisposeSession_ShouldAutoRollbackActiveTransaction()
     {
         await using var engine = await CreateEngine();
@@ -217,8 +207,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(TransactionState.RolledBack, tx.State);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - CommitTransaction: Should throw when not active")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CommitTransaction: Should throw when not active")]
     public async Task CommitTransaction_ShouldThrowWhenNotActive()
     {
         await using var engine = await CreateEngine();
@@ -231,8 +220,7 @@ public class SqlExecutionPipelineTests : IDisposable
         await Assert.ThrowsAsync<DatabaseException>(async () => await tx.CommitAsync());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - RollbackTransaction: Should throw when not active")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - RollbackTransaction: Should throw when not active")]
     public async Task RollbackTransaction_ShouldThrowWhenNotActive()
     {
         await using var engine = await CreateEngine();
@@ -247,8 +235,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── DML Execution ──────────────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteInsert: Should return success with affected count 1")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteInsert: Should return success with affected count 1")]
     public async Task ExecuteInsert_ShouldReturnSuccessWithAffectedCount1()
     {
         await using var engine = await CreateEngine();
@@ -264,8 +251,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.Equal(1, result.AffectedCount);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteInsert: Auto-commit should persist data")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteInsert: Auto-commit should persist data")]
     public async Task ExecuteInsert_AutoCommit_ShouldPersistData()
     {
         await using var engine = await CreateEngine();
@@ -294,8 +280,7 @@ public class SqlExecutionPipelineTests : IDisposable
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteInsert: Explicit transaction commit should persist data")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteInsert: Explicit transaction commit should persist data")]
     public async Task ExecuteInsert_ExplicitTransactionCommit_ShouldPersistData()
     {
         await using var engine = await CreateEngine();
@@ -330,8 +315,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── SELECT Execution ───────────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteSelect: Should return result set")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteSelect: Should return result set")]
     public async Task ExecuteSelect_ShouldReturnResultSet()
     {
         await using var engine = await CreateEngine();
@@ -352,8 +336,7 @@ public class SqlExecutionPipelineTests : IDisposable
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteSelect: Empty table should return no rows")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteSelect: Empty table should return no rows")]
     public async Task ExecuteSelect_EmptyTable_ShouldReturnNoRows()
     {
         await using var engine = await CreateEngine();
@@ -374,8 +357,7 @@ public class SqlExecutionPipelineTests : IDisposable
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteSelect: Multiple inserts should return all rows")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteSelect: Multiple inserts should return all rows")]
     public async Task ExecuteSelect_MultipleInserts_ShouldReturnAllRows()
     {
         await using var engine = await CreateEngine();
@@ -406,8 +388,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Engine Strategy ────────────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - InMemoryEngine: Should create and use database without RootPath")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - InMemoryEngine: Should create and use database without RootPath")]
     public async Task InMemoryEngine_ShouldCreateAndUseDatabaseWithoutRootPath()
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
@@ -439,8 +420,7 @@ public class SqlExecutionPipelineTests : IDisposable
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - CreateDatabase: Should throw for duplicate name")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - CreateDatabase: Should throw for duplicate name")]
     public async Task CreateDatabase_ShouldThrowForDuplicateName()
     {
         await using var engine = await CreateEngine();
@@ -449,8 +429,7 @@ public class SqlExecutionPipelineTests : IDisposable
         await Assert.ThrowsAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("test-db"));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - DropDatabase: Should remove database")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DropDatabase: Should remove database")]
     public async Task DropDatabase_ShouldRemoveDatabase()
     {
         await using var engine = await CreateEngine();
@@ -461,8 +440,7 @@ public class SqlExecutionPipelineTests : IDisposable
         Assert.False(engine.TryGetDatabase("test-db", out _));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - TryGetDatabase: Should find existing database")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - TryGetDatabase: Should find existing database")]
     public async Task TryGetDatabase_ShouldFindExistingDatabase()
     {
         await using var engine = await CreateEngine();
@@ -476,8 +454,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── QueryRow Typed Accessors ───────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - QueryRow: GetInt32 should decode first 4 bytes")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - QueryRow: GetInt32 should decode first 4 bytes")]
     public async Task QueryRow_GetInt32_ShouldDecodeFirst4Bytes()
     {
         await using var engine = await CreateEngine();
@@ -502,8 +479,7 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Error Handling ─────────────────────────────────────────────────
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - ExecuteInsert: Should throw without parameters")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ExecuteInsert: Should throw without parameters")]
     public async Task ExecuteInsert_ShouldThrowWithoutParameters()
     {
         await using var engine = await CreateEngine();
@@ -517,8 +493,7 @@ public class SqlExecutionPipelineTests : IDisposable
         await Assert.ThrowsAsync<DatabaseException>(async () => await session.ExecuteAsync(request));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - Session: Should throw when executing on closed session")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Session: Should throw when executing on closed session")]
     public async Task Session_ShouldThrowWhenExecutingOnClosedSession()
     {
         await using var engine = await CreateEngine();
@@ -529,8 +504,7 @@ public class SqlExecutionPipelineTests : IDisposable
         await Assert.ThrowsAsync<DatabaseException>(async () => await session.ExecuteAsync(CreateSelectRequest()));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [SqlEngine] - Session: Should throw BeginTransaction on closed session")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Session: Should throw BeginTransaction on closed session")]
     public async Task Session_ShouldThrowBeginTransactionOnClosedSession()
     {
         await using var engine = await CreateEngine();

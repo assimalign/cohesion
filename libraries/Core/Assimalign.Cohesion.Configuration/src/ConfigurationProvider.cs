@@ -87,7 +87,11 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         {
             if (path.IsComposite)
             {
-                value = section.GetValue(path.Subpath(1))?.Value!;
+                var subEntry = section.GetEntry(path.Subpath(1));
+                if (subEntry is IConfigurationValue subValue)
+                {
+                    value = subValue.Value!;
+                }
             }
         }
 
@@ -162,7 +166,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             }
             else
             {
-                section[path] = value;
+                ((ConfigurationSection)section)[path] = value;
             }
             return true;
         }
@@ -182,7 +186,8 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         {
             item = entry switch
             {
-                IConfigurationSection section => section.GetEntry(path),
+                IConfigurationSection section when path.IsComposite => section.GetEntry(path),
+                IConfigurationSection section => section,
                 IConfigurationValue value => value,
                 _ => default
             };

@@ -31,12 +31,32 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
 
     public void Dispose()
     {
-        
+        _watcher.EnableRaisingEvents = false;
+        _watcher.Dispose();
+
+        foreach (var subscriber in _subscribers)
+        {
+            subscriber.Dispose();
+        }
+
+        _subscribers.Clear();
     }
 
     public IDisposable OnChange(Action<object?> callback, object? state)
     {
-        return OnChange(callback, state);
+        ArgumentNullException.ThrowIfNull(callback);
+
+        var disposable = new Subscriber<object?>()
+        {
+            ChangeType = FileSystemEventType.Changed,
+            State = state,
+            Callback = args => callback(args.State),
+            OnDispose = subscriber => _subscribers.Remove(subscriber)
+        };
+
+        _subscribers.Add(disposable);
+
+        return disposable;
     }
     public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
@@ -103,17 +123,14 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         return disposable;
     }
 
-    private void Notify(object sender, FileSystemEventArgs args, FileSystemEventType changeType)
+    private void Notify(object? sender, FileSystemEventArgs args, FileSystemEventType changeType)
     {
         FileSystemPath fileSystemPath = args.FullPath;
-        IFileSystem fileSystem = _fileSystemInfo.FileSystem;
 
         if (!_glob.IsMatch(fileSystemPath))
         {
             return;
         }
-
-        IFileSystemInfo fileSystemInfo = fileSystem.GetInfo(fileSystemPath);
 
         foreach (var subscriber in _subscribers)
         {
@@ -123,14 +140,6 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             }
         }
     }
-    enum ChangeType
-    {
-        Created,
-        Deleted,
-        Changed,
-        Rename
-    }
-
     abstract partial class Subscriber : IDisposable
     {
         public required FileSystemEventType ChangeType { get; init; }

@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel;
 using System.IO;
 using Xunit;
 
@@ -17,8 +16,7 @@ public class DocumentStorageTests
         return DocumentStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), name);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - Create: Should initialize new storage")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Create: Should initialize new storage")]
     public void Create_ShouldInitializeNewStorage()
     {
         using var storage = CreateInMemory("test-docs");
@@ -27,8 +25,7 @@ public class DocumentStorageTests
         Assert.Equal(StorageModel.Document, storage.Model);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - Create: Should accept StorageStream")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Create: Should accept StorageStream")]
     public void Create_ShouldAcceptStorageStream()
     {
         using var data = StorageStream.FromInMemory();
@@ -39,8 +36,7 @@ public class DocumentStorageTests
         Assert.NotEqual(default, storage.Id);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - InsertDocument: Should return valid page and slot")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Should return valid page and slot")]
     public void InsertDocument_ShouldReturnValidPageAndSlot()
     {
         using var storage = CreateInMemory("test-docs");
@@ -52,8 +48,7 @@ public class DocumentStorageTests
         Assert.Equal(0, slotIndex);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - ReadDocument: Should return inserted data")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - ReadDocument: Should return inserted data")]
     public void ReadDocument_ShouldReturnInsertedData()
     {
         using var storage = CreateInMemory("test-docs");
@@ -73,8 +68,7 @@ public class DocumentStorageTests
         Assert.Equal(original, result.ToArray());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - InsertDocument: Multiple inserts should produce sequential slots")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Multiple inserts should produce sequential slots")]
     public void InsertDocument_MultipleInserts_ShouldProduceSequentialSlots()
     {
         using var storage = CreateInMemory("test-docs");
@@ -90,8 +84,7 @@ public class DocumentStorageTests
         Assert.Equal(page2, page3);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - UpdateDocument: Should overwrite existing data")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - UpdateDocument: Should overwrite existing data")]
     public void UpdateDocument_ShouldOverwriteExistingData()
     {
         using var storage = CreateInMemory("test-docs");
@@ -109,8 +102,7 @@ public class DocumentStorageTests
         Assert.Equal(updated, result.ToArray());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - DeleteDocument: Should prevent reading deleted record")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - DeleteDocument: Should prevent reading deleted record")]
     public void DeleteDocument_ShouldPreventReadingDeletedRecord()
     {
         using var storage = CreateInMemory("test-docs");
@@ -121,8 +113,7 @@ public class DocumentStorageTests
         Assert.ThrowsAny<Exception>(() => storage.ReadDocument(pageId, slotIndex));
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - FlushChanges: Should not throw")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - FlushChanges: Should not throw")]
     public void FlushChanges_ShouldNotThrow()
     {
         using var storage = CreateInMemory("test-docs");
@@ -131,8 +122,7 @@ public class DocumentStorageTests
         storage.FlushChanges();
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - Open: Should reopen and read persisted data")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Open: Should reopen and read persisted data")]
     public void Open_ShouldReopenAndReadPersistedData()
     {
         var dataStream = new MemoryStream();
@@ -163,8 +153,7 @@ public class DocumentStorageTests
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - Open: Should reopen from raw Stream overload")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Open: Should reopen from raw Stream overload")]
     public void Open_ShouldReopenFromRawStream()
     {
         var dataStream = new MemoryStream();
@@ -193,8 +182,7 @@ public class DocumentStorageTests
         }
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - GetUnitIterator: Should iterate all living documents")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - GetUnitIterator: Should iterate all living documents")]
     public void GetUnitIterator_ShouldIterateAllLivingDocuments()
     {
         using var storage = CreateInMemory("iter-test");
@@ -224,8 +212,7 @@ public class DocumentStorageTests
         Assert.Equal(3, ids[1]);
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - InsertDocument: Large documents should span multiple pages")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - InsertDocument: Large documents should span multiple pages")]
     public void InsertDocument_LargeDocuments_ShouldSpanMultiplePages()
     {
         using var storage = CreateInMemory("large-test");
@@ -252,8 +239,7 @@ public class DocumentStorageTests
         Assert.Equal(bigDoc1, result1.ToArray());
     }
 
-    [Fact]
-    [DisplayName("Cohesion Test [DocumentStorage] - Dispose: Should be idempotent")]
+    [Fact(DisplayName = "Cohesion Test [DocumentStorage] - Dispose: Should be idempotent")]
     public void Dispose_ShouldBeIdempotent()
     {
         var storage = DocumentStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "dispose-test");

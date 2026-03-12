@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -9,8 +8,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed class JournalTests
 {
-	[Fact]
-	[DisplayName("Cohesion Test [Database.Storage] - Journal: Should assign sequential LSNs and persist all records")]
+	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Should assign sequential LSNs and persist all records")]
 	public void Journal_ShouldAssignSequentialLsns_AndPersistAllRecords()
 	{
 		using var stream = new MemoryStream();
@@ -33,8 +31,7 @@ public sealed class JournalTests
 		Assert.Equal(3L, op2Lsn);
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [Database.Storage] - Journal: Recover should return only committed operations")]
+	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Recover should return only committed operations")]
 	public void Journal_RecoverCommittedOperations_ShouldReturnOnlyCommittedOperations()
 	{
 		using var stream = new MemoryStream();
@@ -55,8 +52,7 @@ public sealed class JournalTests
 		Assert.Equal("committed", Encoding.UTF8.GetString(replayRecords[0].Payload.Span));
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [Database.Storage] - Journal: Rollback should exclude transaction operations from recovery")]
+	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Rollback should exclude transaction operations from recovery")]
 	public void Journal_Rollback_ShouldExcludeOperationsFromRecovery()
 	{
 		using var stream = new MemoryStream();
@@ -70,8 +66,7 @@ public sealed class JournalTests
 		Assert.Empty(replayRecords);
 	}
 
-	[Fact]
-	[DisplayName("Cohesion Test [Database.Storage] - Journal: Reopened journal should recover committed operations")]
+	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Reopened journal should recover committed operations")]
 	public void Journal_ReopenedInstance_ShouldRecoverCommittedOperations()
 	{
 		using var stream = new MemoryStream();
