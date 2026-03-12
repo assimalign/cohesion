@@ -1,157 +1,252 @@
-﻿using Assimalign.Cohesion.Transports.Internal;
+#if NET7_0_OR_GREATER
 using System;
-using System.Buffers;
 using System.Collections.Generic;
-using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Transports.Internal;
+
+/// <summary>
+/// Represents a QUIC transport connection that can open multiple logical streams.
+/// </summary>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
 [SupportedOSPlatform("osx")]
-public class QuicTransportConnection : ITransportConnection, IPooledStream
+public sealed class QuicTransportConnection : IMultiplexTransportConnection
 {
     private readonly QuicConnection _connection;
-    private readonly QuicStream _stream;
-
+    private readonly TransportPipeline _pipeline;
+    private readonly QuicStreamType _outboundStreamType;
+    private readonly long _defaultCloseErrorCode;
+    private readonly List<QuicTransportContext> _contexts;
+    private readonly Lock _contextsLock;
+    private readonly Lock _stateLock;
 
     private volatile ConnectionState _state;
-
-
-    internal PooledStreamStack<QuicTransportConnection> StreamPool;
-    private readonly Lock _poolLock = new();
-    private readonly Lock _shutdownLock = new();
-
-    internal const int InitialStreamPoolSize = 5;
-    internal const int MaxStreamPoolSize = 100;
-    internal const long StreamPoolExpirySeconds = 5;
+    private bool _isDisposed;
 
     internal QuicTransportConnection(
         QuicConnection connection,
-        int maxReadBufferSize,
-        int maxWriteBufferSize,
-        bool isServer = true)
+        TransportId transportId,
+        TransportPipeline pipeline,
+        QuicStreamType outboundStreamType,
+        long defaultCloseErrorCode)
     {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(pipeline);
+
         _connection = connection;
-
-        var inputOptions = new PipeOptions(
-            null, 
-            PipeScheduler.ThreadPool, 
-            PipeScheduler.Inline, 
-            maxReadBufferSize, 
-            maxReadBufferSize / 2,
-            useSynchronizationContext: false);
-
-        var outputOptions = new PipeOptions(
-            null, 
-            PipeScheduler.Inline, 
-            PipeScheduler.ThreadPool, 
-            maxWriteBufferSize, 
-            maxWriteBufferSize / 2, 
-            useSynchronizationContext: false);
-
-        var serverPipe = new Pipe(inputOptions);
-        var clientPipe = new Pipe(outputOptions);
-
-        if (isServer)
-        {
-            Pipe = new TransportConnectionPipe(
-                serverPipe.Reader,
-                clientPipe.Writer);
-
-            this.Output = serverPipe.Writer;
-            this.Input = clientPipe.Reader;
-        }
-        else
-        {
-            Pipe = new TransportConnectionPipe(
-                clientPipe.Reader,
-                serverPipe.Writer);
-
-            this.Input = serverPipe.Reader;
-            this.Output = clientPipe.Writer;
-        }
+        _pipeline = pipeline;
+        _outboundStreamType = outboundStreamType;
+        _defaultCloseErrorCode = defaultCloseErrorCode;
+        _contexts = new List<QuicTransportContext>();
+        _contextsLock = new Lock();
+        _stateLock = new Lock();
+        _state = ConnectionState.Idle;
+        TransportId = transportId;
     }
 
-    public bool IsConnected => throw new NotImplementedException();
-    public object? ConnectionData => throw new NotImplementedException();
-    public ProtocolType Protocol => ProtocolType.Quic;
+    /// <inheritdoc />
+    public ConnectionId Id { get; } = ConnectionId.New();
+
+    /// <inheritdoc />
+    public TransportId TransportId { get; }
+
+    /// <inheritdoc />
+    public TransportProtocol Protocol { get; } = TransportProtocol.Quic;
+
+    /// <inheritdoc />
     public ConnectionState State => _state;
-    public ITransportConnectionPipe Pipe { get; }
-    public EndPoint LocalEndPoint => _connection?.LocalEndPoint!;
-    public EndPoint RemoteEndPoint => _connection?.RemoteEndPoint!;
 
-    long IPooledStream.PoolExpirationTimestamp => throw new NotImplementedException();
+    /// <summary>
+    /// Gets the local connection endpoint.
+    /// </summary>
+    public EndPoint LocalEndPoint => _connection.LocalEndPoint;
 
-    public readonly PipeWriter Output;
-    public readonly PipeReader Input;
+    /// <summary>
+    /// Gets the remote connection endpoint.
+    /// </summary>
+    public EndPoint RemoteEndPoint => _connection.RemoteEndPoint;
 
+    internal Action? OnDispose { get; set; }
+
+    /// <inheritdoc />
+    public QuicTransportContext OpenInbound()
+    {
+        return OpenInboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<QuicTransportContext> OpenInboundAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        SetStateOpenIfNeeded();
+
+        QuicStream stream = await _connection.AcceptInboundStreamAsync(cancellationToken).ConfigureAwait(false);
+        QuicTransportContext context = CreateContext(stream);
+
+        await _pipeline.ExecuteAsync(this, context, cancellationToken).ConfigureAwait(false);
+
+        return context;
+    }
+
+    /// <inheritdoc />
+    public QuicTransportContext OpenOutbound()
+    {
+        return OpenOutboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<QuicTransportContext> OpenOutboundAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        SetStateOpenIfNeeded();
+
+        QuicStream stream = await _connection.OpenOutboundStreamAsync(_outboundStreamType, cancellationToken).ConfigureAwait(false);
+        QuicTransportContext context = CreateContext(stream);
+
+        await _pipeline.ExecuteAsync(this, context, cancellationToken).ConfigureAwait(false);
+
+        return context;
+    }
+
+    ITransportConnectionContext IMultiplexTransportConnection.OpenInbound()
+    {
+        return OpenInbound();
+    }
+
+    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
+    {
+        return await OpenInboundAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    ITransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
+    {
+        return OpenOutbound();
+    }
+
+    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
+    {
+        return await OpenOutboundAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public void Abort()
     {
-        
+        AbortAsync().AsTask().GetAwaiter().GetResult();
     }
 
-    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
-        return ValueTask.CompletedTask;
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        lock (_stateLock)
+        {
+            if (_state is ConnectionState.Aborted or ConnectionState.Closed)
+            {
+                return;
+            }
+
+            _state = ConnectionState.Aborted;
+        }
+
+        try
+        {
+            await _connection.CloseAsync(_defaultCloseErrorCode, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (QuicException)
+        {
+        }
+
+        await DisposeAllContextsAsync().ConfigureAwait(false);
+
+        lock (_stateLock)
+        {
+            _state = ConnectionState.Closed;
+        }
     }
 
+    /// <inheritdoc />
     public void Dispose()
     {
-        
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
-    public void Execute()
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
     {
-
-        QuicStream quicStream = await _connection.AcceptInboundStreamAsync();
-
-        QuicTransportConnection? connection = null;
-
-        // Only use pool for bidirectional streams. Just a handful of unidirecitonal
-        // streams are created for a connection and they live for the lifetime of the connection.
-        if (quicStream.CanRead && quicStream.CanWrite)
+        if (_isDisposed)
         {
-            lock (_poolLock)
+            return;
+        }
+
+        _isDisposed = true;
+
+        await AbortAsync().ConfigureAwait(false);
+
+        await _connection.DisposeAsync().ConfigureAwait(false);
+
+        OnDispose?.Invoke();
+    }
+
+    private QuicTransportContext CreateContext(QuicStream stream)
+    {
+        var context = new QuicTransportContext(this, stream);
+
+        lock (_contextsLock)
+        {
+            _contexts.Add(context);
+        }
+
+        return context;
+    }
+
+    private async ValueTask DisposeAllContextsAsync()
+    {
+        QuicTransportContext[] contexts;
+
+        lock (_contextsLock)
+        {
+            contexts = _contexts.ToArray();
+            _contexts.Clear();
+        }
+
+        foreach (QuicTransportContext context in contexts)
+        {
+            await context.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void SetStateOpenIfNeeded()
+    {
+        lock (_stateLock)
+        {
+            if (_state == ConnectionState.Idle)
             {
-                StreamPool.TryPop(out connection);
+                _state = ConnectionState.Open;
+                TransportEventSource.Log.TransportConnectionStart(Protocol, TransportId, Id);
             }
         }
-
-        if (connection is null)
-        {
-            connection = new QuicTransportConnection(
-                quicConnection,
-                quicStream);
-
-            //connection = new QuicStreamContext(this, _context);
-            //context.Initialize(quicStream);
-        }
-        else
-        {
-            //context.ResetFeatureCollection();
-            //context.ResetItems();
-            //context.Initialize(quicStream);
-
-            //QuicLog.StreamReused(_log, context);
-        }
-
-        //QuicLog.AcceptedStream(_log, context);
-
-        return connection;
-
-        return new QuicTransportConnection(quicConnection, quicStream);
     }
 
-    void IPooledStream.DisposeCore()
+    private void ThrowIfDisposed()
     {
-        throw new NotImplementedException();
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(QuicTransportConnection));
     }
 }
+#endif

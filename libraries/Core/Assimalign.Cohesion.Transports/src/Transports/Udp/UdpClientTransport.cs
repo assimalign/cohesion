@@ -1,12 +1,8 @@
-﻿
 using System;
-using System.Buffers;
 using System.Collections.Generic;
-using System.IO.Pipelines;
-using System.Linq;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,113 +10,96 @@ namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Transports.Internal;
 
-public sealed class UdpClientTransport : ClientTransport
+[DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
+public sealed class UdpClientTransport : ClientTransport<UdpTransportConnection>
 {
-    private readonly UdpClientTransportOptions options;
-    private readonly SocketTransportConnectionSettings settings;
-    private Socket? socket;
-    private bool disposed;
+    private readonly UdpClientTransportOptions _options;
+    private readonly TransportPipeline _pipeline;
+    private readonly List<UdpTransportConnection> _connections;
 
-    private readonly List<ITransportConnection> connections = new();
-
-    public UdpClientTransport(UdpClientTransportOptions options)
-    {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
-
-        this.options = options;
-
-        this.settings = SocketTransportConnectionSettings.GetIOQueueSettings(
-            1,
-            options.UnsafePreferInLineScheduling,
-            options.WaitForDataBeforeAllocatingBuffer,
-            options.MaxReadBufferSize,
-            options.MaxWriteBufferSize,
-            options.OnTrace)[0];
-
-        this.Middleware = options.Middleware;
-    }
-
-    public override ProtocolType Protocol => ProtocolType.Udp;
-
-    public override TransportMiddlewareHandler Middleware { get; }
-
-    public override async Task<ITransportConnection> ConnectAsync(CancellationToken cancellationToken = default)
-    {
-        if (disposed)
-        {
-            throw new ObjectDisposedException(nameof(UdpServerTransport));
-        }
-        if (socket is null)
-        {
-            socket = options.Endpoint switch
-            {
-                UnixDomainSocketEndPoint    => new Socket(options.Endpoint.AddressFamily, SocketType.Dgram, System.Net.Sockets.ProtocolType.Unspecified),
-                _                           => new Socket(options.Endpoint.AddressFamily, SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp)
-            };
-            if (options.Endpoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
-            {
-                socket.DualMode = true;
-            }
-        }
-        while (true)
-        {
-            try
-            {
-                var connection = new SocketTransportConnection(settings);
-
-                connections.Add(connection);
-
-                connection.OnDispose = () =>
-                {
-                    connections.Remove(connection);
-                };
-
-                var started = !ThreadPool.UnsafeQueueUserWorkItem(connection, true);
-
-                await Middleware.Invoke(new UdpClientTransportContext(connection));
-
-                return connection;
-            }
-            catch (Exception)
-            {
-
-            }
-        }
-    }
-
-    public override void Dispose()
-    {
-        if (disposed)
-        {
-            throw new ObjectDisposedException(nameof(UdpServerTransport));
-        }
-        if (socket is not null)
-        {
-            socket.Dispose();
-            disposed = true;
-        }
-    }
-
+    private bool _isDisposed;
 
     /// <summary>
-    /// 
+    /// Creates a new UDP client transport.
     /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
-    public static UdpClientTransport Create(Action<UdpClientTransportOptions> configure)
+    /// <param name="options">The UDP client options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    public UdpClientTransport(UdpClientTransportOptions options)
     {
-        if (configure is null)
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
+        _pipeline = options.BuildPipeline();
+        _connections = new List<UdpTransportConnection>();
+    }
+
+    /// <inheritdoc />
+    public override TransportProtocol Protocol { get; } = TransportProtocol.Udp;
+
+    /// <summary>
+    /// Gets the active connections opened by this transport.
+    /// </summary>
+    public IReadOnlyCollection<UdpTransportConnection> Connections => _connections.AsReadOnly();
+
+    /// <inheritdoc />
+    public override async Task<UdpTransportConnection> ConnectAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(UdpClientTransport));
+
+        Socket socket = _options.EndPoint switch
         {
-            throw new ArgumentNullException(nameof(configure));
+            UnixDomainSocketEndPoint => new Socket(_options.EndPoint.AddressFamily, SocketType.Dgram, ProtocolType.Unspecified),
+            _ => new Socket(_options.EndPoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
+        };
+
+        if (_options.EndPoint is IPEndPoint ipEndPoint && ipEndPoint.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            socket.DualMode = true;
         }
 
-        var options = new UdpClientTransportOptions();
+        await socket.ConnectAsync(_options.EndPoint, cancellationToken).ConfigureAwait(false);
 
-        configure.Invoke(options);
+        var connection = new UdpTransportConnection(socket, Id, _pipeline, ownsSocket: true);
+
+        connection.OnDispose = () => _connections.Remove(connection);
+
+        _connections.Add(connection);
+
+        TransportEventSource.Log.TransportInitialized(Protocol, Id);
+
+        return connection;
+    }
+
+    /// <inheritdoc />
+    public override async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+
+        foreach (UdpTransportConnection connection in _connections.ToArray())
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _connections.Clear();
+    }
+
+    /// <summary>
+    /// Creates a UDP client transport using a configure callback.
+    /// </summary>
+    /// <param name="configure">The callback used to configure options.</param>
+    /// <returns>A configured <see cref="UdpClientTransport"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
+    public static UdpClientTransport Create(Action<UdpClientTransportOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        UdpClientTransportOptions options = new UdpClientTransportOptions();
+
+        configure(options);
 
         return new UdpClientTransport(options);
     }

@@ -1,165 +1,172 @@
-﻿#if NET7_0_OR_GREATER
-using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Transports.Internal;
+#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Diagnostics;
 using System.Net.Quic;
-using System.Net.Security;
-using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
-using System.Security.Authentication;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-[RequiresPreviewFeatures]
+using Assimalign.Cohesion.Transports.Internal;
+
+[DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
 [SupportedOSPlatform("osx")]
-public sealed class QuicServerTransport : ServerTransport<QuicTransportConnection, QuicTransportContext>, IAsyncDisposable
+public sealed class QuicServerTransport : ServerTransport<QuicTransportConnection>
 {
-    private QuicListener _listener;
-    private TransportPipeline? _pipeline;
-
     private readonly QuicServerTransportOptions _options;
-    private readonly List<ITransportConnection> connections = new();
-    private readonly ConditionalWeakTable<QuicConnection, QuicTransportConnection> _pendingConnections;
+    private readonly TransportPipeline _pipeline;
+    private readonly List<QuicTransportConnection> _connections;
+    private readonly Lock _listenerLock;
 
+    private QuicListener? _listener;
+    private bool _isDisposed;
 
+    /// <summary>
+    /// Creates a new QUIC server transport.
+    /// </summary>
+    /// <param name="options">The QUIC server options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     public QuicServerTransport(QuicServerTransportOptions options)
     {
-        _options = ThrowHelper.ThrowIfNull(options);
-
-        // If the SslServerAuthenticationOptions doesn't have a cert or protocols then the
-        // QUIC connection will fail and the client receives an unhelpful message.
-        // Validate the options on the server and log issues to improve debugging.
-        ValidateServerAuthenticationOptions(_options.ServerAuthenticationOptions);
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
+        _pipeline = options.BuildPipeline();
+        _connections = new List<QuicTransportConnection>();
+        _listenerLock = new Lock();
     }
 
-    public override ProtocolType Protocol => ProtocolType.Quic;
-    public IReadOnlyCollection<ITransportConnection> Connections => connections.AsReadOnly();
+    /// <inheritdoc />
+    public override TransportProtocol Protocol { get; } = TransportProtocol.Quic;
+
+    /// <summary>
+    /// Gets the active connections accepted by this transport.
+    /// </summary>
+    public IReadOnlyCollection<QuicTransportConnection> Connections => _connections.AsReadOnly();
+
+    /// <inheritdoc />
     public override async Task<QuicTransportConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
-        if (_pipeline is null)
-        {
-            _pipeline = (TransportPipeline)(this as ITransportPipelineBuilder).Build();
-        }
-        if (_listener is null)
-        {
-            _listener = await QuicListener.ListenAsync(new()
-            {
-                ListenEndPoint = _options.EndPoint,
-                ApplicationProtocols =  _options.AcceptApplicationProtocols,
-                ListenBacklog = _options.Backlog,
-                ConnectionOptionsCallback = async (connection, info, cancellationToken) =>
-                {
-                    // Create the connection context inside the callback because it's passed
-                    // to the connection callback. The field is then read once AcceptConnectionAsync
-                    // finishes awaiting.
-                    var currentAcceptingConnection = new QuicTransportConnection(connection);
-                    
-                    _pendingConnections.Add(connection, currentAcceptingConnection);
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(QuicServerTransport));
 
-                    var context = new QuicTransportContext(currentAcceptingConnection)
-                    {
-                    };
+        await EnsureListenerAsync(cancellationToken).ConfigureAwait(false);
 
-                    await _pipeline.ExecuteAsync(context, cancellationToken);
+        QuicConnection quicConnection = await _listener!.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-                    return new QuicServerConnectionOptions()
-                    {
-                        ServerAuthenticationOptions = _options.ServerAuthenticationOptions!,
-                        IdleTimeout = Timeout.InfiniteTimeSpan, // Manages connection lifetimes itself so it can send GoAway's.
-                        MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount,
-                        MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
-                        DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
-                        DefaultStreamErrorCode = _options.DefaultStreamErrorCode,
-                    };
-                },
-            }, cancellationToken);
-        }
-        
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                QuicConnection quicConnection = await _listener.AcceptConnectionAsync(cancellationToken);
+        var connection = new QuicTransportConnection(
+            quicConnection,
+            Id,
+            _pipeline,
+            _options.OutboundStreamType,
+            _options.DefaultCloseErrorCode);
 
-                if (!_pendingConnections.TryGetValue(quicConnection, out var connection))
-                {
-                    throw new InvalidOperationException("Couldn't find ConnectionContext for QuicConnection.");
-                }
-                else
-                {
-                    _pendingConnections.Remove(quicConnection);
-                }
+        connection.OnDispose = () => _connections.Remove(connection);
 
-                quicConnection.
+        _connections.Add(connection);
 
-                return connection;
-            }
-            catch (Exception exception)
-            {
-                continue;
-            }
-        }
+        TransportEventSource.Log.TransportInitialized(Protocol, Id);
 
-        return null;
+        return connection;
     }
 
-    public override void Dispose()
+    /// <inheritdoc />
+    public override async ValueTask DisposeAsync()
     {
-        (this as IAsyncDisposable).DisposeAsync().GetAwaiter().GetResult();
-    }
-    ValueTask IAsyncDisposable.DisposeAsync()
-    {
-        return _listener.DisposeAsync();
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+
+        if (_listener is not null)
+        {
+            await _listener.DisposeAsync().ConfigureAwait(false);
+            _listener = null;
+        }
+
+        foreach (QuicTransportConnection connection in _connections.ToArray())
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _connections.Clear();
     }
 
     /// <summary>
-    /// 
+    /// Creates a QUIC server transport using a configure callback.
     /// </summary>
-    /// <param name="middleware"></param>
-    /// <returns></returns>
-    public new QuicServerTransport Use(Func<QuicTransportContext, TransportMiddleware, Task> middleware)
-    {
-        ThrowHelper.ThrowIfNull(middleware);
-
-        base.Use(middleware);
-
-        return this;
-    }
-
+    /// <param name="configure">The callback used to configure options.</param>
+    /// <returns>A configured <see cref="QuicServerTransport"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
     public static QuicServerTransport Create(Action<QuicServerTransportOptions> configure)
     {
-        if (configure is null)
-        {
-            throw new ArgumentNullException(nameof(configure));
-        }
+        ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new QuicServerTransportOptions();
+        QuicServerTransportOptions options = new QuicServerTransportOptions();
 
-        configure.Invoke(options);
+        configure(options);
 
         return new QuicServerTransport(options);
     }
 
-
-    private void ValidateServerAuthenticationOptions(SslServerAuthenticationOptions serverAuthenticationOptions)
+    private async Task EnsureListenerAsync(CancellationToken cancellationToken)
     {
-        if (serverAuthenticationOptions.ServerCertificate == null &&
-            serverAuthenticationOptions.ServerCertificateContext == null &&
-            serverAuthenticationOptions.ServerCertificateSelectionCallback == null)
+        if (_listener is not null)
         {
-            QuicLog.ConnectionListenerCertificateNotSpecified(_log);
+            return;
         }
-        if (serverAuthenticationOptions.ApplicationProtocols == null || serverAuthenticationOptions.ApplicationProtocols.Count == 0)
+
+        ValidateServerAuthenticationOptions();
+
+        QuicListener? listener;
+
+        lock (_listenerLock)
         {
-            QuicLog.ConnectionListenerApplicationProtocolsNotSpecified(_log);
+            if (_listener is not null)
+            {
+                return;
+            }
+        }
+
+        listener = await QuicListener.ListenAsync(new QuicListenerOptions
+        {
+            ListenEndPoint = _options.EndPoint,
+            ApplicationProtocols = _options.ServerAuthenticationOptions.ApplicationProtocols!,
+            ListenBacklog = _options.Backlog,
+            ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
+            {
+                ServerAuthenticationOptions = _options.ServerAuthenticationOptions,
+                MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount,
+                MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
+                DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
+                DefaultStreamErrorCode = _options.DefaultStreamErrorCode
+            })
+        }, cancellationToken).ConfigureAwait(false);
+
+        lock (_listenerLock)
+        {
+            _listener ??= listener;
+        }
+    }
+
+    private void ValidateServerAuthenticationOptions()
+    {
+        if (_options.ServerAuthenticationOptions.ServerCertificate is null &&
+            _options.ServerAuthenticationOptions.ServerCertificateContext is null &&
+            _options.ServerAuthenticationOptions.ServerCertificateSelectionCallback is null)
+        {
+            throw new InvalidOperationException("A server certificate is required for QUIC server authentication.");
+        }
+
+        if (_options.ServerAuthenticationOptions.ApplicationProtocols is null ||
+            _options.ServerAuthenticationOptions.ApplicationProtocols.Count == 0)
+        {
+            throw new InvalidOperationException("At least one application protocol is required for QUIC server authentication.");
         }
     }
 }

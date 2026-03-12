@@ -1,70 +1,88 @@
-﻿#if NET7_0_OR_GREATER
+#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
+using System.Net.Quic;
 using System.Net.Security;
 using System.Runtime.Versioning;
-using System.Text;
+using System.Security.Authentication;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
+using Assimalign.Cohesion.Transports.Internal;
+
+/// <summary>
+/// Defines options for creating a QUIC server transport.
+/// </summary>
+[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
+[SupportedOSPlatform("osx")]
 public sealed class QuicServerTransportOptions
 {
+    private readonly TransportPipelineBuilder<QuicTransportConnection, QuicTransportContext> _builder;
     private long _defaultStreamErrorCode;
     private long _defaultCloseErrorCode;
 
+    /// <summary>
+    /// Creates a new set of QUIC server transport options.
+    /// </summary>
+    public QuicServerTransportOptions()
+    {
+        _builder = new TransportPipelineBuilder<QuicTransportConnection, QuicTransportContext>();
+        ServerAuthenticationOptions = new SslServerAuthenticationOptions
+        {
+            ApplicationProtocols = new List<SslApplicationProtocol>
+            {
+                SslApplicationProtocol.Http3
+            },
+            EnabledSslProtocols = SslProtocols.Tls13
+        };
+    }
 
     /// <summary>
-    /// 
+    /// Gets or sets the endpoint used by the QUIC listener.
     /// </summary>
     public IPEndPoint EndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 8080);
 
     /// <summary>
-	/// The maximum length of the pending connection middleware.
-	/// </summary>
-	/// <remarks>
-	/// Defaults to 512.
-	/// </remarks>
-	public int Backlog { get; set; } = 512;
+    /// Gets or sets the listener backlog.
+    /// </summary>
+    public int Backlog { get; set; } = 512;
 
     /// <summary>
-    /// The maximum number of concurrent bi-directional streams per connection.
+    /// Gets or sets the maximum number of concurrent inbound bidirectional streams.
     /// </summary>
     public int MaxBidirectionalStreamCount { get; set; } = 100;
 
     /// <summary>
-    /// The maximum number of concurrent inbound uni-directional streams per connection.
+    /// Gets or sets the maximum number of concurrent inbound unidirectional streams.
     /// </summary>
     public int MaxUnidirectionalStreamCount { get; set; } = 10;
 
     /// <summary>
-    /// The maximum read size.
+    /// Gets or sets the maximum read buffer size.
     /// </summary>
     public long? MaxReadBufferSize { get; set; } = 1024 * 1024;
 
     /// <summary>
-    /// The maximum write size.
+    /// Gets or sets the maximum write buffer size.
     /// </summary>
     public long? MaxWriteBufferSize { get; set; } = 64 * 1024;
 
     /// <summary>
-    /// 
+    /// Gets or sets the TLS authentication settings used by the server.
     /// </summary>
-    public List<SslApplicationProtocol> AcceptApplicationProtocols { get; set; } = new List<SslApplicationProtocol>()
-    {
-        SslApplicationProtocol.Http3
-    };
+    public SslServerAuthenticationOptions ServerAuthenticationOptions { get; set; }
 
     /// <summary>
-    /// 
+    /// Gets or sets the stream type used when opening outbound streams from accepted connections.
     /// </summary>
-    public SslServerAuthenticationOptions? ServerAuthenticationOptions { get; set; }
-
+    public QuicStreamType OutboundStreamType { get; set; } = QuicStreamType.Bidirectional;
 
     /// <summary>
-    /// Error code used when the stream needs to abort the read or write side of the stream internally.
+    /// Gets or sets the error code used when a stream abort is triggered.
     /// </summary>
     public long DefaultStreamErrorCode
     {
@@ -77,7 +95,7 @@ public sealed class QuicServerTransportOptions
     }
 
     /// <summary>
-    /// Error code used when an open connection is disposed.
+    /// Gets or sets the error code used when a connection closes.
     /// </summary>
     public long DefaultCloseErrorCode
     {
@@ -89,18 +107,35 @@ public sealed class QuicServerTransportOptions
         }
     }
 
-    internal static void ValidateErrorCode(long errorCode)
+    /// <summary>
+    /// Adds middleware to the QUIC server transport pipeline.
+    /// </summary>
+    /// <param name="middleware">The middleware delegate to add.</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="middleware"/> is <see langword="null"/>.</exception>
+    public QuicServerTransportOptions Use(Func<QuicTransportConnection, QuicTransportContext, TransportMiddleware, Task> middleware)
     {
-        const long MinErrorCode = 0;
-        const long MaxErrorCode = (1L << 62) - 1;
+        ArgumentNullException.ThrowIfNull(middleware);
 
-        if (errorCode < MinErrorCode || errorCode > MaxErrorCode)
-        {
-            // Print the values in hex since the max is unintelligible in decimal
-            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, $"A value between 0x{MinErrorCode:x} and 0x{MaxErrorCode:x} is required.");
-        }
+        _builder.Use(middleware);
+
+        return this;
     }
 
-    internal TimeProvider TimeProvider = TimeProvider.System;
+    internal TransportPipeline BuildPipeline()
+    {
+        return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
+    }
+
+    internal static void ValidateErrorCode(long errorCode)
+    {
+        const long minErrorCode = 0;
+        const long maxErrorCode = (1L << 62) - 1;
+
+        if (errorCode < minErrorCode || errorCode > maxErrorCode)
+        {
+            throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, $"A value between 0x{minErrorCode:x} and 0x{maxErrorCode:x} is required.");
+        }
+    }
 }
 #endif

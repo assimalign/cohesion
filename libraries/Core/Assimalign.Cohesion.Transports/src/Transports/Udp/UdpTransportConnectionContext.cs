@@ -1,40 +1,23 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
 using System.Net;
-using System.Net.Quic;
-using System.Runtime.Versioning;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
 /// <summary>
-/// Represents the QUIC stream context that contains endpoint metadata and the stream pipe.
+/// Represents the UDP connection context that contains endpoint metadata and the connection pipe.
 /// </summary>
-[SupportedOSPlatform("windows")]
-[SupportedOSPlatform("linux")]
-[SupportedOSPlatform("macos")]
-[SupportedOSPlatform("osx")]
-public sealed class QuicTransportContext : ITransportConnectionContext
+public sealed class UdpTransportConnectionContext : ITransportConnectionContext
 {
     private readonly Dictionary<string, object?> _items;
 
-    internal QuicTransportContext(QuicTransportConnection connection, QuicStream stream)
+    internal UdpTransportConnectionContext(EndPoint localEndPoint, EndPoint remoteEndPoint, ITransportConnectionPipe pipe)
     {
-        Connection = connection;
-        Stream = stream;
-        LocalEndPoint = connection.LocalEndPoint;
-        RemoteEndPoint = connection.RemoteEndPoint;
-        Pipe = new TransportConnectionPipe(stream);
+        LocalEndPoint = localEndPoint;
+        RemoteEndPoint = remoteEndPoint;
+        Pipe = pipe;
         _items = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
-
-    /// <summary>
-    /// Gets the QUIC connection associated with this context.
-    /// </summary>
-    public QuicTransportConnection Connection { get; }
-
-    internal QuicStream Stream { get; }
 
     /// <inheritdoc />
     public EndPoint LocalEndPoint { get; }
@@ -58,10 +41,4 @@ public sealed class QuicTransportContext : ITransportConnectionContext
         ArgumentNullException.ThrowIfNull(pipe);
         Pipe = pipe;
     }
-
-    internal ValueTask DisposeAsync()
-    {
-        return Stream.DisposeAsync();
-    }
 }
-#endif

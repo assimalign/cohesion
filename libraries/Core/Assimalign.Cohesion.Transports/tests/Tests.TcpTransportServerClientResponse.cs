@@ -1,228 +1,86 @@
-﻿using System;
+using System;
 using System.Buffers;
-using System.IO;
 using System.IO.Pipelines;
 using System.Linq;
 using System.Net;
-using System.Net.Security;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Serialization;
 using Xunit;
 
 namespace Assimalign.Cohesion.Transports.Tests;
 
 public class TcpTransportServerClientResponseTests
 {
-    const string LocalhostName = "localhost";
-
-
     [Fact]
-    public void TestRequestResponse()
+    public async Task RequestResponse_WhenConnectionIsOpen_ShouldExchangePayloadAsync()
     {
-        using X509Store store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-        using RSA rsa = RSA.Create();
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        if (!store.IsOpen)
+        int port = GetEphemeralPort();
+        var endpoint = new IPEndPoint(IPAddress.Loopback, port);
+
+        Task<string> serverTask = RunServerAsync(endpoint, cancellationTokenSource.Token);
+
+        await Task.Delay(200, cancellationTokenSource.Token);
+
+        string clientResponse = await RunClientAsync(endpoint, cancellationTokenSource.Token);
+        string serverMessage = await serverTask;
+
+        Assert.Equal("Client -> Server: Hello", serverMessage);
+        Assert.Equal("Server -> Client: Hello", clientResponse);
+    }
+
+    private static async Task<string> RunClientAsync(IPEndPoint endpoint, CancellationToken cancellationToken)
+    {
+        await using TcpClientTransport transport = TcpClientTransport.Create(options =>
         {
-            store.Open(OpenFlags.ReadWrite);
-        }
-
-        var sanBuilder = new SubjectAlternativeNameBuilder();
-        sanBuilder.AddDnsName(LocalhostName);
-
-        var certificateRequest = new CertificateRequest($"CN={LocalhostName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        certificateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
-        certificateRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
-        certificateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));
-        certificateRequest.CertificateExtensions.Add(sanBuilder.Build());
-        X509Certificate2 certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMonths(-1), DateTimeOffset.UtcNow.AddMonths(1));
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            //certificate = X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Pfx));
-
-            certificate = new X509Certificate2(certificate.Export(X509ContentType.Pfx));
-            store.Add(certificate);
-        }
-
-
-        // Begin Testing pipeline
-        int i = 0;
-        var server = GetServer(message =>
-        {
-            Assert.Equal("Client -> Server: Hello", message);
-            i++;
-        }, certificate);
-        var client = GetClient(message =>
-        {
-            Assert.Equal("Server -> Client: Hello", message);
-            i++;
+            options.EndPoint = endpoint;
         });
 
-        var timestamp = DateTime.Now;
+        await using TcpTransportConnection connection = await transport.ConnectAsync(cancellationToken);
+        TcpTransportConnectionContext context = await connection.OpenAsync(cancellationToken);
 
-        server.Start();
-        client.Start();
+        await context.Pipe.Output.WriteAsync(Encoding.UTF8.GetBytes("Client -> Server: Hello"), cancellationToken);
 
-        while (i != 2)
-        {
-            if (DateTime.Now > timestamp.AddSeconds(20))
-            {
-                Assert.Fail("The process ran too long and was unable to complete.");
-            }
-        }
+        ReadResult result = await context.Pipe.Input.ReadAsync(cancellationToken);
+        string response = Encoding.UTF8.GetString(result.Buffer.ToArray());
+        context.Pipe.Input.AdvanceTo(result.Buffer.End);
+
+        return response;
     }
-    private static Thread GetClient(Action<string> callback)
+
+    private static async Task<string> RunServerAsync(IPEndPoint endpoint, CancellationToken cancellationToken)
     {
-        return new Thread(async () =>
+        await using TcpServerTransport transport = TcpServerTransport.Create(options =>
         {
-            await using (var transport = TcpClientTransport.Create(options =>
-            {
-                options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
-                options.Use(async (connection, context, next) =>
-                {
-                    var pipe = context.Pipe;
-                    var stream = pipe.GetStream();
-                    var sslStream = new SslStream(stream, true);
-
-                    await sslStream.AuthenticateAsClientAsync(LocalhostName);
-
-                    context.SetPipe(new TransportConnectionPipe(sslStream));
-
-                    await next.Invoke(connection, context);
-                });
-            }))
-            {
-                await using (ISingleStreamTransportConnection connection = await transport.ConnectAsync())
-                {
-                    ITransportConnectionContext context = await connection.OpenAsync();
-
-                    byte[] message = Encoding.UTF8.GetBytes("Client -> Server: Hello");
-
-                    ReadOnlyMemory<byte> memory = new ReadOnlyMemory<byte>(message);
-
-                    FlushResult flush = await context.Pipe.WriteAsync(memory);
-
-                    var result = await context.Pipe.ReadAsync();
-                    var buffer = result.Buffer.ToArray();
-                    var data = Encoding.UTF8.GetString(buffer);
-
-                    callback.Invoke(data);
-                }
-            }
+            options.EndPoint = endpoint;
         });
-    }
-    private static Thread GetServer(Action<string> callback, X509Certificate2 certificate)
-    {
-        return new Thread(async () =>
-        {
-            await using (var transport = TcpServerTransport.Create(options =>
-            {
-                options.EndPoint = new IPEndPoint(IPAddress.Loopback, 8081);
-                options.Use(async (connection, context, next) =>
-                {
-                    var pipe = context.Pipe;
-                    var stream = pipe.GetStream();
-                    var sslStream = new SslStream(stream);
 
-                    await sslStream.AuthenticateAsServerAsync(certificate);
+        await using TcpTransportConnection connection = await transport.AcceptOrListenAsync(cancellationToken);
+        TcpTransportConnectionContext context = await connection.OpenAsync(cancellationToken);
 
-                    context.SetPipe(new TransportConnectionPipe(sslStream));
+        ReadResult result = await context.Pipe.Input.ReadAsync(cancellationToken);
+        string message = Encoding.UTF8.GetString(result.Buffer.ToArray());
+        context.Pipe.Input.AdvanceTo(result.Buffer.End);
 
-                    await next.Invoke(connection, context);
-                });
-            }))
-            {
-                await using (var connection = await transport.AcceptOrListenAsync())
-                {
-                    var context = await connection.OpenAsync();
-                    var result = await context.Pipe.ReadAsync();
-                    var buffer = result.Buffer.ToArray();
-                    var data = Encoding.UTF8.GetString(buffer);
+        await context.Pipe.Output.WriteAsync(Encoding.UTF8.GetBytes("Server -> Client: Hello"), cancellationToken);
 
-                    callback.Invoke(data);
+        await Task.Delay(100, cancellationToken);
 
-                    var message = Encoding.UTF8.GetBytes("Server -> Client: Hello");
-                    var memory = new ReadOnlyMemory<byte>(message);
-
-                    await context.Pipe.WriteAsync(memory);
-
-                    // Need to wait for the client to receive data before disposing of the underlying transport
-                    await Task.Delay(5000);
-                }
-            }
-        });
+        return message;
     }
 
-    private static X509Certificate2 GenerateTestCertificateWithAlgorithm(string algorithmType, string? keyPassword, string certificatePath, string keyPath)
+    private static int GetEphemeralPort()
     {
-        var distinguishedName = new X500DistinguishedName($"CN=test.{algorithmType}.local");
-        var sanBuilder = new SubjectAlternativeNameBuilder();
-        sanBuilder.AddDnsName($"test.{algorithmType}.local");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
 
-        X509Certificate2 certificate;
-        string keyPem;
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        switch (algorithmType)
-        {
-            case "RSA":
-                using (var rsa = RSA.Create(2048))
-                {
-                    var request = new CertificateRequest(distinguishedName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-                    certificate = CreateTestCertificate(request, sanBuilder);
-                    keyPem = ExportKeyToPem(rsa, keyPassword);
-                }
-                break;
+        listener.Stop();
 
-            case "ECDsa":
-                using (var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256))
-                {
-                    var request = new CertificateRequest(distinguishedName, ecdsa, HashAlgorithmName.SHA256);
-                    certificate = CreateTestCertificate(request, sanBuilder);
-                    keyPem = ExportKeyToPem(ecdsa, keyPassword);
-                }
-                break;
-
-            default:
-                throw new ArgumentException($"Unknown algorithm type: {algorithmType}");
-        }
-
-        if (certificatePath.EndsWith(".pem", StringComparison.OrdinalIgnoreCase))
-        {
-            // Export the certificate in PEM format
-            File.WriteAllText(certificatePath, certificate.ExportCertificatePem());
-        }
-        else
-        {
-            // Export the certificate in DER format
-            File.WriteAllBytes(certificatePath, certificate.Export(X509ContentType.Cert));
-        }
-
-        File.WriteAllText(keyPath, keyPem);
-
-        return certificate;
-    }
-
-    private static X509Certificate2 CreateTestCertificate(CertificateRequest request, SubjectAlternativeNameBuilder sanBuilder)
-    {
-        request.CertificateExtensions.Add(sanBuilder.Build());
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: true));
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], critical: false)); // Server Authentication
-
-        var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
-        var notAfter = DateTimeOffset.UtcNow.AddYears(1);
-
-        return request.CreateSelfSigned(notBefore, notAfter);
-    }
-
-    private static string ExportKeyToPem(AsymmetricAlgorithm key, string? password)
-    {
-        return password is null
-            ? key.ExportPkcs8PrivateKeyPem()
-            : key.ExportEncryptedPkcs8PrivateKeyPem(password.AsSpan(), new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 100_000));
+        return port;
     }
 }
