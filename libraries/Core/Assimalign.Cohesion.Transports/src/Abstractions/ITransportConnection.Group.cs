@@ -1,56 +1,63 @@
-using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
 /// <summary>
-/// Represents a one-to-many group transport connection.
+/// Represents a logical group of transport connections, enabling fan-out
+/// communication to multiple members simultaneously.
 /// </summary>
+/// <remarks>
+/// Use cases include pub-sub rooms, connection pools, and broadcast scenarios
+/// where a single write should be delivered to all group members.
+/// </remarks>
 public interface IGroupTransportConnection : ITransportConnection
 {
     /// <summary>
-    /// Joins the connection to a named group.
+    /// The current members of the connection group.
     /// </summary>
-    /// <param name="groupName">The logical group name.</param>
-    void JoinGroup(string groupName);
+    IReadOnlyCollection<ITransportConnection> Members { get; }
 
     /// <summary>
-    /// Joins the connection to a named group.
+    /// Adds a connection to the group.
     /// </summary>
-    /// <param name="groupName">The logical group name.</param>
-    /// <param name="cancellationToken">The cancellation token for the asynchronous operation.</param>
-    /// <returns>A task that completes when the group join operation has completed.</returns>
-    ValueTask JoinGroupAsync(string groupName, CancellationToken cancellationToken = default);
+    /// <param name="connection">The connection to add.</param>
+    void Add(ITransportConnection connection);
 
     /// <summary>
-    /// Leaves a named group.
+    /// Asynchronously adds a connection to the group.
     /// </summary>
-    /// <param name="groupName">The logical group name.</param>
-    void LeaveGroup(string groupName);
+    /// <param name="connection">The connection to add.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> representing the add operation.</returns>
+    ValueTask AddAsync(ITransportConnection connection, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Leaves a named group.
+    /// Removes a connection from the group.
     /// </summary>
-    /// <param name="groupName">The logical group name.</param>
-    /// <param name="cancellationToken">The cancellation token for the asynchronous operation.</param>
-    /// <returns>A task that completes when the group leave operation has completed.</returns>
-    ValueTask LeaveGroupAsync(string groupName, CancellationToken cancellationToken = default);
+    /// <param name="connection">The connection to remove.</param>
+    /// <returns><c>true</c> if the connection was removed; otherwise, <c>false</c>.</returns>
+    bool Remove(ITransportConnection connection);
 
     /// <summary>
-    /// Sends a datagram payload to a specific group.
+    /// Asynchronously removes a connection from the group.
     /// </summary>
-    /// <param name="groupName">The target logical group name.</param>
-    /// <param name="datagram">The datagram payload to send.</param>
-    /// <param name="cancellationToken">The cancellation token for the asynchronous operation.</param>
-    /// <returns>The number of bytes sent to the group members.</returns>
-    ValueTask<int> SendToGroupAsync(string groupName, ReadOnlyMemory<byte> datagram, CancellationToken cancellationToken = default);
+    /// <param name="connection">The connection to remove.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="ValueTask{Boolean}"/> indicating whether the connection was removed.</returns>
+    ValueTask<bool> RemoveAsync(ITransportConnection connection, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sends a datagram payload to all currently joined groups.
+    /// Opens a broadcast context that fans out writes to all group members.
     /// </summary>
-    /// <param name="datagram">The datagram payload to send.</param>
-    /// <param name="cancellationToken">The cancellation token for the asynchronous operation.</param>
-    /// <returns>The number of bytes sent across all group destinations.</returns>
-    ValueTask<int> BroadcastAsync(ReadOnlyMemory<byte> datagram, CancellationToken cancellationToken = default);
+    /// <returns>The opened <see cref="ITransportConnectionContext"/>.</returns>
+    ITransportConnectionContext OpenBroadcast();
+
+    /// <summary>
+    /// Asynchronously opens a broadcast context that fans out writes to all group members.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="ValueTask{ITransportConnectionContext}"/> representing the opened context.</returns>
+    ValueTask<ITransportConnectionContext> OpenBroadcastAsync(CancellationToken cancellationToken = default);
 }
