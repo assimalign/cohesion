@@ -37,10 +37,14 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         Socket socket,
         TransportId transportId,
         TransportPipeline pipeline,
+        PipeOptions receivePipeOptions,
+        PipeOptions sendPipeOptions,
         bool ownsSocket)
     {
         ArgumentNullException.ThrowIfNull(socket);
         ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(receivePipeOptions);
+        ArgumentNullException.ThrowIfNull(sendPipeOptions);
 
         _socket = socket;
         _ownsSocket = ownsSocket;
@@ -51,8 +55,8 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         _stateLock = new Lock();
         _state = ConnectionState.Idle;
 
-        _receivePipe = new Pipe();
-        _sendPipe = new Pipe();
+        _receivePipe = new Pipe(receivePipeOptions);
+        _sendPipe = new Pipe(sendPipeOptions);
 
         Context = new UdpTransportConnectionContext(
             socket.LocalEndPoint!,
@@ -67,11 +71,15 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         TransportPipeline pipeline,
         EndPoint localEndPoint,
         EndPoint remoteEndPoint,
+        PipeOptions receivePipeOptions,
+        PipeOptions sendPipeOptions,
         Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask<int>> sendAsync)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         ArgumentNullException.ThrowIfNull(localEndPoint);
         ArgumentNullException.ThrowIfNull(remoteEndPoint);
+        ArgumentNullException.ThrowIfNull(receivePipeOptions);
+        ArgumentNullException.ThrowIfNull(sendPipeOptions);
         ArgumentNullException.ThrowIfNull(sendAsync);
 
         _socket = null;
@@ -83,8 +91,8 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         _stateLock = new Lock();
         _state = ConnectionState.Idle;
 
-        _receivePipe = new Pipe();
-        _sendPipe = new Pipe();
+        _receivePipe = new Pipe(receivePipeOptions);
+        _sendPipe = new Pipe(sendPipeOptions);
 
         Context = new UdpTransportConnectionContext(
             localEndPoint,

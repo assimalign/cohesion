@@ -58,7 +58,13 @@ public sealed class UdpClientTransport : ClientTransport<UdpTransportConnection>
 
         await socket.ConnectAsync(_options.EndPoint, cancellationToken).ConfigureAwait(false);
 
-        var connection = new UdpTransportConnection(socket, Id, _pipeline, ownsSocket: true);
+        var connection = new UdpTransportConnection(
+            socket,
+            Id,
+            _pipeline,
+            _options.CreateReceivePipeOptions(),
+            _options.CreateSendPipeOptions(),
+            ownsSocket: true);
 
         connection.OnDispose = () => _connections.Remove(connection);
 

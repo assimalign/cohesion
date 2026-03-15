@@ -273,6 +273,8 @@ public sealed class UdpServerTransport : ServerTransport<UdpTransportConnection>
                 _pipeline,
                 localEndPoint,
                 remoteEndPointForContext,
+                _options.CreateReceivePipeOptions(),
+                _options.CreateSendPipeOptions(),
                 (buffer, token) => SendToPeerAsync(remoteEndPointForSend, buffer, token));
 
             connection.OnDispose = () => RemoveConnection(peerKey, connection);

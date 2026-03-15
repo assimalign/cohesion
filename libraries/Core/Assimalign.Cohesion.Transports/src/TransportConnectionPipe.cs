@@ -1,13 +1,8 @@
 ﻿using System;
 using System.IO;
 using System.IO.Pipelines;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
-
-using Assimalign.Cohesion.Internal;
-using System.Buffers;
 
 /// <summary>
 /// A generic connection pipe which data is read and written to.
@@ -21,14 +16,23 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     /// <summary>
     /// Creates a <see cref="ITransportConnectionPipe"/> from a stream.
     /// </summary>
-    /// <param name="stream"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public TransportConnectionPipe(Stream stream)
+    /// <param name="stream">The stream used by the connection pipe.</param>
+    /// <param name="inputOptions">The optional reader configuration.</param>
+    /// <param name="outputOptions">The optional writer configuration.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="stream"/> is <see langword="null"/>.</exception>
+    public TransportConnectionPipe(
+        Stream stream,
+        StreamPipeReaderOptions? inputOptions = null,
+        StreamPipeWriterOptions? outputOptions = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
         _stream = stream;
-        _input = PipeReader.Create(stream);
-        _output = PipeWriter.Create(stream);
+        _input = inputOptions is null
+            ? PipeReader.Create(stream)
+            : PipeReader.Create(stream, inputOptions);
+        _output = outputOptions is null
+            ? PipeWriter.Create(stream)
+            : PipeWriter.Create(stream, outputOptions);
     }
 
     /// <summary>

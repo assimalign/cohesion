@@ -1,6 +1,6 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
@@ -53,6 +53,16 @@ public sealed class QuicClientTransportOptions
     public SslClientAuthenticationOptions ClientAuthenticationOptions { get; set; }
 
     /// <summary>
+    /// Gets or sets the maximum read buffer size used by the client stream pipe.
+    /// </summary>
+    public long? MaxReadBufferSize { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the maximum write buffer size used by the client stream pipe.
+    /// </summary>
+    public long? MaxWriteBufferSize { get; set; } = 64 * 1024;
+
+    /// <summary>
     /// Gets or sets the default stream type used when opening outbound streams.
     /// </summary>
     public QuicStreamType OutboundStreamType { get; set; } = QuicStreamType.Bidirectional;
@@ -102,5 +112,14 @@ public sealed class QuicClientTransportOptions
     {
         return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
     }
+
+    internal StreamPipeReaderOptions CreateReaderOptions()
+    {
+        return TransportPipeOptionsFactory.CreateReaderOptions(MaxReadBufferSize);
+    }
+
+    internal StreamPipeWriterOptions CreateWriterOptions()
+    {
+        return TransportPipeOptionsFactory.CreateWriterOptions(MaxWriteBufferSize);
+    }
 }
-#endif

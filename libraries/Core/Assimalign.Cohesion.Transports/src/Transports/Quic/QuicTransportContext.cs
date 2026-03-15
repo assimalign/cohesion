@@ -1,6 +1,6 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Runtime.Versioning;
@@ -19,13 +19,17 @@ public sealed class QuicTransportContext : ITransportConnectionContext
 {
     private readonly Dictionary<string, object?> _items;
 
-    internal QuicTransportContext(QuicTransportConnection connection, QuicStream stream)
+    internal QuicTransportContext(
+        QuicTransportConnection connection,
+        QuicStream stream,
+        StreamPipeReaderOptions readerOptions,
+        StreamPipeWriterOptions writerOptions)
     {
         Connection = connection;
         Stream = stream;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
-        Pipe = new TransportConnectionPipe(stream);
+        Pipe = new TransportConnectionPipe(stream, readerOptions, writerOptions);
         _items = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
@@ -64,4 +68,3 @@ public sealed class QuicTransportContext : ITransportConnectionContext
         return Stream.DisposeAsync();
     }
 }
-#endif

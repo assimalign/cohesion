@@ -1,6 +1,6 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Runtime.Versioning;
@@ -24,6 +24,8 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
     private readonly TransportPipeline _pipeline;
     private readonly QuicStreamType _outboundStreamType;
     private readonly long _defaultCloseErrorCode;
+    private readonly StreamPipeReaderOptions _readerOptions;
+    private readonly StreamPipeWriterOptions _writerOptions;
     private readonly List<QuicTransportContext> _contexts;
     private readonly Lock _contextsLock;
     private readonly Lock _stateLock;
@@ -36,14 +38,20 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
         TransportId transportId,
         TransportPipeline pipeline,
         QuicStreamType outboundStreamType,
+        StreamPipeReaderOptions readerOptions,
+        StreamPipeWriterOptions writerOptions,
         long defaultCloseErrorCode)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(readerOptions);
+        ArgumentNullException.ThrowIfNull(writerOptions);
 
         _connection = connection;
         _pipeline = pipeline;
         _outboundStreamType = outboundStreamType;
+        _readerOptions = readerOptions;
+        _writerOptions = writerOptions;
         _defaultCloseErrorCode = defaultCloseErrorCode;
         _contexts = new List<QuicTransportContext>();
         _contextsLock = new Lock();
@@ -206,7 +214,7 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
 
     private QuicTransportContext CreateContext(QuicStream stream)
     {
-        var context = new QuicTransportContext(this, stream);
+        var context = new QuicTransportContext(this, stream, _readerOptions, _writerOptions);
 
         lock (_contextsLock)
         {
@@ -249,4 +257,3 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
         ObjectDisposedException.ThrowIf(_isDisposed, nameof(QuicTransportConnection));
     }
 }
-#endif

@@ -1,4 +1,3 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -65,6 +64,8 @@ public sealed class QuicClientTransport : ClientTransport<QuicTransportConnectio
             Id,
             _pipeline,
             _options.OutboundStreamType,
+            _options.CreateReaderOptions(),
+            _options.CreateWriterOptions(),
             _options.DefaultCloseErrorCode);
 
         connection.OnDispose = () => _connections.Remove(connection);
@@ -111,4 +112,3 @@ public sealed class QuicClientTransport : ClientTransport<QuicTransportConnectio
         return new QuicClientTransport(options);
     }
 }
-#endif
