@@ -100,6 +100,53 @@ public class TransportExtensionsTests
         pipe.Input.AdvanceTo(readResult.Buffer.End);
     }
 
+    [Fact]
+    public async Task ReadAsync_WhenDataExists_ShouldConsumePipeBuffer()
+    {
+        var pipe = new TestPipe();
+        byte[] payload = Encoding.UTF8.GetBytes("read");
+
+        await pipe.Output.WriteAsync(payload);
+        await pipe.Output.CompleteAsync();
+
+        ReadResult readResult = await pipe.ReadAsync();
+        Assert.Equal(payload, readResult.Buffer.ToArray());
+
+        ReadResult secondRead = await pipe.Input.ReadAsync();
+        Assert.Equal(0, secondRead.Buffer.Length);
+        Assert.True(secondRead.IsCompleted);
+
+        pipe.Input.AdvanceTo(secondRead.Buffer.End);
+    }
+
+    [Fact]
+    public async Task PeekAsync_WhenCanceled_ShouldHonorCancellationToken()
+    {
+        var pipe = new TestPipe();
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        cancellationTokenSource.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            _ = await pipe.PeekAsync(cancellationTokenSource.Token);
+        });
+    }
+
+    [Fact]
+    public async Task ReadAsync_WhenCanceled_ShouldHonorCancellationToken()
+    {
+        var pipe = new TestPipe();
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        cancellationTokenSource.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            _ = await pipe.ReadAsync(cancellationTokenSource.Token);
+        });
+    }
+
     private sealed class TestTransport : ITransport
     {
         private int _initializeCalls;

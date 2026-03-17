@@ -10,6 +10,9 @@ using Assimalign.Cohesion.Internal;
 using System.Buffers;
 using System.IO.Pipelines;
 
+/// <summary>
+/// Provides convenience helpers for transport types, contexts, and pipes.
+/// </summary>
 public static class TransportExtensions
 {
     extension(ITransport transport)
@@ -60,10 +63,16 @@ public static class TransportExtensions
 
     extension(ITransportConnectionPipe pipe)
     {
-
+        /// <summary>
+        /// Reads the current input buffer without consuming it so the next read can observe the same data.
+        /// </summary>
+        /// <param name="cancellationToken">A token that cancels the read operation.</param>
+        /// <returns>The current read result for the pipe input.</returns>
         public async ValueTask<ReadResult> PeekAsync(CancellationToken cancellationToken = default)
         {
-            ReadResult result = await pipe.Input.ReadAsync();
+            ArgumentNullException.ThrowIfNull(pipe);
+
+            ReadResult result = await pipe.Input.ReadAsync(cancellationToken).ConfigureAwait(false);
             ReadOnlySequence<byte> buffer = result.Buffer;
 
             pipe.Input.AdvanceTo(buffer.Start);
@@ -71,23 +80,40 @@ public static class TransportExtensions
             return result;
         }
 
+        /// <summary>
+        /// Reads the current input buffer, consumes the returned bytes, and returns a stable snapshot of the data.
+        /// </summary>
+        /// <param name="cancellationToken">A token that cancels the read operation.</param>
+        /// <returns>The current read result for the pipe input.</returns>
         public async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
         {
-            ReadResult result = await pipe.Input.ReadAsync();
+            ArgumentNullException.ThrowIfNull(pipe);
+
+            ReadResult result = await pipe.Input.ReadAsync(cancellationToken).ConfigureAwait(false);
             ReadOnlySequence<byte> buffer = result.Buffer;
+            ReadResult snapshot = new ReadResult(
+                new ReadOnlySequence<byte>(buffer.ToArray()),
+                result.IsCanceled,
+                result.IsCompleted);
 
             pipe.Input.AdvanceTo(
-                buffer.Start,
+                buffer.End,
                 buffer.End);
 
-            return result;
+            return snapshot;
         }
 
+        /// <summary>
+        /// Writes the provided buffer to the pipe output and flushes it.
+        /// </summary>
+        /// <param name="buffer">The bytes to write.</param>
+        /// <param name="cancellationToken">A token that cancels the write operation.</param>
+        /// <returns>The flush result for the write operation.</returns>
         public async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            var result = await pipe.Output.WriteAsync(buffer);
+            ArgumentNullException.ThrowIfNull(pipe);
 
-            //Output.Advance(buffer.Length);
+            var result = await pipe.Output.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
 
             return result;
         }
