@@ -32,13 +32,8 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _count = options.IOQueueCount > 0 ? options.IOQueueCount : 1;
-        _settings = SocketTransportConnectionSettings.GetIOQueueSettings(
-            _count,
-            options.UnsafePreferInLineScheduling,
-            options.WaitForDataBeforeAllocatingBuffer,
-            options.MaxReadBufferSize,
-            options.MaxWriteBufferSize);
+        _settings = options.CreateConnectionSettings();
+        _count = _settings.Length;
         _connections = new List<TcpTransportConnection>();
         _pipeline = options.BuildPipeline();
     }
@@ -154,12 +149,23 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     /// <summary>
     /// 
     /// </summary>
-    public override ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         _socket?.Close();
         _socket?.Dispose();
 
-        return ValueTask.CompletedTask;
+        foreach (TcpTransportConnection connection in _connections.ToArray())
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _connections.Clear();
+
+        foreach (SocketTransportConnectionSettings settings in _settings)
+        {
+            settings.PipeOptions.Dispose();
+        }
+
     }
 
     /// <summary>

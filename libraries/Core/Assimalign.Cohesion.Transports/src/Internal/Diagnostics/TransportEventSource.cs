@@ -20,7 +20,7 @@ internal sealed class TransportEventSource : EventSource
     private long _currentConnections;
 
     
-    internal TransportEventSource() : base("Assimalign.Cohesion.Transports")
+    internal TransportEventSource() : base("Assimalign.Cohesion.Transports.TransportEventSource")
     {
     }
 

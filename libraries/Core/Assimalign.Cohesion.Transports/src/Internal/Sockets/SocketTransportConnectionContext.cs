@@ -14,6 +14,7 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
     private readonly TaskCompletionSource _connectionClosingProcess = new TaskCompletionSource();
 
     private readonly Lock _lock = new();
+    private readonly int _memoryPoolBlockSize;
     private bool _isConnectionClosed;
     private volatile bool _isSocketDisposed;
     private volatile ConnectionState _state;
@@ -25,8 +26,8 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
             throw new ArgumentNullException(nameof(settings));
         }
 
-        var serverPipe = new Pipe(settings.InputOptions);
-        var clientPipe = new Pipe(settings.OutputOptions);
+        var serverPipe = new Pipe(settings.PipeOptions.InputOptions);
+        var clientPipe = new Pipe(settings.PipeOptions.OutputOptions);
 
         if (settings.IsServer)
         {
@@ -50,8 +51,9 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
         this.Socket = settings.Socket;
         this.LocalEndPoint = settings?.Socket.LocalEndPoint!;
         this.RemoteEndPoint = settings?.Socket.RemoteEndPoint!;
-        this.SenderPool = new SocketPipeSenderPool(settings!.SenderScheduler);
-        this.Receiver = new SocketPipeReceiver(settings.ReceiverScheduler);
+        this.SenderPool = new SocketPipeSenderPool(settings.PipeOptions.SenderScheduler);
+        this.Receiver = new SocketPipeReceiver(settings.PipeOptions.ReceiverScheduler);
+        _memoryPoolBlockSize = settings.PipeOptions.BlockSize;
     }
 
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
@@ -144,7 +146,7 @@ internal class SocketTransportConnectionContext : ITransportConnectionContext, I
             while (true)
             {
                 // Ensure we have some reasonable amount of buffer space
-                var buffer = Output.GetMemory(PipeMemoryPool.BlockSize / 2);
+                var buffer = Output.GetMemory(_memoryPoolBlockSize / 2);
                 var result = await Receiver.ReceiveAsync(Socket, buffer);
 
                 if (result.BytesTransferred == 0)

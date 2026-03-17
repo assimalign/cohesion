@@ -92,4 +92,14 @@ public sealed class TcpClientTransportOptions
     {
         return (TransportPipeline)(_builder as ITransportPipelineBuilder).Build();
     }
+
+    internal SocketTransportConnectionSettings CreateConnectionSettings()
+    {
+        return TransportPipeOptionsFactory.CreateSocketConnectionSettings(
+            1,
+            UnsafePreferInLineScheduling,
+            WaitForDataBeforeAllocatingBuffer,
+            MaxReadBufferSize,
+            MaxWriteBufferSize)[0];
+    }
 }

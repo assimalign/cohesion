@@ -113,4 +113,16 @@ public sealed class TcpServerTransportOptions
     {
         return (TransportPipeline)(_builder as ITransportPipelineBuilder).Build();
     }
+
+    internal SocketTransportConnectionSettings[] CreateConnectionSettings()
+    {
+        int count = IOQueueCount > 0 ? IOQueueCount : 1;
+
+        return TransportPipeOptionsFactory.CreateSocketConnectionSettings(
+            count,
+            UnsafePreferInLineScheduling,
+            WaitForDataBeforeAllocatingBuffer,
+            MaxReadBufferSize,
+            MaxWriteBufferSize);
+    }
 }

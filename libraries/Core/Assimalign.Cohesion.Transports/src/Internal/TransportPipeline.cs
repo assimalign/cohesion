@@ -10,7 +10,10 @@ internal class TransportPipeline : ITransportPipeline
     {
         _middleware = middleware;
     }
-    public Task ExecuteAsync(ITransportConnection connection, ITransportConnectionContext context, CancellationToken cancellationToken = default)
+    public Task ExecuteAsync(
+        ITransportConnection connection, 
+        ITransportConnectionContext context, 
+        CancellationToken cancellationToken = default)
     {
         return _middleware.Invoke(connection, context);
     }

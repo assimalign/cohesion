@@ -25,12 +25,7 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _settings = SocketTransportConnectionSettings.GetIOQueueSettings(
-            1,
-            options.UnsafePreferInLineScheduling,
-            options.WaitForDataBeforeAllocatingBuffer,
-            options.MaxReadBufferSize,
-            options.MaxWriteBufferSize)[0];
+        _settings = options.CreateConnectionSettings();
         _connections = new List<TcpTransportConnection>();
         _pipeline = options.BuildPipeline();
     }
@@ -111,7 +106,7 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
         }
     }
 
-    public override ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (_socket is not null && _socket.Connected)
         {
@@ -122,7 +117,13 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
             _socket.Dispose();
         }
 
-        return ValueTask.CompletedTask;
+        foreach (TcpTransportConnection connection in _connections.ToArray())
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _connections.Clear();
+        _settings.PipeOptions.Dispose();
     }
 
     /// <summary>

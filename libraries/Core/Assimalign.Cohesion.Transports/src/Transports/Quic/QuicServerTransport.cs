@@ -55,15 +55,25 @@ public sealed class QuicServerTransport : ServerTransport<QuicTransportConnectio
         await EnsureListenerAsync(cancellationToken).ConfigureAwait(false);
 
         QuicConnection quicConnection = await _listener!.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+        TransportStreamPipeOptionsContext streamOptions = _options.CreateStreamOptions();
+        QuicTransportConnection connection;
 
-        var connection = new QuicTransportConnection(
-            quicConnection,
-            Id,
-            _pipeline,
-            _options.OutboundStreamType,
-            _options.CreateReaderOptions(),
-            _options.CreateWriterOptions(),
-            _options.DefaultCloseErrorCode);
+        try
+        {
+            connection = new QuicTransportConnection(
+                quicConnection,
+                Id,
+                _pipeline,
+                _options.OutboundStreamType,
+                streamOptions,
+                _options.DefaultCloseErrorCode);
+        }
+        catch
+        {
+            streamOptions.Dispose();
+            await quicConnection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
 
         connection.OnDispose = () => _connections.Remove(connection);
 

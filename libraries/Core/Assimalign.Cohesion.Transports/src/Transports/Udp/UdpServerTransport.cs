@@ -144,8 +144,15 @@ public sealed class UdpServerTransport : ServerTransport<UdpTransportConnection>
     {
         Socket socket = _options.EndPoint switch
         {
-            UnixDomainSocketEndPoint => new Socket(_options.EndPoint.AddressFamily, SocketType.Dgram, ProtocolType.Unspecified),
-            _ => new Socket(_options.EndPoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
+            UnixDomainSocketEndPoint => new Socket(
+                _options.EndPoint.AddressFamily, 
+                SocketType.Dgram, 
+                ProtocolType.Unspecified),
+
+            _ => new Socket(
+                _options.EndPoint.AddressFamily, 
+                SocketType.Dgram, 
+                ProtocolType.Udp)
         };
 
         if (_options.EndPoint is IPEndPoint ipEndPoint && ipEndPoint.AddressFamily == AddressFamily.InterNetworkV6)
@@ -268,14 +275,23 @@ public sealed class UdpServerTransport : ServerTransport<UdpTransportConnection>
             EndPoint localEndPoint = CloneEndPoint(listener.LocalEndPoint!);
             EndPoint remoteEndPointForContext = CloneEndPoint(remoteEndPoint);
             EndPoint remoteEndPointForSend = CloneEndPoint(remoteEndPoint);
-            connection = new UdpTransportConnection(
-                Id,
-                _pipeline,
-                localEndPoint,
-                remoteEndPointForContext,
-                _options.CreateReceivePipeOptions(),
-                _options.CreateSendPipeOptions(),
-                (buffer, token) => SendToPeerAsync(remoteEndPointForSend, buffer, token));
+            TransportPipeOptionsContext pipeOptions = _options.CreatePipeOptions();
+
+            try
+            {
+                connection = new UdpTransportConnection(
+                    Id,
+                    _pipeline,
+                    localEndPoint,
+                    remoteEndPointForContext,
+                    pipeOptions,
+                    (buffer, token) => SendToPeerAsync(remoteEndPointForSend, buffer, token));
+            }
+            catch
+            {
+                pipeOptions.Dispose();
+                throw;
+            }
 
             connection.OnDispose = () => RemoveConnection(peerKey, connection);
 

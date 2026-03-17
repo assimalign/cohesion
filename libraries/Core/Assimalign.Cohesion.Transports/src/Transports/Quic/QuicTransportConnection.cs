@@ -24,8 +24,7 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
     private readonly TransportPipeline _pipeline;
     private readonly QuicStreamType _outboundStreamType;
     private readonly long _defaultCloseErrorCode;
-    private readonly StreamPipeReaderOptions _readerOptions;
-    private readonly StreamPipeWriterOptions _writerOptions;
+    private readonly TransportStreamPipeOptionsContext _streamOptions;
     private readonly List<QuicTransportContext> _contexts;
     private readonly Lock _contextsLock;
     private readonly Lock _stateLock;
@@ -38,20 +37,17 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
         TransportId transportId,
         TransportPipeline pipeline,
         QuicStreamType outboundStreamType,
-        StreamPipeReaderOptions readerOptions,
-        StreamPipeWriterOptions writerOptions,
+        TransportStreamPipeOptionsContext streamOptions,
         long defaultCloseErrorCode)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(pipeline);
-        ArgumentNullException.ThrowIfNull(readerOptions);
-        ArgumentNullException.ThrowIfNull(writerOptions);
+        ArgumentNullException.ThrowIfNull(streamOptions);
 
         _connection = connection;
         _pipeline = pipeline;
         _outboundStreamType = outboundStreamType;
-        _readerOptions = readerOptions;
-        _writerOptions = writerOptions;
+        _streamOptions = streamOptions;
         _defaultCloseErrorCode = defaultCloseErrorCode;
         _contexts = new List<QuicTransportContext>();
         _contextsLock = new Lock();
@@ -208,13 +204,14 @@ public sealed class QuicTransportConnection : IMultiplexTransportConnection
         await AbortAsync().ConfigureAwait(false);
 
         await _connection.DisposeAsync().ConfigureAwait(false);
+        _streamOptions.Dispose();
 
         OnDispose?.Invoke();
     }
 
     private QuicTransportContext CreateContext(QuicStream stream)
     {
-        var context = new QuicTransportContext(this, stream, _readerOptions, _writerOptions);
+        var context = new QuicTransportContext(this, stream, _streamOptions.ReaderOptions, _streamOptions.WriterOptions);
 
         lock (_contextsLock)
         {

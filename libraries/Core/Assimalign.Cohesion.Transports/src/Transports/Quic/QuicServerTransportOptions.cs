@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
@@ -127,14 +126,9 @@ public sealed class QuicServerTransportOptions
         return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
     }
 
-    internal StreamPipeReaderOptions CreateReaderOptions()
+    internal TransportStreamPipeOptionsContext CreateStreamOptions()
     {
-        return TransportPipeOptionsFactory.CreateReaderOptions(MaxReadBufferSize);
-    }
-
-    internal StreamPipeWriterOptions CreateWriterOptions()
-    {
-        return TransportPipeOptionsFactory.CreateWriterOptions(MaxWriteBufferSize);
+        return TransportPipeOptionsFactory.CreateStreamOptions(MaxReadBufferSize, MaxWriteBufferSize);
     }
 
     internal static void ValidateErrorCode(long errorCode)

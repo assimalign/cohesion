@@ -20,6 +20,7 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
     private readonly Socket? _socket;
     private readonly bool _ownsSocket;
     private readonly bool _hasReceiveLoop;
+    private readonly TransportPipeOptionsContext _pipeOptions;
     private readonly Pipe _receivePipe;
     private readonly Pipe _sendPipe;
     private readonly TransportPipeline _pipeline;
@@ -37,26 +38,25 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         Socket socket,
         TransportId transportId,
         TransportPipeline pipeline,
-        PipeOptions receivePipeOptions,
-        PipeOptions sendPipeOptions,
+        TransportPipeOptionsContext pipeOptions,
         bool ownsSocket)
     {
         ArgumentNullException.ThrowIfNull(socket);
         ArgumentNullException.ThrowIfNull(pipeline);
-        ArgumentNullException.ThrowIfNull(receivePipeOptions);
-        ArgumentNullException.ThrowIfNull(sendPipeOptions);
+        ArgumentNullException.ThrowIfNull(pipeOptions);
 
         _socket = socket;
         _ownsSocket = ownsSocket;
         _hasReceiveLoop = true;
+        _pipeOptions = pipeOptions;
         _pipeline = pipeline;
         _sendAsync = (buffer, cancellationToken) => socket.SendAsync(buffer, SocketFlags.None, cancellationToken);
         _shutdownTokenSource = new CancellationTokenSource();
         _stateLock = new Lock();
         _state = ConnectionState.Idle;
 
-        _receivePipe = new Pipe(receivePipeOptions);
-        _sendPipe = new Pipe(sendPipeOptions);
+        _receivePipe = new Pipe(pipeOptions.InputOptions);
+        _sendPipe = new Pipe(pipeOptions.OutputOptions);
 
         Context = new UdpTransportConnectionContext(
             socket.LocalEndPoint!,
@@ -71,28 +71,27 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         TransportPipeline pipeline,
         EndPoint localEndPoint,
         EndPoint remoteEndPoint,
-        PipeOptions receivePipeOptions,
-        PipeOptions sendPipeOptions,
+        TransportPipeOptionsContext pipeOptions,
         Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask<int>> sendAsync)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         ArgumentNullException.ThrowIfNull(localEndPoint);
         ArgumentNullException.ThrowIfNull(remoteEndPoint);
-        ArgumentNullException.ThrowIfNull(receivePipeOptions);
-        ArgumentNullException.ThrowIfNull(sendPipeOptions);
+        ArgumentNullException.ThrowIfNull(pipeOptions);
         ArgumentNullException.ThrowIfNull(sendAsync);
 
         _socket = null;
         _ownsSocket = false;
         _hasReceiveLoop = false;
+        _pipeOptions = pipeOptions;
         _pipeline = pipeline;
         _sendAsync = sendAsync;
         _shutdownTokenSource = new CancellationTokenSource();
         _stateLock = new Lock();
         _state = ConnectionState.Idle;
 
-        _receivePipe = new Pipe(receivePipeOptions);
-        _sendPipe = new Pipe(sendPipeOptions);
+        _receivePipe = new Pipe(pipeOptions.InputOptions);
+        _sendPipe = new Pipe(pipeOptions.OutputOptions);
 
         Context = new UdpTransportConnectionContext(
             localEndPoint,
@@ -254,6 +253,7 @@ public sealed class UdpTransportConnection : ISingleStreamTransportConnection
         await AbortAsync().ConfigureAwait(false);
 
         _shutdownTokenSource.Dispose();
+        _pipeOptions.Dispose();
 
         OnDispose?.Invoke();
     }

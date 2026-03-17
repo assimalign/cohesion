@@ -8,55 +8,110 @@ internal static class TransportPipeOptionsFactory
 {
     private const int DefaultReadBufferSize = 64 * 1024;
     private const int DefaultWriteBufferSize = 16 * 1024;
+    private const int DefaultMinimumRetainedBlocks = 32;
+    private const int DefaultMaximumRetainedBlocks = 256;
     private const int MinimumSegmentSize = 4096;
+    private static readonly TimeSpan defaultWarmWindow = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan defaultTrimInterval = TimeSpan.FromSeconds(30);
 
-    public static PipeOptions CreateInputOptions(long? maxReadBufferSize, bool unsafePreferInLineScheduling)
+    public static AdaptiveMemoryPool CreateMemoryPool(long? maxReadBufferSize, long? maxWriteBufferSize)
+    {
+        int maximumRetainedBlocks = GetMaximumRetainedBlocks(maxReadBufferSize, maxWriteBufferSize);
+
+        return new AdaptiveMemoryPool(new AdaptiveMemoryPoolOptions()
+        {
+            BlockSize = AdaptiveMemoryPool.DefaultBlockSize,
+            TrimInterval = defaultTrimInterval,
+            Policy = new AdaptiveMemoryPoolPressurePolicy()
+            {
+                MinimumRetainedBlocks = Math.Min(DefaultMinimumRetainedBlocks, maximumRetainedBlocks),
+                MaximumRetainedBlocks = maximumRetainedBlocks,
+                PeakRetentionRatio = 0.25,
+                WarmWindow = defaultWarmWindow
+            }
+        });
+    }
+
+    public static SocketTransportConnectionSettings[] CreateSocketConnectionSettings(
+        int count,
+        bool unsafePreferInLineScheduling = false,
+        bool waitForDataBeforeAllocatingBuffer = false,
+        long? maxReadBufferSize = 0,
+        long? maxWriteBufferSize = 0)
+    {
+        var settings = new SocketTransportConnectionSettings[count];
+
+        for (int index = 0; index < count; index++)
+        {
+            settings[index] = new SocketTransportConnectionSettings()
+            {
+                IsServer = true,
+                PipeOptions = CreateSocketPipeOptions(
+                    maxReadBufferSize,
+                    maxWriteBufferSize,
+                    unsafePreferInLineScheduling),
+                WaitForDataBeforeAllocatingBuffer = waitForDataBeforeAllocatingBuffer
+            };
+        }
+
+        return settings;
+    }
+
+    public static TransportPipeOptionsContext CreatePipeOptions(
+        long? maxReadBufferSize,
+        long? maxWriteBufferSize,
+        bool unsafePreferInLineScheduling)
     {
         PipeScheduler applicationScheduler = GetApplicationScheduler(unsafePreferInLineScheduling);
         PipeScheduler transportScheduler = GetTransportScheduler(unsafePreferInLineScheduling);
 
-        return new PipeOptions(
-            MemoryPool<byte>.Shared,
+        return CreatePipeOptions(
+            maxReadBufferSize,
+            maxWriteBufferSize,
             applicationScheduler,
-            transportScheduler,
-            GetPauseThreshold(maxReadBufferSize),
-            GetResumeThreshold(maxReadBufferSize),
-            MinimumSegmentSize,
-            useSynchronizationContext: false);
+            transportScheduler);
     }
 
-    public static PipeOptions CreateOutputOptions(long? maxWriteBufferSize, bool unsafePreferInLineScheduling)
+    public static SocketTransportPipeOptionsContext CreateSocketPipeOptions(
+        long? maxReadBufferSize,
+        long? maxWriteBufferSize,
+        bool unsafePreferInLineScheduling)
     {
         PipeScheduler applicationScheduler = GetApplicationScheduler(unsafePreferInLineScheduling);
-        PipeScheduler transportScheduler = GetTransportScheduler(unsafePreferInLineScheduling);
+        PipeScheduler transportScheduler = GetSocketTransportScheduler(unsafePreferInLineScheduling);
+        PipeScheduler senderScheduler = unsafePreferInLineScheduling
+            ? PipeScheduler.Inline
+            : OperatingSystem.IsWindows()
+                ? transportScheduler
+                : PipeScheduler.Inline;
 
-        return new PipeOptions(
-            MemoryPool<byte>.Shared,
+        return new SocketTransportPipeOptionsContext(
+            CreatePipeOptions(
+                maxReadBufferSize,
+                maxWriteBufferSize,
+                applicationScheduler,
+                transportScheduler),
             transportScheduler,
-            applicationScheduler,
-            GetPauseThreshold(maxWriteBufferSize),
-            GetResumeThreshold(maxWriteBufferSize),
-            MinimumSegmentSize,
-            useSynchronizationContext: false);
+            senderScheduler);
     }
 
-    public static StreamPipeReaderOptions CreateReaderOptions(long? readBufferSize)
+    public static TransportStreamPipeOptionsContext CreateStreamOptions(long? readBufferSize, long? writeBufferSize)
     {
-        int bufferSize = ClampBufferSize(readBufferSize, DefaultReadBufferSize);
+        AdaptiveMemoryPool memoryPool = CreateMemoryPool(readBufferSize, writeBufferSize);
+        int configuredReadBufferSize = ClampBufferSize(readBufferSize, DefaultReadBufferSize);
+        int configuredWriteBufferSize = ClampBufferSize(writeBufferSize, DefaultWriteBufferSize);
 
-        return new StreamPipeReaderOptions(
-            MemoryPool<byte>.Shared,
-            bufferSize,
-            Math.Min(bufferSize, MinimumSegmentSize),
-            leaveOpen: false);
-    }
-
-    public static StreamPipeWriterOptions CreateWriterOptions(long? writeBufferSize)
-    {
-        return new StreamPipeWriterOptions(
-            MemoryPool<byte>.Shared,
-            ClampBufferSize(writeBufferSize, DefaultWriteBufferSize),
-            leaveOpen: false);
+        return new TransportStreamPipeOptionsContext(
+            memoryPool,
+            new StreamPipeReaderOptions(
+                memoryPool,
+                configuredReadBufferSize,
+                Math.Min(configuredReadBufferSize, MinimumSegmentSize),
+                leaveOpen: false),
+            new StreamPipeWriterOptions(
+                memoryPool,
+                configuredWriteBufferSize,
+                leaveOpen: false));
     }
 
     private static PipeScheduler GetApplicationScheduler(bool unsafePreferInLineScheduling)
@@ -71,6 +126,41 @@ internal static class TransportPipeOptionsFactory
         return unsafePreferInLineScheduling
             ? PipeScheduler.Inline
             : PipeScheduler.ThreadPool;
+    }
+
+    private static PipeScheduler GetSocketTransportScheduler(bool unsafePreferInLineScheduling)
+    {
+        return unsafePreferInLineScheduling
+            ? PipeScheduler.Inline
+            : new SocketPipeScheduler();
+    }
+
+    private static TransportPipeOptionsContext CreatePipeOptions(
+        long? maxReadBufferSize,
+        long? maxWriteBufferSize,
+        PipeScheduler applicationScheduler,
+        PipeScheduler transportScheduler)
+    {
+        AdaptiveMemoryPool memoryPool = CreateMemoryPool(maxReadBufferSize, maxWriteBufferSize);
+
+        return new TransportPipeOptionsContext(
+            memoryPool,
+            new PipeOptions(
+                memoryPool,
+                applicationScheduler,
+                transportScheduler,
+                GetPauseThreshold(maxReadBufferSize),
+                GetResumeThreshold(maxReadBufferSize),
+                MinimumSegmentSize,
+                useSynchronizationContext: false),
+            new PipeOptions(
+                memoryPool,
+                transportScheduler,
+                applicationScheduler,
+                GetPauseThreshold(maxWriteBufferSize),
+                GetResumeThreshold(maxWriteBufferSize),
+                MinimumSegmentSize,
+                useSynchronizationContext: false));
     }
 
     private static long GetPauseThreshold(long? maxBufferSize)
@@ -98,5 +188,26 @@ internal static class TransportPipeOptionsFactory
         }
 
         return defaultValue;
+    }
+
+    private static int GetMaximumRetainedBlocks(long? maxReadBufferSize, long? maxWriteBufferSize)
+    {
+        long totalBufferedBytes = GetPositiveBufferSize(maxReadBufferSize) + GetPositiveBufferSize(maxWriteBufferSize);
+
+        if (totalBufferedBytes <= 0)
+        {
+            return DefaultMaximumRetainedBlocks;
+        }
+
+        long retainedBlockCount = (totalBufferedBytes + AdaptiveMemoryPool.DefaultBlockSize - 1) / AdaptiveMemoryPool.DefaultBlockSize;
+
+        return (int)Math.Clamp(retainedBlockCount, DefaultMinimumRetainedBlocks, DefaultMaximumRetainedBlocks);
+    }
+
+    private static long GetPositiveBufferSize(long? bufferSize)
+    {
+        return bufferSize is > 0
+            ? bufferSize.GetValueOrDefault()
+            : 0;
     }
 }

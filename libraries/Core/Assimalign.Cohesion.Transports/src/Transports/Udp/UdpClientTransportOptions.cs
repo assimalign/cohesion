@@ -1,5 +1,4 @@
 using System;
-using System.IO.Pipelines;
 using System.Net;
 using System.Threading.Tasks;
 
@@ -67,13 +66,8 @@ public sealed class UdpClientTransportOptions
         return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
     }
 
-    internal PipeOptions CreateReceivePipeOptions()
+    internal TransportPipeOptionsContext CreatePipeOptions()
     {
-        return TransportPipeOptionsFactory.CreateInputOptions(MaxReadBufferSize, UnsafePreferInLineScheduling);
-    }
-
-    internal PipeOptions CreateSendPipeOptions()
-    {
-        return TransportPipeOptionsFactory.CreateOutputOptions(MaxWriteBufferSize, UnsafePreferInLineScheduling);
+        return TransportPipeOptionsFactory.CreatePipeOptions(MaxReadBufferSize, MaxWriteBufferSize, UnsafePreferInLineScheduling);
     }
 }

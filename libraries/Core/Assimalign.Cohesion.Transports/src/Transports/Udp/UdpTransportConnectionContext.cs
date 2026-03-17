@@ -9,14 +9,11 @@ namespace Assimalign.Cohesion.Transports;
 /// </summary>
 public sealed class UdpTransportConnectionContext : ITransportConnectionContext
 {
-    private readonly Dictionary<string, object?> _items;
-
     internal UdpTransportConnectionContext(EndPoint localEndPoint, EndPoint remoteEndPoint, ITransportConnectionPipe pipe)
     {
         LocalEndPoint = localEndPoint;
         RemoteEndPoint = remoteEndPoint;
         Pipe = pipe;
-        _items = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
     /// <inheritdoc />
@@ -26,10 +23,10 @@ public sealed class UdpTransportConnectionContext : ITransportConnectionContext
     public EndPoint RemoteEndPoint { get; }
 
     /// <inheritdoc />
-    public ITransportConnectionPipe Pipe { get; private set; }
+    public ITransportConnectionPipe Pipe { get; private set; } 
 
     /// <inheritdoc />
-    public IDictionary<string, object?> Items => _items;
+    public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
 
     /// <summary>
     /// Replaces the active connection pipe with a custom implementation.
