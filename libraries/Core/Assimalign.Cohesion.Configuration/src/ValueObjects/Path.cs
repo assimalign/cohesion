@@ -43,6 +43,7 @@ namespace Assimalign.Cohesion.Configuration;
 [JsonConverter(typeof(KeyPathJsonConvertor))]
 public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 {
+    private static readonly Key[] _emptyKeys = [];
     private readonly Key[] _keys;
 
     /// <summary>
@@ -51,7 +52,9 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="keys"></param>
     public Path(Key[] keys)
     {
-        _keys = keys ??= [];
+        _keys = keys is null || keys.Length == 0
+            ? _emptyKeys
+            : keys;
     }
 
     /// <summary>
@@ -64,7 +67,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     {
         get
         {
-            ref Key key = ref _keys[index];
+            ref Key key = ref Keys[index];
 
             return key;
         }
@@ -83,12 +86,12 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <summary>
     /// Gets an empty key.
     /// </summary>
-    public static readonly Path Empty = [];
+    public static readonly Path Empty = new(_emptyKeys);
 
     /// <summary>
     /// The collection of keys that make up the path.
     /// </summary>
-    public Key[] Keys => _keys;
+    public Key[] Keys => _keys ?? _emptyKeys;
 
     /// <summary>
     /// The number of keys in the path.
@@ -102,12 +105,12 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <summary>
     /// Checks whether the path has any keys.
     /// </summary>
-    public bool IsEmpty => _keys is null || _keys.Length == 0;
+    public bool IsEmpty => Count == 0;
 
     /// <summary>
     /// Checks if the path is made up of two or more keys.
     /// </summary>
-    public bool IsComposite => _keys.Length > 1;
+    public bool IsComposite => Count > 1;
 
     /// <summary>
     /// Creates a subpath at the 
@@ -116,7 +119,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public Path Subpath(int start)
     {
-        return Subpath(start, _keys.Length - start);
+        return Subpath(start, Count - start);
     }
 
     /// <summary>
@@ -127,7 +130,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public Path Subpath(int start, int length)
     {
-        return _keys[start..(start + length)];
+        return Keys[start..(start + length)];
     }
 
     /// <summary>
@@ -171,12 +174,22 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public static Path Combine(Path left, Path right, KeyComparison comparison)
     {
+        if (left.IsEmpty)
+        {
+            return right;
+        }
+
+        if (right.IsEmpty)
+        {
+            return left;
+        }
+
         if (right.StartsWith(left, comparison))
         {
             return right;
         }
 
-        return new Path([.. left._keys, .. right._keys]);
+        return new Path([.. left.Keys, .. right.Keys]);
     }
 
     /// <summary>
@@ -197,24 +210,32 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public bool StartsWith(in Path other, KeyComparison comparison)
     {
+        if (other.IsEmpty)
+        {
+            return true;
+        }
+
         // Has more keys than the current instance than it cannot be a match.
         if (other.Count > Count)
         {
             return false;
         }
 
+        Key[] keys = _keys ?? _emptyKeys;
+        Key[] otherKeys = other._keys ?? _emptyKeys;
+
         // Get the index of the last key
         int last = other.Count - 1;
 
         for (int i = 0; i < last; i++)
         {
-            if (!_keys[i].Equals(other._keys[i], comparison))
+            if (!keys[i].Equals(otherKeys[i], comparison))
             {
                 return false;
             }
         }
 
-        return _keys[last].StartsWith(other._keys[last], comparison);
+        return keys[last].StartsWith(otherKeys[last], comparison);
     }
 
     /// <summary>
@@ -240,10 +261,13 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
             return false;
         }
 
+        Key[] keys = _keys ?? _emptyKeys;
+        Key[] otherKeys = other._keys ?? _emptyKeys;
+
         for (int i = 0; i < Count; i++)
         {
-            ref var left = ref _keys[i];
-            ref var right = ref other._keys[i];
+            ref Key left = ref keys[i];
+            ref Key right = ref otherKeys[i];
 
             if (!left.Equals(right, comparison))
             {
@@ -262,7 +286,7 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
 
     public IEnumerator<Key> GetEnumerator()
     {
-        return (IEnumerator<Key>)Keys.GetEnumerator();
+        return ((IEnumerable<Key>)Keys).GetEnumerator();
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -276,7 +300,9 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <returns></returns>
     public override string ToString()
     {
-        return string.Join(DefaultDelimiter, _keys);
+        return IsEmpty
+            ? string.Empty
+            : string.Join(DefaultDelimiter, Keys);
     }
 
     /// <summary>
@@ -290,12 +316,35 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     }
 
     /// <summary>
+    /// Returns a hash code using the specified key comparison.
+    /// </summary>
+    /// <param name="comparison">The comparison used to hash each key in the path.</param>
+    /// <returns>The hash code for this path.</returns>
+    public int GetHashCode(KeyComparison comparison)
+    {
+        ArgumentException.ThrowIfEnumNotDefined(comparison);
+
+        Key[] keys = _keys ?? _emptyKeys;
+        int hashCode = keys.Length;
+
+        unchecked
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                hashCode = (hashCode * 397) ^ keys[i].GetHashCode(comparison);
+            }
+        }
+
+        return hashCode;
+    }
+
+    /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
     public override int GetHashCode()
     {
-        return ToString().GetHashCode();
+        return GetHashCode(KeyComparison.Ordinal);
     }
 
     /// <summary>
@@ -317,75 +366,56 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     {
         if (span.IsEmpty)
         {
-            return Path.Empty;
+            return Empty;
         }
 
         int start = 0;
         int end = span.Length - 1;
 
-        // Calculate start of string
-        for (; start < span.Length; start++)
+        while (start <= end && IsDelimiter(span[start]))
         {
-            int index = 0;
-            char c = span[start];
-            while (index < Delimiters.Length && Delimiters[index] != c)
-            {
-                index++;
-            }
-            if (index == Delimiters.Length)
-            {
-                break;
-            }
+            start++;
         }
 
-        // Calculate end of string
-        for (; end >= start; end--)
+        while (end >= start && IsDelimiter(span[end]))
         {
-            int index = 0;
-            char c = span[end];
-            while (index < Delimiters.Length && Delimiters[index] != c)
-            {
-                index++;
-            }
-            if (index == Delimiters.Length)
-            {
-                break;
-            }
+            end--;
+        }
+
+        if (start > end)
+        {
+            return Empty;
         }
 
         int count = 0;
         Key[] segments = new Key[5];
-        int length = span.Length - start - (span.Length - end) + 1;
-        ReadOnlySpan<char> trimmed = span.Slice(start, length);
+        ReadOnlySpan<char> trimmed = span.Slice(start, end - start + 1);
 
-        // Reset start
         start = 0;
 
         while (start < trimmed.Length)
         {
-            // Find the next segment by locating ':'
             int segmentEnd = trimmed.Slice(start).IndexOfAny(Delimiters);
 
             if (segmentEnd == -1)
             {
                 segmentEnd = trimmed.Length - start;
-
-                Array.Resize(ref segments, count + 1);
             }
 
-            ReadOnlySpan<char> segment = trimmed.Slice(start, segmentEnd);
-
-            start += segmentEnd + 1; // Move start past the current segment
-
-            // Parse the segment
-            segments[count] = new Key(segment);
-
-            count++;
-
-            if (count > segments.Length)
+            if (count == segments.Length)
             {
                 Array.Resize(ref segments, count + 5);
             }
+
+            segments[count] = new Key(trimmed.Slice(start, segmentEnd));
+
+            count++;
+            start += segmentEnd + 1;
+        }
+
+        if (count != segments.Length)
+        {
+            Array.Resize(ref segments, count);
         }
 
         return new Path(segments);
@@ -483,6 +513,11 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
     /// <param name="right"></param>
     /// <returns></returns>
     public static bool operator !=(Path? left, Path right) => left.HasValue && !left.Equals(right);
+
+    private static bool IsDelimiter(char value)
+    {
+        return value is '\\' or '/' or ':' or '.';
+    }
 
     partial class KeyPathJsonConvertor : JsonConverter<Path>
     {

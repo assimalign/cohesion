@@ -2,6 +2,9 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
 using Xunit;
 
@@ -476,6 +479,106 @@ public class InMemoryFileSystemTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Stream: Shared readers should coexist")]
+    public void Stream_SharedReaders_ShouldCoexist()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/shared-read.dat");
+
+        using var first = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var second = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        Assert.True(first.CanRead);
+        Assert.True(second.CanRead);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Stream: Conflicting share should throw")]
+    public void Stream_ConflictingShare_ShouldThrowIOException()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/conflict.dat");
+
+        using var first = file.Open(FileMode.Open, FileAccess.Read);
+
+        Assert.Throws<IOException>(() =>
+        {
+            using var second = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
+        });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - DeleteFile: Open handle without delete share should throw")]
+    public void DeleteFile_OpenHandleWithoutDeleteShare_ShouldThrowPathInUse()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/in-use-delete.dat");
+
+        using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+        var exception = Assert.Throws<FileSystemException>(() => fileSystem.DeleteFile("tmp/in-use-delete.dat"));
+
+        Assert.Equal(FileSystemErrorCode.PathInUse, exception.Code);
+        Assert.True(fileSystem.Exists("tmp/in-use-delete.dat"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - DeleteFile: Delete share should allow delete while stream stays usable")]
+    public void DeleteFile_DeleteShare_ShouldDeletePathAndKeepStreamUsable()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/delete-shared.dat");
+
+        using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+
+        fileSystem.DeleteFile("tmp/delete-shared.dat");
+
+        Assert.False(fileSystem.Exists("tmp/delete-shared.dat"));
+
+        var content = Encoding.UTF8.GetBytes("still-open");
+        stream.Write(content, 0, content.Length);
+
+        Assert.Equal(content.Length, stream.Length);
+        Assert.Throws<FileNotFoundException>(() => file.Open(FileMode.Open, FileAccess.Read));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Move: Open handle without delete share should throw")]
+    public void Move_OpenHandleWithoutDeleteShare_ShouldThrowPathInUse()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/in-use-move.dat");
+
+        using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+        var exception = Assert.Throws<FileSystemException>(() => fileSystem.Move("tmp/in-use-move.dat", "var/moved.dat"));
+
+        Assert.Equal(FileSystemErrorCode.PathInUse, exception.Code);
+        Assert.True(fileSystem.Exists("tmp/in-use-move.dat"));
+        Assert.False(fileSystem.Exists("var/moved.dat"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Move: Delete share should allow move and preserve stream")]
+    public void Move_DeleteShare_ShouldMovePathAndPreserveStream()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/move-shared.dat");
+
+        var firstSegment = Encoding.UTF8.GetBytes("alpha");
+        using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        stream.Write(firstSegment, 0, firstSegment.Length);
+
+        fileSystem.Move("tmp/move-shared.dat", "var/move-shared.dat");
+
+        Assert.False(fileSystem.Exists("tmp/move-shared.dat"));
+        Assert.True(fileSystem.Exists("var/move-shared.dat"));
+
+        var secondSegment = Encoding.UTF8.GetBytes("-beta");
+        stream.Write(secondSegment, 0, secondSegment.Length);
+        stream.Position = 0;
+
+        var buffer = new byte[firstSegment.Length + secondSegment.Length];
+        _ = stream.Read(buffer, 0, buffer.Length);
+
+        Assert.Equal("alpha-beta", Encoding.UTF8.GetString(buffer));
+    }
+
     // ================================================================
     // DeleteDirectory Tests
     // ================================================================
@@ -814,6 +917,49 @@ public class InMemoryFileSystemTests
         Assert.True(fileSystem.SpaceAvailable.Length < initialAvailable);
     }
 
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Space: Overwrite should not double count usage")]
+    public void Space_Overwrite_ShouldNotDoubleCountUsage()
+    {
+        var fileSystem = CreateFileSystem(sizeMb: 1);
+        var file = fileSystem.CreateFile("data-overwrite.bin");
+        var content = new byte[1024];
+
+        using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+        {
+            stream.Write(content, 0, content.Length);
+        }
+
+        var usedAfterFirstWrite = fileSystem.SpaceUsed.Length;
+
+        using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+        {
+            stream.Write(content, 0, content.Length);
+        }
+
+        Assert.Equal(usedAfterFirstWrite, fileSystem.SpaceUsed.Length);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Space: Delete should release storage after last handle closes")]
+    public void Space_DeleteSharedFile_ShouldReleaseStorageAfterLastHandleCloses()
+    {
+        var fileSystem = CreateFileSystem(sizeMb: 1);
+        var file = fileSystem.CreateFile("data-delete.bin");
+        var content = new byte[1024];
+
+        using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        stream.Write(content, 0, content.Length);
+
+        Assert.Equal(content.Length, fileSystem.SpaceUsed.Length);
+
+        fileSystem.DeleteFile("data-delete.bin");
+
+        Assert.Equal(content.Length, fileSystem.SpaceUsed.Length);
+
+        stream.Dispose();
+
+        Assert.Equal(0, fileSystem.SpaceUsed.Length);
+    }
+
     // ================================================================
     // Timestamps Tests
     // ================================================================
@@ -1007,5 +1153,397 @@ public class InMemoryFileSystemTests
             var options = new InMemoryFileSystemOptions();
             options.RootPath = "../relative";
         });
+    }
+
+    // ================================================================
+    // Concurrency Tests
+    // ================================================================
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Same file create should have a single winner")]
+    public async Task Concurrency_CreateSameFile_ShouldHaveSingleWinnerAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        using var start = new ManualResetEventSlim(false);
+
+        const int taskCount = 16;
+        var successes = 0;
+        var conflicts = 0;
+
+        var tasks = Enumerable.Range(0, taskCount)
+            .Select(_ => Task.Run(() =>
+            {
+                start.Wait();
+
+                try
+                {
+                    fileSystem.CreateFile("tmp/shared.txt");
+                    Interlocked.Increment(ref successes);
+                }
+                catch (FileSystemException exception) when (exception.Code == FileSystemErrorCode.Conflict)
+                {
+                    Interlocked.Increment(ref conflicts);
+                }
+            }))
+            .ToArray();
+
+        start.Set();
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(1, successes);
+        Assert.Equal(taskCount - 1, conflicts);
+        Assert.True(fileSystem.Exists("tmp/shared.txt"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Append mode should preserve all concurrent writes")]
+    public async Task Concurrency_Append_ShouldPreserveAllWritesAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/append.log");
+        using var start = new ManualResetEventSlim(false);
+
+        const int writerCount = 24;
+        var payloads = Enumerable.Range(0, writerCount)
+            .Select(index => Encoding.UTF8.GetBytes($"[{index:D2}]"))
+            .ToArray();
+
+        var tasks = payloads.Select(payload => Task.Run(() =>
+        {
+            using var stream = file.Open(FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            start.Wait();
+            stream.Write(payload, 0, payload.Length);
+        })).ToArray();
+
+        start.Set();
+        await Task.WhenAll(tasks);
+
+        var buffer = new byte[file.Size.Length];
+        using (var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            _ = stream.Read(buffer, 0, buffer.Length);
+        }
+
+        var content = Encoding.UTF8.GetString(buffer);
+
+        Assert.Equal(payloads.Sum(item => item.Length), file.Size.Length);
+
+        foreach (var payload in payloads)
+        {
+            Assert.Contains(Encoding.UTF8.GetString(payload), content);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Enumerate while mutating should not throw")]
+    public async Task Concurrency_EnumerateWhileMutating_ShouldNotThrowAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        using var start = new ManualResetEventSlim(false);
+        var exceptions = new ConcurrentQueue<Exception>();
+
+        var writer = Task.Run(() =>
+        {
+            start.Wait();
+
+            for (int index = 0; index < 200; index++)
+            {
+                var path = $"tmp/concurrency/{index:D3}.txt";
+                fileSystem.CreateFile(path);
+
+                if (index >= 25 && index % 3 == 0)
+                {
+                    fileSystem.DeleteFile($"tmp/concurrency/{index - 25:D3}.txt");
+                }
+            }
+        });
+
+        var reader = Task.Run(() =>
+        {
+            start.Wait();
+
+            for (int iteration = 0; iteration < 400; iteration++)
+            {
+                try
+                {
+                    _ = fileSystem.EnumerateFileSystem(new FileSystemEnumerationOptions
+                    {
+                        Recurse = true,
+                    }).ToArray();
+                }
+                catch (Exception exception)
+                {
+                    exceptions.Enqueue(exception);
+                }
+            }
+        });
+
+        start.Set();
+        await Task.WhenAll(writer, reader);
+
+        Assert.True(exceptions.IsEmpty, string.Join(Environment.NewLine, exceptions.Select(ex => ex.ToString())));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Exclusive open should reject concurrent readers")]
+    public async Task Concurrency_ExclusiveOpen_ShouldRejectConcurrentReadersAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/exclusive.dat");
+        using var opened = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+
+        var owner = Task.Run(() =>
+        {
+            using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            opened.Set();
+            release.Wait();
+        });
+
+        opened.Wait();
+
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            try
+            {
+                using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read);
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        })));
+
+        release.Set();
+        await owner;
+
+        Assert.All(attempts, Assert.False);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Delete and open race should reject new opens after delete")]
+    public async Task Concurrency_DeleteAndOpenRace_ShouldRejectNewOpensAfterDeleteAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/delete-open-race.dat");
+        using var start = new ManualResetEventSlim(false);
+        var unexpected = new ConcurrentQueue<Exception>();
+
+        var successfulOpens = 0;
+        var notFoundAfterDelete = 0;
+
+        var opener = Task.Run(() =>
+        {
+            start.Wait();
+
+            for (int iteration = 0; iteration < 512; iteration++)
+            {
+                try
+                {
+                    using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+                    _ = stream.Length;
+                    Interlocked.Increment(ref successfulOpens);
+                }
+                catch (FileNotFoundException)
+                {
+                    Interlocked.Increment(ref notFoundAfterDelete);
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    unexpected.Enqueue(exception);
+                    return;
+                }
+
+                Thread.Yield();
+            }
+        });
+
+        var deleter = Task.Run(() =>
+        {
+            start.Wait();
+            _ = SpinWait.SpinUntil(() => Volatile.Read(ref successfulOpens) >= 8, TimeSpan.FromSeconds(2));
+
+            try
+            {
+                fileSystem.DeleteFile("tmp/delete-open-race.dat");
+            }
+            catch (Exception exception)
+            {
+                unexpected.Enqueue(exception);
+            }
+        });
+
+        start.Set();
+        await Task.WhenAll(opener, deleter);
+
+        AssertNoUnexpectedExceptions(unexpected);
+        Assert.True(successfulOpens > 0);
+        Assert.True(notFoundAfterDelete > 0);
+        Assert.False(fileSystem.Exists("tmp/delete-open-race.dat"));
+        Assert.Throws<FileNotFoundException>(() => file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Move and open race should keep the file handle usable")]
+    public async Task Concurrency_MoveAndOpenRace_ShouldKeepFileHandleUsableAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        var file = fileSystem.CreateFile("tmp/move-open-race.dat");
+        var seed = Encoding.UTF8.GetBytes("seed");
+        using var start = new ManualResetEventSlim(false);
+        var unexpected = new ConcurrentQueue<Exception>();
+
+        using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+        {
+            stream.Write(seed, 0, seed.Length);
+        }
+
+        var opener = Task.Run(() =>
+        {
+            start.Wait();
+
+            for (int iteration = 0; iteration < 400; iteration++)
+            {
+                try
+                {
+                    using var stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    var buffer = new byte[1];
+                    _ = stream.Read(buffer, 0, buffer.Length);
+                }
+                catch (Exception exception)
+                {
+                    unexpected.Enqueue(exception);
+                    return;
+                }
+
+                Thread.Yield();
+            }
+        });
+
+        var mover = Task.Run(() =>
+        {
+            start.Wait();
+
+            var source = "tmp/move-open-race.dat";
+            var destination = "var/move-open-race.dat";
+
+            for (int iteration = 0; iteration < 250; iteration++)
+            {
+                try
+                {
+                    fileSystem.Move(source, destination);
+                }
+                catch (Exception exception)
+                {
+                    unexpected.Enqueue(exception);
+                    return;
+                }
+
+                Assert.False(fileSystem.Exists(source));
+                Assert.True(fileSystem.Exists(destination));
+
+                (source, destination) = (destination, source);
+                Thread.Yield();
+            }
+        });
+
+        start.Set();
+        await Task.WhenAll(opener, mover);
+
+        AssertNoUnexpectedExceptions(unexpected);
+        Assert.True(fileSystem.Exists("tmp/move-open-race.dat") ^ fileSystem.Exists("var/move-open-race.dat"));
+
+        using var finalOpen = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        Assert.True(finalOpen.CanRead);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Concurrency: Move and delete race should end with a single visible outcome")]
+    public async Task Concurrency_MoveAndDeleteRace_ShouldEndWithSingleVisibleOutcomeAsync()
+    {
+        var fileSystem = CreateFileSystem();
+        _ = fileSystem.CreateFile("tmp/move-delete-race.dat");
+        using var start = new ManualResetEventSlim(false);
+        var unexpected = new ConcurrentQueue<Exception>();
+
+        var deleteSuccesses = 0;
+        var moveSuccesses = 0;
+        var moverStoppedOnNotFound = 0;
+
+        var mover = Task.Run(() =>
+        {
+            start.Wait();
+
+            var source = "tmp/move-delete-race.dat";
+            var destination = "var/move-delete-race.dat";
+
+            for (int iteration = 0; iteration < 300; iteration++)
+            {
+                try
+                {
+                    fileSystem.Move(source, destination);
+                    Interlocked.Increment(ref moveSuccesses);
+                    (source, destination) = (destination, source);
+                }
+                catch (FileSystemException exception) when (exception.Code == FileSystemErrorCode.NotFound)
+                {
+                    Interlocked.Increment(ref moverStoppedOnNotFound);
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    unexpected.Enqueue(exception);
+                    return;
+                }
+
+                Thread.Yield();
+            }
+        });
+
+        var deleter = Task.Run(() =>
+        {
+            start.Wait();
+
+            for (int iteration = 0; iteration < 300; iteration++)
+            {
+                try
+                {
+                    if (fileSystem.Exists("tmp/move-delete-race.dat"))
+                    {
+                        fileSystem.DeleteFile("tmp/move-delete-race.dat");
+                        Interlocked.Increment(ref deleteSuccesses);
+                        return;
+                    }
+
+                    if (fileSystem.Exists("var/move-delete-race.dat"))
+                    {
+                        fileSystem.DeleteFile("var/move-delete-race.dat");
+                        Interlocked.Increment(ref deleteSuccesses);
+                        return;
+                    }
+                }
+                catch (FileSystemException exception) when (exception.Code == FileSystemErrorCode.NotFound)
+                {
+                }
+                catch (Exception exception)
+                {
+                    unexpected.Enqueue(exception);
+                    return;
+                }
+
+                Thread.Yield();
+            }
+
+            unexpected.Enqueue(new InvalidOperationException("The delete task did not observe a stable path to delete."));
+        });
+
+        start.Set();
+        await Task.WhenAll(mover, deleter);
+
+        AssertNoUnexpectedExceptions(unexpected);
+        Assert.Equal(1, deleteSuccesses);
+        Assert.False(fileSystem.Exists("tmp/move-delete-race.dat"));
+        Assert.False(fileSystem.Exists("var/move-delete-race.dat"));
+        Assert.True(moveSuccesses > 0 || moverStoppedOnNotFound > 0);
+    }
+
+    private static void AssertNoUnexpectedExceptions(ConcurrentQueue<Exception> exceptions)
+    {
+        Assert.True(exceptions.IsEmpty, string.Join(Environment.NewLine, exceptions.Select(exception => exception.ToString())));
     }
 }

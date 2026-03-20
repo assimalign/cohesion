@@ -16,6 +16,8 @@ public abstract class InMemoryFileSystemLockHandle
     // _count  > 0 => This is a shared lock
     private int _count;
     private LockPolicy _policy;
+    private int _exclusiveOwnerThreadId;
+    private int _exclusiveReentrancyCount;
 
     internal InMemoryFileSystemLockHandle() { }
 
@@ -72,11 +74,19 @@ public abstract class InMemoryFileSystemLockHandle
 
         try
         {
+            int currentThreadId = Environment.CurrentManagedThreadId;
+
             //var source = new CancellationTokenSource(LockTimeout);
 
             //source.TryReset()
             if (policy.HasFlag(LockPolicy.Exclusive))
             {
+                if (_count < 0 && _exclusiveOwnerThreadId == currentThreadId)
+                {
+                    _exclusiveReentrancyCount++;
+                    return;
+                }
+
                 // Wait for all shared locks to be released
                 while (_count != 0)
                 {
@@ -84,10 +94,18 @@ public abstract class InMemoryFileSystemLockHandle
                 }
                 _count = -1;
                 _policy = LockPolicy.Exclusive;
+                _exclusiveOwnerThreadId = currentThreadId;
+                _exclusiveReentrancyCount = 1;
                 Monitor.PulseAll(this);
             }
             else
             {
+                if (_count < 0 && _exclusiveOwnerThreadId == currentThreadId)
+                {
+                    _exclusiveReentrancyCount++;
+                    return;
+                }
+
                 // Wait for all exclusive locks to be released
                 while (_count < 0)
                 {
@@ -144,12 +162,18 @@ public abstract class InMemoryFileSystemLockHandle
         Monitor.Enter(this);
         try
         {
-            if (_policy.HasFlag(LockPolicy.Exclusive))
+            if (_count < 0 && _exclusiveOwnerThreadId == Environment.CurrentManagedThreadId)
             {
-                Debug.Assert(_count < 0);
-                _count = 0;
-                _policy = LockPolicy.Unlocked;
-                Monitor.PulseAll(this);
+                Debug.Assert(_exclusiveReentrancyCount > 0);
+                _exclusiveReentrancyCount--;
+
+                if (_exclusiveReentrancyCount == 0)
+                {
+                    _count = 0;
+                    _policy = LockPolicy.Unlocked;
+                    _exclusiveOwnerThreadId = 0;
+                    Monitor.PulseAll(this);
+                }
             }
             else
             {

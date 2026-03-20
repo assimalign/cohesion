@@ -135,6 +135,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
             {
                 return _entries.Values
                     .Where(item => item.Path.StartsWith(options.Path.Value, CultureInfo, IgnoreCase))
+                    .ToArray()
                     .SelectMany(item => item switch
                     {
                         InMemoryFileSystemDirectory dir => dir.EnumerateFileSystem(new FileSystemEnumerationOptions()
@@ -143,10 +144,13 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
                         }),
                         InMemoryFileSystemFile file => new InMemoryFileSystemFile[] { file },
                         _ => Array.Empty<IFileSystemInfo>()
-                    });
+                    })
+                    .ToArray();
             }
 
-            return _entries.Values.Where(item => item.Path.StartsWith(options.Path.Value, CultureInfo, IgnoreCase));
+            return _entries.Values
+                .Where(item => item.Path.StartsWith(options.Path.Value, CultureInfo, IgnoreCase))
+                .ToArray();
         }
         finally
         {

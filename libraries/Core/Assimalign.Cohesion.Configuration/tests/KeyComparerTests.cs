@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Configuration.Tests;
 
@@ -10,6 +11,13 @@ public class KeyComparerTests
         var comparer = KeyComparer.FromComparison(KeyComparison.Ordinal);
 
         Assert.NotNull(comparer);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: FromComparison returns cached singleton")]
+    public void KeyComparer_FromComparison_ShouldReturnCachedSingleton()
+    {
+        Assert.Same(KeyComparer.OrdinalIgnoreCase, KeyComparer.FromComparison(KeyComparison.OrdinalIgnoreCase));
+        Assert.Same(KeyComparer.InvariantCulture, KeyComparer.FromComparison(KeyComparison.InvariantCulture));
     }
 
     [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: Ordinal compare")]
@@ -54,6 +62,17 @@ public class KeyComparerTests
         Assert.True(((System.Collections.Generic.IEqualityComparer<Path>)comparer).Equals(p1, p2));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: Path dictionary lookup honors comparison")]
+    public void KeyComparer_PathDictionaryLookup_ShouldHonorComparison()
+    {
+        Dictionary<Path, string> values = new(KeyComparer.OrdinalIgnoreCase)
+        {
+            ["Section:Key"] = "value"
+        };
+
+        Assert.True(values.ContainsKey("section:key"));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: Static instances")]
     public void KeyComparer_StaticInstances_ShouldExist()
     {
@@ -83,6 +102,19 @@ public class KeyComparerTests
         ReadOnlySpan<char> span = "testkey".AsSpan();
 
         Assert.True(comparer.Equals(span, key));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: AlternateLookup dictionary honors comparison")]
+    public void KeyComparer_AlternateLookupDictionary_ShouldHonorComparison()
+    {
+        Dictionary<Key, string> values = new(KeyComparer.OrdinalIgnoreCase)
+        {
+            ["TestKey"] = "value"
+        };
+        Dictionary<Key, string>.AlternateLookup<ReadOnlySpan<char>> lookup = values.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        Assert.True(lookup.TryGetValue("testkey".AsSpan(), out string? value));
+        Assert.Equal("value", value);
     }
 
     [Fact(DisplayName = "Cohesion Test [Configuration] - KeyComparer: Create from span")]

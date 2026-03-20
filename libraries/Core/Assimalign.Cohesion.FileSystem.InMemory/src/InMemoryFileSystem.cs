@@ -167,6 +167,10 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         CheckIfDisposed();
         CheckIfReadOnly(nameof(CopyFile));
 
+        using var manager = new InMemoryFileSystemLockManager();
+
+        manager.Lock(this, LockPolicy.Exclusive);
+
         // Get the source file first
         var sourceInfo = GetInfo(source);
         if (sourceInfo is not InMemoryFileSystemFile sourceFile)
@@ -190,7 +194,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+        manager.Lock(this, LockPolicy.Exclusive);
 
         try
         {
@@ -217,19 +221,25 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                 ThrowHelper.ThrowFileOrDirectoryAlreadyExists(destination);
             }
 
-            // Remove from source parent
-            sourceParent.Entries.Remove(absoluteSource);
-
-            // Recreate at destination
             if (sourceEntry is InMemoryFileSystemFile sourceFile)
             {
-                var destFile = (InMemoryFileSystemFile)CreateFile(destination);
-                destFile.Content.CopyFrom(sourceFile.Content);
+                var destinationParent = EnsureParentDirectory(absoluteDest);
+
+                manager.Lock(sourceParent, LockPolicy.Write | LockPolicy.Delete);
+                manager.Lock(destinationParent, LockPolicy.Write | LockPolicy.Delete);
+                manager.Lock(sourceFile, LockPolicy.Exclusive);
+
+                sourceFile.EnsureDeleteAllowed(absoluteSource);
+
+                sourceParent.Entries.Remove(absoluteSource);
+                sourceFile.MoveTo(absoluteDest.GetFileName()!.Value, destinationParent);
+                destinationParent.Entries[absoluteDest] = sourceFile;
             }
             else if (sourceEntry is InMemoryFileSystemDirectory sourceDir)
             {
                 CreateDirectory(destination);
                 CopyDirectoryContents(sourceDir, absoluteDest);
+                sourceParent.Entries.Remove(absoluteSource);
             }
         }
         finally
@@ -253,7 +263,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+        manager.Lock(this, LockPolicy.Exclusive);
 
         InMemoryFileSystemDirectory? result = default;
 
@@ -324,7 +334,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+        manager.Lock(this, LockPolicy.Exclusive);
 
         InMemoryFileSystemFile result = default!;
 
@@ -401,7 +411,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+        manager.Lock(this, LockPolicy.Exclusive);
 
         InMemoryFileSystemDirectory? directory = default;
 
@@ -461,7 +471,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         using var manager = new InMemoryFileSystemLockManager();
 
-        manager.Lock(this, LockPolicy.Write | LockPolicy.Delete);
+        manager.Lock(this, LockPolicy.Exclusive);
 
         InMemoryFileSystemFile? file = default;
 
@@ -478,6 +488,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             }
 
             file = foundFile;
+            file.BeginDelete(absolute);
 
             var parentDir = FindParentDirectory(absolute, manager);
 
@@ -492,6 +503,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
             // Remove from parent
             parentDir.Entries.Remove(absolute);
+            file.MarkDeleted();
         }
         finally
         {
@@ -727,6 +739,26 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
         var entry = NavigateToEntry(parentPath, manager);
         return entry as InMemoryFileSystemDirectory;
+    }
+
+    private InMemoryFileSystemDirectory EnsureParentDirectory(FileSystemPath absolute)
+    {
+        string path = absolute.ToString();
+        int lastSep = path.LastIndexOf('/');
+
+        if (lastSep <= 0)
+        {
+            return _root;
+        }
+
+        FileSystemPath parentPath = path[..lastSep];
+
+        if (!Exists(parentPath))
+        {
+            return (InMemoryFileSystemDirectory)CreateDirectory(parentPath);
+        }
+
+        return (InMemoryFileSystemDirectory)GetDirectory(parentPath);
     }
 
     private void CopyDirectoryContents(InMemoryFileSystemDirectory source, FileSystemPath destBase)

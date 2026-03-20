@@ -42,6 +42,16 @@ public class ConfigurationPathTests
         Assert.Equal(3, path.Count);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Path: Parse many segments")]
+    public void Path_ParseManySegments_ShouldSplit()
+    {
+        Path path = Path.Parse("a:b:c:d:e:f:g");
+
+        Assert.Equal(7, path.Count);
+        Assert.Equal("a", path[0].ToString());
+        Assert.Equal("g", path[6].ToString());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Path: Mixed format equality")]
     public void Path_MixedFormat_ShouldBeEqual()
     {
@@ -165,6 +175,14 @@ public class ConfigurationPathTests
 
         Assert.True(path.StartsWith(prefix));
         Assert.False(prefix.StartsWith(path));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Path: StartsWith empty path")]
+    public void Path_StartsWithEmptyPath_ShouldMatch()
+    {
+        Path path = Path.Parse("a:b:c");
+
+        Assert.True(path.StartsWith(Path.Empty));
     }
 
     [Fact(DisplayName = "Cohesion Test [Configuration] - Path: Equality with same keys")]

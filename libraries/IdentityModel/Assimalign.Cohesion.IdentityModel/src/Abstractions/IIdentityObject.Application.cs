@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 namespace Assimalign.Cohesion.IdentityModel;
 
+/// <summary>
+/// Represents an application identity object.
+/// </summary>
 public interface IApplicationIdentityObject : IIdentityObject
 {
 }

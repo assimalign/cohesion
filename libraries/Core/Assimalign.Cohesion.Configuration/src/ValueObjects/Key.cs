@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -103,12 +102,15 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public bool StartsWith(Key other, KeyComparison comparison)
     {
-        if (other._value.Length > _value.Length)
+        ReadOnlySpan<char> value = AsSpan();
+        ReadOnlySpan<char> otherValue = other.AsSpan();
+
+        if (otherValue.Length > value.Length)
         {
             return false;
         }
 
-        return _value.StartsWith(other._value, (StringComparison)comparison);
+        return value.StartsWith(otherValue, (StringComparison)comparison);
     }
 
     public bool EndsWith(Key other)
@@ -118,11 +120,15 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
 
     public bool EndsWith(Key other, KeyComparison comparison)
     {
-        if (other._value.Length > _value.Length)
+        ReadOnlySpan<char> value = AsSpan();
+        ReadOnlySpan<char> otherValue = other.AsSpan();
+
+        if (otherValue.Length > value.Length)
         {
             return false;
         }
-        return _value.EndsWith(other._value, (StringComparison)comparison);
+
+        return value.EndsWith(otherValue, (StringComparison)comparison);
     }
 
     /// <summary>
@@ -166,7 +172,16 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public int GetHashCode(KeyComparison comparison)
     {
-        return _value.GetHashCode((StringComparison)comparison);
+        return ArgumentException.ThrowIfEnumNotDefined(comparison) switch
+        {
+            KeyComparison.Ordinal => _value?.GetHashCode() ?? 0,
+            KeyComparison.OrdinalIgnoreCase => string.GetHashCode(AsSpan(), StringComparison.OrdinalIgnoreCase),
+            KeyComparison.CurrentCulture => StringComparer.CurrentCulture.GetHashCode(_value ?? string.Empty),
+            KeyComparison.CurrentCultureIgnoreCase => StringComparer.CurrentCultureIgnoreCase.GetHashCode(_value ?? string.Empty),
+            KeyComparison.InvariantCulture => StringComparer.InvariantCulture.GetHashCode(_value ?? string.Empty),
+            KeyComparison.InvariantCultureIgnoreCase => StringComparer.InvariantCultureIgnoreCase.GetHashCode(_value ?? string.Empty),
+            _ => throw new ArgumentOutOfRangeException(nameof(comparison))
+        };
     }
 
     /// <summary>
@@ -175,7 +190,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public override string ToString()
     {
-        return _value;
+        return _value ?? string.Empty;
     }
 
     /// <summary>
@@ -184,7 +199,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <returns></returns>
     public override int GetHashCode()
     {
-        return _value.GetHashCode();
+        return _value?.GetHashCode() ?? 0;
     }
 
     /// <summary>
