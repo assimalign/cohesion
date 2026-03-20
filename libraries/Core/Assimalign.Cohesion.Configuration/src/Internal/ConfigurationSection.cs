@@ -122,12 +122,26 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
     private void SetConfigurationValue(in Path path, string? input)
     {
-        SetConfigurationValueCore(path, input, notifySelf: true);
+        SetConfigurationValueCore(path, input, notifySelf: true, ignoreReadOnly: false);
     }
 
-    private bool SetConfigurationValueCore(in Path path, string? input, bool notifySelf)
+    internal bool SetValue(Path path, string? input, bool ignoreReadOnly = false)
     {
-        InvalidOperationException.ThrowIf(_isReadOnly, "The configuration section is read-only.");
+        return SetConfigurationValueCore(
+            Path.Combine(Path, path, _comparison),
+            input,
+            notifySelf: true,
+            ignoreReadOnly);
+    }
+
+    internal bool Remove(Path path)
+    {
+        return RemoveCore(Path.Combine(Path, path, _comparison));
+    }
+
+    private bool SetConfigurationValueCore(in Path path, string? input, bool notifySelf, bool ignoreReadOnly)
+    {
+        InvalidOperationException.ThrowIf(_isReadOnly && !ignoreReadOnly, "The configuration section is read-only.");
 
         if (!TryGetNextKey(path, out Key key))
         {
@@ -136,7 +150,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
         if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
         {
-            AddEntry(path, key, input, notifySelf);
+            AddEntry(path, key, input, notifySelf, ignoreReadOnly);
             return true;
         }
 
@@ -144,10 +158,10 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         {
             if (path.Count == Path.Count + 1)
             {
-                return value.SetValue(input);
+                return value.SetValue(input, ignoreReadOnly);
             }
 
-            ReplaceValueWithSection(path, key, value, input, notifySelf);
+            ReplaceValueWithSection(path, key, value, input, notifySelf, ignoreReadOnly);
             return true;
         }
 
@@ -166,13 +180,47 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
                 return true;
             }
 
-            return section.SetConfigurationValueCore(path, input, notifySelf: true);
+            return section.SetConfigurationValueCore(path, input, notifySelf: true, ignoreReadOnly);
         }
 
         return false;
     }
 
-    private void AddEntry(in Path path, in Key key, string? input, bool notifySelf)
+    private bool RemoveCore(in Path path)
+    {
+        InvalidOperationException.ThrowIf(_isReadOnly, "The configuration section is read-only.");
+
+        if (!TryGetNextKey(path, out Key key))
+        {
+            return false;
+        }
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        {
+            return false;
+        }
+
+        if (path.Count == Path.Count + 1)
+        {
+            if (entry is ConfigurationEntry configurationEntry)
+            {
+                configurationEntry.NotifyLocalChanged();
+            }
+
+            if (!_data.Remove(key))
+            {
+                return false;
+            }
+
+            NotifyChanged();
+
+            return true;
+        }
+
+        return entry is ConfigurationSection section && section.RemoveCore(path);
+    }
+
+    private void AddEntry(in Path path, in Key key, string? input, bool notifySelf, bool ignoreReadOnly)
     {
         if (path.Count > Path.Count + 1)
         {
@@ -181,7 +229,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 
             // A brand-new child cannot have external subscribers yet, so we only notify once
             // after it is attached to the current section.
-            entry.SetConfigurationValueCore(path, input, notifySelf: false);
+            entry.SetConfigurationValueCore(path, input, notifySelf: false, ignoreReadOnly);
             _data.Add(key, entry);
         }
         else
@@ -200,13 +248,14 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         in Key key,
         ConfigurationValue value,
         string? input,
-        bool notifySelf)
+        bool notifySelf,
+        bool ignoreReadOnly)
     {
         Path entryPath = path.Subpath(0, Path.Count + 1);
         var entry = new ConfigurationSection(entryPath, ProviderName, _comparison, _isReadOnly, this);
 
         value.NotifyLocalChanged();
-        entry.SetConfigurationValueCore(path, input, notifySelf: false);
+        entry.SetConfigurationValueCore(path, input, notifySelf: false, ignoreReadOnly);
         _data[key] = entry;
 
         if (notifySelf)

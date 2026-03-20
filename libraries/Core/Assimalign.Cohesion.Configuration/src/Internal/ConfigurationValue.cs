@@ -38,14 +38,19 @@ internal sealed class ConfigurationValue : ConfigurationEntry, IConfigurationVal
         get => _value;
         set
         {
-            InvalidOperationException.ThrowIf(_isReadOnly, "The configuration value is read-only.");
-
-            SetValue(value);
+            SetValue(value, ignoreReadOnly: false);
         }
     }
 
     internal bool SetValue(string? value)
     {
+        return SetValue(value, ignoreReadOnly: false);
+    }
+
+    internal bool SetValue(string? value, bool ignoreReadOnly)
+    {
+        InvalidOperationException.ThrowIf(_isReadOnly && !ignoreReadOnly, "The configuration value is read-only.");
+
         lock (_lock)
         {
             if (string.Equals(_value, value, StringComparison.Ordinal))

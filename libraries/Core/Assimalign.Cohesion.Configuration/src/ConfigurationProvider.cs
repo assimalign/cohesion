@@ -1,11 +1,10 @@
-﻿using System;
-using System.Linq;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Configuration;
 
@@ -62,40 +61,21 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
         value = null;
 
-        if (_isLoading)
+        if (_isLoading || GetEntry(path) is not IConfigurationValue configurationValue)
         {
             return false;
         }
 
-        Key key = path[0];
+        string? current = configurationValue.Value;
 
-        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        if (current is null)
         {
             return false;
         }
-        else if (entry.IsValue(out IConfigurationValue? val))
-        {
-            // If result is a value, but the key is composite then return false
-            if (path.IsComposite)
-            {
-                return false;
-            }
 
-            value = val.Value!;
-        }
-        else if (entry.IsSection(out IConfigurationSection? section))
-        {
-            if (path.IsComposite)
-            {
-                var subEntry = section.GetEntry(path.Subpath(1));
-                if (subEntry is IConfigurationValue subValue)
-                {
-                    value = subValue.Value!;
-                }
-            }
-        }
+        value = current;
 
-        return value is not null;
+        return true;
     }
 
     /// <inheritdoc />
@@ -103,75 +83,12 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        // Only allow value sets on readonly and internal reloads
-        if (_isReadOnly && !_isLoading)
+        if (_isLoading || _isReadOnly)
         {
             return false;
         }
 
-        Key key = path[0];
-
-        // If No Entry
-        if (!_lookup.TryGetValue(key, out IConfigurationEntry? item))
-        {
-            if (path.Count > 1)
-            {
-                Path entryPath = path.Subpath(0, 1);
-                ConfigurationSection entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
-
-                entry[path] = value;
-
-                return _data.TryAdd(key, entry);
-            }
-            else
-            {
-                return _data.TryAdd(key, new ConfigurationValue(path, value, Name, _isReadOnly));
-            }
-        }
-        if (item.IsValue(out IConfigurationValue? val))
-        {
-            if (path.Count == 1)
-            {
-                val.Value = value;
-            }
-            else
-            {
-                Path entryPath = path.Subpath(0, 1);
-                ConfigurationSection entry = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
-
-                entry[path] = value;
-
-                // Remove the value and replace with a section.
-                if (!_data.TryRemove(key, out var _))
-                {
-                    return false;
-                }
-
-                return _data.TryAdd(key, entry);
-            }
-
-            return true;
-        }
-        else if (item.IsSection(out IConfigurationSection? section))
-        {
-            // Remove section and replace with value.
-            if (path.Count == 1)
-            {
-                if (!_data.TryRemove(key, out var _))
-                {
-                    return false;
-                }
-
-                return _data.TryAdd(key, new ConfigurationValue(path, value, Name));
-            }
-            else
-            {
-                ((ConfigurationSection)section)[path] = value;
-            }
-            return true;
-        }
-
-        return false;
+        return TrySetCore(path, value, ignoreReadOnly: false);
     }
 
     /// <inheritdoc />
@@ -179,28 +96,38 @@ public abstract class ConfigurationProvider : IConfigurationProvider
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        IConfigurationEntry? item = default;
-        Key key = path[0];
-
-        if (_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        if (_isLoading || path.IsEmpty)
         {
-            item = entry switch
-            {
-                IConfigurationSection section when path.IsComposite => section.GetEntry(path),
-                IConfigurationSection section => section,
-                IConfigurationValue value => value,
-                _ => default
-            };
+            return null;
         }
 
-        return item;
+        Key key = path[0];
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        {
+            return null;
+        }
+
+        return entry switch
+        {
+            ConfigurationSection section when path.IsComposite => GetVisibleEntry(section.GetEntry(path.Subpath(1))),
+            ConfigurationSection section => section,
+            IConfigurationValue value when !path.IsComposite && value.Value is not null => value,
+            _ => null
+        };
     }
 
     /// <inheritdoc />
     public virtual IEnumerable<IConfigurationEntry> GetEntries()
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
-        return _data.Values;
+
+        if (_isLoading)
+        {
+            return [];
+        }
+
+        return EnumerateEntries();
     }
 
     protected abstract Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default);
@@ -229,7 +156,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
         using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-            _cancellationTokenSource.Token, 
+            _cancellationTokenSource.Token,
             cancellationToken);
 
         Dictionary<Path, string?> entries = new Dictionary<Path, string?>(KeyComparer.FromComparison(_comparison));
@@ -244,10 +171,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
             foreach ((Path path, string? value) in entries)
             {
-                if (TrySet(path, value))
-                {
-                    // TODO: Notify of set issue
-                }
+                TrySetCore(path, value, ignoreReadOnly: true);
             }
         }
         catch (OperationCanceledException exception)
@@ -271,9 +195,6 @@ public abstract class ConfigurationProvider : IConfigurationProvider
             _isDisposed = true;
             _isLoading = false;
 
-            // TODO: free unmanaged resources (unmanaged objects) and override finalizer
-            // TODO: set large fields to null
-
             GC.SuppressFinalize(this);
         }
     }
@@ -283,10 +204,124 @@ public abstract class ConfigurationProvider : IConfigurationProvider
         DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
+    private IEnumerable<IConfigurationEntry> EnumerateEntries()
+    {
+        foreach (IConfigurationEntry entry in _data.Values)
+        {
+            if (entry is IConfigurationValue value && value.Value is null)
+            {
+                continue;
+            }
+
+            yield return entry;
+        }
+    }
+
+    private bool TrySetCore(Path path, string? value, bool ignoreReadOnly)
+    {
+        if (path.IsEmpty)
+        {
+            return false;
+        }
+
+        return value is null
+            ? TryRemoveCore(path)
+            : TrySetValueCore(path, value, ignoreReadOnly);
+    }
+
+    private bool TrySetValueCore(Path path, string value, bool ignoreReadOnly)
+    {
+        Key key = path[0];
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        {
+            if (path.Count > 1)
+            {
+                Path entryPath = path.Subpath(0, 1);
+                var section = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
+
+                section.SetValue(path.Subpath(1), value, ignoreReadOnly: true);
+
+                return _data.TryAdd(key, section);
+            }
+
+            return _data.TryAdd(key, new ConfigurationValue(path, value, Name, _isReadOnly));
+        }
+
+        if (entry is ConfigurationValue configurationValue)
+        {
+            if (path.Count == 1)
+            {
+                return configurationValue.SetValue(value, ignoreReadOnly);
+            }
+
+            Path entryPath = path.Subpath(0, 1);
+            var section = new ConfigurationSection(entryPath, Name, _comparison, _isReadOnly);
+
+            configurationValue.NotifyLocalChanged();
+            section.SetValue(path.Subpath(1), value, ignoreReadOnly: true);
+            _data[key] = section;
+
+            return true;
+        }
+
+        if (entry is ConfigurationSection configurationSection)
+        {
+            if (path.Count == 1)
+            {
+                configurationSection.NotifyLocalChanged();
+                _data[key] = new ConfigurationValue(path, value, Name, _isReadOnly);
+
+                return true;
+            }
+
+            return configurationSection.SetValue(path.Subpath(1), value, ignoreReadOnly);
+        }
+
+        return false;
+    }
+
+    private bool TryRemoveCore(Path path)
+    {
+        Key key = path[0];
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        {
+            return false;
+        }
+
+        if (path.Count == 1)
+        {
+            if (!_data.TryRemove(key, out IConfigurationEntry? removed))
+            {
+                return false;
+            }
+
+            if (removed is ConfigurationEntry configurationEntry)
+            {
+                configurationEntry.NotifyLocalChanged();
+            }
+
+            return true;
+        }
+
+        return entry is ConfigurationSection section && section.Remove(path.Subpath(1));
+    }
+
+    private static IConfigurationEntry? GetVisibleEntry(IConfigurationEntry? entry)
+    {
+        return entry switch
+        {
+            IConfigurationValue value when value.Value is not null => value,
+            IConfigurationSection section => section,
+            _ => null
+        };
+    }
 
     partial class DebuggerView
     {
         private readonly ConfigurationProvider _provider;
+
         public DebuggerView(ConfigurationProvider provider)
         {
             _provider = provider;

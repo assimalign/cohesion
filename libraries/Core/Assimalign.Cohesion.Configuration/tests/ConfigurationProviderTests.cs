@@ -92,6 +92,58 @@ public class ConfigurationProviderTests
         Assert.Equal("updated", value);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: TrySet null removes value")]
+    public void Provider_TrySet_NullValue_ShouldRemoveValue()
+    {
+        var provider = CreateProvider(entries =>
+        {
+            entries["key1"] = "value1";
+        });
+
+        provider.Load();
+
+        Assert.True(provider.TrySet("key1", null));
+        Assert.False(provider.Exists("key1"));
+        Assert.False(provider.TryGet("key1", out _));
+        Assert.Null(provider.GetEntry("key1"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: TrySet null removes nested value")]
+    public void Provider_TrySet_NullValue_ShouldRemoveNestedValue()
+    {
+        var provider = CreateProvider(entries =>
+        {
+            entries["section:key1"] = "value1";
+            entries["section:key2"] = "value2";
+        });
+
+        provider.Load();
+
+        Assert.True(provider.TrySet("section:key1", null));
+        Assert.False(provider.Exists("section:key1"));
+        Assert.False(provider.TryGet("section:key1", out _));
+        Assert.Null(provider.GetEntry("section:key1"));
+        Assert.True(provider.TryGet("section:key2", out string? value));
+        Assert.Equal("value2", value);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: TrySet null removes section subtree")]
+    public void Provider_TrySet_NullValue_ShouldRemoveSectionSubtree()
+    {
+        var provider = CreateProvider(entries =>
+        {
+            entries["section:key1"] = "value1";
+        });
+
+        provider.Load();
+
+        Assert.True(provider.TrySet("section", null));
+        Assert.False(provider.Exists("section"));
+        Assert.False(provider.Exists("section:key1"));
+        Assert.Null(provider.GetEntry("section"));
+        Assert.Null(provider.GetEntry("section:key1"));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: Hierarchical keys create sections")]
     public void Provider_HierarchicalKeys_ShouldCreateSections()
     {
@@ -277,6 +329,30 @@ public class ConfigurationProviderTests
         provider.Load();
 
         Assert.False(provider.TryGet("key1:sub", out _));
+        Assert.False(provider.Exists("key1:sub"));
+        Assert.Null(provider.GetEntry("key1:sub"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: Null-valued entry is hidden by provider APIs")]
+    public void Provider_NullValuedEntry_ShouldBeHiddenByProviderApis()
+    {
+        var provider = CreateProvider(entries =>
+        {
+            entries["key1"] = "value1";
+        });
+
+        provider.Load();
+
+        var entry = provider.GetEntry("key1") as IConfigurationValue;
+
+        Assert.NotNull(entry);
+
+        entry!.Value = null;
+
+        Assert.False(provider.Exists("key1"));
+        Assert.False(provider.TryGet("key1", out _));
+        Assert.Null(provider.GetEntry("key1"));
+        Assert.Empty(provider.GetEntries());
     }
 
     private static MockConfigurationProvider CreateProvider(Action<IDictionary<Path, string?>> onLoad)
