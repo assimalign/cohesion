@@ -24,6 +24,13 @@ public interface IConfigurationBuilder
     IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider);
 
     /// <summary>
+    /// Registers an asynchronous provider factory.
+    /// </summary>
+    /// <param name="provider">The asynchronous provider factory.</param>
+    /// <returns>The current builder.</returns>
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> provider);
+
+    /// <summary>
     /// Synchronously builds the <see cref="IConfigurationRoot"/> by loading 
     /// the providers. "<see cref="IConfigurationProvider.Load"/>"
     /// </summary>

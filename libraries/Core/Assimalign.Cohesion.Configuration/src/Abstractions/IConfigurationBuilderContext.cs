@@ -23,4 +23,5 @@ public interface IConfigurationBuilderContext
     /// A collection of registered providers.
     /// </summary>
     IEnumerable<IConfigurationProvider> Providers { get; }
+
 }

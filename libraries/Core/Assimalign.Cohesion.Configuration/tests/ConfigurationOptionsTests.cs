@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Tests;
 
@@ -57,11 +58,36 @@ public class ConfigurationOptionsTests
         Assert.NotNull(ConfigurationOptions.Default);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Options: Default returns a new instance")]
+    public void Options_Default_ShouldReturnNewInstance()
+    {
+        Assert.NotSame(ConfigurationOptions.Default, ConfigurationOptions.Default);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Options: Invalid enum throws")]
     public void Options_InvalidSetStrategy_ShouldThrow()
     {
         var options = new ConfigurationOptions();
 
         Assert.Throws<ArgumentException>(() => options.SetStrategy = (ConfigurationSetStrategy)999);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Options: Negative timeout throws")]
+    public void Options_NegativeLoadTimeout_ShouldThrow()
+    {
+        var options = new ConfigurationOptions();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => options.LoadTimeout = TimeSpan.FromMilliseconds(-2));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Options: Infinite timeout is allowed")]
+    public void Options_InfiniteLoadTimeout_ShouldBeAllowed()
+    {
+        var options = new ConfigurationOptions
+        {
+            LoadTimeout = Timeout.InfiniteTimeSpan
+        };
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, options.LoadTimeout);
     }
 }

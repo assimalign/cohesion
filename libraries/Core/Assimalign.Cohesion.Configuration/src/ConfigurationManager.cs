@@ -30,7 +30,7 @@ public sealed class ConfigurationManager : IConfigurationManager
         _lock = new Lock();
         _options = options;
         _root = new Configuration(options);
-        _context = new ConfigurationBuilderContext(options.Providers);
+        _context = new ConfigurationBuilderContext(options.LoadTimeout, options.Providers);
     }
 
     public string? this[Path path]
