@@ -106,6 +106,85 @@ public class ConfigurationChangeTokenTests
         Assert.Equal(expectedState, receivedState);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - ChangeToken: OnChange fires parent section subscribers")]
+    public void ChangeToken_OnChange_ShouldFireParentSectionSubscribers()
+    {
+        var config = new ConfigurationBuilder()
+            .AddProvider(_ => new MockConfigurationProvider(entries =>
+            {
+                entries["section:key1"] = "original";
+            }))
+            .Build();
+
+        var section = config.GetSection("section");
+        var entry = section!.GetEntry("key1") as IConfigurationValue;
+
+        Assert.NotNull(entry);
+
+        bool changed = false;
+        var token = section.GetChangeToken();
+        token.OnChange(_ => changed = true, null);
+
+        entry!.Value = "updated";
+
+        Assert.True(changed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - ChangeToken: OnChange ignores unchanged value")]
+    public void ChangeToken_OnChange_UnchangedValue_ShouldNotFire()
+    {
+        var config = new ConfigurationBuilder()
+            .AddProvider(_ => new MockConfigurationProvider(entries =>
+            {
+                entries["section:key1"] = "original";
+            }))
+            .Build();
+
+        var section = config.GetSection("section");
+        var entry = section!.GetEntry("key1") as IConfigurationValue;
+
+        Assert.NotNull(entry);
+
+        bool changed = false;
+        var token = section.GetChangeToken();
+        token.OnChange(_ => changed = true, null);
+
+        entry!.Value = "original";
+
+        Assert.False(changed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - ChangeToken: Dispose during notification does not skip remaining subscribers")]
+    public void ChangeToken_DisposeDuringNotify_ShouldNotSkipRemainingSubscribers()
+    {
+        var config = new ConfigurationBuilder()
+            .AddProvider(_ => new MockConfigurationProvider(entries =>
+            {
+                entries["key1"] = "original";
+            }))
+            .Build();
+
+        var entry = config.GetEntry("key1") as IConfigurationValue;
+
+        Assert.NotNull(entry);
+
+        int callCount = 0;
+        var token = entry!.GetChangeToken();
+        IDisposable? subscription = null;
+
+        subscription = token.OnChange(_ =>
+        {
+            callCount++;
+            subscription!.Dispose();
+        }, null);
+
+        token.OnChange(_ => callCount++, null);
+
+        entry.Value = "updated";
+
+        Assert.Equal(2, callCount);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - ChangeToken: GetChangeToken returns same instance")]
     public void ChangeToken_GetChangeToken_ShouldReturnSameInstance()
     {

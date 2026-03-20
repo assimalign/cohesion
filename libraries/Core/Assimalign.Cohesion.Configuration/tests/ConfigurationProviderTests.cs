@@ -242,6 +242,22 @@ public class ConfigurationProviderTests
         Assert.Equal("simple", value);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: TrySet replaces nested section with value")]
+    public void Provider_TrySet_ShouldReplaceNestedSectionWithValue()
+    {
+        var provider = CreateProvider(entries =>
+        {
+            entries["key:sub:value"] = "nested";
+        });
+
+        provider.Load();
+
+        Assert.True(provider.TrySet("key:sub", "simple"));
+        Assert.True(provider.TryGet("key:sub", out string? value));
+        Assert.Equal("simple", value);
+        Assert.False(provider.TryGet("key:sub:value", out _));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Provider: Name property returns correct name")]
     public void Provider_Name_ShouldReturnCorrectName()
     {

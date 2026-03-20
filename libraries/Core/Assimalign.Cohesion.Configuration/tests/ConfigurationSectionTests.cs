@@ -42,6 +42,25 @@ public class ConfigurationSectionTests
         Assert.IsAssignableFrom<IConfigurationSection>(identity);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Section: GetEntry uses nested case-insensitive lookup")]
+    public void Section_GetEntry_ShouldHonorNestedCaseInsensitiveLookup()
+    {
+        var config = BuildConfiguration(entries =>
+        {
+            entries["Azure:Identity:ClientId"] = "abc123";
+        });
+
+        var section = config.GetSection("azure");
+
+        Assert.NotNull(section);
+
+        var entry = section!.GetEntry("identity:clientid");
+
+        Assert.NotNull(entry);
+        Assert.IsAssignableFrom<IConfigurationValue>(entry);
+        Assert.Equal("abc123", ((IConfigurationValue)entry).Value);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Section: GetEntry returns null for missing")]
     public void Section_GetEntry_MissingKey_ShouldReturnNull()
     {

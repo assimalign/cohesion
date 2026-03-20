@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
@@ -9,16 +9,17 @@ internal abstract class ConfigurationEntry : IConfigurationEntry
     private readonly Path _path;
     private readonly Lazy<ConfigurationChangeToken> _token;
     private readonly string _providerName;
-    private readonly bool _isReadOnly;
+    private readonly ConfigurationSection? _parent;
 
-    internal ConfigurationEntry(Path path, string providerName)
+    internal ConfigurationEntry(Path path, string providerName, ConfigurationSection? parent = null)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(providerName);
 
         _path = path;
         _key = path.Keys[path.Count - 1];
-        _token = new Lazy<ConfigurationChangeToken>(() => new ConfigurationChangeToken(this), true);
+        _token = new Lazy<ConfigurationChangeToken>(() => new ConfigurationChangeToken(), true);
         _providerName = providerName;
+        _parent = parent;
     }
 
     /// <inheritdoc />
@@ -39,13 +40,15 @@ internal abstract class ConfigurationEntry : IConfigurationEntry
     /// <inheritdoc />
     protected void NotifyChanged()
     {
-        _token.Value.Notify();
+        NotifyLocalChanged();
+        _parent?.NotifyChanged();
     }
 
-    /// <inheritdoc />
-    protected T NotifyChanged<T>(T? previous = default, T? current = default)
+    internal void NotifyLocalChanged()
     {
-        _token.Value.Notify();
-        return current!;
+        if (_token.IsValueCreated)
+        {
+            _token.Value.Notify();
+        }
     }
 }

@@ -1,63 +1,91 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
-internal class ConfigurationChangeToken : IChangeToken
+internal sealed class ConfigurationChangeToken : IChangeToken
 {
+    private readonly Lock _lock;
     private readonly List<Subscriber> _subscribers;
 
-    public ConfigurationChangeToken(ConfigurationEntry entry)
+    public ConfigurationChangeToken()
     {
-        _subscribers = new List<Subscriber>();
+        _lock = new Lock();
+        _subscribers = [];
     }
 
-    public IDisposable OnChange<T>(Action<T> callback, T state)
-    {
-        var subscriber = new Subscriber<T>(_subscribers)
-        {
-            State = state,
-            OnChange = callback
-        };
-        _subscribers.Add(subscriber);
-        return subscriber;
-    }
     public IDisposable OnChange(Action<object?> callback, object? state)
     {
-        return OnChange<object>(callback, state!);
+        ArgumentNullException.ThrowIfNull(callback);
+
+        var subscriber = new Subscriber(this, callback, state);
+
+        lock (_lock)
+        {
+            _subscribers.Add(subscriber);
+        }
+
+        return subscriber;
     }
+
     public void Notify()
     {
-        for (int i = 0; i < _subscribers.Count; i++)
+        Subscriber[] subscribers;
+
+        lock (_lock)
         {
-            _subscribers[i].Notify();
+            if (_subscribers.Count == 0)
+            {
+                return;
+            }
+
+            subscribers = [.. _subscribers];
+        }
+
+        for (int i = 0; i < subscribers.Length; i++)
+        {
+            subscribers[i].Notify();
         }
     }
-    abstract partial class Subscriber : IDisposable
-    {
-        private readonly List<Subscriber> _subscribers;
 
-        public Subscriber(List<Subscriber> subscribers)
+    private void Unsubscribe(Subscriber subscriber)
+    {
+        lock (_lock)
         {
-            _subscribers = subscribers;
+            _subscribers.Remove(subscriber);
         }
-        public abstract void Notify();
+    }
+
+    private sealed class Subscriber : IDisposable
+    {
+        private readonly ConfigurationChangeToken _owner;
+        private readonly Action<object?> _onChange;
+        private readonly object? _state;
+
+        private int _disposed;
+
+        public Subscriber(ConfigurationChangeToken owner, Action<object?> onChange, object? state)
+        {
+            _owner = owner;
+            _onChange = onChange;
+            _state = state;
+        }
+
+        public void Notify()
+        {
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                _onChange.Invoke(_state);
+            }
+        }
+
         public void Dispose()
         {
-            _subscribers.Remove(this);
-        }
-    }
-    partial class Subscriber<T> : Subscriber
-    {
-        public Subscriber(List<Subscriber> subscribers) 
-            : base(subscribers) { }
-        public required T State { get; init; }
-        public required Action<T> OnChange { get; init; }
-        public override void Notify()
-        {
-            OnChange.Invoke(State);
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _owner.Unsubscribe(this);
+            }
         }
     }
 }

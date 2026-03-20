@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
@@ -12,29 +12,34 @@ namespace Assimalign.Cohesion.Configuration.Internal;
 internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
 {
     private readonly bool _isReadOnly;
-    private readonly KeyComparison _comparison = KeyComparison.Ordinal;
+    private readonly KeyComparison _comparison;
     private readonly Dictionary<Key, IConfigurationEntry> _data;
     private readonly Dictionary<Key, IConfigurationEntry>.AlternateLookup<ReadOnlySpan<char>> _lookup;
 
-    internal ConfigurationSection(Path path, string providerName) 
-        : base(path, providerName)
+    internal ConfigurationSection(Path path, string providerName)
+        : this(path, providerName, KeyComparison.Ordinal)
     {
-        _data = new Dictionary<Key, IConfigurationEntry>(KeyComparer.FromComparison(_comparison));
-        _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
-    internal ConfigurationSection(Path path, string providerName, KeyComparison comparison, bool isReadOnly = false) 
-        : this(path, providerName)
+    internal ConfigurationSection(
+        Path path,
+        string providerName,
+        KeyComparison comparison,
+        bool isReadOnly = false,
+        ConfigurationSection? parent = null)
+        : base(path, providerName, parent)
     {
         _comparison = ArgumentException.ThrowIfEnumNotDefined(comparison);
         _isReadOnly = isReadOnly;
+        _data = new Dictionary<Key, IConfigurationEntry>(KeyComparer.FromComparison(_comparison));
+        _lookup = _data.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
     /// <inheritdoc />
     public string? this[Path path]
     {
-        get => GetConfigurationValue(Path.Combine(path, _comparison));
-        set => SetConfigurationValue(Path.Combine(path, _comparison), value);
+        get => GetConfigurationValue(Path.Combine(Path, path, _comparison));
+        set => SetConfigurationValue(Path.Combine(Path, path, _comparison), value);
     }
 
     /// <inheritdoc />
@@ -43,38 +48,7 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
     /// <inheritdoc />
     public IConfigurationEntry? GetEntry(Path path)
     {
-        path = Path.Combine(path, _comparison);
-
-        Key key = path[Path.Count];
-
-        if (!_lookup.TryGetValue(key, out var either))
-        {
-            return null;
-        }
-        else if (either.IsValue(out IConfigurationValue? value))
-        {
-            if (path.Count > Path.Count + 1)
-            {
-                return null;
-            }
-            return value;
-        }
-        else if (either.IsSection(out IConfigurationSection? section))
-        {
-            if (path.Count > Path.Count + 1)
-            {
-                return section.GetEntry(path);
-            }
-            return section;
-        }
-
-        return null;
-    }
-
-    /// <inheritdoc />
-    public string ToValue()
-    {
-        throw new NotImplementedException();
+        return GetEntryCore(Path.Combine(Path, path, _comparison));
     }
 
     /// <inheritdoc />
@@ -83,113 +57,185 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
         return _data.Values;
     }
 
-    private string? GetConfigurationValue(in Path path)
+    private IConfigurationEntry? GetEntryCore(in Path path)
     {
-        Key key = path[Path.Count];
+        if (path.Count == Path.Count && path.Equals(Path, _comparison))
+        {
+            return this;
+        }
 
-        if (!_lookup.TryGetValue(key, out var either))
+        if (!TryGetNextKey(path, out Key key))
         {
             return null;
         }
 
-        else if (either.IsValue(out IConfigurationValue? value))
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
         {
-            if (path.Count > Path.Count + 1)
-            {
-                return null;
-            }
-
-            return value.Value;
-        }
-        else if (either.IsSection(out IConfigurationSection? section))
-        {
-            if (path.Count > Path.Count + 1)
-            {
-                var subEntry = section.GetEntry(path);
-                return subEntry is IConfigurationValue subValue ? subValue.Value : null;
-            }
-
             return null;
+        }
+
+        if (entry is ConfigurationValue value)
+        {
+            return path.Count == Path.Count + 1
+                ? value
+                : null;
+        }
+
+        if (entry is ConfigurationSection section)
+        {
+            return path.Count > Path.Count + 1
+                ? section.GetEntryCore(path)
+                : section;
         }
 
         return null;
     }
+
+    private string? GetConfigurationValue(in Path path)
+    {
+        if (!TryGetNextKey(path, out Key key))
+        {
+            return null;
+        }
+
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
+        {
+            return null;
+        }
+
+        if (entry is ConfigurationValue value)
+        {
+            return path.Count == Path.Count + 1
+                ? value.Value
+                : null;
+        }
+
+        if (entry is ConfigurationSection section)
+        {
+            return path.Count > Path.Count + 1
+                ? section.GetConfigurationValue(path)
+                : null;
+        }
+
+        return null;
+    }
+
     private void SetConfigurationValue(in Path path, string? input)
     {
-        if (_isReadOnly)
+        SetConfigurationValueCore(path, input, notifySelf: true);
+    }
+
+    private bool SetConfigurationValueCore(in Path path, string? input, bool notifySelf)
+    {
+        InvalidOperationException.ThrowIf(_isReadOnly, "The configuration section is read-only.");
+
+        if (!TryGetNextKey(path, out Key key))
         {
-            throw new InvalidOperationException("The configuration section is read-only.");
+            throw new ArgumentException("The path must target a descendant of the current section.", nameof(path));
         }
 
-        Key key = path[Path.Count];
-
-        // If No Entry
-        if (!_lookup.TryGetValue(key, out var either))
+        if (!_lookup.TryGetValue(key, out IConfigurationEntry? entry))
         {
-            if (path.Count > Path.Count + 1)
-            {
-                var entryPath = path.Subpath(0, Path.Count + 1);
-                var entry = new ConfigurationSection(entryPath, ProviderName, _comparison, _isReadOnly);
-
-                entry[path] = input;
-
-                _data.Add(key, entry);
-            }
-            else
-            {
-                _data.Add(key, new ConfigurationValue(path, input, ProviderName, _isReadOnly));
-            }
-
-            NotifyChanged();
+            AddEntry(path, key, input, notifySelf);
+            return true;
         }
-        else if (either.IsValue(out IConfigurationValue? value))
+
+        if (entry is ConfigurationValue value)
         {
             if (path.Count == Path.Count + 1)
             {
-                value.Value = input;
-            }
-            else
-            {
-                var entryPath = path.Subpath(0, Path.Count + 1);
-                var entry = new ConfigurationSection(entryPath, ProviderName, _comparison, _isReadOnly);
-                
-                entry[path] = input;
-
-                // Remove the value and replace with a section.
-                _data.Remove(key, out var old);
-                _data.Add(key, entry);
+                return value.SetValue(input);
             }
 
-            NotifyChanged();
+            ReplaceValueWithSection(path, key, value, input, notifySelf);
+            return true;
         }
-        else if (either.IsSection(out IConfigurationSection? section))
+
+        if (entry is ConfigurationSection section)
         {
-            // Remove section and replace with value.
-            if (path.Count < Path.Count + 1)
+            if (path.Count == Path.Count + 1)
             {
-                _data.Remove(key);
-                _data.Add(key, new ConfigurationValue(path, input, ProviderName, _isReadOnly));
-            }
-            else
-            {
-                ((ConfigurationSection)section)[path] = input;
+                section.NotifyLocalChanged();
+                _data[key] = new ConfigurationValue(path, input, ProviderName, _isReadOnly, this);
+
+                if (notifySelf)
+                {
+                    NotifyChanged();
+                }
+
+                return true;
             }
 
+            return section.SetConfigurationValueCore(path, input, notifySelf: true);
+        }
+
+        return false;
+    }
+
+    private void AddEntry(in Path path, in Key key, string? input, bool notifySelf)
+    {
+        if (path.Count > Path.Count + 1)
+        {
+            Path entryPath = path.Subpath(0, Path.Count + 1);
+            var entry = new ConfigurationSection(entryPath, ProviderName, _comparison, _isReadOnly, this);
+
+            // A brand-new child cannot have external subscribers yet, so we only notify once
+            // after it is attached to the current section.
+            entry.SetConfigurationValueCore(path, input, notifySelf: false);
+            _data.Add(key, entry);
+        }
+        else
+        {
+            _data.Add(key, new ConfigurationValue(path, input, ProviderName, _isReadOnly, this));
+        }
+
+        if (notifySelf)
+        {
             NotifyChanged();
         }
     }
 
+    private void ReplaceValueWithSection(
+        in Path path,
+        in Key key,
+        ConfigurationValue value,
+        string? input,
+        bool notifySelf)
+    {
+        Path entryPath = path.Subpath(0, Path.Count + 1);
+        var entry = new ConfigurationSection(entryPath, ProviderName, _comparison, _isReadOnly, this);
+
+        value.NotifyLocalChanged();
+        entry.SetConfigurationValueCore(path, input, notifySelf: false);
+        _data[key] = entry;
+
+        if (notifySelf)
+        {
+            NotifyChanged();
+        }
+    }
+
+    private bool TryGetNextKey(in Path path, out Key key)
+    {
+        if (path.Count <= Path.Count)
+        {
+            key = default;
+            return false;
+        }
+
+        key = path[Path.Count];
+
+        return true;
+    }
 
     partial class DebuggerView
     {
         private readonly ConfigurationSection _section;
+
         public DebuggerView(ConfigurationSection section)
         {
             _section = section;
         }
-
-        //public Key Key => _section.Key;
-        //public Path Path => _section.Path;
 
         [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
         public IConfigurationEntry[] Entries
@@ -208,7 +254,5 @@ internal class ConfigurationSection : ConfigurationEntry, IConfigurationSection
                 return entries;
             }
         }
-
-        //public int? Count => _section.Value;
     }
 }

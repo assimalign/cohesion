@@ -1,8 +1,7 @@
-﻿using System.Threading;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System;
-
+using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
@@ -14,13 +13,17 @@ namespace Assimalign.Cohesion.Configuration.Internal;
 internal sealed class ConfigurationValue : ConfigurationEntry, IConfigurationValue
 {
     private readonly Lock _lock;
+    private readonly bool _isReadOnly;
 
     private string? _value;
-    private bool _isReadOnly;
 
-
-    internal ConfigurationValue(Path path, string? value, string providerName, bool isReadOnly = false)
-        : base(path, providerName)
+    internal ConfigurationValue(
+        Path path,
+        string? value,
+        string providerName,
+        bool isReadOnly = false,
+        ConfigurationSection? parent = null)
+        : base(path, providerName, parent)
     {
         _lock = new Lock();
         _value = value;
@@ -37,13 +40,26 @@ internal sealed class ConfigurationValue : ConfigurationEntry, IConfigurationVal
         {
             InvalidOperationException.ThrowIf(_isReadOnly, "The configuration value is read-only.");
 
-            lock (_lock)
-            {
-                _value = NotifyChanged(_value, value);
-            }
+            SetValue(value);
         }
     }
 
+    internal bool SetValue(string? value)
+    {
+        lock (_lock)
+        {
+            if (string.Equals(_value, value, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _value = value;
+        }
+
+        NotifyChanged();
+
+        return true;
+    }
 
     /// <summary>
     /// 
@@ -66,6 +82,7 @@ internal sealed class ConfigurationValue : ConfigurationEntry, IConfigurationVal
     partial class DebuggerView
     {
         private readonly ConfigurationValue _value;
+
         public DebuggerView(ConfigurationValue value)
         {
             _value = value;
