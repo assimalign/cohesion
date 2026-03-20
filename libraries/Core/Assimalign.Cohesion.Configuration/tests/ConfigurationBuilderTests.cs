@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration.Tests;
@@ -190,6 +191,87 @@ public class ConfigurationBuilderTests
         Assert.Equal(2, config.Providers.Count());
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Load failure throws with provider name")]
+    public void Builder_LoadFailure_ShouldThrowWithProviderName()
+    {
+        var builder = new ConfigurationBuilder()
+            .AddProvider(_ => new MockConfigurationProvider("Provider1", entries =>
+            {
+                entries["key1"] = "value1";
+            }))
+            .AddProvider(_ => new ThrowingConfigurationProvider("Provider2", new NotSupportedException("boom")));
+
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.Build());
+
+        Assert.Contains("Provider2", exception.Message);
+        Assert.IsType<NotSupportedException>(exception.InnerException);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Load failure disposes previously loaded providers")]
+    public void Builder_LoadFailure_ShouldDisposePreviouslyLoadedProviders()
+    {
+        TrackingConfigurationProvider? loadedProvider = null;
+
+        var builder = new ConfigurationBuilder()
+            .AddProvider(_ =>
+            {
+                loadedProvider = new TrackingConfigurationProvider("Provider1", entries =>
+                {
+                    entries["key1"] = "value1";
+                });
+
+                return loadedProvider;
+            })
+            .AddProvider(_ => new ThrowingConfigurationProvider("Provider2", new InvalidOperationException("boom")));
+
+        Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.True(loadedProvider!.WasDisposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Default timeout does not cancel load immediately")]
+    public async Task Builder_DefaultTimeout_ShouldNotCancelLoadImmediately()
+    {
+        var config = await new ConfigurationBuilder()
+            .AddProvider(_ => new DelayedConfigurationProvider(
+                "Provider1",
+                TimeSpan.FromMilliseconds(25),
+                entries => entries["key1"] = "value1"))
+            .BuildAsync();
+
+        Assert.Equal("value1", config["key1"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Load timeout throws TimeoutException")]
+    public async Task Builder_LoadTimeout_ShouldThrowTimeoutException()
+    {
+        var builder = new ConfigurationBuilder(new ConfigurationOptions
+        {
+            LoadTimeout = TimeSpan.FromMilliseconds(20)
+        })
+            .AddProvider(_ => new DelayedConfigurationProvider(
+                "Provider1",
+                TimeSpan.FromMilliseconds(200),
+                entries => entries["key1"] = "value1"));
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(async () => await builder.BuildAsync());
+
+        Assert.Contains("Provider1", exception.Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Cancellation token cancels build")]
+    public async Task Builder_CancellationToken_ShouldCancelBuild()
+    {
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+
+        var builder = new ConfigurationBuilder()
+            .AddProvider(_ => new DelayedConfigurationProvider(
+                "Provider1",
+                TimeSpan.FromMilliseconds(200),
+                entries => entries["key1"] = "value1"));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await builder.BuildAsync(cancellationTokenSource.Token));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Builder: Duplicate provider name throws")]
     public void Builder_DuplicateProviderName_ShouldThrow()
     {
@@ -267,5 +349,70 @@ public class ConfigurationBuilderTests
         public TimeSpan Timeout { get; }
         public IDictionary<string, object> Properties { get; }
         public IEnumerable<IConfigurationProvider> Providers => [];
+    }
+
+    private sealed class ThrowingConfigurationProvider : ConfigurationProvider
+    {
+        private readonly Exception _exception;
+
+        public ThrowingConfigurationProvider(string name, Exception exception)
+        {
+            Name = name;
+            _exception = exception;
+        }
+
+        public override string Name { get; }
+
+        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            throw _exception;
+        }
+    }
+
+    private sealed class TrackingConfigurationProvider : ConfigurationProvider
+    {
+        private readonly Action<IDictionary<Path, string?>> _onLoad;
+
+        public TrackingConfigurationProvider(string name, Action<IDictionary<Path, string?>> onLoad)
+        {
+            Name = name;
+            _onLoad = onLoad;
+        }
+
+        public override string Name { get; }
+        public bool WasDisposed { get; private set; }
+
+        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            _onLoad.Invoke(entries);
+            return Task.CompletedTask;
+        }
+
+        protected override ValueTask OnDisposeAsync(IEnumerable<IConfigurationEntry> entries)
+        {
+            WasDisposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class DelayedConfigurationProvider : ConfigurationProvider
+    {
+        private readonly TimeSpan _delay;
+        private readonly Action<IDictionary<Path, string?>> _onLoad;
+
+        public DelayedConfigurationProvider(string name, TimeSpan delay, Action<IDictionary<Path, string?>> onLoad)
+        {
+            Name = name;
+            _delay = delay;
+            _onLoad = onLoad;
+        }
+
+        public override string Name { get; }
+
+        protected override async Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(_delay).ConfigureAwait(false);
+            _onLoad.Invoke(entries);
+        }
     }
 }

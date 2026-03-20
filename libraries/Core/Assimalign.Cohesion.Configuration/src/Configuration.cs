@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -96,24 +95,40 @@ public class Configuration : IConfiguration
     {
         CheckIfDisposedOrDisposing();
 
-        foreach(var provider in _providers)
-        {
-            provider.Dispose();
-        }
+        _isDisposing = true;
 
-        _isDisposed = true;
+        try
+        {
+            foreach (var provider in _providers)
+            {
+                provider.Dispose();
+            }
+        }
+        finally
+        {
+            _isDisposed = true;
+            _isDisposing = false;
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
         CheckIfDisposedOrDisposing();
 
-        foreach (var provider in _providers)
-        {
-            await provider.DisposeAsync();
-        }
+        _isDisposing = true;
 
-        _isDisposed = true;  
+        try
+        {
+            foreach (var provider in _providers)
+            {
+                await provider.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _isDisposed = true;
+            _isDisposing = false;
+        }
     }
 
     private void CheckIfDisposedOrDisposing()

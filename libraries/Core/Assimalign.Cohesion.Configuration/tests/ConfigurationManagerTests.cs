@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Configuration.Tests;
 
 public class ConfigurationManagerTests
 {
-    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: AddProvider and get value")]
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: AddProvider loads provider and gets value")]
     public void Manager_AddProvider_ShouldAllowGetValue()
     {
         var options = new ConfigurationOptions();
@@ -17,12 +18,6 @@ public class ConfigurationManagerTests
         {
             entries["key1"] = "value1";
         }));
-
-        // Load the provider
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
 
         Assert.Equal("value1", manager["key1"]);
     }
@@ -37,11 +32,6 @@ public class ConfigurationManagerTests
         {
             entries["key1"] = "original";
         }));
-
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
 
         manager["key1"] = "updated";
 
@@ -58,11 +48,6 @@ public class ConfigurationManagerTests
         {
             entries["key1"] = "value1";
         }));
-
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
 
         var entry = manager.GetEntry("key1");
 
@@ -81,11 +66,6 @@ public class ConfigurationManagerTests
             entries["key1"] = "value1";
         }));
 
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
-
         var value = manager.GetValue("key1");
 
         Assert.NotNull(value);
@@ -102,11 +82,6 @@ public class ConfigurationManagerTests
         {
             entries["section:key1"] = "value1";
         }));
-
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
 
         var section = manager.GetSection("section");
 
@@ -146,37 +121,146 @@ public class ConfigurationManagerTests
             entries["key2"] = "value2";
         }));
 
-        foreach (var provider in manager.Providers)
-        {
-            provider.Load();
-        }
-
         var all = manager.ToList();
 
         Assert.Equal(2, all.Count);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Constructor loads configured providers")]
+    public void Manager_Constructor_ShouldLoadConfiguredProviders()
+    {
+        var options = new ConfigurationOptions();
+        options.Providers.Add(new MockConfigurationProvider(entries =>
+        {
+            entries["key1"] = "value1";
+        }));
+
+        var manager = new ConfigurationManager(options);
+
+        Assert.Equal("value1", manager["key1"]);
+        Assert.Single(manager.Providers);
+        Assert.Single(options.Providers);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Async add loads provider")]
+    public async Task Manager_AddProviderAsync_ShouldLoadProvider()
+    {
+        var manager = new ConfigurationManager();
+
+        await manager.AddProviderAsync(_ => Task.FromResult<IConfigurationProvider>(
+            new MockConfigurationProvider(entries =>
+            {
+                entries["key1"] = "value1";
+            })));
+
+        Assert.Equal("value1", manager["key1"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Interface async add loads provider")]
+    public async Task Manager_InterfaceAddProviderAsync_ShouldLoadProvider()
+    {
+        IConfigurationManager manager = new ConfigurationManager();
+
+        await manager.AddProviderAsync(_ => Task.FromResult<IConfigurationProvider>(
+            new MockConfigurationProvider(entries =>
+            {
+                entries["key1"] = "value1";
+            })));
+
+        Assert.Equal("value1", manager["key1"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Timeout throws TimeoutException")]
+    public async Task Manager_AddProviderAsync_LoadTimeout_ShouldThrowTimeoutException()
+    {
+        var manager = new ConfigurationManager(new ConfigurationOptions
+        {
+            LoadTimeout = TimeSpan.FromMilliseconds(20)
+        });
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(async () =>
+            await manager.AddProviderAsync(_ => Task.FromResult<IConfigurationProvider>(
+                new DelayedConfigurationProvider(
+                    "Provider1",
+                    TimeSpan.FromMilliseconds(200),
+                    entries => entries["key1"] = "value1"))));
+
+        Assert.Contains("Provider1", exception.Message);
+        Assert.Empty(manager.Providers);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Cancellation token cancels add")]
+    public async Task Manager_AddProviderAsync_Cancellation_ShouldCancel()
+    {
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+
+        var manager = new ConfigurationManager();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await manager.AddProviderAsync(
+                _ => Task.FromResult<IConfigurationProvider>(
+                    new DelayedConfigurationProvider(
+                        "Provider1",
+                        TimeSpan.FromMilliseconds(200),
+                        entries => entries["key1"] = "value1")),
+                cancellationTokenSource.Token));
+
+        Assert.Empty(manager.Providers);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Load failure is surfaced and provider is not registered")]
+    public void Manager_AddProvider_LoadFailure_ShouldNotRegisterProvider()
+    {
+        var manager = new ConfigurationManager();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            manager.AddProvider(_ => new ThrowingConfigurationProvider(
+                "Provider1",
+                new NotSupportedException("boom"))));
+
+        Assert.Contains("Provider1", exception.Message);
+        Assert.Empty(manager.Providers);
+        Assert.Null(manager["key1"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Failed provider is disposed")]
+    public void Manager_AddProvider_LoadFailure_ShouldDisposeProvider()
+    {
+        var manager = new ConfigurationManager();
+        var provider = new TrackingThrowingConfigurationProvider(
+            "Provider1",
+            new NotSupportedException("boom"));
+
+        Assert.Throws<InvalidOperationException>(() => manager.AddProvider(_ => provider));
+        Assert.True(provider.WasDisposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Duplicate provider name throws")]
+    public void Manager_AddProvider_DuplicateProviderName_ShouldThrow()
+    {
+        var manager = new ConfigurationManager();
+
+        manager.AddProvider(_ => new MockConfigurationProvider("Provider1", _ => { }));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            manager.AddProvider(_ => new MockConfigurationProvider("Provider1", _ => { })));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: Dispose is safe")]
     public void Manager_Dispose_ShouldBeSafe()
     {
-        var options = new ConfigurationOptions();
-        var manager = new ConfigurationManager(options);
+        var manager = new ConfigurationManager();
 
         manager.Dispose();
-
-        // Should not throw on double dispose
         manager.Dispose();
     }
 
     [Fact(DisplayName = "Cohesion Test [Configuration] - Manager: DisposeAsync is safe")]
     public async Task Manager_DisposeAsync_ShouldBeSafe()
     {
-        var options = new ConfigurationOptions();
-        var manager = new ConfigurationManager(options);
+        var manager = new ConfigurationManager();
 
         await manager.DisposeAsync();
-
-        // Should not throw on double dispose
         await manager.DisposeAsync();
     }
 
@@ -184,5 +268,69 @@ public class ConfigurationManagerTests
     public void Manager_NullOptions_ShouldThrow()
     {
         Assert.Throws<ArgumentNullException>(() => new ConfigurationManager(null!));
+    }
+
+    private sealed class ThrowingConfigurationProvider : ConfigurationProvider
+    {
+        private readonly Exception _exception;
+
+        public ThrowingConfigurationProvider(string name, Exception exception)
+        {
+            Name = name;
+            _exception = exception;
+        }
+
+        public override string Name { get; }
+
+        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            throw _exception;
+        }
+    }
+
+    private sealed class TrackingThrowingConfigurationProvider : ConfigurationProvider
+    {
+        private readonly Exception _exception;
+
+        public TrackingThrowingConfigurationProvider(string name, Exception exception)
+        {
+            Name = name;
+            _exception = exception;
+        }
+
+        public override string Name { get; }
+        public bool WasDisposed { get; private set; }
+
+        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            throw _exception;
+        }
+
+        protected override ValueTask OnDisposeAsync(IEnumerable<IConfigurationEntry> entries)
+        {
+            WasDisposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class DelayedConfigurationProvider : ConfigurationProvider
+    {
+        private readonly TimeSpan _delay;
+        private readonly Action<IDictionary<Path, string?>> _onLoad;
+
+        public DelayedConfigurationProvider(string name, TimeSpan delay, Action<IDictionary<Path, string?>> onLoad)
+        {
+            Name = name;
+            _delay = delay;
+            _onLoad = onLoad;
+        }
+
+        public override string Name { get; }
+
+        protected override async Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(_delay).ConfigureAwait(false);
+            _onLoad.Invoke(entries);
+        }
     }
 }
