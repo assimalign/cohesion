@@ -273,6 +273,10 @@ public class DatabaseConnectionException : CohesionException
 }
 ```
 
+**Throwing Patterns:** Do not introduce `ThrowHelper` or `ThrowHelpers` types
+- Prefer direct `throw` statements or framework guard APIs for local guard clauses
+- If reusable throw behavior is needed, use a .NET 10 extension type method in the `Extensions/` folder instead of a helper class
+
 **Value Objects:** Place in `ValueObjects/` folder
 ```csharp
 namespace Assimalign.Cohesion.Hosting;
@@ -597,7 +601,8 @@ public class ConfigurationBuilder : IConfigurationBuilder
 5. ✅ Preserve XML documentation
 6. ✅ Consider breaking changes impact
 7. ✅ Follow dependency layer constraints
-8. ✅ Build incrementally to catch errors early
+8. ✅ Avoid introducing `ThrowHelper` patterns; use direct throws or .NET 10 extension type methods instead
+9. ✅ Build incrementally to catch errors early
 
 ### When in Doubt
 1. ✅ Look for similar code in the same service category

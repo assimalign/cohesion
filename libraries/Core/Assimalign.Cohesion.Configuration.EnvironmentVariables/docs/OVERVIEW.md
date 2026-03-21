@@ -14,7 +14,7 @@ Supplies an environment-variable configuration source and provider for process a
 
 ## Primary Responsibilities
 
-- The source object only captures the filtering options needed for provider creation.
+- The options object only captures the filtering values needed for provider creation.
 - The provider is responsible for enumerating environment variables and mapping them into configuration keys.
 - The builder extension keeps the caller API consistent with the rest of the configuration provider packages.
 
@@ -22,7 +22,7 @@ Supplies an environment-variable configuration source and provider for process a
 
 - ConfigurationBuilderExtensions
 - ConfigurationEnvironmentVariablesProvider
-- ConfigurationEnvironmentVariablesSource
+- ConfigurationEnvironmentVariablesOptions
 
 ## Source Layout
 

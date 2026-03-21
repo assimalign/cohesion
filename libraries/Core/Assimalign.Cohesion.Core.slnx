@@ -37,18 +37,6 @@
     <Folder Name="/Core/Assimalign.Cohesion.Configuration/tests/">
         <Project Path="Assimalign.Cohesion.Configuration/tests/Assimalign.Cohesion.Configuration.Tests.csproj" />
     </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Configuration.Binder/">
-        <File Path="Assimalign.Cohesion.Configuration.Binder/README.md" />
-    </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Configuration.Binder/docs/">
-        <File Path="Assimalign.Cohesion.Configuration.Binder/docs/design.md" />
-    </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Configuration.Binder/src/">
-        <Project Path="Assimalign.Cohesion.Configuration.Binder/src/Assimalign.Cohesion.Configuration.Binder.csproj" />
-    </Folder>
-    <Folder Name="/Core/Assimalign.Cohesion.Configuration.Binder/tests/">
-        <Project Path="Assimalign.Cohesion.Configuration.Binder/tests/Assimalign.Cohesion.Configuration.Binder.Tests.csproj" />
-    </Folder>
     <Folder Name="/Core/Assimalign.Cohesion.Configuration.CommandLine/">
         <File Path="Assimalign.Cohesion.Configuration.CommandLine/README.md" />
     </Folder>

@@ -1,45 +1,54 @@
-﻿using System;
+using System;
 
-namespace  Assimalign.Cohesion.Configuration;
+namespace Assimalign.Cohesion.Configuration;
 
-using  Assimalign.Cohesion.Configuration.Providers;
-
-public static partial class ConfigurationBuilderExtensions
+/// <summary>
+/// Adds environment variable provider registration helpers to configuration builders.
+/// </summary>
+public static class ConfigurationBuilderExtensions
 {
-    #region Environment Variable Provider
-    // <summary>
-    /// Adds an <see cref="IConfigurationProvider"/> that reads configuration values from environment variables.
+    /// <summary>
+    /// Adds the environment variables provider to the builder.
     /// </summary>
-    /// <param name="configurationBuilder">The <see cref="IConfigurationBuilder"/> to add to.</param>
-    /// <returns>The <see cref="IConfigurationBuilder"/>.</returns>
-    public static IConfigurationBuilder AddEnvironmentVariables(this IConfigurationBuilder configurationBuilder)
+    /// <param name="builder">The builder to add to.</param>
+    /// <returns>The current builder.</returns>
+    public static IConfigurationBuilder AddEnvironmentVariables(this IConfigurationBuilder builder)
     {
-        configurationBuilder.Add(new ConfigurationEnvironmentVariablesSource());
-        return configurationBuilder;
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.AddProvider(_ => new ConfigurationEnvironmentVariablesProvider());
     }
 
     /// <summary>
-    /// Adds an <see cref="IConfigurationProvider"/> that reads configuration values from environment variables
-    /// with a specified prefix.
+    /// Adds the environment variables provider to the builder with a prefix filter.
     /// </summary>
-    /// <param name="configurationBuilder">The <see cref="IConfigurationBuilder"/> to add to.</param>
-    /// <param name="prefix">The prefix that environment variable names must start with. The prefix will be removed from the environment variable names.</param>
-    /// <returns>The <see cref="IConfigurationBuilder"/>.</returns>
+    /// <param name="builder">The builder to add to.</param>
+    /// <param name="prefix">The prefix used to filter environment variable names.</param>
+    /// <returns>The current builder.</returns>
+    public static IConfigurationBuilder AddEnvironmentVariables(this IConfigurationBuilder builder, string prefix)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.AddProvider(_ => new ConfigurationEnvironmentVariablesProvider(prefix));
+    }
+
+    /// <summary>
+    /// Adds the environment variables provider to the builder using a configuration callback.
+    /// </summary>
+    /// <param name="builder">The builder to add to.</param>
+    /// <param name="configureSource">The callback used to configure provider options.</param>
+    /// <returns>The current builder.</returns>
     public static IConfigurationBuilder AddEnvironmentVariables(
-        this IConfigurationBuilder configurationBuilder,
-        string prefix)
+        this IConfigurationBuilder builder,
+        Action<ConfigurationEnvironmentVariablesOptions> configureSource)
     {
-        configurationBuilder.Add(new ConfigurationEnvironmentVariablesSource { Prefix = prefix });
-        return configurationBuilder;
-    }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configureSource);
 
-    /// <summary>
-    /// Adds an <see cref="IConfigurationProvider"/> that reads configuration values from environment variables.
-    /// </summary>
-    /// <param name="builder">The <see cref="IConfigurationBuilder"/> to add to.</param>
-    /// <param name="configureSource">Configures the source.</param>
-    /// <returns>The <see cref="IConfigurationBuilder"/>.</returns>
-    public static IConfigurationBuilder AddEnvironmentVariables(this IConfigurationBuilder builder, Action<ConfigurationEnvironmentVariablesSource> configureSource)
-        => builder.Add(configureSource);
-    #endregion
+        var options = new ConfigurationEnvironmentVariablesOptions();
+
+        configureSource.Invoke(options);
+
+        return builder.AddProvider(_ => new ConfigurationEnvironmentVariablesProvider(options.Prefix));
+    }
 }

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Supplies a command-line configuration source and provider that translate process arguments into configuration entries.
+ Supplies a command-line configuration provider that translates process arguments into configuration entries.
 
 ## Current Evaluation
 
@@ -15,14 +15,14 @@ Supplies a command-line configuration source and provider that translate process
 ## Primary Responsibilities
 
 - ConfigurationBuilder extension methods are the user-facing entry point.
-- ConfigurationCommandLineSource captures raw arguments and optional switch mappings.
+- ConfigurationCommandLineOptions captures raw arguments and optional switch mappings.
 - ConfigurationCommandLineProvider turns normalized arguments into configuration keys and values.
 
 ## Key Types
 
 - ConfigurationBuilderExtensions
 - ConfigurationCommandLineProvider
-- ConfigurationCommandLineSource
+- ConfigurationCommandLineOptions
 
 ## Source Layout
 

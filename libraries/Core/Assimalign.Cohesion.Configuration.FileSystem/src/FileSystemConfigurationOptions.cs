@@ -1,46 +1,55 @@
-﻿using System;
+using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Configuration;
+namespace Assimalign.Cohesion.Configuration.FileSystem;
 
-using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
-/// Represents a base class for file based <see cref="IConfigurationSource"/>.
+/// Represents options used by file-backed configuration providers.
 /// </summary>
-public sealed class FileSystemConfigurationOptions
+public class FileSystemConfigurationOptions
 {
-    /// <summary>
-    /// Used to access the contents of the file.
-    /// </summary>
-    public IFileSystem FileSystem { get; set; }
+    private TimeSpan _reloadDelay = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// The path to the file.
+    /// Gets or sets the file system used to resolve the configured file path.
     /// </summary>
-    public FileSystemPath Path { get; set; }
+    public IFileSystem? FileSystem { get; set; }
 
     /// <summary>
-    /// Determines if loading the file is optional.
+    /// Gets or sets the path to the configuration file within the configured file system.
+    /// </summary>
+    public FileSystemPath Path { get; set; } = FileSystemPath.Empty;
+
+    /// <summary>
+    /// Gets or sets a value that indicates whether the file is optional.
     /// </summary>
     public bool Optional { get; set; }
 
     /// <summary>
-    /// Determines whether the source will be loaded if the underlying file changes.
+    /// Gets or sets a value that indicates whether the provider should reload when the file changes.
     /// </summary>
     public bool ReloadOnChange { get; set; }
 
     /// <summary>
-    /// Number of milliseconds that reload will wait before calling Load.  This helps
-    /// avoid triggering reload before a file is completely written. Default is 250.
+    /// Gets or sets the debounce delay applied before a file change triggers a reload.
     /// </summary>
-    public int ReloadDelay { get; set; } = 250;
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the provided value is negative.
+    /// </exception>
+    public TimeSpan ReloadDelay
+    {
+        get => _reloadDelay;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+            _reloadDelay = value;
+        }
+    }
 
     /// <summary>
-    /// Will be called if an uncaught exception occurs in FileConfigurationProvider.Load.
+    /// Gets or sets the callback used to handle file load exceptions.
     /// </summary>
-    public Action<ConfigurationFileLoadExceptionContext> OnLoadException { get; set; }
-
-
+    public Action<ConfigurationFileLoadExceptionContext>? OnLoadException { get; set; }
 }

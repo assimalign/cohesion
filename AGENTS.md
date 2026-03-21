@@ -47,6 +47,10 @@ This document defines specific coding standards and rules for the Cohesion proje
    - ✅ `README.md`, `CONTRIBUTING.md`, `LICENSE`
    - ❌ `readme.md`, `contributing.md`
 
+8. **Prefer direct throws or .NET 10 extension type methods over ThrowHelpers**
+   - Use direct `throw` statements or framework guard APIs when the logic is local
+   - If reusable throw behavior is needed, implement it as a .NET 10 extension type method in `Extensions/`
+
 ### ❌ Forbidden Patterns
 
 1. **NEVER use block-scoped namespaces**
@@ -87,6 +91,10 @@ This document defines specific coding standards and rules for the Cohesion proje
    /// </summary>
    public interface IDatabase { }
    ```
+
+7. **NEVER introduce `ThrowHelper` or `ThrowHelpers` types**
+   - Do not add helper classes whose primary purpose is throwing exceptions
+   - When touching existing usages, migrate them toward direct throws or .NET 10 extension type methods
 
 ## Naming Conventions
 
@@ -414,6 +422,10 @@ public static class CacheExtensions
    }
    ```
 
+4. **Avoid `ThrowHelper` patterns**
+   - Prefer direct `throw` statements for local guard clauses
+   - If throwing logic must be reused, use a .NET 10 extension type method instead of a helper class
+
 ## Performance Guidelines
 
 ### Memory Allocation
@@ -499,6 +511,7 @@ Before submitting code, ensure:
 - [ ] XML documentation on all public APIs
 - [ ] Tests added/updated
 - [ ] Exception types inherit from `CohesionException`
+- [ ] No new `ThrowHelper` or `ThrowHelpers` types introduced
 - [ ] Async methods have `Async` suffix
 - [ ] `CancellationToken` parameter included in async methods
 - [ ] No `async void` methods (except event handlers)

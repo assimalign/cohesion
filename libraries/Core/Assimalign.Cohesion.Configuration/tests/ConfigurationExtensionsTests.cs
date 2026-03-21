@@ -164,7 +164,7 @@ public class ConfigurationExtensionsTests
             entries["key"] = "value";
         });
 
-        Assert.Throws<InvalidCastException>(() => config.GetValue<Guid>("key"));
+        Assert.Throws<InvalidCastException>(() => config.GetValue<UnsupportedType>("key"));
     }
 
     [Fact(DisplayName = "Cohesion Test [Configuration] - Extensions: GetSection returns section")]
@@ -239,5 +239,9 @@ public class ConfigurationExtensionsTests
         return new ConfigurationBuilder()
             .AddProvider(_ => new MockConfigurationProvider(onLoad))
             .Build();
+    }
+
+    private sealed class UnsupportedType
+    {
     }
 }

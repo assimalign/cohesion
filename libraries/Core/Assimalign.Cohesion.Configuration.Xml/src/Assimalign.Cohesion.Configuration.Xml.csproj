@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	
 	<PropertyGroup>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<EnableDefaultItems>true</EnableDefaultItems>
+		<RootNamespace>Assimalign.Cohesion.Configuration.Xml</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
 		<None Include="README.md">
@@ -13,5 +12,7 @@
 	<ItemGroup>
 	  <CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
 	</ItemGroup>
-	
+	<ItemGroup>
+		<CohesionPackageReference Include="System.Security.Cryptography.Xml" />
+	</ItemGroup>
 </Project>

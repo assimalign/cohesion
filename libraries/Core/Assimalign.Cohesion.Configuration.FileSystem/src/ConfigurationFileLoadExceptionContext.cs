@@ -1,24 +1,24 @@
-﻿using System;
+using System;
 
-namespace Assimalign.Cohesion.Configuration.Providers;
+namespace Assimalign.Cohesion.Configuration.FileSystem;
 
 /// <summary>
-/// Contains information about a file load exception.
+/// Contains information about a file-backed configuration load failure.
 /// </summary>
-public class ConfigurationFileLoadExceptionContext
+public sealed class ConfigurationFileLoadExceptionContext
 {
     /// <summary>
-    /// The <see cref="ConfigurationFileProvider"/> that caused the exception.
+    /// Gets the provider that encountered the load failure.
     /// </summary>
-    public ConfigurationFileProvider Provider { get; set; }
+    public required FileSystemConfigurationProvider Provider { get; init; }
 
     /// <summary>
-    /// The exception that occurred in Load.
+    /// Gets the exception that occurred while loading the file.
     /// </summary>
-    public Exception Exception { get; set; }
+    public required Exception Exception { get; init; }
 
     /// <summary>
-    /// If true, the exception will not be rethrown.
+    /// Gets or sets a value that indicates whether the exception should be ignored.
     /// </summary>
     public bool Ignore { get; set; }
 }

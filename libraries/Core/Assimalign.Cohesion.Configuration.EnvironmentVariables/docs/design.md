@@ -6,7 +6,7 @@ This package keeps environment loading as a small plug-in over the core configur
 
 ## Architecture
 
-- The source object only captures the filtering options needed for provider creation.
+- The options object only captures the filtering values needed for provider creation.
 - The provider is responsible for enumerating environment variables and mapping them into configuration keys.
 - The builder extension keeps the caller API consistent with the rest of the configuration provider packages.
 

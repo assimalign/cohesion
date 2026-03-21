@@ -6,29 +6,27 @@ Adds JSON parsing and registration helpers to the configuration stack.
 
 ## Current Evaluation
 
-- Status: Partial
-- Production source files: 8; key type candidates discovered: 8; test files discovered: 1.
+- Status: Implemented
+- Production source files: 5; key type candidates discovered: 5; test files discovered: 1.
 - Project references: Assimalign.Cohesion.Configuration.FileSystem
 - Package references: None
-- NotImplementedException markers: 11
+- NotImplementedException markers: 0
 
 ## Primary Responsibilities
 
 - Builder extensions provide AddJsonFile and AddJsonStream so callers stay close to the core configuration experience.
-- Stream-based parsing is the natural center of the implementation, regardless of the backing file source.
-- The coexistence of older and newer provider code shows that the package is evolving and still being consolidated.
+- ConfigurationJsonProvider builds on the shared file-backed provider layer from Configuration.FileSystem.
+- JsonConfigurationParser flattens JSON objects and arrays into composite configuration paths.
 
 ## Key Types
 
 - ConfigurationBuilderExtensions
-- ConfigurationJsonEntry
-- ConfigurationJsonProviderOld
-- ConfigurationJsonSection
+- ConfigurationJsonOptions
+- ConfigurationJsonProvider
 - ConfigurationJsonStreamProvider
-- ConfigurationJsonStreamSource
-- JsonConfigurationProvider
-- JsonConfigurationProviderOptions
+- JsonConfigurationParser
 
 ## Source Layout
 
 - src/Extensions
+- src/Internal

@@ -5,6 +5,7 @@
         <_CohesionPackage Include="KubernetesClient" Version="17.0.4" />
         <_CohesionPackage Include="NUlid" Version="1.7.2" />
         <_CohesionPackage Include="System.Threading.RateLimiting" Version="10.0.0"/>
+        <_CohesionPackage Include="System.Security.Cryptography.Xml" Version="10.0.0" />
     </ItemGroup>
 
     <!-- Analyzer & Build Dependencies -->

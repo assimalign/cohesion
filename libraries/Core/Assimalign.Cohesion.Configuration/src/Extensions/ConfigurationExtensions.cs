@@ -24,50 +24,8 @@ public delegate bool ConfigurationFinder(Path path);
 /// </summary>
 public static partial class ConfigurationExtensions
 {
-    private static List<(Func<Type, bool> filter, Func<string, object> converter)> _converters = new List<(Func<Type, bool> filter, Func<string, object> converter)>
-    {
-        (type => type == typeof(string), value => value),
-        (type => type == typeof(short) || type == typeof(short?), value => short.Parse(value)),
-        (type => type == typeof(int) || type == typeof(int?), value => int.Parse(value)),
-        (type => type == typeof(long) || type == typeof(long?), value => long.Parse(value)),
-        (type => type == typeof(Int128) || type == typeof(Int128?), value => Int128.Parse(value)),
-        (type => type == typeof(bool) || type == typeof(bool?), value => bool.Parse(value)),
-        (type => type == typeof(double) || type == typeof(double?), value => double.Parse(value)),
-        (type => type == typeof(float) || type == typeof(float?), value => float.Parse(value)),
-        (type => type == typeof(decimal) || type == typeof(decimal?), value => decimal.Parse(value)),
-        (type => type == typeof(TimeSpan) || type == typeof(TimeSpan?), value => TimeSpan.Parse(value)),
-        (type => type == typeof(DateTime) || type == typeof(DateTime?), value => DateTime.Parse(value)),
-        (type => type == typeof(DateTimeOffset) || type == typeof(DateTimeOffset?), value => DateTimeOffset.Parse(value)),
-    };
-
     extension(IConfiguration configuration)
     {
-        /// <summary>
-        /// Gets a value and tries to convert it to the specified type.
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="path"></param>
-        /// <returns></returns>
-        public T GetValue<T>(Path path)
-        {
-            var type = typeof(T);
-            var value = configuration.GetValue(path)?.Value;
-
-            ArgumentNullException.ThrowIfNullOrEmpty(value);
- 
-            for (int i = 0; i < _converters.Count; i++)
-            {
-                var (filter, converter) = _converters[i];
-
-                if (filter.Invoke(type))
-                {
-                    return (T)converter(value);
-                }
-            }
-
-            throw new InvalidCastException(value + " cannot be converted to " + type.Name);
-        }
-
         /// <summary>
         /// 
         /// </summary>

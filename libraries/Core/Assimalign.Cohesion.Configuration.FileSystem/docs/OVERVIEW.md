@@ -7,7 +7,7 @@ Defines the bridge layer for configuration providers that read from the abstract
 ## Current Evaluation
 
 - Status: Implemented
-- Production source files: 5; key type candidates discovered: 5; test files discovered: 1.
+- Production source files: 4; key type candidates discovered: 4; test files discovered: 1.
 - Project references: Assimalign.Cohesion.Configuration, Assimalign.Cohesion.FileSystem
 - Package references: None
 - NotImplementedException markers: 0
@@ -22,11 +22,9 @@ Defines the bridge layer for configuration providers that read from the abstract
 
 - ConfigurationBuilderExtensions
 - ConfigurationFileLoadExceptionContext
-- ConfigurationFileProvider
 - FileSystemConfigurationOptions
 - FileSystemConfigurationProvider
 
 ## Source Layout
 
 - src/Extensions
-- src/Internal

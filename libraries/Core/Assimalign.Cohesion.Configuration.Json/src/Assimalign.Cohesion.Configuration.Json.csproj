@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<EnableDefaultItems>true</EnableDefaultItems>
-		<RootNamespace>Assimalign.Cohesion.Configuration</RootNamespace>
-		<Description>JSON configuration provider implementation for  Assimalign.Cohesion.Configuration.</Description>
+		<RootNamespace>Assimalign.Cohesion.Configuration.Json</RootNamespace>
+		<Description>JSON configuration provider implementation for Assimalign.Cohesion.Configuration.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />

@@ -2,12 +2,12 @@
 
 ## Design Intent
 
-This package follows the standard source and provider pattern used throughout the configuration family, but scopes it to command-line inputs and switch mapping rules.
+This package keeps command-line parsing as a focused provider over the core configuration system, with an options object that carries raw arguments and switch mappings.
 
 ## Architecture
 
 - ConfigurationBuilder extension methods are the user-facing entry point.
-- ConfigurationCommandLineSource captures raw arguments and optional switch mappings.
+- ConfigurationCommandLineOptions captures raw arguments and optional switch mappings.
 - ConfigurationCommandLineProvider turns normalized arguments into configuration keys and values.
 
 ## Layout Example

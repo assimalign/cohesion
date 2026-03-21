@@ -1,13 +1,15 @@
 using System;
 
-namespace Assimalign.Extensions.Configuration.Providers;
-
+namespace Assimalign.Cohesion.Configuration.Xml;
 
 internal sealed class XmlConfigurationElementTextContent
 {
-    public XmlConfigurationElementTextContent(string textContent, int? linePosition, int? lineNumber)
+    public XmlConfigurationElementTextContent(
+        string textContent,
+        int? lineNumber,
+        int? linePosition)
     {
-        ThrowHelper.ThrowIfNull(textContent);
+        ArgumentNullException.ThrowIfNull(textContent);
 
         TextContent = textContent;
         LineNumber = lineNumber;

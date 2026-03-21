@@ -1,121 +1,197 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
+namespace Assimalign.Cohesion.Configuration;
 
-namespace  Assimalign.Cohesion.Configuration.Providers
+/// <summary>
+/// Loads configuration values from process environment variables.
+/// </summary>
+public class ConfigurationEnvironmentVariablesProvider : ConfigurationProvider
 {
+    private const string CustomConnectionStringPrefix = "CUSTOMCONNSTR_";
+    private const string DoubleUnderscore = "__";
+    private const string MySqlConnectionStringPrefix = "MYSQLCONNSTR_";
+    private const string NormalizedDelimiter = ":";
+    private const string SqlAzureConnectionStringPrefix = "SQLAZURECONNSTR_";
+    private const string SqlConnectionStringPrefix = "SQLCONNSTR_";
+
+    private readonly string _name;
+    private readonly string _prefix;
+
     /// <summary>
-    /// An environment variable based <see cref="ConfigurationProvider"/>.
+    /// Creates an environment variables provider without a prefix filter.
     /// </summary>
-    public class ConfigurationEnvironmentVariablesProvider : ConfigurationProvider
+    public ConfigurationEnvironmentVariablesProvider() : this(string.Empty)
     {
-        private const string MySqlServerPrefix = "MYSQLCONNSTR_";
-        private const string SqlAzureServerPrefix = "SQLAZURECONNSTR_";
-        private const string SqlServerPrefix = "SQLCONNSTR_";
-        private const string CustomPrefix = "CUSTOMCONNSTR_";
+    }
 
-        private readonly string _prefix;
+    /// <summary>
+    /// Creates an environment variables provider with an optional prefix filter.
+    /// </summary>
+    /// <param name="prefix">The prefix that environment variable names must start with.</param>
+    public ConfigurationEnvironmentVariablesProvider(string? prefix)
+    {
+        _prefix = prefix ?? string.Empty;
+        _name = string.IsNullOrEmpty(_prefix)
+            ? nameof(ConfigurationEnvironmentVariablesProvider)
+            : $"{nameof(ConfigurationEnvironmentVariablesProvider)}[{_prefix}]";
+    }
 
-        /// <summary>
-        /// Initializes a new instance.
-        /// </summary>
-        public ConfigurationEnvironmentVariablesProvider() =>
-            _prefix = string.Empty;
+    /// <inheritdoc />
+    public override string Name => _name;
 
-        /// <summary>
-        /// Initializes a new instance with the specified prefix.
-        /// </summary>
-        /// <param name="prefix">A prefix used to filter the environment variables.</param>
-        public ConfigurationEnvironmentVariablesProvider(string prefix) =>
-            _prefix = prefix ?? string.Empty;
+    /// <inheritdoc />
+    protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
+    {
+        Load(Environment.GetEnvironmentVariables(), entries, _prefix, cancellationToken);
+        return Task.CompletedTask;
+    }
 
-        /// <summary>
-        /// Loads the environment variables.
-        /// </summary>
-        public override void Load() =>
-            Load(Environment.GetEnvironmentVariables());
+    internal static void Load(
+        IDictionary environmentVariables,
+        IDictionary<Path, string?> entries,
+        string? prefix,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(environmentVariables);
+        ArgumentNullException.ThrowIfNull(entries);
 
-        /// <summary>
-        /// Generates a string representing this provider name and relevant details.
-        /// </summary>
-        /// <returns> The configuration name. </returns>
-        public override string ToString()
-            => $"{GetType().Name} Prefix: '{_prefix}'";
+        prefix ??= string.Empty;
 
-        internal void Load(IDictionary envVariables)
+        foreach (DictionaryEntry entry in environmentVariables)
         {
-            var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            IDictionaryEnumerator e = envVariables.GetEnumerator();
-            try
+            if (entry.Key is not string key)
             {
-                while (e.MoveNext())
-                {
-                    DictionaryEntry entry = e.Entry;
-                    string key = (string)entry.Key;
-                    string provider = null;
-                    string prefix;
-
-                    if (key.StartsWith(MySqlServerPrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        prefix = MySqlServerPrefix;
-                        provider = "MySql.Data.MySqlClient";
-                    }
-                    else if (key.StartsWith(SqlAzureServerPrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        prefix = SqlAzureServerPrefix;
-                        provider = "System.Data.SqlClient";
-                    }
-                    else if (key.StartsWith(SqlServerPrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        prefix = SqlServerPrefix;
-                        provider = "System.Data.SqlClient";
-                    }
-                    else if (key.StartsWith(CustomPrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        prefix = CustomPrefix;
-                    }
-                    else if (key.StartsWith(_prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // This prevents the prefix from being normalized.
-                        // We can also do a fast path branch, I guess? No point in reallocating if the prefix is empty.
-                        key = NormalizeKey(key.Substring(_prefix.Length));
-                        data[key] = entry.Value as string;
-
-                        continue;
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    // Add the key-value pair for connection string, and optionally provider name
-                    key = NormalizeKey(key.Substring(prefix.Length));
-                    AddIfPrefixed(data, $"ConnectionStrings:{key}", (string)entry.Value);
-                    if (provider != null)
-                    {
-                        AddIfPrefixed(data, $"ConnectionStrings:{key}_ProviderName", provider);
-                    }
-                }
-            }
-            finally
-            {
-                (e as IDisposable)?.Dispose();
+                continue;
             }
 
-            Data = data;
+            string? value = entry.Value as string ?? entry.Value?.ToString();
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (TryAddConnectionStringEntry(entries, prefix, key, value))
+            {
+                continue;
+            }
+
+            TryAddPrefixedEntry(entries, prefix, key, value);
+        }
+    }
+
+    private static bool TryAddConnectionStringEntry(
+        IDictionary<Path, string?> entries,
+        string prefix,
+        string key,
+        string value)
+    {
+        string? connectionStringPrefix = null;
+        string? providerName = null;
+
+        if (key.StartsWith(MySqlConnectionStringPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            connectionStringPrefix = MySqlConnectionStringPrefix;
+            providerName = "MySql.Data.MySqlClient";
+        }
+        else if (key.StartsWith(SqlAzureConnectionStringPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            connectionStringPrefix = SqlAzureConnectionStringPrefix;
+            providerName = "System.Data.SqlClient";
+        }
+        else if (key.StartsWith(SqlConnectionStringPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            connectionStringPrefix = SqlConnectionStringPrefix;
+            providerName = "System.Data.SqlClient";
+        }
+        else if (key.StartsWith(CustomConnectionStringPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            connectionStringPrefix = CustomConnectionStringPrefix;
         }
 
-        private void AddIfPrefixed(Dictionary<string, string> data, string key, string value)
+        if (connectionStringPrefix is null)
         {
-            if (key.StartsWith(_prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                key = key.Substring(_prefix.Length);
-                data[key] = value;
-            }
+            return false;
         }
 
-        private static string NormalizeKey(string key) => key.Replace("__", ConfigurationPath.KeyDelimiter);
+        string normalizedKey = NormalizeKey(key.AsSpan(connectionStringPrefix.Length));
+
+        if (string.IsNullOrEmpty(normalizedKey))
+        {
+            return true;
+        }
+
+        AddIfPrefixed(entries, prefix, $"ConnectionStrings:{normalizedKey}", value);
+
+        if (providerName is not null)
+        {
+            AddIfPrefixed(entries, prefix, $"ConnectionStrings:{normalizedKey}_ProviderName", providerName);
+        }
+
+        return true;
+    }
+
+    private static bool TryAddPrefixedEntry(
+        IDictionary<Path, string?> entries,
+        string prefix,
+        string key,
+        string value)
+    {
+        if (!key.AsSpan().StartsWith(prefix.AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string normalizedKey = NormalizeKey(key.AsSpan(prefix.Length));
+
+        if (string.IsNullOrEmpty(normalizedKey))
+        {
+            return false;
+        }
+
+        entries[Path.Parse(normalizedKey)] = value;
+
+        return true;
+    }
+
+    private static void AddIfPrefixed(
+        IDictionary<Path, string?> entries,
+        string prefix,
+        string key,
+        string value)
+    {
+        if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> trimmedKey = key.AsSpan(prefix.Length);
+
+        if (trimmedKey.IsEmpty)
+        {
+            return;
+        }
+
+        entries[Path.Parse(trimmedKey)] = value;
+    }
+
+    private static string NormalizeKey(ReadOnlySpan<char> key)
+    {
+        if (key.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        string value = key.ToString();
+
+        return value.IndexOf(DoubleUnderscore, StringComparison.Ordinal) >= 0
+            ? value.Replace(DoubleUnderscore, NormalizedDelimiter, StringComparison.Ordinal)
+            : value;
     }
 }
