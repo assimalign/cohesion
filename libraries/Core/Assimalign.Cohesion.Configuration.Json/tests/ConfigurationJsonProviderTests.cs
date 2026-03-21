@@ -28,7 +28,6 @@ public class ConfigurationJsonProviderTests
             """);
 
         Configuration configuration = (Configuration)new ConfigurationBuilder()
-
             .AddJsonFile(fileSystem, "settings.json")
             .Build();
 

@@ -18,6 +18,7 @@ Cohesion is a mono repository
 ## Services/Resources
 
 ![Core](https://github.com/assimalign/cohesion/actions/workflows/core.yml/badge.svg?branch=development) 
+![Http](https://github.com/assimalign/cohesion/actions/workflows/http.yml/badge.svg?branch=development) 
 ![Configuration Store](https://github.com/assimalign/cohesion/actions/workflows/configuration-store.yml/badge.svg?branch=development)
 ![API Manager](https://github.com/assimalign/cohesion/actions/workflows/api-manager.yml/badge.svg?branch=development)
 ![Database](https://github.com/assimalign/cohesion/actions/workflows/database.yml/badge.svg?branch=development)
