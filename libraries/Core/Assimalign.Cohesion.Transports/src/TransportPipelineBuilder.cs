@@ -9,6 +9,11 @@ namespace Assimalign.Cohesion.Transports;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Transports.Internal;
 
+/// <summary>
+/// Builds a transport pipeline for a specific connection and context pairing.
+/// </summary>
+/// <typeparam name="TConnection">The transport connection type accepted by the pipeline.</typeparam>
+/// <typeparam name="TContext">The transport context type accepted by the pipeline.</typeparam>
 public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelineBuilder
     where TConnection : ITransportConnection
     where TContext : ITransportConnectionContext
@@ -20,6 +25,11 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
         _middleware = new List<Func<TransportMiddleware, TransportMiddleware>>();
     }
 
+    /// <summary>
+    /// Adds typed middleware to the transport pipeline.
+    /// </summary>
+    /// <param name="middleware">The middleware to add to the pipeline.</param>
+    /// <returns>The current pipeline builder.</returns>
     public TransportPipelineBuilder<TConnection, TContext> Use(
         Func<TConnection, TContext, TransportMiddleware, CancellationToken, Task> middleware)
     {
@@ -37,10 +47,19 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
                 return middleware2.Invoke(connection, context, next, cancellationToken);
             }
 
-            return Task.CompletedTask;
+            return Task.FromException(CreateTypeMismatchException(c, cc));
         });
 
         return this;
+    }
+
+    private static TransportPipelineConfigurationException CreateTypeMismatchException(
+        ITransportConnection connection,
+        ITransportConnectionContext context)
+    {
+        return new TransportPipelineConfigurationException(
+            $"The transport pipeline was configured for connection type '{typeof(TConnection).FullName}' and context type '{typeof(TContext).FullName}', " +
+            $"but received connection type '{connection.GetType().FullName}' and context type '{context.GetType().FullName}'.");
     }
 
     ITransportPipelineBuilder ITransportPipelineBuilder.Use(Func<TransportMiddleware, TransportMiddleware> middleware)

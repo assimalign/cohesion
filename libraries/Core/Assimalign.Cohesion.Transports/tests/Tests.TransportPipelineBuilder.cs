@@ -43,22 +43,37 @@ public class TransportPipelineBuilderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenConnectionTypeDoesNotMatch_ShouldSkipTypedMiddleware()
+    public async Task ExecuteAsync_WhenConnectionTypeDoesNotMatch_ShouldThrowTransportPipelineConfigurationException()
     {
-        bool invoked = false;
         var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
 
         builder.Use((connection, context, next, cancellationToken) =>
-        {
-            invoked = true;
-            return next(connection, context, cancellationToken);
-        });
+            next(connection, context, cancellationToken));
 
         ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
 
-        await pipeline.ExecuteAsync(new AnotherConnection(), new TestContext());
+        var exception = await Assert.ThrowsAsync<TransportPipelineConfigurationException>(() =>
+            pipeline.ExecuteAsync(new AnotherConnection(), new TestContext()));
 
-        Assert.False(invoked);
+        Assert.Contains(typeof(TestConnection).Name, exception.Message);
+        Assert.Contains(typeof(AnotherConnection).Name, exception.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenContextTypeDoesNotMatch_ShouldThrowTransportPipelineConfigurationException()
+    {
+        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+
+        builder.Use((connection, context, next, cancellationToken) =>
+            next(connection, context, cancellationToken));
+
+        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
+
+        var exception = await Assert.ThrowsAsync<TransportPipelineConfigurationException>(() =>
+            pipeline.ExecuteAsync(new TestConnection(), new AnotherContext()));
+
+        Assert.Contains(typeof(TestContext).Name, exception.Message);
+        Assert.Contains(typeof(AnotherContext).Name, exception.Message);
     }
 
     [Fact]
@@ -134,6 +149,14 @@ public class TransportPipelineBuilderTests
     }
 
     private sealed class TestContext : ITransportConnectionContext
+    {
+        public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
+        public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+    }
+
+    private sealed class AnotherContext : ITransportConnectionContext
     {
         public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
