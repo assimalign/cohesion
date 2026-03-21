@@ -1,4 +1,4 @@
-name: Core
+name: hTTP
 
 on:
   push:
