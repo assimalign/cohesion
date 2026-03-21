@@ -12,7 +12,7 @@ internal class ResilienceContextPool : DefaultObjectPool<ResilienceContext, Resi
     }
 
     public ResilienceContext Rent(CancellationToken cancellationToken = default)
-        => Rent(null, cancellationToken);
+        => Rent(default(OperationKey), cancellationToken);
 
     public ResilienceContext Rent(OperationKey operationKey, CancellationToken cancellationToken = default)
         => Rent(operationKey, null, cancellationToken);

@@ -1,45 +1,50 @@
-﻿using System;
+using System;
 
 namespace Assimalign.Cohesion.Resilience;
 
+/// <summary>
+/// Represents a pipeline failure that aggregated one or more strategy failures.
+/// </summary>
 public sealed class ResiliencePipelineFailureException : ResilienceException
 {
-    public ResiliencePipelineFailureException(OperationKey operationKey, string message) 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ResiliencePipelineFailureException"/> class.
+    /// </summary>
+    /// <param name="operationKey">The operation key associated with the failed execution.</param>
+    /// <param name="message">The failure message.</param>
+    public ResiliencePipelineFailureException(OperationKey operationKey, string message)
         : this(operationKey, message, [])
     {
-
     }
 
-    public ResiliencePipelineFailureException(OperationKey operationKey, string message, ResilienceStrategyFailureException[] failures) 
-        : base(message, TryGetAggregateException(failures))
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ResiliencePipelineFailureException"/> class.
+    /// </summary>
+    /// <param name="operationKey">The operation key associated with the failed execution.</param>
+    /// <param name="message">The failure message.</param>
+    /// <param name="failures">The strategy failures collected by the pipeline.</param>
+    public ResiliencePipelineFailureException(
+        OperationKey operationKey,
+        string message,
+        ResilienceStrategyFailureException[] failures)
+        : base(
+            ResilienceErrorCode.PipelineFailure,
+            operationKey,
+            message,
+            TryGetAggregateException(failures))
     {
-        OperationKey = operationKey;
         Failures = failures;
     }
-
-    /// <inheritdoc />
-    public override OperationKey OperationKey { get; }
-
-    /// <inheritdoc />
-    public override ResilienceErrorCode Code { get; } = ResilienceErrorCode.PipelineFailure;
 
     /// <summary>
     /// Gets the collection of failures that occurred during the execution of the resilience pipeline.
     /// </summary>
-    /// <remarks>Use this property to inspect the individual exceptions that were encountered while executing
-    /// the resilience pipeline. Each element in the array represents a distinct failure, which can assist in diagnosing
-    /// issues or understanding the sequence of errors that led to the current state.</remarks>
     public ResilienceStrategyFailureException[] Failures { get; }
-
-
 
     private static Exception? TryGetAggregateException(ResilienceStrategyFailureException[] failures)
     {
-        if (failures.Length == 0)
-        {
-            return null;
-        }
-
-        return new AggregateException(failures);
+        return failures.Length == 0
+            ? null
+            : new AggregateException(failures);
     }
 }

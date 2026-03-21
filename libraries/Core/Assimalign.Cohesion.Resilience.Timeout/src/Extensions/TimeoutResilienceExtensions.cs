@@ -1,30 +1,45 @@
-﻿using System;
+using System;
 
 namespace Assimalign.Cohesion.Resilience;
 
 using Internal;
 
+/// <summary>
+/// Adds timeout resilience strategies to pipeline builders.
+/// </summary>
 public static class TimeoutResilienceExtensions
 {
-    extension(ResiliencePipelineBuilder builder)
+    extension(IResiliencePipelineBuilder builder)
     {
-        public ResiliencePipelineBuilder UseTimeout(Action<TimeoutStrategyOptions> configure)
+        /// <summary>
+        /// Adds a timeout strategy to the pipeline builder.
+        /// </summary>
+        /// <param name="configure">The timeout configuration delegate.</param>
+        /// <returns>The current pipeline builder.</returns>
+        public IResiliencePipelineBuilder UseTimeout(Action<TimeoutStrategyOptions> configure)
         {
-            TimeoutStrategyOptions options = new TimeoutStrategyOptions();
+            TimeoutStrategyOptions options = new();
 
-            ArgumentNullException.ThrowIfNull<Action<TimeoutStrategyOptions>>(configure).Invoke(options);
+            ArgumentNullException.ThrowIfNull(configure);
+            configure.Invoke(options);
 
             return builder.UseStrategy(new TimeoutResilienceStrategy(options));
         }
     }
 
-    extension<TResult>(ResiliencePipelineBuilder<TResult> builder)
+    extension<TResult>(IResiliencePipelineBuilder<TResult> builder)
     {
-        public ResiliencePipelineBuilder<TResult> UseTimeout(Action<TimeoutStrategyOptions> configure)
+        /// <summary>
+        /// Adds a timeout strategy to the generic pipeline builder.
+        /// </summary>
+        /// <param name="configure">The timeout configuration delegate.</param>
+        /// <returns>The current pipeline builder.</returns>
+        public IResiliencePipelineBuilder<TResult> UseTimeout(Action<TimeoutStrategyOptions> configure)
         {
-            TimeoutStrategyOptions options = new TimeoutStrategyOptions();
+            TimeoutStrategyOptions options = new();
 
-            ArgumentNullException.ThrowIfNull<Action<TimeoutStrategyOptions>>(configure).Invoke(options);
+            ArgumentNullException.ThrowIfNull(configure);
+            configure.Invoke(options);
 
             return builder.UseStrategy(new TimeoutResilienceStrategy<TResult>(options));
         }

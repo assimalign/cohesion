@@ -1323,6 +1323,8 @@ public class InMemoryFileSystemTests
         var fileSystem = CreateFileSystem();
         var file = fileSystem.CreateFile("tmp/delete-open-race.dat");
         using var start = new ManualResetEventSlim(false);
+        using var readyForDelete = new ManualResetEventSlim(false);
+        using var deleted = new ManualResetEventSlim(false);
         var unexpected = new ConcurrentQueue<Exception>();
 
         var successfulOpens = 0;
@@ -1332,13 +1334,17 @@ public class InMemoryFileSystemTests
         {
             start.Wait();
 
-            for (int iteration = 0; iteration < 512; iteration++)
+            while (!deleted.IsSet)
             {
                 try
                 {
                     using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
                     _ = stream.Length;
-                    Interlocked.Increment(ref successfulOpens);
+
+                    if (Interlocked.Increment(ref successfulOpens) == 32)
+                    {
+                        readyForDelete.Set();
+                    }
                 }
                 catch (FileNotFoundException)
                 {
@@ -1353,16 +1359,15 @@ public class InMemoryFileSystemTests
 
                 Thread.Yield();
             }
-        });
-
-        var deleter = Task.Run(() =>
-        {
-            start.Wait();
-            _ = SpinWait.SpinUntil(() => Volatile.Read(ref successfulOpens) >= 8, TimeSpan.FromSeconds(2));
 
             try
             {
-                fileSystem.DeleteFile("tmp/delete-open-race.dat");
+                using var stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+                unexpected.Enqueue(new InvalidOperationException("Open succeeded after delete completed."));
+            }
+            catch (FileNotFoundException)
+            {
+                Interlocked.Increment(ref notFoundAfterDelete);
             }
             catch (Exception exception)
             {
@@ -1370,11 +1375,35 @@ public class InMemoryFileSystemTests
             }
         });
 
+        var deleter = Task.Run(() =>
+        {
+            start.Wait();
+
+            try
+            {
+                if (!readyForDelete.Wait(TimeSpan.FromSeconds(2)))
+                {
+                    unexpected.Enqueue(new InvalidOperationException("The opener did not reach the pre-delete phase in time."));
+                    return;
+                }
+
+                fileSystem.DeleteFile("tmp/delete-open-race.dat");
+            }
+            catch (Exception exception)
+            {
+                unexpected.Enqueue(exception);
+            }
+            finally
+            {
+                deleted.Set();
+            }
+        });
+
         start.Set();
         await Task.WhenAll(opener, deleter);
 
         AssertNoUnexpectedExceptions(unexpected);
-        Assert.True(successfulOpens > 0);
+        Assert.True(successfulOpens >= 32);
         Assert.True(notFoundAfterDelete > 0);
         Assert.False(fileSystem.Exists("tmp/delete-open-race.dat"));
         Assert.Throws<FileNotFoundException>(() => file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));

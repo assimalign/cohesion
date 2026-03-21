@@ -1,23 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
-internal class TimeoutResilienceContext : IResilienceContext
+internal sealed class TimeoutResilienceContext : IResilienceContext
 {
-    private readonly CancellationToken _cancellationToken;
-
-    public TimeoutResilienceContext(CancellationToken cancellationToken, bool continueOnCapturedContext, OperationKey? operationKey)
+    public TimeoutResilienceContext(IResilienceContext context, CancellationToken cancellationToken)
     {
-        _cancellationToken = cancellationToken;
-        ContinueOnCapturedContext = continueOnCapturedContext;
-        OperationKey = operationKey;
+        OperationKey = context.OperationKey;
+        ContinueOnCapturedContext = context.ContinueOnCapturedContext;
+        CancellationToken = cancellationToken;
     }
 
+    public OperationKey OperationKey { get; }
+
+    public CancellationToken CancellationToken { get; }
+
     public bool ContinueOnCapturedContext { get; }
-    public OperationKey? OperationKey { get; }
-    public CancellationToken CancellationToken =>  _cancellationToken;
-    public IServiceProvider? ServiceProvider => throw new NotImplementedException();
 }
