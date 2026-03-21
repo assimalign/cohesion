@@ -10,11 +10,14 @@ internal abstract class TimeoutResilienceStrategyBase
 {
     protected TimeoutResilienceStrategyBase(TimeoutStrategyOptions options)
     {
+        TimeProvider = options.TimeProvider;
         DefaultTimeout = options.Timeout;
         TimeoutGenerator = options.TimeoutGenerator;
         OnTimeout = options.OnTimeout;
         CancellationTokenSourcePool = new CancellationTokenSourcePool(options.TimeProvider);
     }
+
+    protected TimeProvider TimeProvider { get; }
 
     protected TimeSpan DefaultTimeout { get; }
 
@@ -47,6 +50,7 @@ internal abstract class TimeoutResilienceStrategyBase
         CancellationTokenSource cancellationTokenSource = CancellationTokenSourcePool.Rent(timeout);
         CancellationToken previousCancellationToken = context.CancellationToken;
         CancellationTokenRegistration registration = default;
+        bool cleanupDeferred = false;
 
         try
         {
@@ -55,27 +59,68 @@ internal abstract class TimeoutResilienceStrategyBase
                 cancellationTokenSource);
 
             IResilienceContext timeoutContext = new TimeoutResilienceContext(context, cancellationTokenSource.Token);
+            Task<TOutcome> executionTask = callback.Invoke(timeoutContext, state).AsTask();
+            Task timeoutTask = Task.Delay(timeout, TimeProvider, CancellationToken.None);
 
-            TOutcome outcome = await callback.Invoke(timeoutContext, state).ConfigureAwait(context.ContinueOnCapturedContext);
+            Task completedTask = await Task.WhenAny(executionTask, timeoutTask).ConfigureAwait(context.ContinueOnCapturedContext);
 
-            bool timedOut = cancellationTokenSource.IsCancellationRequested && !previousCancellationToken.IsCancellationRequested;
-
-            if (!timedOut || !IsOutcomeOperationCancelledException(outcome, out OperationCanceledException? cancelled))
+            if (ReferenceEquals(completedTask, executionTask))
             {
-                return outcome;
+                TOutcome outcome = await executionTask.ConfigureAwait(context.ContinueOnCapturedContext);
+
+                bool timedOut = cancellationTokenSource.IsCancellationRequested && !previousCancellationToken.IsCancellationRequested;
+
+                if (!timedOut || !IsOutcomeOperationCancelledException(outcome, out OperationCanceledException cancelled))
+                {
+                    return outcome;
+                }
+
+                if (OnTimeout is not null)
+                {
+                    await OnTimeout.Invoke(new OnTimeoutArguments(context, timeout)).ConfigureAwait(context.ContinueOnCapturedContext);
+                }
+
+                return error.Invoke(new TimeoutRejectedException(
+                    $"The operation didn't complete within the allowed timeout of '{timeout}'.",
+                    timeout,
+                    cancelled));
             }
 
-            OnTimeoutArguments args = new(context, timeout);
+            cancellationTokenSource.Cancel();
+            cleanupDeferred = true;
+            _ = ObserveLateCompletionAsync(executionTask, registration, cancellationTokenSource);
 
             if (OnTimeout is not null)
             {
-                await OnTimeout.Invoke(args).ConfigureAwait(context.ContinueOnCapturedContext);
+                await OnTimeout.Invoke(new OnTimeoutArguments(context, timeout)).ConfigureAwait(context.ContinueOnCapturedContext);
             }
 
             return error.Invoke(new TimeoutRejectedException(
                 $"The operation didn't complete within the allowed timeout of '{timeout}'.",
-                timeout,
-                cancelled));
+                timeout));
+        }
+        finally
+        {
+            if (!cleanupDeferred)
+            {
+                registration.Dispose();
+                CancellationTokenSourcePool.Return(cancellationTokenSource);
+            }
+        }
+    }
+
+    private async Task ObserveLateCompletionAsync<TOutcome>(
+        Task<TOutcome> executionTask,
+        CancellationTokenRegistration registration,
+        CancellationTokenSource cancellationTokenSource)
+    {
+        try
+        {
+            await executionTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            return;
         }
         finally
         {

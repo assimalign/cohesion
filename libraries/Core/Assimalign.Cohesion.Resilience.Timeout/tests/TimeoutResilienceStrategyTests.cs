@@ -21,9 +21,9 @@ public class TimeoutResilienceStrategyTests
 
         ResilienceException exception = await Should.ThrowAsync<ResilienceException>(async () =>
         {
-            await pipeline.ExecuteAsync<object?>(static async (context, _) =>
+            await pipeline.ExecuteAsync<object?>(static async (_, _) =>
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(100), context.CancellationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
             }).ConfigureAwait(false);
         });
 
