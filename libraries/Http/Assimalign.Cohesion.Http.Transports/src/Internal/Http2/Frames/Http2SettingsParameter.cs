@@ -1,12 +1,5 @@
-﻿using System;
-using System.Buffers;
-using System.Buffers.Binary;
-using System.Collections.Generic;
-using System.Diagnostics;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
-namespace Assimalign.Cohesion.Http.Internal;
-
-// https://www.iana.org/assignments/http2-parameters/http2-parameters.xhtml#settings
 internal enum Http2SettingsParameter : ushort
 {
     SETTINGS_HEADER_TABLE_SIZE = 0x1,

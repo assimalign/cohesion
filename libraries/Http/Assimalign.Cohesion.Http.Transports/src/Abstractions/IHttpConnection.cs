@@ -1,37 +1,25 @@
-﻿using System.Threading;
+using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Transports;
 
-using Transports;
+namespace Assimalign.Cohesion.Http.Transports;
 
 /// <summary>
-/// 
-/// How to use:
-/// <code>
-/// await foreach (var received in ReceiveAsync().WithCancellation(cancellationToken))
-/// {
-///     // TODO: Add HTTP Application code to execute
-///     
-///     await foreach (var sent in SendAsync(received).WithCancellation(cancellationToken))
-///     {
-///         await sent.DisposeAsync();
-///     }
-/// }
-/// </code>
+/// Represents a protocol-specific HTTP connection layered on top of a transport connection.
 /// </summary>
 public interface IHttpConnection : ITransportConnection
 {
     /// <summary>
-    /// Opens the inbound point to point connection that allows reading and writing.
+    /// Opens the HTTP connection context used to receive requests and send responses.
     /// </summary>
-    /// <returns></returns>
+    /// <returns>The opened connection context.</returns>
     IHttpConnectionContext Open();
 
     /// <summary>
-    /// 
+    /// Opens the HTTP connection context used to receive requests and send responses.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">The cancellation token for the open operation.</param>
+    /// <returns>The opened connection context.</returns>
     ValueTask<IHttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default);
 }

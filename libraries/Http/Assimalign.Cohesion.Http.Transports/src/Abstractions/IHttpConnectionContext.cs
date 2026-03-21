@@ -1,40 +1,28 @@
-﻿using System;
-using System.Threading;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Transports;
 
-using Transports;
+namespace Assimalign.Cohesion.Http.Transports;
 
 /// <summary>
-/// 
-/// How to use:
-/// <code>
-/// await foreach (var received in ReceiveAsync().WithCancellation(cancellationToken))
-/// {
-///     // TODO: Add HTTP Application code to execute
-///     
-///     await foreach (var sent in SendAsync(received).WithCancellation(cancellationToken))
-///     {
-///         await sent.DisposeAsync();
-///     }
-/// }
-/// </code>
+/// Represents the active HTTP connection context used to receive exchanges and write responses.
 /// </summary>
 public interface IHttpConnectionContext : ITransportConnectionContext
 {
     /// <summary>
-    /// 
+    /// Receives HTTP exchanges from the underlying connection.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">The cancellation token for enumeration.</param>
+    /// <returns>An asynchronous sequence of received HTTP contexts.</returns>
     IAsyncEnumerable<IHttpContext> ReceiveAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 
+    /// Writes the response state contained by the supplied HTTP context to the underlying connection.
     /// </summary>
-    /// <param name="context"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    IAsyncEnumerable<IHttpContext> SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
+    /// <param name="context">The HTTP context to serialize back to the client.</param>
+    /// <param name="cancellationToken">The cancellation token for the write operation.</param>
+    /// <returns>A task that completes when the response has been written.</returns>
+    ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
 }

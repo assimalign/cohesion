@@ -1,13 +1,9 @@
-﻿namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
-/* https://tools.ietf.org/html/rfc7540#section-6.9
-    +-+-------------------------------------------------------------+
-    |R|              Window Size Increment (31)                     |
-    +-+-------------------------------------------------------------+
-*/
 internal partial class Http2Frame
 {
     public int WindowUpdateSizeIncrement { get; set; }
+
     public void PrepareWindowUpdate(int streamId, int sizeIncrement)
     {
         PayloadLength = 4;

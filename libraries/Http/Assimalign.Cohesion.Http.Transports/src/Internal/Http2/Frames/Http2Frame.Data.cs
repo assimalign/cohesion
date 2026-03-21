@@ -1,14 +1,5 @@
-﻿namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
-/*
-    +---------------+
-    |Pad Length? (8)|
-    +---------------+-----------------------------------------------+
-    |                            Data (*)                         ...
-    +---------------------------------------------------------------+
-    |                           Padding (*)                       ...
-    +---------------------------------------------------------------+
-*/
 internal partial class Http2Frame
 {
     public Http2DataFrameFlags DataFlags
@@ -18,9 +9,13 @@ internal partial class Http2Frame
     }
 
     public bool DataEndStream => (DataFlags & Http2DataFrameFlags.EndStream) == Http2DataFrameFlags.EndStream;
+
     public bool DataHasPadding => (DataFlags & Http2DataFrameFlags.Padded) == Http2DataFrameFlags.Padded;
+
     public byte DataPadLength { get; set; }
+
     private int DataPayloadOffset => DataHasPadding ? 1 : 0;
+
     public int DataPayloadLength => PayloadLength - DataPayloadOffset - DataPadLength;
 
     public void PrepareData(int streamId, byte? padLength = null)

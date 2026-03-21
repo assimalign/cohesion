@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
 internal readonly struct Http2PeerSetting
 {
@@ -18,4 +12,3 @@ internal readonly struct Http2PeerSetting
 
     public uint Value { get; }
 }
-

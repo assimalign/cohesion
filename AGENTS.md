@@ -199,7 +199,7 @@ using Assimalign.Cohesion.Configuration;
 namespace Assimalign.Cohesion.Database;
 ```
 
-**Don's Use global usings**
+**Never use global usings or project-level `<Using Include="...">` items. Add explicit `using` directives in each file instead.**
 
 ## Access Modifiers
 

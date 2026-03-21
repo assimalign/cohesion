@@ -1,25 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
 
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Transports;
 
-internal class Http3Context : IHttpContext
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
+
+internal sealed class Http3Context : TransportHttpContext
 {
-    public HttpVersion Version => throw new NotImplementedException();
-
-    public IHttpSession? Session => throw new NotImplementedException();
-
-    public IHttpRequest? Request => throw new NotImplementedException();
-
-    public IHttpResponse? Response => throw new NotImplementedException();
-
-    public IServiceProvider? ServiceProvider => throw new NotImplementedException();
-
-    public ValueTask DisposeAsync()
+    public Http3Context(Http3Request request, Http3Response response, IHttpConnectionInfo connectionInfo, CancellationToken requestAborted, ITransportConnectionContext streamContext)
+        : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted)
     {
-        throw new NotImplementedException();
+        StreamContext = streamContext;
     }
+
+    public ITransportConnectionContext StreamContext { get; }
 }

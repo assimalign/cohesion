@@ -1,40 +1,46 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// 
+/// Represents the request and response state for a single HTTP exchange.
 /// </summary>
 public interface IHttpContext : IAsyncDisposable
 {
     /// <summary>
-    /// Represents the HTTP Version being used for the context.
+    /// Gets the HTTP version for the current exchange.
     /// </summary>
     HttpVersion Version { get; }
 
     /// <summary>
-    /// Returns the session of the underlying connection.
+    /// Gets the session associated with the current exchange.
     /// </summary>
     IHttpSession Session { get; }
 
     /// <summary>
-    /// Represents the HTTP Request.
+    /// Gets the current request.
     /// </summary>
     IHttpRequest Request { get; }
 
     /// <summary>
-    /// Represents the HTTP Response.
+    /// Gets the current response.
     /// </summary>
-    /// <remarks>
-    /// When creating a custom framework 
-    /// Think of the properties within the <see cref="IHttpContext"/> as a reference
-    /// that carries the data needs to handle the request and response. 
-    /// The actual reading and writing of the response will be done internally.
-    /// </remarks>
     IHttpResponse Response { get; }
 
     /// <summary>
-    /// Gets the Http connection info.
+    /// Gets the transport connection metadata for the current exchange.
     /// </summary>
     IHttpConnectionInfo ConnectionInfo { get; }
+
+    /// <summary>
+    /// Gets a bag of items shared for the lifetime of the exchange.
+    /// </summary>
+    IDictionary<string, object?> Items { get; }
+
+    /// <summary>
+    /// Gets the cancellation token that signals when the request has been aborted.
+    /// </summary>
+    CancellationToken RequestAborted { get; }
 }

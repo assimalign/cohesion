@@ -1,30 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
-internal sealed class Http1Context : IHttpContext
+internal sealed class Http1Context : TransportHttpContext
 {
-
-    internal volatile bool IsDisposed;
-
-    public HttpVersion Version => HttpVersion.Http11;
-    public Http1Request Request { get; set; } = new();
-    public Http1Response Response { get; set; } = new();
-    public Http1Session Session { get; set; } = new();
-    public IServiceProvider ServiceProvider { get; set; }
-
-    IHttpSession IHttpContext.Session => this.Session;
-    IHttpRequest IHttpContext.Request => this.Request;
-    IHttpResponse IHttpContext.Response => this.Response;
-
-
-    public ValueTask DisposeAsync()
+    public Http1Context(Http1Request request, Http1Response response, IHttpConnectionInfo connectionInfo, CancellationToken requestAborted, bool keepAlive)
+        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted)
     {
-        IsDisposed = true;
-        return ValueTask.CompletedTask;
+        KeepAlive = keepAlive;
     }
+
+    public bool KeepAlive { get; set; }
 }

@@ -1,27 +1,22 @@
-﻿using System;
 using System.IO;
 using System.Security.Claims;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
-internal class Http1Request : IHttpRequest
+internal sealed class Http1Request : TransportHttpRequest
 {
-    public HttpPath Path { get; set; }
-    public HttpMethod Method { get; set; }
-    public HttpScheme Scheme  { get; set; }
-
-    public HttpQueryCollection Query { get; } = new();
-    IHttpQueryCollection IHttpRequest.Query => this.Query;
-
-    public HttpHeaderCollection Headers { get; } = new();
-    IHttpHeaderCollection IHttpRequest.Headers => this.Headers;
-
-    public IHttpCookieCollection Cookies => throw new NotImplementedException();
-    public Stream Body { get; set; }
-
-    public HttpHost Host => throw new NotImplementedException();
-
-    public IHttpFormCollection Form => throw new NotImplementedException();
-
-    public ClaimsPrincipal ClaimsPrincipal => throw new NotImplementedException();
+    public Http1Request(
+        HttpHost host,
+        HttpPath path,
+        HttpMethod method,
+        HttpScheme scheme,
+        IHttpQueryCollection query,
+        IHttpHeaderCollection headers,
+        IHttpCookieCollection cookies,
+        IHttpFormCollection form,
+        Stream body,
+        ClaimsPrincipal claimsPrincipal)
+        : base(host, path, method, scheme, query, headers, cookies, form, body, claimsPrincipal)
+    {
+    }
 }

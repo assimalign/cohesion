@@ -1,68 +1,39 @@
-﻿using System;
-using System.Net;
+using System;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 
 namespace Assimalign.Cohesion.Http;
 
-using Cohesion.Internal;
-
+/// <summary>
+/// Represents an HTTP host value.
+/// </summary>
 [DebuggerDisplay("{Value}")]
 public readonly struct HttpHost : IEquatable<HttpHost>
 {
     /// <summary>
-    /// The default constructor.
+    /// Gets an empty host value.
     /// </summary>
-    /// <param name="value"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public HttpHost(string value)
-    {
-        ArgumentNullException.ThrowIfNullOrEmpty(value);
+    public static HttpHost Empty { get; } = new(string.Empty);
 
-        Value = value;
+    /// <summary>
+    /// Initializes a new host value.
+    /// </summary>
+    /// <param name="value">The raw host value.</param>
+    public HttpHost(string? value)
+    {
+        Value = value ?? string.Empty;
     }
 
+    /// <summary>
+    /// Gets the raw host value.
+    /// </summary>
     public string Value { get; }
 
-    //public int? Port { get; }
-    public bool Equals(HttpHost other)
-    {
-        return string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-    }
+    /// <inheritdoc />
+    public bool Equals(HttpHost other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
 
-    #region Overloads
-
-    public override bool Equals(object? obj)
-    {
-        if (obj is  HttpHost other)
-        {
-            return Equals(other);
-        }
-        return false;
-    }
-    public override string ToString()
-    {
-        return Value;
-    }
-    public override int GetHashCode()
-    {
-        return string.GetHashCode(Value, StringComparison.OrdinalIgnoreCase);
-    }
-
-    #endregion
-
-    #region Operators
-
-    public static implicit operator HttpHost(string value)
-    {
-        return new HttpHost(value);
-    }
-
-    public static implicit operator string(HttpHost host)
-    {
-        return host.Value;
-    }
-
-    #endregion
+    public override bool Equals(object? obj) => obj is HttpHost other && Equals(other);
+    public override string ToString() => Value;
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+    public static implicit operator HttpHost(string value) => new(value);
+    public static implicit operator string(HttpHost host) => host.Value;
 }

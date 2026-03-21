@@ -1,9 +1,26 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<ImplicitUsings>disable</ImplicitUsings>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Remove="Internal\Extensions\**\*.cs" />
+		<Compile Remove="Internal\Extensions\BufferExtensions.cs" />
+		<Compile Remove="Internal\Http1\Http1ConnectionListener.cs" />
+		<Compile Remove="Internal\Http1\Http1RequestStream.cs" />
+		<Compile Remove="Internal\Http1\Http1ResponseStream.cs" />
+		<Compile Remove="Internal\Http1\Http1Session.cs" />
+		<Compile Remove="Internal\Http1\MessageBody\**\*.cs" />
+		<Compile Remove="Internal\Http1\Reader\**\*.cs" />
+		<Compile Remove="Internal\Http1\Utilities\**\*.cs" />
+		<Compile Remove="Internal\Http1\Writer\**\*.cs" />
+		<Compile Remove="Internal\Http3\Frames\**\*.cs" />
+		<Compile Remove="Internal\Http3\QPack\**\*.cs" />
+		<Compile Remove="Internal\HttpContext.cs" />
+		<Compile Remove="Internal\HttpServerOptionsInternal.cs" />
+		<Compile Remove="Internal\Transports\HttpTlsServerTransportMiddleware.cs" />
 	</ItemGroup>
 </Project>

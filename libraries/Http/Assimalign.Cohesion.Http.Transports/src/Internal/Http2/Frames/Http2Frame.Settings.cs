@@ -1,19 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
-namespace Assimalign.Cohesion.Http.Internal;
-
-/* https://tools.ietf.org/html/rfc7540#section-6.5.1
-    List of:
-    +-------------------------------+
-    |       Identifier (16)         |
-    +-------------------------------+-------------------------------+
-    |                        Value (32)                             |
-    +---------------------------------------------------------------+
-*/
 internal partial class Http2Frame
 {
     public Http2SettingsFrameFlags SettingsFlags

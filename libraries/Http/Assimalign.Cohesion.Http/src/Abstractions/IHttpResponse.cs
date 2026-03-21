@@ -1,27 +1,29 @@
-﻿using System;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http;
 
+/// <summary>
+/// Represents the mutable response state for an HTTP exchange.
+/// </summary>
 public interface IHttpResponse
 {
     /// <summary>
-    /// 
+    /// Gets or sets the response status code.
     /// </summary>
-    HttpStatusCode StatusCode { get; }
+    HttpStatusCode StatusCode { get; set; }
 
     /// <summary>
-    /// The collection of Response Headers to be sent back to the client.
+    /// Gets the collection of response headers.
     /// </summary>
     IHttpHeaderCollection Headers { get; }
 
     /// <summary>
-    /// Gets the response cookies.
+    /// Gets the collection of response cookies.
     /// </summary>
     IHttpCookieCollection Cookies { get; }
 
     /// <summary>
-    /// 
+    /// Gets or sets the response body stream.
     /// </summary>
-    Stream Body { get; }
+    Stream Body { get; set; }
 }

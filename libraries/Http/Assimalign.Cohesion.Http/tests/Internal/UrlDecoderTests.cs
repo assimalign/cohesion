@@ -3,11 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using Xunit;
 
 namespace Assimalign.Cohesion.Http.Tests;
 
-public class UrlDecoderTest
+public class UrlDecoderTests
 {
     [Theory]
     [MemberData(nameof(PathTestData))]

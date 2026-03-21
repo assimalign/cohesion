@@ -1,9 +1,10 @@
-﻿
 namespace Assimalign.Cohesion.Http.Internal;
 
-internal class HttpInvalidPathException : HttpException
+internal sealed class HttpInvalidPathException : HttpException
 {
-    public HttpInvalidPathException(string message) : base(message) { }
-
-    public override NetworkOsiLayer Layer => throw new System.NotImplementedException();
+    public HttpInvalidPathException(string message)
+        : base(message)
+    {
+        Code = HttpErrorCode.InvalidPath;
+    }
 }

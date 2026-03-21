@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Internal;
 [DebuggerDisplay("{ToString()}")]
 public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
 {
-    private static ReadOnlySpan<KeyValuePair<int, string>> _statusCodes => new KeyValuePair<int, string>[]
+    private static readonly KeyValuePair<int, string>[] StatusCodes =
     {
         // 1xx Information
         new (100, "Continue"), 
@@ -28,7 +28,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
         new (207, "Multi-Status"), 
         new (208, "Already Reported"),
         // 3xx Redirection
-        new (301, "Multiple Choices"),
+        new (300, "Multiple Choices"),
         new (301, "Moved Permanently"),
         new (302, "Found"),
         new (303, "See Other"),
@@ -83,7 +83,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// <summary>
     /// The default constructor.
     /// </summary>
-    /// <param name="statusCode"></param>
+    /// <param name="statusCode">The numeric HTTP status code.</param>
     public HttpStatusCode(int statusCode)
     {
         ArgumentException.ThrowIf(!IsValid(statusCode), $"The provided status code is invalid: '{statusCode}'");
@@ -109,13 +109,13 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     {
         var value = string.Empty;
 
-        for (int i = 0; i < _statusCodes.Length; i++)
+        for (int i = 0; i < StatusCodes.Length; i++)
         {
-            var statusCode = _statusCodes[i];
+            var statusCode = StatusCodes[i];
 
             if (statusCode.Key == Value)
             {
-                value = statusCode.Key + " " + statusCode.Value;
+                return statusCode.Key + " " + statusCode.Value;
             }
         }
 
@@ -142,18 +142,18 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     #region Operators
 
     /// <summary>
-    /// 
+    /// Converts a numeric status code into a <see cref="HttpStatusCode"/> value.
     /// </summary>
-    /// <param name="statusCode"></param>
+    /// <param name="statusCode">The numeric HTTP status code.</param>
     public static implicit operator HttpStatusCode(int statusCode)
     {
         return new HttpStatusCode(statusCode);
     }
 
     /// <summary>
-    /// 
+    /// Converts an <see cref="HttpStatusCode"/> value into its numeric representation.
     /// </summary>
-    /// <param name="statusCode"></param>
+    /// <param name="statusCode">The status code to convert.</param>
     public static implicit operator int(HttpStatusCode statusCode)
     {
         return statusCode.Value;
@@ -175,6 +175,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     public static HttpStatusCode PartialContent => 206;
     public static HttpStatusCode MultiStatus => 207;
     public static HttpStatusCode AlreadyReported => 208;
+    public static HttpStatusCode MultipleChoices => 300;
     public static HttpStatusCode MovedPermanently => 301;
     public static HttpStatusCode Found => 302;
     public static HttpStatusCode SeeOther => 303;
@@ -205,6 +206,7 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     public static HttpStatusCode UnProcessableEntity => 422;
     public static HttpStatusCode Locked => 423;
     public static HttpStatusCode FailedDependency => 424;
+    public static HttpStatusCode TooEarly => 425;
     public static HttpStatusCode UpgradeRequired => 426;
     public static HttpStatusCode PreconditionRequired => 428;
     public static HttpStatusCode TooManyRequests => 429;
@@ -226,14 +228,14 @@ public readonly struct HttpStatusCode : IEquatable<HttpStatusCode>
     /// <summary>
     /// Checks whether the numeric <paramref name="statusCode"/> is valid.
     /// </summary>
-    /// <param name="statusCode"></param>
-    /// <returns></returns>
+    /// <param name="statusCode">The numeric status code to validate.</param>
+    /// <returns><see langword="true"/> when the supplied code is known; otherwise <see langword="false"/>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsValid(int statusCode)
     {
-        for (int i = 0; i < _statusCodes.Length; i++)
+        for (int i = 0; i < StatusCodes.Length; i++)
         {
-            if (_statusCodes[i].Key == statusCode)
+            if (StatusCodes[i].Key == statusCode)
             {
                 return true;
             }

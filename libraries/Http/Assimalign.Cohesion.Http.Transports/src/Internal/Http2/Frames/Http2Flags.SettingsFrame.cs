@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
 [Flags]
 internal enum Http2SettingsFrameFlags : byte

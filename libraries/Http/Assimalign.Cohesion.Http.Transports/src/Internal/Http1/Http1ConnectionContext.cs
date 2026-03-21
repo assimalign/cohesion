@@ -1,27 +1,46 @@
-﻿using Assimalign.Cohesion.Transports;
-using System;
 using System.Collections.Generic;
-using System.Net;
-using System.Text;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http.Internal;
+using Assimalign.Cohesion.Transports;
 
-internal class Http1ConnectionContext : IHttpConnectionContext
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
+
+internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
-    public EndPoint LocalEndPoint { get; init; }
-    public EndPoint RemoteEndPoint { get; init; }
-    public ITransportConnectionPipe Pipe { get; init; }
-    public IDictionary<string, object?> Items { get; init; }
-
-
-    public IAsyncEnumerable<IHttpContext> ReceiveAsync(CancellationToken cancellationToken = default)
+    public Http1ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
+        : base(transportContext, isSecure)
     {
-        throw new NotImplementedException();
     }
 
-    public IAsyncEnumerable<IHttpContext> SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            Http1Context? context = await Http1MessageReader.ReadRequestAsync(Stream, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), cancellationToken).ConfigureAwait(false);
+
+            if (context is null)
+            {
+                yield break;
+            }
+
+            yield return context;
+
+            if (!context.KeepAlive)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public override ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    {
+        if (context is not Http1Context http1Context)
+        {
+            throw new System.InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
+        }
+
+        return Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken);
     }
 }

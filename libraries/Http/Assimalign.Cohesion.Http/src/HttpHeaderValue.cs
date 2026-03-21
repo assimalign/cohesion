@@ -41,14 +41,9 @@ public readonly partial struct HttpHeaderValue :
     #region Properties
 
     /// <summary>
-    /// 
+    /// Gets the header value rendered as a comma-separated string.
     /// </summary>
-    public string? Value => _values switch
-    {
-        string str => str,
-        string[] strArr => string.Join(';', strArr),
-        _ => null
-    };
+    public string Value => GetStringValue() ?? string.Empty;
 
     public bool IsEmpty
     {
@@ -594,9 +589,9 @@ public readonly partial struct HttpHeaderValue :
     /// Returns <c>null</c> where <see cref="HttpHeaderValue"/> has been initialized from an empty string array or is <see cref="HttpHeaderValue.Empty"/>.
     /// </remarks>
     /// <param name="values">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
-    public static implicit operator string?(HttpHeaderValue values)
+    public static implicit operator string(HttpHeaderValue values)
     {
-        return values.GetStringValue();
+        return values.Value;
     }
 
     /// <summary>
@@ -739,7 +734,7 @@ public readonly partial struct HttpHeaderValue :
     /// <returns>A string representation of the value of the current <see cref="HttpHeaderValue"/> object.</returns>
     public override string ToString()
     {
-        return GetStringValue() ?? string.Empty;
+        return Value;
     }
 
     /// <summary>

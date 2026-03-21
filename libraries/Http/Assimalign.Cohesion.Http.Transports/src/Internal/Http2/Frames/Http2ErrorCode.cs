@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
 internal enum Http2ErrorCode : uint
 {

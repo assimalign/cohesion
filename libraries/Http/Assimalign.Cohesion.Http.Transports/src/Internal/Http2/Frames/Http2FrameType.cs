@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
 internal enum Http2FrameType : byte
 {
@@ -11,5 +11,5 @@ internal enum Http2FrameType : byte
     Ping = 0x6,
     GoAway = 0x7,
     WindowUpdate = 0x8,
-    Continuation = 0x9
+    Continuation = 0x9,
 }

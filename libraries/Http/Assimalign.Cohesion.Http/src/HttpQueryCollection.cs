@@ -1,218 +1,173 @@
-﻿using System;
-using System.Linq;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Http;
 
-
-public sealed partial class HttpQueryCollection : IHttpQueryCollection
+/// <summary>
+/// Provides a mutable collection of parsed query-string values.
+/// </summary>
+public sealed class HttpQueryCollection : IHttpQueryCollection
 {
-    private static readonly HttpQueryKey[] EmptyKeys = Array.Empty<HttpQueryKey>();
-    private static readonly HttpQueryValue[] EmptyValues = Array.Empty<HttpQueryValue>();
-    private static readonly IEnumerator<KeyValuePair<HttpQueryKey, HttpQueryValue>> EmptyIEnumeratorType = default(Enumerator);
-    private static readonly IEnumerator EmptyIEnumerator = default(Enumerator);
+    private readonly Dictionary<HttpQueryKey, HttpQueryValue> _store;
 
-    private Dictionary<HttpQueryKey, HttpQueryValue>? store;
+    /// <summary>
+    /// Initializes an empty query collection.
+    /// </summary>
+    public HttpQueryCollection()
+    {
+        _store = new Dictionary<HttpQueryKey, HttpQueryValue>();
+    }
 
-    public HttpQueryCollection() { }
+    /// <summary>
+    /// Initializes a query collection with the specified initial capacity.
+    /// </summary>
+    /// <param name="capacity">The expected entry capacity.</param>
     public HttpQueryCollection(int capacity)
     {
-        EnsureStore(capacity);
+        _store = new Dictionary<HttpQueryKey, HttpQueryValue>(capacity);
     }
+
+    /// <summary>
+    /// Initializes a query collection from an existing store.
+    /// </summary>
+    /// <param name="store">The backing store to wrap.</param>
     public HttpQueryCollection(Dictionary<HttpQueryKey, HttpQueryValue>? store)
     {
-        this.store = store;
+        _store = store ?? new Dictionary<HttpQueryKey, HttpQueryValue>();
     }
 
-
+    /// <summary>
+    /// Gets or sets the value associated with the supplied query key.
+    /// </summary>
+    /// <param name="key">The query key.</param>
     public HttpQueryValue this[HttpQueryKey key]
     {
-        get
-        {
-            if (store == null)
-            {
-                return HttpQueryValue.Empty;
-            }
-            if (TryGetValue(key, out var value))
-            {
-                return value;
-            }
-            return HttpQueryValue.Empty;
-        }
+        get => TryGetValue(key, out HttpQueryValue value) ? value : HttpQueryValue.Empty;
         set
         {
-            if (key == null)
-            {
-                throw new ArgumentNullException("key");
-            }
             ThrowIfReadOnly();
-            //if (value.Count == 0)
-            //{
-            //    store?.Remove(key);
-            //    return;
-            //}
-            EnsureStore(1);
-            store![key] = value;
+            _store[key] = value;
         }
     }
 
-    public ICollection<HttpQueryKey> Keys => store == null ? EmptyKeys : store!.Keys;
-    public ICollection<HttpQueryValue> Values => store == null ? EmptyValues : store!.Values;
+    /// <summary>
+    /// Gets the query keys present in the collection.
+    /// </summary>
+    public ICollection<HttpQueryKey> Keys => _store.Keys;
 
-    public int Count => store?.Count ?? 0;
+    /// <summary>
+    /// Gets the query values present in the collection.
+    /// </summary>
+    public ICollection<HttpQueryValue> Values => _store.Values;
+
+    /// <inheritdoc />
+    public int Count => _store.Count;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the collection can be modified.
+    /// </summary>
     public bool IsReadOnly { get; set; }
 
+    /// <summary>
+    /// Adds a query entry to the collection.
+    /// </summary>
+    /// <param name="key">The query key to add.</param>
+    /// <param name="value">The query value to add.</param>
     public void Add(HttpQueryKey key, HttpQueryValue value)
     {
         ThrowIfReadOnly();
-        EnsureStore(1);
-        store!.Add(key, value);
+        _store.Add(key, value);
     }
+
+    /// <summary>
+    /// Adds a query entry to the collection.
+    /// </summary>
+    /// <param name="item">The query entry to add.</param>
     public void Add(KeyValuePair<HttpQueryKey, HttpQueryValue> item)
     {
         ThrowIfReadOnly();
-        EnsureStore(1);
-        store!.Add(item.Key, item.Value);
+        _store.Add(item.Key, item.Value);
     }
+
+    /// <summary>
+    /// Removes all query entries from the collection.
+    /// </summary>
     public void Clear()
     {
         ThrowIfReadOnly();
-        store?.Clear();
+        _store.Clear();
     }
-    public bool Contains(KeyValuePair<HttpQueryKey, HttpQueryValue> item)
-    {
-        if (store == null || !store!.TryGetValue(item.Key, out var value) || value != item.Value)
-        {
-            return false;
-        }
-        return true;
-    }
+
+    /// <summary>
+    /// Determines whether the collection contains the supplied entry.
+    /// </summary>
+    /// <param name="item">The entry to locate.</param>
+    /// <returns><see langword="true"/> when the entry exists; otherwise <see langword="false"/>.</returns>
+    public bool Contains(KeyValuePair<HttpQueryKey, HttpQueryValue> item) =>
+        _store.TryGetValue(item.Key, out HttpQueryValue value) && value == item.Value;
+
+    /// <inheritdoc />
     public bool ContainsKey(HttpQueryKey key)
     {
-        if (store == null)
-        {
-            return false;
-        }
-        return store!.ContainsKey(key);
+        return _store.ContainsKey(key);
     }
+
+    /// <summary>
+    /// Copies the collection entries into the supplied destination array.
+    /// </summary>
+    /// <param name="array">The destination array.</param>
+    /// <param name="arrayIndex">The zero-based destination index.</param>
     public void CopyTo(KeyValuePair<HttpQueryKey, HttpQueryValue>[] array, int arrayIndex)
     {
-        if (store == null)
-        {
-            return;
-        }
-        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> item in store!)
-        {
-            KeyValuePair<HttpQueryKey, HttpQueryValue> keyValuePair = (array[arrayIndex] = item);
-            arrayIndex++;
-        }
+        ((ICollection<KeyValuePair<HttpQueryKey, HttpQueryValue>>)_store).CopyTo(array, arrayIndex);
     }
+
+    /// <summary>
+    /// Removes the entry associated with the supplied key.
+    /// </summary>
+    /// <param name="key">The query key to remove.</param>
+    /// <returns><see langword="true"/> when an entry was removed; otherwise <see langword="false"/>.</returns>
     public bool Remove(HttpQueryKey key)
     {
         ThrowIfReadOnly();
-        if (store == null)
-        {
-            return false;
-        }
-        return store!.Remove(key);
+        return _store.Remove(key);
     }
+
+    /// <summary>
+    /// Removes the supplied entry from the collection.
+    /// </summary>
+    /// <param name="item">The entry to remove.</param>
+    /// <returns><see langword="true"/> when the entry was removed; otherwise <see langword="false"/>.</returns>
     public bool Remove(KeyValuePair<HttpQueryKey, HttpQueryValue> item)
     {
         ThrowIfReadOnly();
-        if (store == null)
-        {
-            return false;
-        }
-        if (store!.TryGetValue(item.Key, out var value) && item.Value == value)
-        {
-            return store!.Remove(item.Key);
-        }
-        return false;
+        return ((ICollection<KeyValuePair<HttpQueryKey, HttpQueryValue>>)_store).Remove(item);
     }
+
+    /// <inheritdoc />
     public bool TryGetValue(HttpQueryKey key, [MaybeNullWhen(false)] out HttpQueryValue value)
     {
-        if (store == null)
-        {
-            value = default(HttpQueryValue);
-            return false;
-        }
-        return store!.TryGetValue(key, out value);
+        return _store.TryGetValue(key, out value);
     }
 
-    //private static ref HttpQueryValue GetValueRefOrNullRef(IHttpCookieCollection collection, HttpQueryKey key) 
-    //{
-    //    return ref dictionary.FindValue(key);
-    //}
-
-
+    /// <inheritdoc />
     public IEnumerator<KeyValuePair<HttpQueryKey, HttpQueryValue>> GetEnumerator()
     {
-        if (store == null || store!.Count == 0)
-        {
-            return default(Enumerator);
-        }
-        return new Enumerator(store!.GetEnumerator());
+        return _store.GetEnumerator();
     }
+
     IEnumerator IEnumerable.GetEnumerator()
     {
-        if (store == null || store!.Count == 0)
-        {
-            return EmptyIEnumerator;
-        }
-        return store!.GetEnumerator();
+        return GetEnumerator();
     }
 
-
-    [MemberNotNull("store")]
-    private void EnsureStore(int capacity)
-    {
-        if (store == null)
-        {
-            store = new Dictionary<HttpQueryKey, HttpQueryValue>(capacity);
-        }
-    }
     private void ThrowIfReadOnly()
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The response headers cannot be modified because the response has already started.");
-        }
-    }
-
-
-    private struct Enumerator : IEnumerator<KeyValuePair<HttpQueryKey, HttpQueryValue>>, IEnumerator, IDisposable
-    {
-        private Dictionary<HttpQueryKey, HttpQueryValue>.Enumerator enumerator;
-        private readonly bool isNotEmpty;
-
-        public KeyValuePair<HttpQueryKey, HttpQueryValue> Current
-        {
-            get
-            {
-                if (isNotEmpty)
-                {
-                    return enumerator.Current;
-                }
-                return default(KeyValuePair<HttpQueryKey, HttpQueryValue>);
-            }
-        }
-
-        object IEnumerator.Current => Current;
-        internal Enumerator(Dictionary<HttpQueryKey, HttpQueryValue>.Enumerator dictionaryEnumerator)
-        {
-            enumerator = dictionaryEnumerator;
-            isNotEmpty = true;
-        }
-        public bool MoveNext() => isNotEmpty ? enumerator.MoveNext() : false;
-        public void Dispose() { }
-        void IEnumerator.Reset()
-        {
-            if (isNotEmpty)
-            {
-                ((IEnumerator)enumerator).Reset();
-            }
+            throw new InvalidOperationException("The query collection cannot be modified because it is read-only.");
         }
     }
 }

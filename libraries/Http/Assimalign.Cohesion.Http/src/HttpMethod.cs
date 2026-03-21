@@ -1,334 +1,93 @@
-﻿using System;
-using System.Linq;
+using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Http;
 
 using Assimalign.Cohesion.Internal;
 
+/// <summary>
+/// Represents an HTTP method token.
+/// </summary>
 [DebuggerDisplay("{Value}")]
 public readonly struct HttpMethod : IEquatable<HttpMethod>
 {
-    const int _length = 16;
-
-    #region Constructors
+    private const int MaximumLength = 32;
+    private static readonly SearchValues<char> AllowedCharacters = SearchValues.Create("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
     /// <summary>
-    /// The default constructor
+    /// Initializes a new HTTP method.
     /// </summary>
-    /// <param name="value"></param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <param name="value">The method token.</param>
     public HttpMethod(string? value)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(value);
 
-        if (value.Length > _length)
+        if (value.Length > MaximumLength)
         {
-            throw new ArgumentException($"The method is too long. Must be under {_length} characters.");
+            throw new ArgumentException($"The method is too long. It must be {MaximumLength} characters or fewer.", nameof(value));
         }
 
-        ReadOnlySpan<char> source = value;
-        Span<char> destination = stackalloc char[source.Length];
-
-        for (int i = 0; i < source.Length; i++)
+        if (value.AsSpan().ContainsAnyExcept(AllowedCharacters))
         {
-            var c = source[i];
-
-            if (!char.IsLetterOrDigit(c))
-            {
-                ThrowHelper.InvalidHttpMethod(value);
-            }
-            if (char.IsLower(c))
-            {
-                c = char.ToUpper(c);
-            }
-            destination[i] = c;
+            ThrowHelper.InvalidHttpMethod(value);
         }
 
-        Value = destination.ToString();
+        Value = value.ToUpperInvariant();
     }
 
-    #endregion
-
-    #region Properties
-
     /// <summary>
-    /// The raw http value.
+    /// Gets the raw HTTP method token.
     /// </summary>
-    public string? Value { get; } 
+    public string Value { get; }
 
-    /// <summary>
-    /// HTTP "CONNECT" method.
-    /// </summary>
-    public static readonly HttpMethod Connect = "CONNECT";
+    public static HttpMethod Connect { get; } = new("CONNECT");
+    public static HttpMethod Delete { get; } = new("DELETE");
+    public static HttpMethod Get { get; } = new("GET");
+    public static HttpMethod Head { get; } = new("HEAD");
+    public static HttpMethod Options { get; } = new("OPTIONS");
+    public static HttpMethod Patch { get; } = new("PATCH");
+    public static HttpMethod Post { get; } = new("POST");
+    public static HttpMethod Put { get; } = new("PUT");
+    public static HttpMethod Trace { get; } = new("TRACE");
 
-    /// <summary>
-    /// HTTP "DELETE" method.
-    /// </summary>
-    public static readonly HttpMethod Delete = "DELETE";
-
-    /// <summary>
-    /// HTTP "GET" method.
-    /// </summary>
-    public static readonly HttpMethod Get = "GET";
-
-    /// <summary>
-    /// HTTP "HEAD" method.
-    /// </summary>
-    public static readonly HttpMethod Head = "HEAD";
-
-    /// <summary>
-    /// HTTP "OPTIONS" method.
-    /// </summary>
-    public static readonly HttpMethod Options = "OPTIONS";
-
-    /// <summary>
-    /// HTTP "PATCH" method.
-    /// </summary>
-    public static readonly HttpMethod Patch = "PATCH";
-
-    /// <summary>
-    /// HTTP "POST" method.
-    /// </summary>
-    public static readonly HttpMethod Post = "POST";
-
-    /// <summary>
-    /// HTTP "PUT" method.
-    /// </summary>
-    public static readonly HttpMethod Put = "PUT";
-
-    /// <summary>
-    /// HTTP "TRACE" method.
-    /// </summary>
-    public static readonly HttpMethod Trace = "TRACE";
-
-    #endregion
-
-    #region Methods
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="other"></param>
-    /// <returns></returns>
+    /// <inheritdoc />
     public bool Equals(HttpMethod other)
     {
-        return Equals(this, other);
+        return string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// Returns a value that indicates if the HTTP request method is CONNECT.
+    /// Returns a canonicalized method when one of the standard methods matches.
     /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is CONNECT; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsConnect(string method)
+    /// <param name="method">The method to canonicalize.</param>
+    /// <returns>A canonicalized method value.</returns>
+    public static HttpMethod GetCanonicalizedValue(string method) => method.ToUpperInvariant() switch
     {
-        return Equals(Connect, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is DELETE.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is DELETE; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsDelete(string method)
-    {
-        return Equals(Delete, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is GET.
-    /// </summary>
-    /// <param name="method">The  HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is GET; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsGet(string method)
-    {
-        return Equals(Get, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is HEAD.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is HEAD; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsHead(string method)
-    {
-        return Equals(Head, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is OPTIONS.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is OPTIONS; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsOptions(string method)
-    {
-        return Equals(Options, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is PATCH.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is PATCH; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsPatch(string method)
-    {
-        return Equals(Patch, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is POST.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is POST; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsPost(string method)
-    {
-        return Equals(Post, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is PUT.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is PUT; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsPut(string method)
-    {
-        return Equals(Put, method);
-    }
-
-    /// <summary>
-    /// Returns a value that indicates if the HTTP request method is TRACE.
-    /// </summary>
-    /// <param name="method">The HTTP request method.</param>
-    /// <returns>
-    /// <see langword="true" /> if the method is TRACE; otherwise, <see langword="false" />.
-    /// </returns>
-    public static bool IsTrace(string method)
-    {
-        return Equals(Trace, method);
-    }
-
-    /// <summary>
-    ///  Returns the equivalent static instance, or the original instance if none match. 
-    ///  This conversion is optional but allows for performance optimizations when comparing method values elsewhere.
-    /// </summary>
-    /// <param name="method"></param>
-    /// <returns></returns>
-    public static HttpMethod GetCanonicalizedValue(string method) => method switch
-    {
-        string _ when IsGet(method) => Get,
-        string _ when IsPost(method) => Post,
-        string _ when IsPut(method) => Put,
-        string _ when IsDelete(method) => Delete,
-        string _ when IsOptions(method) => Options,
-        string _ when IsHead(method) => Head,
-        string _ when IsPatch(method) => Patch,
-        string _ when IsTrace(method) => Trace,
-        string _ when IsConnect(method) => Connect,
-        string _ => method
+        "GET" => Get,
+        "POST" => Post,
+        "PUT" => Put,
+        "DELETE" => Delete,
+        "OPTIONS" => Options,
+        "HEAD" => Head,
+        "PATCH" => Patch,
+        "TRACE" => Trace,
+        "CONNECT" => Connect,
+        _ => new HttpMethod(method),
     };
 
-    /// <summary>
-    /// Returns a value that indicates if the HTTP methods are the same.
-    /// </summary>
-    /// <param name="methodA">The first HTTP request method to compare.</param>
-    /// <param name="methodB">The second HTTP request method to compare.</param>
-    /// <returns>
-    /// <see langword="true" /> if the methods are the same; otherwise, <see langword="false" />.
-    /// </returns>
-    private static bool Equals(string? methodA, string? methodB)
-    {
-        return object.ReferenceEquals(methodA, methodB) || StringComparer.OrdinalIgnoreCase.Equals(methodA, methodB);
-    }
-
-    #endregion
-
-    #region Overloads
+    /// <inheritdoc />
+    public override string ToString() => Value;
 
     /// <inheritdoc />
-    public override string? ToString()
-    {
-        return Value;
-    }
+    public override bool Equals([NotNullWhen(true)] object? obj) => obj is HttpMethod method && Equals(method);
 
     /// <inheritdoc />
-    public override bool Equals([NotNullWhen(true)] object? obj)
-    {
-        if (obj is HttpMethod method)
-        {
-            return Equals(method);
-        }
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
-        return false;
-    }
-
-    /// <inheritdoc />
-    public override int GetHashCode()
-    {
-        return Value?.GetHashCode() ?? string.Empty.GetHashCode();
-    }
-
-    #endregion
-
-    #region Operators
-
-    /// <summary>
-    /// Implicit conversion from string to HttpMethod.
-    /// </summary>
-    /// <param name="method"></param>
-    public static implicit operator HttpMethod(string method)
-    {
-        return new HttpMethod(method);
-    }
-
-    /// <summary>
-    /// Implicit conversion from HttpMethod to string.
-    /// </summary>
-    /// <param name="method"></param>
-    public static implicit operator string?(HttpMethod method)
-    {
-        return method.Value;
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    public static bool operator ==(HttpMethod left, HttpMethod right)
-    {
-        return Equals(left!, right!);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    public static bool operator !=(HttpMethod left, HttpMethod right)
-    {
-        return !Equals(left!, right!);
-    }
-
-    #endregion
+    public static implicit operator HttpMethod(string method) => new(method);
+    public static implicit operator string(HttpMethod method) => method.Value;
+    public static bool operator ==(HttpMethod left, HttpMethod right) => left.Equals(right);
+    public static bool operator !=(HttpMethod left, HttpMethod right) => !left.Equals(right);
 }

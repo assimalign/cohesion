@@ -1,46 +1,43 @@
-﻿using System;
+using System;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
 
 internal sealed class HPackDynamicTable
 {
-    private HPackHeaderField[] buffer;
-    private int maxSize;
-    private int size;
-    private int count;
-    private int insertIndex;
-    private int removeIndex;
+    private HPackHeaderField[] _buffer;
+    private int _maxSize;
+    private int _size;
+    private int _count;
+    private int _insertIndex;
+    private int _removeIndex;
 
     public HPackDynamicTable(int maxSize)
     {
-        this.buffer = new HPackHeaderField[maxSize / HPackHeaderField.RfcOverhead];
-        this.maxSize = maxSize;
+        _buffer = new HPackHeaderField[Math.Max(1, maxSize / HPackHeaderField.RfcOverhead)];
+        _maxSize = maxSize;
     }
 
-    public int Count => count;
+    public int Count => _count;
 
-    public int Size => size;
-
-    public int MaxSize => maxSize;
+    public int MaxSize => _maxSize;
 
     public ref readonly HPackHeaderField this[int index]
     {
         get
         {
-            if (index >= count)
+            if ((uint)index >= _count)
             {
                 throw new IndexOutOfRangeException();
             }
 
-            index = insertIndex - index - 1;
+            index = _insertIndex - index - 1;
 
             if (index < 0)
             {
-                // _buffer is circular; wrap the index back around.
-                index += buffer.Length;
+                index += _buffer.Length;
             }
 
-            return ref buffer[index];
+            return ref _buffer[index];
         }
     }
 
@@ -54,56 +51,49 @@ internal sealed class HPackDynamicTable
         int entryLength = HPackHeaderField.GetLength(name.Length, value.Length);
         EnsureAvailable(entryLength);
 
-        if (entryLength > maxSize)
+        if (entryLength > _maxSize)
         {
-            // http://httpwg.org/specs/rfc7541.html#rfc.section.4.4
-            // It is not an error to attempt to add an entry that is larger than the maximum size;
-            // an attempt to add an entry larger than the maximum size causes the table to be emptied
-            // of all existing entries and results in an empty table.
             return;
         }
 
-        var entry = new HPackHeaderField(staticTableIndex, name, value);
-        buffer[insertIndex] = entry;
-        insertIndex = (insertIndex + 1) % buffer.Length;
-        size += entry.Length;
-        count++;
+        _buffer[_insertIndex] = new HPackHeaderField(staticTableIndex, name, value);
+        _insertIndex = (_insertIndex + 1) % _buffer.Length;
+        _size += entryLength;
+        _count++;
     }
 
     public void Resize(int maxSize)
     {
-        if (maxSize > this.maxSize)
+        if (maxSize > _maxSize)
         {
-            var newBuffer = new HPackHeaderField[maxSize / HPackHeaderField.RfcOverhead];
+            HPackHeaderField[] newBuffer = new HPackHeaderField[Math.Max(1, maxSize / HPackHeaderField.RfcOverhead)];
+            int headCount = Math.Min(_buffer.Length - _removeIndex, _count);
+            int tailCount = _count - headCount;
 
-            int headCount = Math.Min(buffer.Length - removeIndex, count);
-            int tailCount = count - headCount;
+            Array.Copy(_buffer, _removeIndex, newBuffer, 0, headCount);
+            Array.Copy(_buffer, 0, newBuffer, headCount, tailCount);
 
-            Array.Copy(buffer, removeIndex, newBuffer, 0, headCount);
-            Array.Copy(buffer, 0, newBuffer, headCount, tailCount);
-
-            buffer = newBuffer;
-            removeIndex = 0;
-            insertIndex = count;
-            this.maxSize = maxSize;
+            _buffer = newBuffer;
+            _removeIndex = 0;
+            _insertIndex = _count;
+            _maxSize = maxSize;
         }
         else
         {
-            this.maxSize = maxSize;
+            _maxSize = maxSize;
             EnsureAvailable(0);
         }
     }
 
     private void EnsureAvailable(int available)
     {
-        while (count > 0 && maxSize - size < available)
+        while (_count > 0 && _maxSize - _size < available)
         {
-            ref HPackHeaderField field = ref buffer[removeIndex];
-            size -= field.Length;
+            ref HPackHeaderField field = ref _buffer[_removeIndex];
+            _size -= field.Length;
             field = default;
-
-            count--;
-            removeIndex = (removeIndex + 1) % buffer.Length;
+            _count--;
+            _removeIndex = (_removeIndex + 1) % _buffer.Length;
         }
     }
 }

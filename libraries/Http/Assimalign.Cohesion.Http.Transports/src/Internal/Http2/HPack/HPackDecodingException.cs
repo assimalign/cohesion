@@ -1,9 +1,6 @@
-﻿using System;
-using System.Runtime.Serialization;
+using System;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
 
-namespace Assimalign.Cohesion.Http.Internal;
-
-// TODO: Should this be public?
 [Serializable]
 internal sealed class HPackDecodingException : Exception
 {
@@ -11,15 +8,13 @@ internal sealed class HPackDecodingException : Exception
     {
     }
 
-    public HPackDecodingException(string message) : base(message)
+    public HPackDecodingException(string message)
+        : base(message)
     {
     }
 
-    public HPackDecodingException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
-
-    public HPackDecodingException(SerializationInfo info, StreamingContext context) : base(info, context)
+    public HPackDecodingException(string message, Exception innerException)
+        : base(message, innerException)
     {
     }
 }
