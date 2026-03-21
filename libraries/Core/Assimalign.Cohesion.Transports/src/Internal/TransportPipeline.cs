@@ -15,6 +15,6 @@ internal class TransportPipeline : ITransportPipeline
         ITransportConnectionContext context, 
         CancellationToken cancellationToken = default)
     {
-        return _middleware.Invoke(connection, context);
+        return _middleware.Invoke(connection, context, cancellationToken);
     }
 }

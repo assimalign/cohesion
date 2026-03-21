@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -79,7 +80,8 @@ public sealed class TcpClientTransportOptions
 	/// </summary>
 	/// <param name="middleware"></param>
 	/// <returns></returns>
-    public TcpClientTransportOptions Use(Func<TcpTransportConnection, TcpTransportConnectionContext, TransportMiddleware, Task> middleware)
+    public TcpClientTransportOptions Use(
+        Func<TcpTransportConnection, TcpTransportConnectionContext, TransportMiddleware, CancellationToken, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 

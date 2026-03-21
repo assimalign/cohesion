@@ -1,7 +1,7 @@
 ﻿
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -20,17 +20,21 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
         _middleware = new List<Func<TransportMiddleware, TransportMiddleware>>();
     }
 
-    public TransportPipelineBuilder<TConnection, TContext> Use(Func<TConnection, TContext, TransportMiddleware, Task> middleware)
+    public TransportPipelineBuilder<TConnection, TContext> Use(
+        Func<TConnection, TContext, TransportMiddleware, CancellationToken, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 
-        Func<TConnection, TContext, TransportMiddleware, Task> middleware2 = middleware;
+        Func<TConnection, TContext, TransportMiddleware, CancellationToken, Task> middleware2 = middleware;
 
-        (this as ITransportPipelineBuilder).Use((TransportMiddleware next) => (ITransportConnection c, ITransportConnectionContext cc) =>
+        (this as ITransportPipelineBuilder).Use((TransportMiddleware next) => (
+            ITransportConnection c,
+            ITransportConnectionContext cc,
+            CancellationToken cancellationToken) =>
         {
             if (c is TConnection connection && cc is TContext context)
             {
-                return middleware2.Invoke(connection, context, next);
+                return middleware2.Invoke(connection, context, next, cancellationToken);
             }
 
             return Task.CompletedTask;
@@ -49,7 +53,7 @@ public class TransportPipelineBuilder<TConnection, TContext> : ITransportPipelin
     }
     ITransportPipeline ITransportPipelineBuilder.Build()
     {
-        var middleware = new TransportMiddleware((connection, context) =>
+        var middleware = new TransportMiddleware((connection, context, cancellationToken) =>
         {
             return Task.CompletedTask;
         });

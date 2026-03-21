@@ -5,6 +5,7 @@ using System.Net.Quic;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -98,7 +99,8 @@ public sealed class QuicClientTransportOptions
     /// <param name="middleware">The middleware delegate to add.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="middleware"/> is <see langword="null"/>.</exception>
-    public QuicClientTransportOptions Use(Func<QuicTransportConnection, QuicTransportContext, TransportMiddleware, Task> middleware)
+    public QuicClientTransportOptions Use(
+        Func<QuicTransportConnection, QuicTransportContext, TransportMiddleware, CancellationToken, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 

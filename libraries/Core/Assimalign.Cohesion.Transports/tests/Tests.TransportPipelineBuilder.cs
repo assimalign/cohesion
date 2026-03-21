@@ -15,17 +15,17 @@ public class TransportPipelineBuilderTests
         var calls = new List<string>();
         var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
 
-        builder.Use(async (connection, context, next) =>
+        builder.Use(async (connection, context, next, cancellationToken) =>
         {
             calls.Add("first-before");
-            await next(connection, context).ConfigureAwait(false);
+            await next(connection, context, cancellationToken).ConfigureAwait(false);
             calls.Add("first-after");
         });
 
-        builder.Use(async (connection, context, next) =>
+        builder.Use(async (connection, context, next, cancellationToken) =>
         {
             calls.Add("second-before");
-            await next(connection, context).ConfigureAwait(false);
+            await next(connection, context, cancellationToken).ConfigureAwait(false);
             calls.Add("second-after");
         });
 
@@ -48,10 +48,10 @@ public class TransportPipelineBuilderTests
         bool invoked = false;
         var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
 
-        builder.Use((connection, context, next) =>
+        builder.Use((connection, context, next, cancellationToken) =>
         {
             invoked = true;
-            return next(connection, context);
+            return next(connection, context, cancellationToken);
         });
 
         ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
@@ -59,6 +59,54 @@ public class TransportPipelineBuilderTests
         await pipeline.ExecuteAsync(new AnotherConnection(), new TestContext());
 
         Assert.False(invoked);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenCancellationTokenIsProvided_ShouldFlowThroughMiddlewareChain()
+    {
+        var observedTokens = new List<CancellationToken>();
+        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+        using var cancellationTokenSource = new CancellationTokenSource();
+        CancellationToken cancellationToken = cancellationTokenSource.Token;
+
+        builder.Use(async (connection, context, next, token) =>
+        {
+            observedTokens.Add(token);
+            await next(connection, context, token).ConfigureAwait(false);
+        });
+
+        builder.Use((connection, context, next, token) =>
+        {
+            observedTokens.Add(token);
+            return Task.CompletedTask;
+        });
+
+        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
+
+        await pipeline.ExecuteAsync(new TestConnection(), new TestContext(), cancellationToken);
+
+        Assert.Equal(2, observedTokens.Count);
+        Assert.All(observedTokens, token => Assert.Equal(cancellationToken, token));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenCancellationTokenIsCanceled_ShouldAllowMiddlewareToObserveCancellation()
+    {
+        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        cancellationTokenSource.Cancel();
+
+        builder.Use((connection, context, next, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return next(connection, context, cancellationToken);
+        });
+
+        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            pipeline.ExecuteAsync(new TestConnection(), new TestContext(), cancellationTokenSource.Token));
     }
 
     private sealed class TestConnection : ITransportConnection

@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -52,7 +53,8 @@ public sealed class UdpClientTransportOptions
     /// <param name="middleware">The middleware delegate to add.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="middleware"/> is <see langword="null"/>.</exception>
-    public UdpClientTransportOptions Use(Func<UdpTransportConnection, UdpTransportConnectionContext, TransportMiddleware, Task> middleware)
+    public UdpClientTransportOptions Use(
+        Func<UdpTransportConnection, UdpTransportConnectionContext, TransportMiddleware, CancellationToken, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 
