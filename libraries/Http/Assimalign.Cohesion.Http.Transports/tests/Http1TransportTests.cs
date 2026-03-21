@@ -54,6 +54,28 @@ public class Http1TransportTests
         responseText.ShouldContain("created");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse absolute-form request targets")]
+    public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
+    {
+        // Arrange
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET http://api.test/widgets?id=42 HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Path.Value.ShouldBe("/widgets");
+        httpContext.Request.Query["id"].Value.ShouldBe("42");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse form values from a URL encoded request body")]
     public async Task Http1_OnUrlEncodedPost_ShouldParseFormValues()
     {

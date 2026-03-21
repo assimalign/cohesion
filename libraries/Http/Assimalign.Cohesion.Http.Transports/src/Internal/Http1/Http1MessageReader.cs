@@ -202,12 +202,24 @@ internal static class Http1MessageReader
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)
     {
+        ArgumentNullException.ThrowIfNull(requestTarget);
+
+        if (requestTarget.Length > 0 && requestTarget[0] is '/' or '*')
+        {
+            return ParseOriginFormQuery(requestTarget, out path);
+        }
+
         if (Uri.TryCreate(requestTarget, UriKind.Absolute, out Uri? uri))
         {
             path = HttpPath.FromUriComponent(uri.AbsolutePath);
             return new HttpQuery(uri.Query).Parse();
         }
 
+        return ParseOriginFormQuery(requestTarget, out path);
+    }
+
+    private static HttpQueryCollection ParseOriginFormQuery(string requestTarget, out HttpPath path)
+    {
         int queryIndex = requestTarget.IndexOf('?');
 
         if (queryIndex >= 0)
