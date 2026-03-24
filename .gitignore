@@ -11,6 +11,7 @@ CLAUDE.md
 .linqpad
 scripts/**/*.txt
 scripts/modules
+.dotnet-cli-home
 
 # User-specific files
 *.rsuser
