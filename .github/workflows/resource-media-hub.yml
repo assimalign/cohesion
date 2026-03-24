@@ -1,0 +1,25 @@
+name: "Resource - [Media Hub]"
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "resources/MediaHub/**"
+      - ".github/workflows/resource-media-hub.yml" # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: ["Assimalign.Cohesion.MediaHub"]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: "resources"
+          category: "MediaHub"
+          project: ${{ matrix.projects }}

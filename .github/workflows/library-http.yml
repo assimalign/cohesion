@@ -1,11 +1,11 @@
-name: Library - [Configuration]
+name: Library - [Http]
 on:
   push:
     paths:
       - "**/Directory.Build.props" # When the Global Props File Changes
-      - "libraries/Configuration/**"
+      - "libraries/Http/**"
       - ".github/actions/build/**" # When Shared Build Action Changes
-      - ".github/workflows/library-configuration.yml" # When Pipeline File Changes
+      - ".github/workflows/library-http.yml" # When Pipeline File Changes
 jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
@@ -15,13 +15,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            'Assimalign.Cohesion.Configuration',
-            'Assimalign.Cohesion.Configuration.CommandLine',
-            'Assimalign.Cohesion.Configuration.EnvironmentVariables',
-            'Assimalign.Cohesion.Configuration.FileSystem',
-            'Assimalign.Cohesion.Configuration.Json',
-            'Assimalign.Cohesion.Configuration.Xml',
-            # 'Assimalign.Cohesion.Configuration.Ini',
+            "Assimalign.Cohesion.Http",
+            "Assimalign.Cohesion.Http.Transports"
           ]
     steps:
       - uses: actions/checkout@v4
@@ -31,5 +26,5 @@ jobs:
         name: "Running Build & Tests: ${{ matrix.projects }}"
         with: 
           area: 'libraries'
-          category: 'Configuration'
+          category: 'Http'
           project: ${{ matrix.projects }}

@@ -1,11 +1,11 @@
-name: Library - [Configuration]
+name: Library - [Core]
 on:
   push:
     paths:
       - "**/Directory.Build.props" # When the Global Props File Changes
-      - "libraries/Configuration/**"
+      - "libraries/Core/**"
       - ".github/actions/build/**" # When Shared Build Action Changes
-      - ".github/workflows/library-configuration.yml" # When Pipeline File Changes
+      - ".github/workflows/library-core.yml" # When Pipeline File Changes
 jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
@@ -15,13 +15,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            'Assimalign.Cohesion.Configuration',
-            'Assimalign.Cohesion.Configuration.CommandLine',
-            'Assimalign.Cohesion.Configuration.EnvironmentVariables',
-            'Assimalign.Cohesion.Configuration.FileSystem',
-            'Assimalign.Cohesion.Configuration.Json',
-            'Assimalign.Cohesion.Configuration.Xml',
-            # 'Assimalign.Cohesion.Configuration.Ini',
+            "Assimalign.Cohesion.Core",
+            'Assimalign.Cohesion.DependencyInjection',
+            'Assimalign.Cohesion.ObjectMapping',
+            "Assimalign.Cohesion.ObjectPool",
+            "Assimalign.Cohesion.ObjectValidation",
+            "Assimalign.Cohesion.Transports"
           ]
     steps:
       - uses: actions/checkout@v4
@@ -31,5 +30,5 @@ jobs:
         name: "Running Build & Tests: ${{ matrix.projects }}"
         with: 
           area: 'libraries'
-          category: 'Configuration'
+          category: 'Core'
           project: ${{ matrix.projects }}

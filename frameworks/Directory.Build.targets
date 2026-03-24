@@ -1,10 +1,8 @@
 <Project>
-	<Import Project="..\Directory.Build.targets" />
-
-	<ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\Shared')">
-		<Compile Remove="Shared\**" />
-		<None Include="Shared\**\*.cs">
-			<Visible>true</Visible>
-		</None>
-	</ItemGroup>
+    <Import Project="..\Directory.Build.targets" />
+    <Target Name="TargetName" BeforeTargets="DesignTimeResolveAssemblyReferences">
+        <Exec Command="dotnet sln Assimalign.Cohesion.Frameworks.sln add (ls -r '../**/*.csproj')" WorkingDirectory="$(MSBuildThisFileDirectory)">
+            
+        </Exec>
+    </Target>
 </Project>

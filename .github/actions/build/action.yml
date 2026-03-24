@@ -2,10 +2,10 @@ name: Cohesion Build
 description: Restores, builds, and tests a Cohesion project.
 
 inputs:
-  kind:
+  area:
     description: The top-level folder that contains the project set, such as libraries.
     required: true
-  container:
+  category:
     description: The category folder under the top-level kind folder.
     required: true
   project:
@@ -31,18 +31,25 @@ runs:
 
     - name: Restore ${{ inputs.project }}
       shell: pwsh
-      run: dotnet restore "./${{ inputs.kind }}/${{ inputs.container }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj"
+      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj"
 
     - name: Build ${{ inputs.project }}
       shell: pwsh
-      run: dotnet build "./${{ inputs.kind }}/${{ inputs.container }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-restore
+      run: dotnet build "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-restore
 
     - name: Restore tests for ${{ inputs.project }}
-      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.kind, inputs.container, inputs.project)) != '' }}
+      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
       shell: pwsh
-      run: dotnet restore "./${{ inputs.kind }}/${{ inputs.container }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj"
+      run: dotnet restore "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj"
 
     - name: Test ${{ inputs.project }}
-      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.kind, inputs.container, inputs.project)) != '' }}
+      if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
       shell: pwsh
-      run: dotnet test "./${{ inputs.kind }}/${{ inputs.container }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore
+      run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore
+
+
+    # - name: '.NET Benchmarks: ${{ matrix.projects }}'
+    #   if: hashFiles(format('./libraries/Core/{0}/benchmarks/{1}.Benchmarks.csproj', matrix.projects, matrix.projects)) != ''
+    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" --
+    #   working-directory: './libraries/Core/${{ matrix.projects }}'
+
