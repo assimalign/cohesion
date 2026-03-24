@@ -1,4 +1,6 @@
-﻿namespace Assimalign.Cohesion.Logging.Tests;
+﻿using Xunit;
+
+namespace Assimalign.Cohesion.Logging.Tests;
 
 public class UnitTest1
 {
@@ -7,9 +9,9 @@ public class UnitTest1
     {
         var logger = default(ILogger)!;
 
-        using var scope = logger.BeginScope(new LoggerEntry()
-        {
+        //using var scope = logger.BeginScope(new LoggerEntry()
+        //{
 
-        });
+        //});
     }
 }

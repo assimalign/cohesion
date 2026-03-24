@@ -1,14 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="coverlet.collector" />
-		<Reference Include="Microsoft.NET.Test.Sdk" />
-		<Reference Include="xunit" />
-		<Reference Include="xunit.runner.visualstudio" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Logging"/>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Using Include="Xunit" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="NUlid" />
+		<CohesionPackageReference Include="FluentAssertions"/>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
 	</ItemGroup>
 
 </Project>
