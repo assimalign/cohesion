@@ -1,21 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
+
 	<PropertyGroup>
-		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
-		<IsTestProject>true</IsTestProject>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <Compile Remove="Spcification\**" />
+	  <EmbeddedResource Remove="Spcification\**" />
+	  <None Remove="Spcification\**" />
+	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="FluentAssertions" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
-	</ItemGroup>
-	<ItemGroup>
-	  <Folder Include="Spcification\" />
 	</ItemGroup>
 	
 </Project>

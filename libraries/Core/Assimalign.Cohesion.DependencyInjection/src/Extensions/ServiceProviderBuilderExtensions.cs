@@ -1,8 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System;
 
-namespace System;
+namespace Assimalign.Cohesion.DependencyInjection;
 
 public static class ServiceProviderBuilderExtensions
 {
