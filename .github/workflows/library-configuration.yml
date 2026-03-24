@@ -28,6 +28,9 @@ jobs:
             'Assimalign.Cohesion.Configuration.Xml'
           ]
     steps:
+      - uses: actions/checkout@v2
+        name: "Checkout: ${{ matrix.projects }}"
+
       - uses: './.github/actions/build.yml'
         with: 
           kind: 'libraries'
