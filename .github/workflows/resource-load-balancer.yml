@@ -1,4 +1,4 @@
-name: "Resource - [Load Balancer]"
+name: Load Balancer
 on:
   push:
     paths:

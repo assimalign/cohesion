@@ -1,4 +1,4 @@
-name: "Resource - [Notification Hub]"
+name: Notification Hub
 on:
   push:
     paths:

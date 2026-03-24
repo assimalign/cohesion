@@ -1,4 +1,4 @@
-name: Library - [ApplicationModel]
+name: ApplicationModel
 on:
   push:
     paths: 

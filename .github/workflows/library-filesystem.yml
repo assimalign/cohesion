@@ -1,4 +1,4 @@
-name: Library - [FileSystem]
+name: FileSystem
 on:
   push:
     paths:

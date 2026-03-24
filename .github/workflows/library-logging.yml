@@ -1,4 +1,4 @@
-name: Library - [Logging]
+name: Logging
 on:
   push:
     paths:

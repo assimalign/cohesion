@@ -1,4 +1,4 @@
-name: "Resource - [Web]"
+name: Web
 on:
   push:
     paths: 

@@ -1,4 +1,4 @@
-name: "Resource - [Media Hub]"
+name: Media Hub
 on:
   push:
     paths:

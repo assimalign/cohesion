@@ -1,4 +1,4 @@
-name: "Resource - [IoT Hub]"
+name: IoT Hub
 on:
   push:
     paths: 

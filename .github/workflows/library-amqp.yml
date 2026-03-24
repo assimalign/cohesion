@@ -1,4 +1,4 @@
-name: Library - [AMQP]
+name: AMQP
 on:
   push:
     paths: 

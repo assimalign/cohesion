@@ -1,4 +1,4 @@
-name: Library - [OpenTelemetry]
+name: OpenTelemetry
 
 on:
   push:

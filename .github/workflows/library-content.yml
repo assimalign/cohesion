@@ -1,4 +1,4 @@
-name: Library - [Content]
+name: Content
 on:
   push:
     paths: 

@@ -1,4 +1,4 @@
-name: "Resource - [Message Hub]"
+name: Message Hub
 on:
   push:
     paths:

@@ -1,4 +1,4 @@
-name: "Resource - [Database]"
+name: Database
 on:
   push:
     paths: 

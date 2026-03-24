@@ -1,4 +1,4 @@
-name: "Resource - [Configuration Store]"
+name: Configuration Store
 on:
   push:
     paths: 

@@ -1,4 +1,4 @@
-name: Library - [IdentityModel]
+name: IdentityModel
 on:
   push:
     paths: 

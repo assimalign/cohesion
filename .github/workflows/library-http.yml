@@ -1,4 +1,4 @@
-name: Library - [Http]
+name: Http
 on:
   push:
     paths:

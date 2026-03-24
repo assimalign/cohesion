@@ -1,4 +1,4 @@
-name: "Resource - [Log Space]"
+name: Log Space
 on:
   push:
     paths:

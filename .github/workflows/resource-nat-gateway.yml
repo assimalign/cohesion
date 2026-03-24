@@ -1,4 +1,4 @@
-name: "Resource - [NAT Gateway]"
+name: NAT Gateway
 on:
   push:
     paths:

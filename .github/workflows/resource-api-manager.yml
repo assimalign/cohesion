@@ -1,4 +1,4 @@
-name: "Resource - [API Manager]"
+name: API Manager
 on:
   push:
     paths: 

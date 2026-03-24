@@ -1,4 +1,4 @@
-name: Library - [DNS]
+name: DNS
 on:
   push:
     paths: 

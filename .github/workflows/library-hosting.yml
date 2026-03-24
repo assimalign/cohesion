@@ -1,4 +1,4 @@
-name: Library - [Hosting]
+name: Hosting
 on:
   push:
     paths:
