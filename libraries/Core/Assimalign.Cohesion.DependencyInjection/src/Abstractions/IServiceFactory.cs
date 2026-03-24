@@ -1,5 +1,3 @@
-using System;
-
 namespace Assimalign.Cohesion.DependencyInjection;
 
 /// <summary>

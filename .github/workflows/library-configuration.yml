@@ -1,0 +1,67 @@
+name: Library - [Configuration]
+
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Configuration/**"
+      - ".github/workflows/library-configuration.yml" # When Pipeline File Changes
+
+env:
+    project: 'Configuration'
+
+jobs:
+  build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.Configuration',
+            'Assimalign.Cohesion.Configuration.CommandLine',
+            'Assimalign.Cohesion.Configuration.EnvironmentVariables',
+            'Assimalign.Cohesion.Configuration.FileSystem',
+            # 'Assimalign.Cohesion.Configuration.Ini',
+            'Assimalign.Cohesion.Configuration.Json',
+            'Assimalign.Cohesion.Configuration.Xml'
+          ]
+    steps:
+      - uses: './.github/actions/build.yml'
+        with: 
+          kind: 'libraries'
+          container: 'Configuration'
+          project: ${{ matrix.projects }}
+      
+      # - uses: actions/checkout@v2
+      #   name: "Checkout: ${{ matrix.projects }}"
+
+      # - name: .NET Installation
+      #   uses: actions/setup-dotnet@v3
+      #   with:
+      #     dotnet-version: |
+      #       10.x
+      # - name: ".NET Restore: MSBuild Project"
+      #   run: dotnet restore './build/Tasks'
+        
+      # - name: ".NET Build:  MSBuild Project"
+      #   run: dotnet build --configuration Release --no-restore
+      #   working-directory: "./build/Tasks"
+
+      # - name: ".NET Restore: ${{ matrix.projects }}"
+      #   run: dotnet restore './libraries/Configuration/${{ matrix.projects }}'
+
+      # - name: ".NET Build: ${{ matrix.projects }}"
+      #   run: dotnet build --configuration Release --no-restore
+      #   working-directory: "./libraries/Core/${{ matrix.projects }}"
+
+      # - name: ".NET Unit Tests: ${{ matrix.projects }}"
+      #   if: hashFiles(format('./libraries/Core/{0}/tests/{1}.Tests.csproj', matrix.projects, matrix.projects)) != ''
+      #   run: dotnet test --configuration Release --no-restore
+      #   working-directory: "./libraries/Core/${{ matrix.projects }}/tests"
+
+    # - name: '.NET Benchmarks: ${{ matrix.projects }}'
+    #   if: hashFiles(format('./libraries/Core/{0}/benchmarks/{1}.Benchmarks.csproj', matrix.projects, matrix.projects)) != ''
+    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" --
+    #   working-directory: './libraries/Core/${{ matrix.projects }}'

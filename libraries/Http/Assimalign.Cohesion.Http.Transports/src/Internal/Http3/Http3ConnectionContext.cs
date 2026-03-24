@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
+using Assimalign.Cohesion.Http.Transports.Internal.Http3.Frames;
+
 internal sealed class Http3ConnectionContext : HttpConnectionContext
 {
     private static readonly ITransportConnectionPipe DisabledPipe = new TransportConnectionPipe(Stream.Null);

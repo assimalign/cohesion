@@ -1,7 +1,0 @@
-name: "te"
-
-on:
-  release:
-    types: published
-
-jobs:

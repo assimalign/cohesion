@@ -86,7 +86,7 @@ cohesion/
 libraries/{Category}/Assimalign.Cohesion.{Library}/
 ├── src/                          # Source code (generates NuGet package)
 │   ├── Abstractions/             # Interfaces (I prefix)
-│   ├── Extensions/               # Extension methods
+│   ├── Extensions/               # Extension members
 │   ├── Internal/                 # Internal implementations
 │   ├── Exceptions/               # Custom exceptions
 │   ├── ValueObjects/             # Domain value objects
@@ -247,18 +247,30 @@ public interface IDatabase { }
 public interface IConfigurationProvider { }
 ```
 
-**Extension Methods:** Use partial classes in `Extensions/` folder
+**Extension Members:** Use partial classes in `Extensions/` folder and declare members with `extension(...)`
 ```csharp
 // File: Extensions/ServiceProviderBuilderExtensions.cs
 namespace Assimalign.Cohesion.DependencyInjection;
 
 public static partial class ServiceProviderBuilderExtensions
 {
-    public static IServiceCollection AddSingleton<T>(this IServiceCollection services)
-        where T : class
+    extension(IServiceCollection services)
     {
-        // Implementation
+        public IServiceCollection AddSingleton<T>()
+            where T : class
+        {
+            // Implementation
+        }
     }
+}
+```
+
+**Do not use the legacy extension method form:**
+```csharp
+public static IServiceCollection AddSingleton<T>(this IServiceCollection services)
+    where T : class
+{
+    // ❌ WRONG for new code
 }
 ```
 
@@ -522,13 +534,16 @@ internal class MemoryCache : ICache
     }
 }
 
-// 3. Provide extension methods for registration
+// 3. Provide extension members for registration
 public static class CacheExtensions
 {
-    public static IServiceCollection AddMemoryCache(this IServiceCollection services)
+    extension(IServiceCollection services)
     {
-        services.AddSingleton<ICache, MemoryCache>();
-        return services;
+        public IServiceCollection AddMemoryCache()
+        {
+            services.AddSingleton<ICache, MemoryCache>();
+            return services;
+        }
     }
 }
 ```
@@ -602,7 +617,8 @@ public class ConfigurationBuilder : IConfigurationBuilder
 6. ✅ Consider breaking changes impact
 7. ✅ Follow dependency layer constraints
 8. ✅ Avoid introducing `ThrowHelper` patterns; use direct throws or .NET 10 extension type methods instead
-9. ✅ Build incrementally to catch errors early
+9. ✅ Prefer `extension(...)` blocks over legacy `this`-parameter extension methods
+10. ✅ Build incrementally to catch errors early
 
 ### When in Doubt
 1. ✅ Look for similar code in the same service category

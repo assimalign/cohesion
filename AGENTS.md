@@ -51,6 +51,10 @@ This document defines specific coding standards and rules for the Cohesion proje
    - Use direct `throw` statements or framework guard APIs when the logic is local
    - If reusable throw behavior is needed, implement it as a .NET 10 extension type method in `Extensions/`
 
+9. **Use the .NET 10 `extension(...)` syntax for extension members**
+   - Define new extension members with `extension(...)` blocks
+   - Do not use the legacy `this` parameter syntax for new extension members
+
 ### ❌ Forbidden Patterns
 
 1. **NEVER use block-scoped namespaces**
@@ -95,6 +99,18 @@ This document defines specific coding standards and rules for the Cohesion proje
 7. **NEVER introduce `ThrowHelper` or `ThrowHelpers` types**
    - Do not add helper classes whose primary purpose is throwing exceptions
    - When touching existing usages, migrate them toward direct throws or .NET 10 extension type methods
+
+8. **NEVER declare new extension members with the legacy `this` parameter syntax**
+   ```csharp
+   // ❌ WRONG
+   public static class DatabaseExtensions
+   {
+       public static IServiceCollection AddDatabase(this IServiceCollection services)
+       {
+           return services;
+       }
+   }
+   ```
 
 ## Naming Conventions
 
@@ -168,7 +184,7 @@ Libraries MUST follow this structure:
 libraries/{Category}/Assimalign.Cohesion.{Library}/
 ├── src/
 │   ├── Abstractions/      # Interfaces only
-│   ├── Extensions/        # Extension methods
+│   ├── Extensions/        # Extension members
 │   ├── Internal/          # Internal implementation
 │   ├── Exceptions/        # Custom exceptions
 │   ├── ValueObjects/      # Value types
@@ -183,7 +199,7 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 1. **One public type per file** (exceptions: nested types, related enums)
 2. **File name MUST match primary type name**
    - `DatabaseEngine.cs` contains `class DatabaseEngine`
-3. **Extension methods** in partial classes in `Extensions/` folder
+3. **Extension members** in partial classes in `Extensions/` folder using `extension(...)`
 4. **Test files** named `{Feature}Tests.cs`
 
 ### Using Directives
@@ -224,14 +240,17 @@ namespace Assimalign.Cohesion.Database;
    internal class Database : IDatabase { }
    ```
 
-3. **Extension methods:** Always `public static`
+3. **Extension containers:** Always `public static`, with members declared inside `extension(...)`
    ```csharp
    public static class DatabaseExtensions
    {
-       public static IServiceCollection AddDatabase(this IServiceCollection services)
+       extension(IServiceCollection services)
        {
-           services.AddSingleton<IDatabase, Database>();
-           return services;
+           public IServiceCollection AddDatabase()
+           {
+               services.AddSingleton<IDatabase, Database>();
+               return services;
+           }
        }
    }
    ```
@@ -349,12 +368,15 @@ internal class MemoryCache : ICache
     public Task SetAsync<T>(string key, T value) { /* ... */ }
 }
 
-// 3. Register via extension method
+// 3. Register via extension member
 public static class CacheExtensions
 {
-    public static IServiceCollection AddMemoryCache(this IServiceCollection services)
+    extension(IServiceCollection services)
     {
-        return services.AddSingleton<ICache, MemoryCache>();
+        public IServiceCollection AddMemoryCache()
+        {
+            return services.AddSingleton<ICache, MemoryCache>();
+        }
     }
 }
 ```
@@ -512,6 +534,7 @@ Before submitting code, ensure:
 - [ ] Tests added/updated
 - [ ] Exception types inherit from `CohesionException`
 - [ ] No new `ThrowHelper` or `ThrowHelpers` types introduced
+- [ ] New extension members use `extension(...)` instead of the legacy `this` parameter syntax
 - [ ] Async methods have `Async` suffix
 - [ ] `CancellationToken` parameter included in async methods
 - [ ] No `async void` methods (except event handlers)

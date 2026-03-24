@@ -32,7 +32,7 @@
         }
     ],
     "files.associations": {
-        "**/.github/workflows/**/*.yml": "github-actions-workflow"
+        "**/.github/**/*.yml": "github-actions-workflow"
     },
     "dotnet.preferCSharpExtension": true,
     "dotnet.defaultSolution": "Assimalign.Cohesion.sln",

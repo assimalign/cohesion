@@ -35,3 +35,5 @@
 - Avoid `ThrowHelper` and `ThrowHelpers` types
 - Prefer direct `throw` statements or framework guard APIs for local guard clauses
 - If reusable throw behavior is needed, use a .NET 10 extension type method in `Extensions/` instead of a helper class
+- Prefer the .NET 10 `extension(...)` syntax for extension members
+- Do not declare new extension members with the legacy `this` first-parameter syntax

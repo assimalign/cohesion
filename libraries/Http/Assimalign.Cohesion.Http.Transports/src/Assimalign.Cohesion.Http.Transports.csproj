@@ -17,7 +17,7 @@
 		<Compile Remove="Internal\Http1\Reader\**\*.cs" />
 		<Compile Remove="Internal\Http1\Utilities\**\*.cs" />
 		<Compile Remove="Internal\Http1\Writer\**\*.cs" />
-		<Compile Remove="Internal\Http3\Frames\**\*.cs" />
+
 		<Compile Remove="Internal\Http3\QPack\**\*.cs" />
 		<Compile Remove="Internal\HttpContext.cs" />
 		<Compile Remove="Internal\HttpServerOptionsInternal.cs" />

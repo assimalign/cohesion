@@ -24,7 +24,7 @@ internal abstract class TransportHttpContext : HttpContext
 
     public override HttpVersion Version { get; }
 
-    public override IHttpSession Session { get; }
+    public override HttpSession Session { get; }
 
     public override HttpRequest Request { get; }
 

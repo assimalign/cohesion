@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.DependencyInjection;
 
@@ -7,9 +8,8 @@ namespace Assimalign.Cohesion.DependencyInjection;
 /// When does
 /// </summary>
 [DebuggerDisplay("Lifetime = {Lifetime}, ServiceType = {ServiceType}, ImplementationType = {ImplementationType}")]
-public sealed class ServiceDescriptor
+public class ServiceDescriptor
 {
-
     /// <summary>
     /// Initializes a new implementationInstance of <see cref="ServiceDescriptor"/> with the specified <paramref name="implementationType"/>.
     /// </summary>
@@ -18,21 +18,13 @@ public sealed class ServiceDescriptor
     /// <param name="lifetime">The <see cref="ServiceLifetime"/> of the service.</param>
     /// <exception cref="ArgumentNullException"> Neither <paramref name="serviceType"/> or <paramref name="implementationType"/> can be null.</exception>
     /// <exception cref="ArgumentException"><paramref name="implementationType"/> must be assignable to <paramref name="serviceType"/></exception>
-    public ServiceDescriptor(Type serviceType, Type implementationType, ServiceLifetime lifetime)
+    public ServiceDescriptor(
+        Type serviceType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType, ServiceLifetime lifetime)
         : this(serviceType, lifetime)
     {
-        if (serviceType == null)
-        {
-            throw new ArgumentNullException(nameof(serviceType));
-        }
-        if (implementationType == null)
-        {
-            throw new ArgumentNullException(nameof(implementationType));
-        }
-        //if (!serviceType.IsAssignableFrom(implementationType))
-        //{
-        //    throw new ArgumentException($"The type '{implementationType}' is not assignable to '{serviceType}'.");
-        //}
+        ArgumentNullException.ThrowIfNull(serviceType);
+        ArgumentNullException.ThrowIfNull(implementationType);
 
         ImplementationType = implementationType;
     }
@@ -48,18 +40,8 @@ public sealed class ServiceDescriptor
     public ServiceDescriptor(Type serviceType, object implementationInstance) 
         : this(serviceType, ServiceLifetime.Singleton)
     {
-        if (serviceType == null)
-        {
-            throw new ArgumentNullException(nameof(serviceType));
-        }
-        if (implementationInstance == null)
-        {
-            throw new ArgumentNullException(nameof(implementationInstance));
-        }
-        //if (!serviceType.IsAssignableFrom(implementationInstance.GetType()))
-        //{
-        //    throw new ArgumentException($"The type '{implementationInstance.GetType()}' is not assignable to '{serviceType}'.");
-        //}
+        ArgumentNullException.ThrowIfNull(serviceType);
+        ArgumentNullException.ThrowIfNull(implementationInstance);
 
         ImplementationInstance = implementationInstance;
     }
@@ -68,30 +50,17 @@ public sealed class ServiceDescriptor
     /// Initializes a new implementationInstance of <see cref="ServiceDescriptor"/> with the specified <paramref name="factory"/>.
     /// </summary>
     /// <param name="serviceType">The <see cref="Type"/> of the service.</param>
-    /// <param name="factory">A factory used for creating service instances.</param>
+    /// <param name="implementationFactory">A factory used for creating service instances.</param>
     /// <param name="lifetime">The <see cref="ServiceLifetime"/> of the service.</param>
     /// <exception cref="ArgumentNullException"> Neither <paramref name="serviceType"/> or <paramref name="factory"/> can be null.</exception>
     /// <exception cref="ArgumentException">The return type of <paramref name="factory"/> must be assignable to <paramref name="serviceType"/></exception>
-    public ServiceDescriptor(Type serviceType, Func<IServiceProvider, object> factory, ServiceLifetime lifetime)
+    public ServiceDescriptor(Type serviceType, Func<IServiceProvider, object> implementationFactory, ServiceLifetime lifetime)
         : this(serviceType, lifetime)
     {
-        if (serviceType == null)
-        {
-            throw new ArgumentNullException(nameof(serviceType));
-        }
-        if (factory == null)
-        {
-            throw new ArgumentNullException(nameof(factory));
-        }
+        ArgumentNullException.ThrowIfNull(serviceType);
+        ArgumentNullException.ThrowIfNull(implementationFactory);
 
-        var returnType = factory.GetType().GenericTypeArguments[1];
-
-        //if (!serviceType.IsAssignableFrom(returnType))
-        //{
-        //    throw new ArgumentException($"The type '{returnType}' is not assignable to '{serviceType}'.");
-        //}
-
-        ImplementationFactory = factory;
+        ImplementationFactory = implementationFactory;
     }
 
     private ServiceDescriptor(Type serviceType, ServiceLifetime lifetime)
@@ -104,18 +73,22 @@ public sealed class ServiceDescriptor
     /// 
     /// </summary>
     public ServiceLifetime Lifetime { get; }
+
     /// <summary>
     /// 
     /// </summary>
     public Type ServiceType { get; }
+
     /// <summary>
     /// 
     /// </summary>
     public Type? ImplementationType { get; }
+
     /// <summary>
     /// 
     /// </summary>
     public object? ImplementationInstance { get; }
+
     /// <summary>
     /// 
     /// </summary>
@@ -173,7 +146,7 @@ public sealed class ServiceDescriptor
     /// <typeparam name="TService">The type of the service.</typeparam>
     /// <typeparam name="TImplementation">The type of the implementation.</typeparam>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Transient<TService, TImplementation>()
+    public static ServiceDescriptor Transient<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
         where TService : class
         where TImplementation : class, TService
     {
@@ -188,7 +161,7 @@ public sealed class ServiceDescriptor
     /// <param name="service">The type of the service.</param>
     /// <param name="implementationType">The type of the implementation.</param>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Transient(Type service,Type implementationType)
+    public static ServiceDescriptor Transient(Type service, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (service == null)
         {
@@ -275,7 +248,7 @@ public sealed class ServiceDescriptor
     /// <typeparam name="TService">The type of the service.</typeparam>
     /// <typeparam name="TImplementation">The type of the implementation.</typeparam>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Scoped<TService, TImplementation>()
+    public static ServiceDescriptor Scoped<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
         where TService : class
         where TImplementation : class, TService
     {
@@ -290,7 +263,7 @@ public sealed class ServiceDescriptor
     /// <param name="service">The type of the service.</param>
     /// <param name="implementationType">The type of the implementation.</param>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Scoped(Type service, Type implementationType)
+    public static ServiceDescriptor Scoped(Type service, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         return Describe(service, implementationType, ServiceLifetime.Scoped);
     }
@@ -366,7 +339,7 @@ public sealed class ServiceDescriptor
     /// <typeparam name="TService">The type of the service.</typeparam>
     /// <typeparam name="TImplementation">The type of the implementation.</typeparam>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Singleton<TService, TImplementation>()
+    public static ServiceDescriptor Singleton<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
         where TService : class
         where TImplementation : class, TService
     {
@@ -381,7 +354,7 @@ public sealed class ServiceDescriptor
     /// <param name="service">The type of the service.</param>
     /// <param name="implementationType">The type of the implementation.</param>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Singleton(Type service, Type implementationType)
+    public static ServiceDescriptor Singleton(Type service, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (service == null)
         {
@@ -511,7 +484,7 @@ public sealed class ServiceDescriptor
     /// <param name="implementationType">The type of the implementation.</param>
     /// <param name="lifetime">The lifetime of the service.</param>
     /// <returns>A new implementationInstance of <see cref="ServiceDescriptor"/>.</returns>
-    public static ServiceDescriptor Describe(Type serviceType, Type implementationType, ServiceLifetime lifetime)
+    public static ServiceDescriptor Describe(Type serviceType, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType, ServiceLifetime lifetime)
     {
         return new ServiceDescriptor(serviceType, implementationType, lifetime);
     }
@@ -530,7 +503,7 @@ public sealed class ServiceDescriptor
         return new ServiceDescriptor(serviceType, implementationFactory, lifetime);
     }
 
-    private static ServiceDescriptor Describe<TService, TImplementation>(ServiceLifetime lifetime)
+    private static ServiceDescriptor Describe<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(ServiceLifetime lifetime)
         where TService : class
         where TImplementation : class, TService
     {

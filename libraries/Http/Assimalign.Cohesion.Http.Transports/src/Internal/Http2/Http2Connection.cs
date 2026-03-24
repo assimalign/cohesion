@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 internal sealed class Http2Connection : HttpConnection
 {
     private readonly ISingleStreamTransportConnection _connection;
-    private Http2ConnectionContext? _openContext;
+    private Http2ConnectionContext? _context;
 
     public Http2Connection(ISingleStreamTransportConnection connection, bool isSecure)
         : base(connection, isSecure)
@@ -22,15 +22,16 @@ internal sealed class Http2Connection : HttpConnection
 
     public override async ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
-        if (_openContext is not null)
+        if (_context is not null)
         {
-            return _openContext;
+            return _context;
         }
 
         ITransportConnectionContext context = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        _openContext = new Http2ConnectionContext(context, IsSecure);
 
-        return _openContext;
+        _context = new Http2ConnectionContext(context, IsSecure);
+
+        return _context;
     }
 
     public override ValueTask DisposeAsync()

@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.DependencyInjection;
+﻿namespace System;
 
 /// <summary>
 /// Specifies the lifetime of a service in an <see cref="IServiceCollection"/>.

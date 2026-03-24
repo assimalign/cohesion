@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-	<ItemGroup>
-	  <ProjectReference Include="..\..\Assimalign.Cohesion.Web.Routing\src\Assimalign.Cohesion.Web.Routing.csproj" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-	</ItemGroup>
-</Project>
