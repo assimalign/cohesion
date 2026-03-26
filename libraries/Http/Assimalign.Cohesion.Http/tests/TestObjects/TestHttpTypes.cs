@@ -45,7 +45,7 @@ internal sealed class TestHttpContext : HttpContext
 {
     public TestHttpContext(
         HttpVersion version,
-        IHttpSession session,
+        HttpSession session,
         TestHttpRequest request,
         TestHttpResponse response,
         IHttpConnectionInfo? connectionInfo = null,
@@ -62,7 +62,7 @@ internal sealed class TestHttpContext : HttpContext
 
     public override HttpVersion Version { get; }
 
-    public override IHttpSession Session { get; }
+    public override HttpSession Session { get; }
 
     public override TestHttpRequest Request { get; }
 

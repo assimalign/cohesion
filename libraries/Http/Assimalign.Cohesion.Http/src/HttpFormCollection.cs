@@ -45,10 +45,10 @@ public sealed class HttpFormCollection : IHttpFormCollection
     /// Adds a form file.
     /// </summary>
     /// <param name="file">The file to add.</param>
-    //public void Add(IHttpFormFile file)
-    //{
-    //    ((HttpFormFileCollection)Files).Add(file);
-    //}
+    public void Add(HttpFormFile file)
+    {
+        ((HttpFormFileCollection)Files).Add(file);
+    }
 
     /// <inheritdoc />
     public bool ContainsKey(string key)

@@ -35,7 +35,7 @@ Cohesion is a mono repository
 
 ## Services/Resources
 ![api manager](https://github.com/assimalign/cohesion/actions/workflows/resource-api-manager.yml/badge.svg?branch=development)
-![configuration store](https://github.com/assimalign/cohesion/actions/workflows/resource-configuration-store.yml/badge.svg?branch=development)
+![Configuration Store](https://github.com/assimalign/cohesion/actions/workflows/resource-configuration-store.yml/badge.svg?branch=development)
 ![database](https://github.com/assimalign/cohesion/actions/workflows/resource-database.yml/badge.svg?branch=development)
 ![event hub](https://github.com/assimalign/cohesion/actions/workflows/resource-event-hub.yml/badge.svg?branch=development)
 ![iot hub](https://github.com/assimalign/cohesion/actions/workflows/resource-iot-hub.yml/badge.svg?branch=development)

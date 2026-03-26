@@ -12,14 +12,14 @@ public interface IHostBuilder
     /// </summary>
     /// <param name="service">The service managed by the host.</param>
     /// <returns>The same instance of <see cref="IHostBuilder"/></returns>
-    IHostBuilder AddHostedService(IHostService service);
+    //IHostBuilder AddHostedService(IHostService service);
 
     /// <summary>
     /// Adds a service to the host.
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    IHostBuilder AddHostedService(Func<IHostContext, IHostService> configure);
+    //IHostBuilder AddHostedService(Func<IHostContext, IHostService> configure);
 
     /// <summary>
     /// Builds the <see cref="IHost"/>.

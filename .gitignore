@@ -26,6 +26,7 @@ scripts/modules
 # Build output folder
 .out
 _out
+_archive
 
 # Mono auto generated files
 mono_crash.*

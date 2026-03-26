@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 public abstract class Application : IApplication
 {
+    public ServiceId Id => throw new NotImplementedException();
+
     Task IHostService.StartAsync(CancellationToken cancellationToken)
     {
         throw new NotImplementedException();

@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Hosting;
 /// <summary>
 /// 
 /// </summary>
-public interface IWebApplicationBuilder
+public interface IWebApplicationBuilder 
 {
     /// <summary>
     /// 
@@ -27,13 +27,6 @@ public interface IWebApplicationBuilder
     /// 
     /// </summary>
     IConfigurationManager Configuration { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="server"></param>
-    /// <returns></returns>
-    IWebApplicationBuilder UseServer(IWebApplicationServer server);
 
     /// <summary>
     /// 

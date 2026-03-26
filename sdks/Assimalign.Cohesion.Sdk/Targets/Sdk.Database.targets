@@ -1,3 +1,5 @@
 <Project>
-
+    <ItemGroup>
+        <PackageReference Include="Assimalign.Cohesion.Database.Hosting" Version="$(CohesionVersion)" />
+    </ItemGroup>
 </Project>

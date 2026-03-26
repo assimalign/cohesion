@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Web.Routing;
 /// </summary>
 public static class WebApplicationPipelineBuilderExtensions
 {
-    extension(IWebApplicationPipelineBuilder builder)
+    extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     {
         /// <summary>
         /// Maps a GET route to the supplied middleware.
@@ -24,10 +24,6 @@ public static class WebApplicationPipelineBuilderExtensions
             ArgumentNullException.ThrowIfNullOrEmpty(pattern);
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(middleware);
-
-
-            builder.Use()
-
             IWebApplicationContext context = builder.Context;
 
             IServiceProvider? serviceProvider = context.ServiceProvider;
@@ -37,7 +33,7 @@ public static class WebApplicationPipelineBuilderExtensions
                 throw new InvalidOperationException("No Service Provider was registered");
             }
 
-            IRouterBuilder? routerBuilder = serviceProvider.GetService<IRouterBuilder>();
+            IRouterBuilder? routerBuilder = serviceProvider.GetService(typeof(IRouterBuilder)) as IRouterBuilder;
 
             if (routerBuilder is null)
             {

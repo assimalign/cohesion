@@ -19,7 +19,7 @@ public class HttpFormCollectionTests
         form.Add("name", "cohesion");
         form.Add(file);
         bool foundValue = form.TryGetValue("name", out HttpQueryValue value);
-        bool foundFile = form.Files.TryGetValue("avatar", out IHttpFormFile uploadedFile);
+        bool foundFile = form.Files.TryGetValue("avatar", out HttpFormFile uploadedFile);
 
         // Assert
         foundValue.ShouldBeTrue();

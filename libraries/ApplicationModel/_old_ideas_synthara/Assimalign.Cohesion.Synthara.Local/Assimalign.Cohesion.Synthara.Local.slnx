@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.Synthara.Local.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.Synthara.Local.Tests.csproj" />
-  </Folder>
-</Solution>

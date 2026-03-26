@@ -9,8 +9,6 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 public static class RoutingExtensions
 {
-    private static IRouterBuilder? _routerBuilder;
-
     extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     {
         /// <summary>
@@ -27,7 +25,7 @@ public static class RoutingExtensions
                 
                 CancellationToken cancellationToken = cancellationTokenSource.Token;
 
-                IRouter router = RouterBuilder.Build();
+                IRouter router = RouterBuilder.Shared.Build();
 
                 await router.RouteAsync(context, cancellationToken).ConfigureAwait(false);
 
@@ -37,7 +35,7 @@ public static class RoutingExtensions
                 }
             });
 
-            return RouterBuilder;
+            return RouterBuilder.Shared;
         }
     }
 }

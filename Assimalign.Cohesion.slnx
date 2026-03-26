@@ -18,6 +18,32 @@
 	<Folder Name="/cohesion/.designing/">
 		<Project Path=".designing/project-template.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/.dotnet-cli-home/" />
+	<Folder Name="/cohesion/.dotnet-cli-home/.dotnet/">
+		<File Path=".dotnet-cli-home/.dotnet/.workloadAdvertisingManifestSentinel10.0.100" />
+		<File Path=".dotnet-cli-home/.dotnet/10.0.104.aspNetCertificateSentinel" />
+		<File Path=".dotnet-cli-home/.dotnet/10.0.104.dotnetFirstUseSentinel" />
+		<File Path=".dotnet-cli-home/.dotnet/10.0.104.toolpath.sentinel" />
+		<File Path=".dotnet-cli-home/.dotnet/10.0.104_IsDockerContainer.dotnetUserLevelCache" />
+		<File Path=".dotnet-cli-home/.dotnet/10.0.104_MachineId.dotnetUserLevelCache" />
+		<File Path=".dotnet-cli-home/.dotnet/MachineId.v1.dotnetUserLevelCache" />
+	</Folder>
+	<Folder Name="/cohesion/.dotnet-cli-home/.dotnet/TelemetryStorageService/">
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/02808c7f6eb3480fb8a113de851c0d41" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/0566774e089b44c481edc8a9fc7784b8" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/12003addddd343118ff241056bde6c07" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/20260324125925_cf3dd61be4924794a65e408777621ac0.trn" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/68c1e5ad3f5e4d77b59ca1f98ee91cc1" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/82385cf1fdb248988a4eaf88c4864493" />
+		<File Path=".dotnet-cli-home/.dotnet/TelemetryStorageService/c06caf5384d64662afea77ef8fe274e9" />
+	</Folder>
+	<Folder Name="/cohesion/.dotnet-cli-home/.nuget/" />
+	<Folder Name="/cohesion/.dotnet-cli-home/.nuget/packages/" />
+	<Folder Name="/cohesion/.dotnet-cli-home/AppData/" />
+	<Folder Name="/cohesion/.dotnet-cli-home/AppData/Roaming/" />
+	<Folder Name="/cohesion/.dotnet-cli-home/AppData/Roaming/NuGet/">
+		<File Path=".dotnet-cli-home/AppData/Roaming/NuGet/NuGet.Config" />
+	</Folder>
 	<Folder Name="/cohesion/.github/">
 		<File Path=".github/copilot-instructions.md" />
 	</Folder>
@@ -56,6 +82,27 @@
 		<File Path=".github/workflows/resource-notification-hub.yml" />
 		<File Path=".github/workflows/resource-secret-store.yml" />
 		<File Path=".github/workflows/resource-web.yml" />
+	</Folder>
+	<Folder Name="/cohesion/.obsidian/">
+		<File Path=".obsidian/app.json" />
+		<File Path=".obsidian/appearance.json" />
+		<File Path=".obsidian/bookmarks.json" />
+		<File Path=".obsidian/community-plugins.json" />
+		<File Path=".obsidian/core-plugins.json" />
+		<File Path=".obsidian/workspace.json" />
+		<File Path=".obsidian/workspaces.json" />
+	</Folder>
+	<Folder Name="/cohesion/.obsidian/plugins/" />
+	<Folder Name="/cohesion/.obsidian/plugins/table-editor-obsidian/">
+		<File Path=".obsidian/plugins/table-editor-obsidian/data.json" />
+		<File Path=".obsidian/plugins/table-editor-obsidian/main.js" />
+		<File Path=".obsidian/plugins/table-editor-obsidian/manifest.json" />
+		<File Path=".obsidian/plugins/table-editor-obsidian/styles.css" />
+	</Folder>
+	<Folder Name="/cohesion/.obsidian/themes/" />
+	<Folder Name="/cohesion/.obsidian/themes/Obsidianite/">
+		<File Path=".obsidian/themes/Obsidianite/manifest.json" />
+		<File Path=".obsidian/themes/Obsidianite/theme.css" />
 	</Folder>
 	<Folder Name="/cohesion/.vscode/">
 		<File Path=".vscode/extensions.json" />
@@ -189,47 +236,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/">
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Directory.Build.props" />
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Directory.Build.targets" />
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/">
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/src/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/src/Assimalign.Cohesion.Synthara.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/tests/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara/tests/Assimalign.Cohesion.Synthara.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/">
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/src/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/src/Assimalign.Cohesion.Synthara.Discovery.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/tests/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/tests/Assimalign.Cohesion.Synthara.Discovery.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/">
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/src/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/src/Assimalign.Cohesion.Synthara.Kubernetes.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/tests/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/tests/Assimalign.Cohesion.Synthara.Kubernetes.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/">
-		<File Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/src/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/src/Assimalign.Cohesion.Synthara.Local.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/tests/">
-		<Project Path="libraries/ApplicationModel/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/tests/Assimalign.Cohesion.Synthara.Local.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Configuration/">
 		<File Path="libraries/Configuration/Directory.Build.props" />
@@ -1639,5 +1645,344 @@
 	<Folder Name="/cohesion/tooling/Portal/src/" />
 	<Folder Name="/cohesion/tooling/Portal/src/Assimalign.Cohesion.Portal/">
 		<Project Path="tooling/Portal/src/Assimalign.Cohesion.Portal/Assimalign.Cohesion.Portal.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/" />
+	<Folder Name="/cohesion/_archive/_old_Abstractions/">
+		<File Path="_archive/_old_Abstractions/ISyntharaAccount.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaApplication.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaApplicationBuilder.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaMetadata.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaNetwork.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaNetworkSubnet.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaNode.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaRegion.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaResource.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaResourceGroup.cs" />
+		<File Path="_archive/_old_Abstractions/ISyntharaResourcePublisher.cs" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_Abstractions/ValueObjects/">
+		<File Path="_archive/_old_Abstractions/ValueObjects/AccountId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/AccountId.generated.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/AccountName.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/AccountName.generated.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/NodeId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/NodeName.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/RegionId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/RegionName.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/ResourceGroupId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/ResourceGroupName.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/ResourceId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/ResourceName.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/SyntharaId.cs" />
+		<File Path="_archive/_old_Abstractions/ValueObjects/SyntharaName.cs" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/">
+		<File Path="_archive/_old_ideas_synthara/Directory.Build.props" />
+		<File Path="_archive/_old_ideas_synthara/Directory.Build.targets" />
+		<File Path="_archive/_old_ideas_synthara/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/">
+		<File Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/src/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/src/Assimalign.Cohesion.Synthara.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/tests/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara/tests/Assimalign.Cohesion.Synthara.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/">
+		<File Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/src/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/src/Assimalign.Cohesion.Synthara.Discovery.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/tests/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Discovery/tests/Assimalign.Cohesion.Synthara.Discovery.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/">
+		<File Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/src/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/src/Assimalign.Cohesion.Synthara.Kubernetes.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/tests/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Kubernetes/tests/Assimalign.Cohesion.Synthara.Kubernetes.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/">
+		<File Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/src/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/src/Assimalign.Cohesion.Synthara.Local.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/tests/">
+		<Project Path="_archive/_old_ideas_synthara/Assimalign.Cohesion.Synthara.Local/tests/Assimalign.Cohesion.Synthara.Local.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/_out/" />
+	<Folder Name="/cohesion/_out/code-generation/" />
+	<Folder Name="/cohesion/_out/code-generation/create-value-types/" />
+	<Folder Name="/cohesion/_out/code-generation/create-value-types/ValueTypes/">
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ApplicationId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ConnectionId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/Domain.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/GroupId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/HostId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/JobId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/LogId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ObjectId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/OperationKey.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/PermissionId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/PrincipalId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ResourceId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ResourceName.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/RoleId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ScheduleId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/ServiceId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/TenantId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/TransportId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/TransportProtocol.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/UserId.cs" />
+		<File Path="_out/code-generation/create-value-types/ValueTypes/Username.cs" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Sdk/">
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.props" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.targets" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/">
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.props" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.targets" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.props" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.targets" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.props" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.targets" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Targets/Version.props" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/">
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.pdb" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.Framework.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.Utilities.Core.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.NET.StringTools.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Configuration.ConfigurationManager.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Diagnostics.EventLog.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Reflection.MetadataLoadContext.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Security.Cryptography.ProtectedData.dll" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/">
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.dll" />
+		<File Path="_out/dotnet/sdk/10.0.101/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.Messages.dll" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.103/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.103/sdks/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.103/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.103/sdks/Assimalign.Cohesion.Sdk/Tasks/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Sdk/">
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.props" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.targets" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/">
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.props" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.targets" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.props" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.targets" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.props" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.targets" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Targets/Version.props" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/">
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.pdb" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.Framework.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.Build.Utilities.Core.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/Microsoft.NET.StringTools.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Configuration.ConfigurationManager.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Diagnostics.EventLog.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Reflection.MetadataLoadContext.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/System.Security.Cryptography.ProtectedData.dll" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/">
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.dll" />
+		<File Path="_out/dotnet/sdk/10.0.104/sdks/Assimalign.Cohesion.Sdk/Tasks/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.Messages.dll" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/sdks/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Sdk/">
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.props" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.targets" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/">
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.props" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Common.targets" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.props" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Database.targets" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.props" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Sdk.Web.targets" />
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Targets/Version.props" />
+	</Folder>
+	<Folder Name="/cohesion/_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Tasks/">
+		<File Path="_out/dotnet/sdk/9.0.203/sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" />
+	</Folder>
+	<Folder Name="/cohesion/_out/packages/">
+		<File Path="_out/packages/Assimalign.Cohesion.Amqp.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Amqp.Transports.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ApiManager.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ApiManager.Hosting.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.CommandLine.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.CommandLine.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.EnvironmentVariables.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.EnvironmentVariables.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.FileSystem.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.FileSystem.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.Json.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.Json.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.Xml.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Configuration.Xml.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ConfigurationStore.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Binary.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Markdown.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Media.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Mpeg.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Pdf.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Content.Text.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Core.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Core.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Blob.Catalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Blob.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Blob.Replication.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Blob.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Blob.Storage.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.Catalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.Language.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.Storage.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Cache.Tests.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.Catalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.Language.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.Replication.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Documents.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Embedded.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Execution.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Execution.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Governance.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Catalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Language.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Replication.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Graph.Storage.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Hosting.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Hosting.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Cataalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Replication.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Security.Tests.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.KeyValuePair.Storage.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Language.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Language.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Memory.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Sql.Catalog.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Sql.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Sql.Language.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Sql.Security.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Types.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Database.Types.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.DependencyInjection.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.DependencyInjection.1.0.0.snupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.DependencyInjection.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.DependencyInjection.9.0.0.snupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.EventHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.FileSystem.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.FileSystem.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.FileSystem.Globbing.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.FileSystem.InMemory.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.FileSystem.Physical.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Hosting.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Hosting.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Http.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Http.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Http.Transports.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityHub.Models.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityModel.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityModel.Token.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IdentityModel.Token.Saml.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IoTHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.IoTHub.Hosting.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Logging.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Logging.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Logging.Debug.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.LogSpace.Telemetry.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.MediaHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.MessageHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.MessageHub.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.NotificationHub.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.NotificationHub.Client.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ObjectMapping.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ObjectPool.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ObjectValidation.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.OpenApi.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.OpenTelemetry.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.ProjectTemplates.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.CircuitBreaker.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.Fallback.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.Hedging.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.RateLimiting.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.Retry.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Resilience.Timeout.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Scheduler.Timer.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Sdk.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.SecretStore.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Transports.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Api.9.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Api.Controllers.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Authentication.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Authorization.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.CookiePolicy.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Results.1.0.0.nupkg" />
+		<File Path="_out/packages/Assimalign.Cohesion.Web.Routing.9.0.0.nupkg" />
+	</Folder>
+	<Folder Name="/cohesion/_out/scripts/" />
+	<Folder Name="/cohesion/_out/scripts/modules/" />
+	<Folder Name="/cohesion/_out/scripts/modules/Assimalign.Cohesion.DevScripts/" />
+	<Folder Name="/cohesion/_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/" />
+	<Folder Name="/cohesion/_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/">
+		<File Path="_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/Assimalign.Cohesion.DevScripts.deps.json" />
+		<File Path="_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/Assimalign.Cohesion.DevScripts.dll" />
+		<File Path="_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/Assimalign.Cohesion.DevScripts.pdb" />
+		<File Path="_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/Assimalign.Cohesion.DevScripts.psd1" />
+		<File Path="_out/scripts/modules/Assimalign.Cohesion.DevScripts/0.0.1/netstandard2.1/Assimalign.Cohesion.DevScripts.psm1" />
 	</Folder>
 </Solution>

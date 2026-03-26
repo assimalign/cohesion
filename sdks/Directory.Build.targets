@@ -1,12 +1,19 @@
 <Project>
     <Import Project="..\Directory.Build.targets" />
+    <PropertyGroup>
+        <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);CollectSdkTaskFiles</TargetsForTfmSpecificContentInPackage>
+    </PropertyGroup>
     <ItemGroup>
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
+        <None Include="$(MSBuildProjectDirectory)\..\Sdk\**\*" Pack="true" PackagePath="Sdk\%(RecursiveDir)%(Filename)%(Extension)" />
+        <None Include="$(MSBuildProjectDirectory)\..\Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)" />
+        <None Include="$(CohesionRepositoryDirectory)build\Targets\Version.props" Pack="true" PackagePath="Targets\Version.props" />
+        <None Include="$(CohesionRepositoryDirectory)sdks\README.md" Pack="true" PackagePath="README.md" />
     </ItemGroup>
 
     <!-- #region Copies: Sdk/Sdk.{props, targets} and Targets/{targets}.{props, targets}-->
-    <Target Name="CopyRootSdkRiles" AfterTargets="Build">
+    <Target Name="CopyRootSdkFiles" AfterTargets="Build">
         <ItemGroup>
             <MySourceFiles1 Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Sdk\*.*" />
         </ItemGroup>
@@ -25,6 +32,33 @@
         <Copy SourceFiles="@(MySourceFiles3)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\" />
     </Target>
     <!-- #endregion -->
+
+    <Target Name="PackCohesionProjects" BeforeTargets="GenerateNuspec" Condition="'$(PackCohesionProjects)' == 'true'">
+        <ItemGroup>
+            <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)libraries\**\src\*.csproj"
+                Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj;$(CohesionRepositoryDirectory)libraries\ApplicationModel\_old_ideas_synthara\**\*.csproj" />
+            <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)resources\**\src\*.csproj"
+                Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj" />
+            <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)extensions\dotnet\src\**\*.csproj"
+                Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj" />
+        </ItemGroup>
+        <Message Text="Packing Cohesion projects into $(CohesionOutputPathForLibraries)" Importance="High" />
+        <MSBuild
+            Projects="@(CohesionSdkPackProject)"
+            Targets="Restore;Pack"
+            BuildInParallel="true"
+            Properties="Configuration=$(Configuration);PackageOutputPath=$(CohesionOutputPathForLibraries)"
+            RemoveProperties="OutDir;PackageId;TargetFramework;TargetFrameworks;IncludeBuildOutput;GenerateDependencyFile;CopyLocalLockFileAssemblies"
+            ContinueOnError="WarnAndContinue" />
+    </Target>
+
+    <Target Name="CollectSdkTaskFiles">
+        <ItemGroup>
+            <TfmSpecificPackageFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.nupkg;$(OutDir)**\*.snupkg;$(OutDir)**\*.nuspec">
+                <PackagePath>Tasks\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+            </TfmSpecificPackageFile>
+        </ItemGroup>
+    </Target>
 
     <Target Name="CleanOutDir" AfterTargets="Clean">
         <ItemGroup>

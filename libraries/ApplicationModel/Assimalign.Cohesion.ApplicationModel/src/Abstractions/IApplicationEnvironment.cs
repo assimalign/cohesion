@@ -1,14 +1,10 @@
-﻿
+﻿using Assimalign.Cohesion.Hosting;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
-using Hosting;
-
-public interface ICohesionApplication : IHost
+public interface IApplicationEnvironment : IHostEnvironment
 {
 }

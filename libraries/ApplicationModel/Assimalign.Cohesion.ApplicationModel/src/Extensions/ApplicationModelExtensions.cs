@@ -15,12 +15,7 @@ public static class ApplicationModelExtensions
         Func<ApplicationBuilder<TApp>, TApp> configure)
         where TApp : Application
     {
-        builder.AddService(context =>
-        {
-
-
-
-        });
+        
 
         return builder;
     }

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
+using Assimalign.Cohesion.Logging;
 using Configuration;
 using DependencyInjection;
 using Hosting;
@@ -15,17 +16,13 @@ using Hosting;
 public abstract class ApplicationBuilder<TApplication> : IApplicationBuilder
     where TApplication : Application
 {
-    public ApplicationBuilder(HostBuilder host)
-    {
-        Host = host;
-    }
 
-
-    public virtual HostBuilder Host { get; }
     public virtual ConfigurationManager Configuration { get; }
     public virtual ServiceProviderBuilder Services { get; }
 
-    IHostBuilder IApplicationBuilder.Host => Host;
+    public ILoggerFactoryBuilder Logging => throw new NotImplementedException();
+
+    IHostBuilder IApplicationBuilder.Host => throw new NotImplementedException();
     IConfigurationManager IApplicationBuilder.Configuration => Configuration;
     IServiceProviderBuilder IApplicationBuilder.Services => Services;
 

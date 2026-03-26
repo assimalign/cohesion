@@ -18,6 +18,11 @@
 	</PropertyGroup>
 	<!-- Package Metadata -->
 	<PropertyGroup>
-		<PackageTags>Sdk</PackageTags>
+		<Version>$(CohesionVersion)</Version>
+		<PackageVersion>$(Version)</PackageVersion>
+		<Authors>Assimalign</Authors>
+		<Description>Cohesion MSBuild SDK and local packaging feed for framework, library, and resource packages.</Description>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageTags>Sdk;MSBuild;Cohesion</PackageTags>
 	</PropertyGroup>
 </Project>

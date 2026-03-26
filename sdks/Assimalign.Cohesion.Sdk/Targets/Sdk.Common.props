@@ -1,4 +1,11 @@
 <Project>
+	<PropertyGroup>
+		<CohesionSdkType Condition="'$(CohesionSdkType)' == ''">Common</CohesionSdkType>
+		<TargetFramework Condition="'$(TargetFramework)' == '' and '$(TargetFrameworks)' == ''">net10.0</TargetFramework>
+		<LangVersion Condition="'$(LangVersion)' == ''">Preview</LangVersion>
+		<EnablePreviewFeatures Condition="'$(EnablePreviewFeatures)' == ''">true</EnablePreviewFeatures>
+		<Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+	</PropertyGroup>
 	
 	<UsingTask
 		TaskName="Assimalign.Cohesion.Sdk.Tasks.CreateValueTypeTask"

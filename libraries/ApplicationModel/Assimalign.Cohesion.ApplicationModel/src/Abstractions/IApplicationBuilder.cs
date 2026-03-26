@@ -14,13 +14,8 @@ using DependencyInjection;
 /// <summary>
 /// 
 /// </summary>
-public interface IApplicationBuilder
+public interface IApplicationBuilder<TContext> : IHostBuilder where TContext : IApplicationContext
 {
-    /// <summary>
-    /// 
-    /// </summary>
-    IHostBuilder Host { get; }
-
     /// <summary>
     /// 
     /// </summary>
@@ -40,5 +35,5 @@ public interface IApplicationBuilder
     /// 
     /// </summary>
     /// <returns></returns>
-    IApplication Build();
+    new IApplication<TContext> Build();
 }
