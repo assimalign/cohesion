@@ -25,4 +25,5 @@ public partial struct TransportProtocol
     public static TransportProtocol Raw => "Raw";
     public static TransportProtocol Quic => "Quic";
     public static TransportProtocol Http => "Http";
+    public static TransportProtocol Amqp => "Amqp";
 }
