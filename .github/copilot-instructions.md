@@ -34,6 +34,8 @@ If this file and `AGENTS.md` ever drift, treat `AGENTS.md` as the canonical sour
 - Prefer direct `throw` statements or reusable extension type methods over throw-helper classes.
 - Use explicit `using` directives in each file; do not rely on global usings.
 - Prefer interface-first public APIs and keep implementation types `internal` unless a public type is required.
+- Keep custom exception roots scoped to the owning library or service family, for example `FileSystemException` or `HttpException`.
+- Prefer area-root exceptions that inherit directly from `Exception` or `SystemException` instead of introducing cross-framework exception ancestry.
 - When multiple files implement variants of the same abstraction root, prefer grouped root-first filenames such as `Http2Frame.Header.cs` and `Http2Frame.Ping.cs` so related files sort together.
 - Project-level documentation should live in a `docs/` folder next to `src/` and `tests/`, with required `OVERVIEW.md`, `DESIGN.md`, and `Assembly/` API reference content.
 - Area roots such as `resources/Web/` or `libraries/Core/` should have a `README.md` overview file.
@@ -48,6 +50,7 @@ If this file and `AGENTS.md` ever drift, treat `AGENTS.md` as the canonical sour
 - Do not create public types without XML documentation.
 - Do not introduce `ThrowHelper` or `ThrowHelpers` types.
 - Do not declare new extension members with the legacy `this` parameter syntax.
+- Do not create or revive cross-framework base exception types such as `CohesionException` or `NetworkException`.
 - Do not rely on reflection-heavy runtime discovery, dynamic code generation, or other linker-hostile patterns.
 
 ## Project and Build Rules

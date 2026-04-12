@@ -2,13 +2,12 @@ using System;
 
 namespace Assimalign.Cohesion.Resilience;
 
-using Assimalign.Cohesion;
 using Properties;
 
 /// <summary>
 /// Represents a resilience-specific failure that occurred while executing a pipeline or strategy.
 /// </summary>
-public class ResilienceException : CohesionException
+public class ResilienceException : Exception
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ResilienceException"/> class.

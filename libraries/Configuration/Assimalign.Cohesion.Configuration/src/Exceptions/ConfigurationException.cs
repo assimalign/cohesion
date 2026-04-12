@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Configuration;
 
-public class ConfigurationException : CohesionException
+public class ConfigurationException : Exception
 {
     public ConfigurationException(ConfigurationErrorCode code, string message) 
         : base(message)

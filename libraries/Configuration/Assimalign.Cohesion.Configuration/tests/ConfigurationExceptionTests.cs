@@ -39,11 +39,11 @@ public class ConfigurationExceptionTests
         Assert.Same(inner, exception.InnerException);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Configuration] - Exception: Inherits from CohesionException")]
-    public void Exception_ShouldInheritFromCohesionException()
+    [Fact(DisplayName = "Cohesion Test [Configuration] - Exception: Inherits from Exception")]
+    public void Exception_ShouldInheritFromException()
     {
         var exception = ConfigurationException.NotFound;
 
-        Assert.IsAssignableFrom<Assimalign.Cohesion.CohesionException>(exception);
+        Assert.IsAssignableFrom<Exception>(exception);
     }
 }

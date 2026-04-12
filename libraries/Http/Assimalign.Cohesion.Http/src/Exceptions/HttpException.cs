@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents a base exception for HTTP failures.
 /// </summary>
-public abstract class HttpException : NetworkException
+public abstract class HttpException : Exception
 {
     /// <summary>
     /// Initializes a new HTTP exception.
@@ -30,7 +30,4 @@ public abstract class HttpException : NetworkException
     /// Gets the error code associated with the failure.
     /// </summary>
     public HttpErrorCode Code { get; init; }
-
-    /// <inheritdoc />
-    public override NetworkOsiLayer Layer => NetworkOsiLayer.Application;
 }

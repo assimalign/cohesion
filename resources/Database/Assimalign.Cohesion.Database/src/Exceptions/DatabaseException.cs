@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>
 /// Represents errors that occur during database operations.
 /// </summary>
-public class DatabaseException : CohesionException
+public class DatabaseException : Exception
 {
     /// <summary>
     /// Initializes a new instance of <see cref="DatabaseException"/>.

@@ -121,6 +121,11 @@ When work is coming from the Cohesion GitHub Project, treat project fields as ex
    - Define new extension members with `extension(...)` blocks
    - Do not use the legacy `this` parameter syntax for new extension members
 
+10. **Scope exception roots to a library or service family**
+   - Prefer local roots such as `FileSystemException`, `HttpException`, or `DatabaseException` when a service area needs a shared exception base
+   - Area-root exceptions should inherit directly from `Exception` or `SystemException` unless there is a strong BCL reason to do otherwise
+   - Keep exception inheritance local to the owning area instead of introducing framework-wide base exception dependencies
+
 ### ❌ Forbidden Patterns
 
 1. **NEVER use block-scoped namespaces**
@@ -177,6 +182,10 @@ When work is coming from the Cohesion GitHub Project, treat project fields as ex
        }
    }
    ```
+
+9. **NEVER introduce new framework-wide base exception types for unrelated areas**
+   - Do not create or revive cross-framework roots such as `CohesionException` or `NetworkException`
+   - Unrelated libraries should not depend on a shared exception ancestry just to satisfy framework conventions
 
 ## Naming Conventions
 
@@ -525,12 +534,14 @@ public static class CacheExtensions
 
 2. **Use custom exceptions for domain errors**
    ```csharp
-   public class InvalidConfigurationException : CohesionException
+   public class InvalidConfigurationException : Exception
    {
        public InvalidConfigurationException(string key) 
            : base($"Configuration key '{key}' is invalid or missing.") { }
    }
    ```
+   - When multiple implementations within the same area need a shared root, define an area-specific base such as `FileSystemException`
+   - Avoid cross-framework exception roots that force unrelated libraries to share the same ancestry
 
 3. **Preserve stack trace when rethrowing**
    ```csharp
@@ -636,7 +647,7 @@ Before submitting code, ensure:
 - [ ] `CohesionPackageReference` used for packages
 - [ ] XML documentation on all public APIs
 - [ ] Tests added/updated
-- [ ] Exception types inherit from `CohesionException`
+- [ ] Exception roots stay scoped to the owning library or service area
 - [ ] No new `ThrowHelper` or `ThrowHelpers` types introduced
 - [ ] New extension members use `extension(...)` instead of the legacy `this` parameter syntax
 - [ ] Async methods have `Async` suffix
