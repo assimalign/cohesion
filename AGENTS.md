@@ -1,6 +1,71 @@
 # Cohesion Coding Rules
 
+This file is the canonical instruction source for AI agents working in this repository. The GitHub Copilot companion file at `.github/copilot-instructions.md` should mirror this document rather than introduce competing rules.
+
 This document defines specific coding standards and rules for the Cohesion project. These rules are enforced by AI agents and code reviews.
+
+## Repository Context
+
+### Development Environment
+
+- .NET SDK `10.0.101` or later is required and pinned in `global.json`
+- Projects compile with `LangVersion=Preview` and `EnablePreviewFeatures=true`
+- Libraries target `net10.0` through the shared build configuration
+- NativeAOT compatibility is a standing requirement across the repo
+
+### Quick Commands
+
+```powershell
+# Build the repository
+dotnet build
+
+# Build a specific project
+dotnet build libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj
+
+# Run a project's tests
+dotnet test libraries/Core/Assimalign.Cohesion.Core/tests/
+
+# Create packages
+dotnet pack --configuration Release
+
+# Clean outputs
+dotnet clean
+```
+
+### Output Directories
+
+- `_out/packages/` for packaged library outputs
+- `_out/dotnet/sdk/` for SDK and build output
+- `_out/code-generation/` for generated code artifacts
+
+### Repository Structure
+
+- `libraries/` contains shared libraries, infrastructure, runtime, and cross-service foundations
+- `resources/` contains service and resource implementations
+- `build/` contains custom MSBuild logic, centralized targets, and package-version management
+- `sdks/` contains Cohesion SDK projects
+- `extensions/` and `tooling/` contain developer tooling and integration surfaces
+- `docs/` contains repository-level documentation
+
+### Build System Context
+
+- Prefer Cohesion-specific MSBuild items over stock items where available
+- Internal dependencies should use `CohesionProjectReference`
+- External packages should use `CohesionPackageReference`
+- Central package versions are managed in `build/Targets/PackageReferences.targets`
+- Strongly typed value objects may be generated through `CohesionCodeGenValueType`
+
+### GitHub Project Execution Metadata
+
+When work is coming from the Cohesion GitHub Project, treat project fields as execution guidance rather than as decorative labels.
+
+- `Priority` expresses urgency and criticality. Lower numbers are higher priority, so `P001` should be considered before `P002`.
+- `Wave` expresses planned delivery order. Lower numbers are earlier waves, so `W01` should generally be delivered before `W02` and `W03`.
+- When selecting work autonomously, prefer items that are both unblocked and in the earliest available `Priority` and `Wave`.
+- Do not pull later-wave work forward ahead of earlier-wave blockers unless the user explicitly asks for it or the dependency graph makes prerequisite work necessary.
+- If issue body details, dependency relationships, `Priority`, and `Wave` conflict, resolve them in this order: explicit user instruction, dependency or blocker relationships, `Priority`, then `Wave`.
+- Preserve later-wave requirements in planning and design notes even when only implementing current-wave scope.
+- When a ticket requires prerequisite work from another ticket, call that out explicitly rather than silently skipping the project ordering.
 
 ## General Rules
 
@@ -46,6 +111,7 @@ This document defines specific coding standards and rules for the Cohesion proje
 7. **Markdown files MUST use uppercase snake casing**
    - ✅ `README.md`, `CONTRIBUTING.md`, `LICENSE`
    - ❌ `readme.md`, `contributing.md`
+   - Exception: API reference files under `docs/Assembly/` may mirror namespace and type names directly, for example `docs/Assembly/System.IO/Glob.md`
 
 8. **Prefer direct throws or .NET 10 extension type methods over ThrowHelpers**
    - Use direct `throw` statements or framework guard APIs when the logic is local
@@ -189,6 +255,10 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 │   ├── Exceptions/        # Custom exceptions
 │   ├── ValueObjects/      # Value types
 │   └── [Feature folders]
+├── docs/
+│   ├── OVERVIEW.md        # Project overview
+│   ├── DESIGN.md          # Project design notes
+│   └── Assembly/          # API reference by namespace and type
 └── tests/
     ├── TestObjects/       # Test fixtures
     └── Shared/            # Shared test code
@@ -199,6 +269,9 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 1. **One public type per file** (exceptions: nested types, related enums)
 2. **File name MUST match primary type name**
    - `DatabaseEngine.cs` contains `class DatabaseEngine`
+   - Exception: when several files represent variants of the same root abstraction, prefer grouped root-first filenames so related files sort together
+   - Example: use `Http2Frame.Header.cs` and `Http2Frame.Ping.cs` instead of `HeaderHttp2Frame.cs` and `PingHttp2Frame.cs`
+   - This grouped naming should be used for implementation families that share the same abstraction root even if the concrete type name remains variant-first
 3. **Extension members** in partial classes in `Extensions/` folder using `extension(...)`
 4. **Test files** named `{Feature}Tests.cs`
 
@@ -258,6 +331,37 @@ namespace Assimalign.Cohesion.Database;
 4. **Nested types:** Match outer type visibility unless explicitly different
 
 ## Documentation Standards
+
+### Project Level Documentation Requirements
+
+Every project with `src/` and `tests/` should also have a sibling `docs/` folder.
+
+Required project-level documentation:
+- `docs/OVERVIEW.md` describing the project purpose, scope, dependencies, and usage at a high level
+- `docs/DESIGN.md` describing architecture, important design choices, lifecycle behavior, extension points, operational concerns, and known constraints
+- `docs/Assembly/` containing API reference material organized by namespace and type
+
+Assembly documentation layout:
+- Namespace folders under `docs/Assembly/` should mirror the documented namespace, for example `docs/Assembly/System.IO/`
+- Type documentation files inside those folders should mirror the type name, for example `docs/Assembly/System.IO/Glob.md`
+- Assembly API docs are the exception to the uppercase-markdown naming rule because they intentionally mirror CLR namespace and type names
+- API reference docs should outline the public surface area, constructor or factory behavior, methods, properties, exceptions, and usage notes for the documented type
+
+### Area Level Documentation Requirements
+
+Each major area root should contain a `README.md` that provides an overview of that area.
+
+Examples:
+- `resources/Web/README.md`
+- `resources/Database/README.md`
+- `libraries/Core/README.md`
+
+Area-level `README.md` files should summarize:
+- the purpose of the area
+- the major projects or services it contains
+- how the area fits into the L1, L2, and L3 layering model
+- important dependencies on other areas
+- links to project-level `OVERVIEW.md` and `DESIGN.md` files where relevant
 
 ### XML Documentation Requirements
 
@@ -544,4 +648,6 @@ Before submitting code, ensure:
 
 ---
 
-**For questions about these rules, see `.github/copilot-instructions.md` for detailed guidance.**
+**Canonical source:** `AGENTS.md`
+
+**Copilot mirror:** `.github/copilot-instructions.md` should stay aligned with this file and should not override it.
