@@ -168,9 +168,23 @@ if ($globalPackagesRoot) {
     }
 }
 
-#region 1. SDK packs --------------------------------------------------------
+#region 1. Cohesion build tasks (prerequisite) -----------------------------
+# build/Build.props has a <UsingTask> pointing at
+# build/Tasks/bin/<cfg>/<tfm>/Assimalign.Cohesion.Build.Tasks.dll, which is
+# referenced by every Cohesion library that uses code-generation (Resilience,
+# etc.). Without this DLL on disk every subsequent dotnet pack fails with
+# MSB4062 ("task could not be loaded"). Local devs typically already have it
+# from previous builds; CI's fresh runner doesn't.
+Write-Host "[1/4] Building Cohesion build tasks..." -ForegroundColor Cyan
+$buildTasksProj = Join-Path $repoRoot 'build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj'
+Write-Host "  build $buildTasksProj" -ForegroundColor DarkGray
+& dotnet build $buildTasksProj -c $Configuration --nologo
+if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for $buildTasksProj" }
+#endregion
+
+#region 2. SDK packs --------------------------------------------------------
 if (-not $SkipSdks) {
-    Write-Host "[1/3] Packing SDK projects..." -ForegroundColor Cyan
+    Write-Host "[2/4] Packing SDK projects..." -ForegroundColor Cyan
     $sdkProjects = @(
         Join-Path $repoRoot 'sdks\Assimalign.Cohesion.Sdk\Tasks\Assimalign.Cohesion.Sdk.Tasks.csproj'
         Join-Path $repoRoot 'sdks\Assimalign.Cohesion.Sdk.Web\Tasks\Assimalign.Cohesion.Sdk.Web.Tasks.csproj'
@@ -187,13 +201,13 @@ if (-not $SkipSdks) {
     }
 }
 else {
-    Write-Host "[1/3] Skipping SDK packs (-SkipSdks)." -ForegroundColor DarkYellow
+    Write-Host "[2/4] Skipping SDK packs (-SkipSdks)." -ForegroundColor DarkYellow
 }
 #endregion
 
-#region 2. App runtime packs (per RID) -------------------------------------
+#region 3. App runtime packs (per RID) -------------------------------------
 if (-not $SkipFramework) {
-    Write-Host "[2/3] Packing Assimalign.Cohesion.App runtime pack(s)..." -ForegroundColor Cyan
+    Write-Host "[3/4] Packing Assimalign.Cohesion.App runtime pack(s)..." -ForegroundColor Cyan
     $runtimeProj = Join-Path $repoRoot 'frameworks\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj'
     foreach ($rid in $Rids) {
         Write-Host "  pack runtime ($rid)" -ForegroundColor DarkGray
@@ -202,20 +216,20 @@ if (-not $SkipFramework) {
     }
 }
 else {
-    Write-Host "[2/3] Skipping runtime packs (-SkipFramework)." -ForegroundColor DarkYellow
+    Write-Host "[3/4] Skipping runtime packs (-SkipFramework)." -ForegroundColor DarkYellow
 }
 #endregion
 
-#region 3. App targeting pack ----------------------------------------------
+#region 4. App targeting pack ----------------------------------------------
 if (-not $SkipFramework) {
-    Write-Host "[3/3] Packing Assimalign.Cohesion.App targeting pack..." -ForegroundColor Cyan
+    Write-Host "[4/4] Packing Assimalign.Cohesion.App targeting pack..." -ForegroundColor Cyan
     $refsProj = Join-Path $repoRoot 'frameworks\Assimalign.Cohesion.App.Refs\src\Assimalign.Cohesion.App.Refs.csproj'
     Write-Host "  pack refs" -ForegroundColor DarkGray
     & dotnet pack $refsProj -c $Configuration --nologo
     if ($LASTEXITCODE -ne 0) { throw "Targeting pack build failed." }
 }
 else {
-    Write-Host "[3/3] Skipping targeting pack (-SkipFramework)." -ForegroundColor DarkYellow
+    Write-Host "[4/4] Skipping targeting pack (-SkipFramework)." -ForegroundColor DarkYellow
 }
 #endregion
 
