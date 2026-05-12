@@ -3,6 +3,7 @@
 		<OutputType>Exe</OutputType>
 		<TargetFramework>$(TargetFrameworkForCli)</TargetFramework>
 		<AssemblyName>cohesion</AssemblyName>
+		<OutDir>$(CohesionOutputPathForCli)</OutDir>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Sharprompt" />

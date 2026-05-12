@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.OpenApi.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
-  </Folder>
-</Solution>

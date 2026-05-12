@@ -11,7 +11,7 @@
 					/src
 					/test
 					-->
-					<PropertyGroup>
+	<PropertyGroup>
 		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
 		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
 		<RollForward>LatestPatch</RollForward>
@@ -27,7 +27,7 @@
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-		
+
 		<!-- <SignAssembly>true</SignAssembly>
 		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>

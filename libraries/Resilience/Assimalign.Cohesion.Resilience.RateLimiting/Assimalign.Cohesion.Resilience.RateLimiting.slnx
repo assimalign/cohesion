@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Assimalign.Cohesion.Resilience.RateLimiting.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Assimalign.Cohesion.Resilience.RateLimiting.Tests.csproj" />
-  </Folder>
-</Solution>

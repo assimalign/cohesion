@@ -1,0 +1,4 @@
+<FileList Name="Assimalign.Cohesion.App" TargetFrameworkIdentifier=".NETCoreApp" TargetFrameworkVersion="10.0" FrameworkName="Assimalign.Cohesion.App">
+  <File Type="Managed" Path="Assimalign.Cohesion.App.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.App" AssemblyVersion="9.0.0.0" FileVersion="9.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Core.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Core" AssemblyVersion="9.0.0.0" FileVersion="9.0.0.0" />
+</FileList>

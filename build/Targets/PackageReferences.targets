@@ -1,7 +1,7 @@
 <Project>
     <!-- #region Packages & Dependencies -->
     <ItemGroup>
-        <_CohesionPackage Include="Sharprompt" Version="3.0.0" />
+        <_CohesionPackage Include="Sharprompt" Version="3.1.1" />
         <_CohesionPackage Include="KubernetesClient" Version="17.0.4" />
         <_CohesionPackage Include="NUlid" Version="1.7.2" />
         <_CohesionPackage Include="System.Threading.RateLimiting" Version="10.0.0"/>

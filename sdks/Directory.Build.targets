@@ -6,8 +6,12 @@
     <ItemGroup>
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
         <None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
-        <None Include="$(MSBuildProjectDirectory)\..\Sdk\**\*" Pack="true" PackagePath="Sdk\%(RecursiveDir)%(Filename)%(Extension)" />
-        <None Include="$(MSBuildProjectDirectory)\..\Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)" />
+		<None Include="$(MSBuildProjectDirectory)\..\Sdk\**\*" Pack="true" PackagePath="Sdk\%(RecursiveDir)%(Filename)%(Extension)">
+			<Visible>false</Visible>
+		</None>
+		<None Include="$(MSBuildProjectDirectory)\..\Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)">
+			<Visible>false</Visible>
+		</None>
         <None Include="$(CohesionRepositoryDirectory)build\Targets\Version.props" Pack="true" PackagePath="Targets\Version.props" />
         <None Include="$(CohesionRepositoryDirectory)sdks\README.md" Pack="true" PackagePath="README.md" />
     </ItemGroup>

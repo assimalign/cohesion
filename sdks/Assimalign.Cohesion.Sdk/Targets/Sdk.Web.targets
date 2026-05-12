@@ -1,5 +1,0 @@
-<Project>
-    <ItemGroup>
-        <PackageReference Include="Assimalign.Cohesion.Web.Hosting" Version="$(CohesionVersion)" />
-    </ItemGroup>
-</Project>

@@ -1,0 +1,26 @@
+<Project Sdk="WixToolset.Sdk/6.0.0">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>Assimalign.Cohesion</OutputName>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\</IntermediateOutputPath>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <SuppressIces>ICE61;ICE91</SuppressIces>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Source folder that contains the bits to package. -->
+    <PayloadDir>$(MSBuildThisFileDirectory)..\_out\</PayloadDir>
+    <!-- Read product version from the central Version.props if not provided on the command line. -->
+    <ProductVersion Condition="'$(ProductVersion)' == ''">9.0.0</ProductVersion>
+    <!-- Pass these into the WiX preprocessor so $(var.PayloadDir) / $(var.ProductVersion) resolve. -->
+    <DefineConstants>$(DefineConstants);PayloadDir=$(PayloadDir);ProductVersion=$(ProductVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <Target Name="ValidatePayload" BeforeTargets="Build">
+    <Error Text="Payload directory not found: $(PayloadDir). Build the repo first so that '_out' is populated."
+           Condition="!Exists('$(PayloadDir)')" />
+  </Target>
+
+</Project>

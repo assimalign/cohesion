@@ -70,3 +70,64 @@ The following l
 | `./extensions` |                                                                       |
 | `./sdk`        | This contains source code for MSBuild SDK Style Project.              |
 
+
+
+
+```mermaid
+graph TD
+    subgraph W1["Wave 1: Anchors"]
+        Core["Core L01.01.06"]
+        Security["Security L01.01.18"]
+    end
+
+    subgraph W2["Wave 2: Core Infrastructure"]
+        DI["DependencyInjection L01.01.07"]
+        Config["Configuration L01.01.04"]
+        Logging["Logging L01.01.13"]
+        FS["FileSystem L01.01.09"]
+        Net["Net L01.01.14"]
+        Cache["Cache L01.01.03"]
+        Resilience["Resilience L01.01.17"]
+    end
+
+    subgraph W3["Wave 3: Protocol & Format"]
+        Http["Http L01.01.11"]
+        Amqp["Amqp L01.01.01"]
+        Content["Content L01.01.05"]
+        Identity["IdentityModel L01.01.12"]
+        OTel["OpenTelemetry L01.01.16"]
+        OpenApi["OpenApi L01.01.15"]
+    end
+
+    subgraph W4["Wave 4: Composition & High-Risk"]
+        Hosting["Hosting L01.01.10"]
+        AppModel["ApplicationModel L01.01.02"]
+        Dns["Dns L01.01.08"]
+    end
+
+    Core --> DI
+    Core --> Config
+    Core --> Logging
+    Core --> FS
+    Core --> Net
+    Core --> Cache
+    Core --> Resilience
+    Core --> Http
+    Core --> Amqp
+    Core --> Dns
+    Core --> Hosting
+    Core --> OTel
+    Core --> OpenApi
+    Security --> Identity
+    FS --> Config
+    FS --> Content
+    Net --> Http
+    Net --> Amqp
+    DI --> Hosting
+    DI --> AppModel
+    Config --> AppModel
+    Logging --> AppModel
+    FS --> AppModel
+    Hosting --> AppModel
+
+```

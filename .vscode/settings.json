@@ -34,6 +34,11 @@
     "files.associations": {
         "**/.github/**/*.yml": "github-actions-workflow"
     },
+    "explorer.fileNesting.enabled": true,
+    "files.exclude": {
+        // "_out": true,
+        "**/.vs/**": true
+    },
     "dotnet.preferCSharpExtension": true,
     "dotnet.defaultSolution": "Assimalign.Cohesion.sln",
     "chat.tools.terminal.autoApprove": {

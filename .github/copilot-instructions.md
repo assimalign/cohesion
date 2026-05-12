@@ -23,6 +23,14 @@ If this file and `AGENTS.md` ever drift, treat `AGENTS.md` as the canonical sour
 - If issue details, dependency relationships, `Priority`, and `Wave` conflict, follow this order: explicit user instruction, dependency or blocker relationships, `Priority`, then `Wave`.
 - Preserve later-wave requirements in planning notes even when implementing only current-wave scope.
 
+## Backlog Authoring Guidance
+
+- When creating or refining backlog items, include architectural boundary guidance when it helps a future implementation session make better decisions.
+- If a design naturally decomposes into a project family, call out the suggested project family in the feature or story body.
+- Suggested project families are advisory unless the issue explicitly marks them as required.
+- When suggesting a project family, include candidate project names, project ownership boundaries, and the intended dependency direction between them.
+- Call out boundaries that matter for AOT, source generation, validation, serialization, transport, or service integration so later implementation does not need to rediscover them.
+
 ## Required Patterns
 
 - Use file-scoped namespaces only.

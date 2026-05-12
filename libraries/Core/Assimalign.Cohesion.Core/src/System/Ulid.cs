@@ -46,38 +46,69 @@ public readonly partial struct Ulid :
     // Core
 
     // Timestamp(48bits)
-    [FieldOffset(0)] readonly byte timestamp0;
-    [FieldOffset(1)] readonly byte timestamp1;
-    [FieldOffset(2)] readonly byte timestamp2;
-    [FieldOffset(3)] readonly byte timestamp3;
-    [FieldOffset(4)] readonly byte timestamp4;
-    [FieldOffset(5)] readonly byte timestamp5;
+    [FieldOffset(0)] 
+    private readonly byte _timestamp0;
+
+    [FieldOffset(1)] 
+    private readonly byte _timestamp1;
+
+    [FieldOffset(2)] 
+    private readonly byte _timestamp2;
+
+    [FieldOffset(3)] 
+    private readonly byte _timestamp3;
+
+    [FieldOffset(4)] 
+    private readonly byte _timestamp4;
+
+    [FieldOffset(5)] 
+    private readonly byte _timestamp5;
 
     // Randomness(80bits)
-    [FieldOffset(6)] readonly byte randomness0;
-    [FieldOffset(7)] readonly byte randomness1;
-    [FieldOffset(8)] readonly byte randomness2;
-    [FieldOffset(9)] readonly byte randomness3;
-    [FieldOffset(10)] readonly byte randomness4;
-    [FieldOffset(11)] readonly byte randomness5;
-    [FieldOffset(12)] readonly byte randomness6;
-    [FieldOffset(13)] readonly byte randomness7;
-    [FieldOffset(14)] readonly byte randomness8;
-    [FieldOffset(15)] readonly byte randomness9;
+    [FieldOffset(6)] 
+    private readonly byte _randomness0;
+
+    [FieldOffset(7)] 
+    private readonly byte _randomness1;
+
+    [FieldOffset(8)] 
+    private readonly byte _randomness2;
+
+    [FieldOffset(9)] 
+    private readonly byte _randomness3;
+
+    [FieldOffset(10)] 
+    private readonly byte _randomness4;
+
+    [FieldOffset(11)] 
+    private readonly byte _randomness5;
+
+    [FieldOffset(12)] 
+    private readonly byte _randomness6;
+
+    [FieldOffset(13)] 
+    private readonly byte _randomness7;
+
+    [FieldOffset(14)] 
+    private readonly byte _randomness8;
+
+    [FieldOffset(15)] 
+    private readonly byte _randomness9;
+
 
     [IgnoreDataMember]
     public byte[] Random => new byte[]
     {
-            randomness0,
-            randomness1,
-            randomness2,
-            randomness3,
-            randomness4,
-            randomness5,
-            randomness6,
-            randomness7,
-            randomness8,
-            randomness9,
+            _randomness0,
+            _randomness1,
+            _randomness2,
+            _randomness3,
+            _randomness4,
+            _randomness5,
+            _randomness6,
+            _randomness7,
+            _randomness8,
+            _randomness9,
     };
 
     [IgnoreDataMember]
@@ -92,8 +123,8 @@ public readonly partial struct Ulid :
                 // Lower |A|B|C|D| -> |D|C|B|A|
                 // Upper |E|F| -> |F|E|
                 // Time  |F|E| + |0|0|D|C|B|A|
-                var lower = Unsafe.ReadUnaligned<uint>(ref Unsafe.AsRef(this.timestamp0));
-                var upper = Unsafe.ReadUnaligned<ushort>(ref Unsafe.AsRef(this.timestamp4));
+                var lower = Unsafe.ReadUnaligned<uint>(ref Unsafe.AsRef(_timestamp0));
+                var upper = Unsafe.ReadUnaligned<ushort>(ref Unsafe.AsRef(_timestamp4));
                 var time = (long)BinaryPrimitives.ReverseEndianness(upper) + (((long)BinaryPrimitives.ReverseEndianness(lower)) << 16);
                 return DateTimeOffset.FromUnixTimeMilliseconds(time);
             }
@@ -104,8 +135,8 @@ public readonly partial struct Ulid :
                 // Upper |A|B|C|D|
                 // Lower |E|F|
                 // Time  |A|B|C|C|0|0| + |E|F|
-                var upper = Unsafe.ReadUnaligned<uint>(ref Unsafe.AsRef(this.timestamp0));
-                var lower = Unsafe.ReadUnaligned<ushort>(ref Unsafe.AsRef(this.timestamp4));
+                var upper = Unsafe.ReadUnaligned<uint>(ref Unsafe.AsRef(_timestamp0));
+                var lower = Unsafe.ReadUnaligned<ushort>(ref Unsafe.AsRef(_timestamp4));
                 var time = ((long)upper << 16) + (long)lower;
                 return DateTimeOffset.FromUnixTimeMilliseconds(time);
             }
@@ -123,27 +154,27 @@ public readonly partial struct Ulid :
             if (BitConverter.IsLittleEndian)
             {
                 // Get memory in stack and copy to ulid(Little->Big reverse order).
-                this.timestamp0 = Unsafe.Add(ref firstByte, 5);
-                this.timestamp1 = Unsafe.Add(ref firstByte, 4);
-                this.timestamp2 = Unsafe.Add(ref firstByte, 3);
-                this.timestamp3 = Unsafe.Add(ref firstByte, 2);
-                this.timestamp4 = Unsafe.Add(ref firstByte, 1);
-                this.timestamp5 = Unsafe.Add(ref firstByte, 0);
+                _timestamp0 = Unsafe.Add(ref firstByte, 5);
+                _timestamp1 = Unsafe.Add(ref firstByte, 4);
+                _timestamp2 = Unsafe.Add(ref firstByte, 3);
+                _timestamp3 = Unsafe.Add(ref firstByte, 2);
+                _timestamp4 = Unsafe.Add(ref firstByte, 1);
+                _timestamp5 = Unsafe.Add(ref firstByte, 0);
             }
             else
             {
-                this.timestamp0 = Unsafe.Add(ref firstByte, 2);
-                this.timestamp1 = Unsafe.Add(ref firstByte, 3);
-                this.timestamp2 = Unsafe.Add(ref firstByte, 4);
-                this.timestamp3 = Unsafe.Add(ref firstByte, 5);
-                this.timestamp4 = Unsafe.Add(ref firstByte, 6);
-                this.timestamp5 = Unsafe.Add(ref firstByte, 7);
+                _timestamp0 = Unsafe.Add(ref firstByte, 2);
+                _timestamp1 = Unsafe.Add(ref firstByte, 3);
+                _timestamp2 = Unsafe.Add(ref firstByte, 4);
+                _timestamp3 = Unsafe.Add(ref firstByte, 5);
+                _timestamp4 = Unsafe.Add(ref firstByte, 6);
+                _timestamp5 = Unsafe.Add(ref firstByte, 7);
             }
         }
 
         // Get first byte of randomness from Ulid Struct.
-        Unsafe.WriteUnaligned(ref randomness0, random.Next()); // randomness0~7(but use 0~1 only)
-        Unsafe.WriteUnaligned(ref randomness2, random.Next()); // randomness2~9
+        Unsafe.WriteUnaligned(ref _randomness0, random.Next()); // randomness0~7(but use 0~1 only)
+        Unsafe.WriteUnaligned(ref _randomness2, random.Next()); // randomness2~9
     }
     internal Ulid(long timestampMilliseconds, ReadOnlySpan<byte> randomness)
         : this()
@@ -154,63 +185,60 @@ public readonly partial struct Ulid :
             if (BitConverter.IsLittleEndian)
             {
                 // Get memory in stack and copy to ulid(Little->Big reverse order).
-                this.timestamp0 = Unsafe.Add(ref firstByte, 5);
-                this.timestamp1 = Unsafe.Add(ref firstByte, 4);
-                this.timestamp2 = Unsafe.Add(ref firstByte, 3);
-                this.timestamp3 = Unsafe.Add(ref firstByte, 2);
-                this.timestamp4 = Unsafe.Add(ref firstByte, 1);
-                this.timestamp5 = Unsafe.Add(ref firstByte, 0);
+                _timestamp0 = Unsafe.Add(ref firstByte, 5);
+                _timestamp1 = Unsafe.Add(ref firstByte, 4);
+                _timestamp2 = Unsafe.Add(ref firstByte, 3);
+                _timestamp3 = Unsafe.Add(ref firstByte, 2);
+                _timestamp4 = Unsafe.Add(ref firstByte, 1);
+                _timestamp5 = Unsafe.Add(ref firstByte, 0);
             }
             else
             {
-                this.timestamp0 = Unsafe.Add(ref firstByte, 2);
-                this.timestamp1 = Unsafe.Add(ref firstByte, 3);
-                this.timestamp2 = Unsafe.Add(ref firstByte, 4);
-                this.timestamp3 = Unsafe.Add(ref firstByte, 5);
-                this.timestamp4 = Unsafe.Add(ref firstByte, 6);
-                this.timestamp5 = Unsafe.Add(ref firstByte, 7);
+                _timestamp0 = Unsafe.Add(ref firstByte, 2);
+                _timestamp1 = Unsafe.Add(ref firstByte, 3);
+                _timestamp2 = Unsafe.Add(ref firstByte, 4);
+                _timestamp3 = Unsafe.Add(ref firstByte, 5);
+                _timestamp4 = Unsafe.Add(ref firstByte, 6);
+                _timestamp5 = Unsafe.Add(ref firstByte, 7);
             }
         }
 
         ref var src = ref MemoryMarshal.GetReference(randomness); // length = 10
-        randomness0 = randomness[0];
-        randomness1 = randomness[1];
-        Unsafe.WriteUnaligned(ref randomness2, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref src, 2))); // randomness2~randomness9
+        _randomness0 = randomness[0];
+        _randomness1 = randomness[1];
+        Unsafe.WriteUnaligned(ref _randomness2, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref src, 2))); // randomness2~randomness9
     }
     internal Ulid(ReadOnlySpan<char> base32)
     {
         // unroll-code is based on NUlid.
 
-        randomness9 = (byte)((CharToBase32[base32[24]] << 5) | CharToBase32[base32[25]]); // eliminate bounds-check of span
+        _randomness9 = (byte)((CharToBase32[base32[24]] << 5) | CharToBase32[base32[25]]); // eliminate bounds-check of span
 
-        timestamp0 = (byte)((CharToBase32[base32[0]] << 5) | CharToBase32[base32[1]]);
-        timestamp1 = (byte)((CharToBase32[base32[2]] << 3) | (CharToBase32[base32[3]] >> 2));
-        timestamp2 = (byte)((CharToBase32[base32[3]] << 6) | (CharToBase32[base32[4]] << 1) | (CharToBase32[base32[5]] >> 4));
-        timestamp3 = (byte)((CharToBase32[base32[5]] << 4) | (CharToBase32[base32[6]] >> 1));
-        timestamp4 = (byte)((CharToBase32[base32[6]] << 7) | (CharToBase32[base32[7]] << 2) | (CharToBase32[base32[8]] >> 3));
-        timestamp5 = (byte)((CharToBase32[base32[8]] << 5) | CharToBase32[base32[9]]);
+        _timestamp0 = (byte)((CharToBase32[base32[0]] << 5) | CharToBase32[base32[1]]);
+        _timestamp1 = (byte)((CharToBase32[base32[2]] << 3) | (CharToBase32[base32[3]] >> 2));
+        _timestamp2 = (byte)((CharToBase32[base32[3]] << 6) | (CharToBase32[base32[4]] << 1) | (CharToBase32[base32[5]] >> 4));
+        _timestamp3 = (byte)((CharToBase32[base32[5]] << 4) | (CharToBase32[base32[6]] >> 1));
+        _timestamp4 = (byte)((CharToBase32[base32[6]] << 7) | (CharToBase32[base32[7]] << 2) | (CharToBase32[base32[8]] >> 3));
+        _timestamp5 = (byte)((CharToBase32[base32[8]] << 5) | CharToBase32[base32[9]]);
 
-        randomness0 = (byte)((CharToBase32[base32[10]] << 3) | (CharToBase32[base32[11]] >> 2));
-        randomness1 = (byte)((CharToBase32[base32[11]] << 6) | (CharToBase32[base32[12]] << 1) | (CharToBase32[base32[13]] >> 4));
-        randomness2 = (byte)((CharToBase32[base32[13]] << 4) | (CharToBase32[base32[14]] >> 1));
-        randomness3 = (byte)((CharToBase32[base32[14]] << 7) | (CharToBase32[base32[15]] << 2) | (CharToBase32[base32[16]] >> 3));
-        randomness4 = (byte)((CharToBase32[base32[16]] << 5) | CharToBase32[base32[17]]);
-        randomness5 = (byte)((CharToBase32[base32[18]] << 3) | CharToBase32[base32[19]] >> 2);
-        randomness6 = (byte)((CharToBase32[base32[19]] << 6) | (CharToBase32[base32[20]] << 1) | (CharToBase32[base32[21]] >> 4));
-        randomness7 = (byte)((CharToBase32[base32[21]] << 4) | (CharToBase32[base32[22]] >> 1));
-        randomness8 = (byte)((CharToBase32[base32[22]] << 7) | (CharToBase32[base32[23]] << 2) | (CharToBase32[base32[24]] >> 3));
+        _randomness0 = (byte)((CharToBase32[base32[10]] << 3) | (CharToBase32[base32[11]] >> 2));
+        _randomness1 = (byte)((CharToBase32[base32[11]] << 6) | (CharToBase32[base32[12]] << 1) | (CharToBase32[base32[13]] >> 4));
+        _randomness2 = (byte)((CharToBase32[base32[13]] << 4) | (CharToBase32[base32[14]] >> 1));
+        _randomness3 = (byte)((CharToBase32[base32[14]] << 7) | (CharToBase32[base32[15]] << 2) | (CharToBase32[base32[16]] >> 3));
+        _randomness4 = (byte)((CharToBase32[base32[16]] << 5) | CharToBase32[base32[17]]);
+        _randomness5 = (byte)((CharToBase32[base32[18]] << 3) | CharToBase32[base32[19]] >> 2);
+        _randomness6 = (byte)((CharToBase32[base32[19]] << 6) | (CharToBase32[base32[20]] << 1) | (CharToBase32[base32[21]] >> 4));
+        _randomness7 = (byte)((CharToBase32[base32[21]] << 4) | (CharToBase32[base32[22]] >> 1));
+        _randomness8 = (byte)((CharToBase32[base32[22]] << 7) | (CharToBase32[base32[23]] << 2) | (CharToBase32[base32[24]] >> 3));
     }
 
     public Ulid(ReadOnlySpan<byte> bytes) : this()
     {
-        if (bytes.Length != 16)
-        {
-            throw new ArgumentException("invalid bytes length, length:" + bytes.Length);
-        }
+        ArgumentException.ThrowIf(bytes.Length != 16, "Invalid bytes length, length:" + bytes.Length);
 
         ref var src = ref MemoryMarshal.GetReference(bytes);
-        Unsafe.WriteUnaligned(ref timestamp0, Unsafe.ReadUnaligned<ulong>(ref src)); // timestamp0~randomness1
-        Unsafe.WriteUnaligned(ref randomness2, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref src, 8))); // randomness2~randomness9
+        Unsafe.WriteUnaligned(ref _timestamp0, Unsafe.ReadUnaligned<ulong>(ref src)); // timestamp0~randomness1
+        Unsafe.WriteUnaligned(ref _randomness2, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref src, 8))); // randomness2~randomness9
     }
 
     // HACK: We assume the layout of a Guid is the following:
@@ -399,7 +427,7 @@ public readonly partial struct Ulid :
         try
         {
             TryWriteBytes(buffer);
-            return Convert.ToBase64String(buffer, options);
+            return Convert.ToBase64String(buffer, 0, 16, options);
         }
         finally
         {
@@ -414,36 +442,36 @@ public readonly partial struct Ulid :
             return false;
         }
 
-        span[25] = Base32Bytes[randomness9 & 31]; // eliminate bounds-check of span
+        span[25] = Base32Bytes[_randomness9 & 31]; // eliminate bounds-check of span
 
         // timestamp
-        span[0] = Base32Bytes[(timestamp0 & 224) >> 5];
-        span[1] = Base32Bytes[timestamp0 & 31];
-        span[2] = Base32Bytes[(timestamp1 & 248) >> 3];
-        span[3] = Base32Bytes[((timestamp1 & 7) << 2) | ((timestamp2 & 192) >> 6)];
-        span[4] = Base32Bytes[(timestamp2 & 62) >> 1];
-        span[5] = Base32Bytes[((timestamp2 & 1) << 4) | ((timestamp3 & 240) >> 4)];
-        span[6] = Base32Bytes[((timestamp3 & 15) << 1) | ((timestamp4 & 128) >> 7)];
-        span[7] = Base32Bytes[(timestamp4 & 124) >> 2];
-        span[8] = Base32Bytes[((timestamp4 & 3) << 3) | ((timestamp5 & 224) >> 5)];
-        span[9] = Base32Bytes[timestamp5 & 31];
+        span[0] = Base32Bytes[(_timestamp0 & 224) >> 5];
+        span[1] = Base32Bytes[_timestamp0 & 31];
+        span[2] = Base32Bytes[(_timestamp1 & 248) >> 3];
+        span[3] = Base32Bytes[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
+        span[4] = Base32Bytes[(_timestamp2 & 62) >> 1];
+        span[5] = Base32Bytes[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
+        span[6] = Base32Bytes[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
+        span[7] = Base32Bytes[(_timestamp4 & 124) >> 2];
+        span[8] = Base32Bytes[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
+        span[9] = Base32Bytes[_timestamp5 & 31];
 
         // randomness
-        span[10] = Base32Bytes[(randomness0 & 248) >> 3];
-        span[11] = Base32Bytes[((randomness0 & 7) << 2) | ((randomness1 & 192) >> 6)];
-        span[12] = Base32Bytes[(randomness1 & 62) >> 1];
-        span[13] = Base32Bytes[((randomness1 & 1) << 4) | ((randomness2 & 240) >> 4)];
-        span[14] = Base32Bytes[((randomness2 & 15) << 1) | ((randomness3 & 128) >> 7)];
-        span[15] = Base32Bytes[(randomness3 & 124) >> 2];
-        span[16] = Base32Bytes[((randomness3 & 3) << 3) | ((randomness4 & 224) >> 5)];
-        span[17] = Base32Bytes[randomness4 & 31];
-        span[18] = Base32Bytes[(randomness5 & 248) >> 3];
-        span[19] = Base32Bytes[((randomness5 & 7) << 2) | ((randomness6 & 192) >> 6)];
-        span[20] = Base32Bytes[(randomness6 & 62) >> 1];
-        span[21] = Base32Bytes[((randomness6 & 1) << 4) | ((randomness7 & 240) >> 4)];
-        span[22] = Base32Bytes[((randomness7 & 15) << 1) | ((randomness8 & 128) >> 7)];
-        span[23] = Base32Bytes[(randomness8 & 124) >> 2];
-        span[24] = Base32Bytes[((randomness8 & 3) << 3) | ((randomness9 & 224) >> 5)];
+        span[10] = Base32Bytes[(_randomness0 & 248) >> 3];
+        span[11] = Base32Bytes[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
+        span[12] = Base32Bytes[(_randomness1 & 62) >> 1];
+        span[13] = Base32Bytes[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
+        span[14] = Base32Bytes[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
+        span[15] = Base32Bytes[(_randomness3 & 124) >> 2];
+        span[16] = Base32Bytes[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
+        span[17] = Base32Bytes[_randomness4 & 31];
+        span[18] = Base32Bytes[(_randomness5 & 248) >> 3];
+        span[19] = Base32Bytes[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
+        span[20] = Base32Bytes[(_randomness6 & 62) >> 1];
+        span[21] = Base32Bytes[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
+        span[22] = Base32Bytes[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
+        span[23] = Base32Bytes[(_randomness8 & 124) >> 2];
+        span[24] = Base32Bytes[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
 
         return true;
     }
@@ -455,55 +483,46 @@ public readonly partial struct Ulid :
             return false;
         }
 
-        span[25] = Base32Text[randomness9 & 31]; // eliminate bounds-check of span
+        span[25] = Base32Text[_randomness9 & 31]; // eliminate bounds-check of span
 
         // timestamp
-        span[0] = Base32Text[(timestamp0 & 224) >> 5];
-        span[1] = Base32Text[timestamp0 & 31];
-        span[2] = Base32Text[(timestamp1 & 248) >> 3];
-        span[3] = Base32Text[((timestamp1 & 7) << 2) | ((timestamp2 & 192) >> 6)];
-        span[4] = Base32Text[(timestamp2 & 62) >> 1];
-        span[5] = Base32Text[((timestamp2 & 1) << 4) | ((timestamp3 & 240) >> 4)];
-        span[6] = Base32Text[((timestamp3 & 15) << 1) | ((timestamp4 & 128) >> 7)];
-        span[7] = Base32Text[(timestamp4 & 124) >> 2];
-        span[8] = Base32Text[((timestamp4 & 3) << 3) | ((timestamp5 & 224) >> 5)];
-        span[9] = Base32Text[timestamp5 & 31];
+        span[0] = Base32Text[(_timestamp0 & 224) >> 5];
+        span[1] = Base32Text[_timestamp0 & 31];
+        span[2] = Base32Text[(_timestamp1 & 248) >> 3];
+        span[3] = Base32Text[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
+        span[4] = Base32Text[(_timestamp2 & 62) >> 1];
+        span[5] = Base32Text[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
+        span[6] = Base32Text[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
+        span[7] = Base32Text[(_timestamp4 & 124) >> 2];
+        span[8] = Base32Text[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
+        span[9] = Base32Text[_timestamp5 & 31];
 
         // randomness
-        span[10] = Base32Text[(randomness0 & 248) >> 3];
-        span[11] = Base32Text[((randomness0 & 7) << 2) | ((randomness1 & 192) >> 6)];
-        span[12] = Base32Text[(randomness1 & 62) >> 1];
-        span[13] = Base32Text[((randomness1 & 1) << 4) | ((randomness2 & 240) >> 4)];
-        span[14] = Base32Text[((randomness2 & 15) << 1) | ((randomness3 & 128) >> 7)];
-        span[15] = Base32Text[(randomness3 & 124) >> 2];
-        span[16] = Base32Text[((randomness3 & 3) << 3) | ((randomness4 & 224) >> 5)];
-        span[17] = Base32Text[randomness4 & 31];
-        span[18] = Base32Text[(randomness5 & 248) >> 3];
-        span[19] = Base32Text[((randomness5 & 7) << 2) | ((randomness6 & 192) >> 6)];
-        span[20] = Base32Text[(randomness6 & 62) >> 1];
-        span[21] = Base32Text[((randomness6 & 1) << 4) | ((randomness7 & 240) >> 4)];
-        span[22] = Base32Text[((randomness7 & 15) << 1) | ((randomness8 & 128) >> 7)];
-        span[23] = Base32Text[(randomness8 & 124) >> 2];
-        span[24] = Base32Text[((randomness8 & 3) << 3) | ((randomness9 & 224) >> 5)];
+        span[10] = Base32Text[(_randomness0 & 248) >> 3];
+        span[11] = Base32Text[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
+        span[12] = Base32Text[(_randomness1 & 62) >> 1];
+        span[13] = Base32Text[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
+        span[14] = Base32Text[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
+        span[15] = Base32Text[(_randomness3 & 124) >> 2];
+        span[16] = Base32Text[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
+        span[17] = Base32Text[_randomness4 & 31];
+        span[18] = Base32Text[(_randomness5 & 248) >> 3];
+        span[19] = Base32Text[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
+        span[20] = Base32Text[(_randomness6 & 62) >> 1];
+        span[21] = Base32Text[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
+        span[22] = Base32Text[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
+        span[23] = Base32Text[(_randomness8 & 124) >> 2];
+        span[24] = Base32Text[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
 
         return true;
     }
 
     public override string ToString()
     {
-#if NETCOREAPP2_1_OR_GREATER
         return string.Create<Ulid>(26, this, (span, state) =>
         {
             state.TryWriteStringify(span);
         });
-#else
-            Span<char> span = stackalloc char[26];
-            TryWriteStringify(span);
-            unsafe
-            {
-                return new string((char*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(span)), 0, 26);
-            }
-#endif
     }
 
     //
@@ -532,13 +551,7 @@ public readonly partial struct Ulid :
     public static Ulid Parse(string s, IFormatProvider provider) => Parse(s);
 
     /// <inheritdoc cref="IParsable{TSelf}.TryParse(string?, IFormatProvider?, out TSelf)" />
-    public static bool TryParse(
-#if NETSTANDARD2_1_OR_GREATER
-            [NotNullWhen(true)] string s,
-#else
-        string s,
-#endif
-        IFormatProvider provider, out Ulid result) => TryParse(s, out result);
+    public static bool TryParse([NotNullWhen(true)] string s, IFormatProvider provider, out Ulid result) => TryParse(s, out result);
 
     //
     // ISpanParsable
@@ -574,13 +587,10 @@ public readonly partial struct Ulid :
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool EqualsCore(in Ulid left, in Ulid right)
     {
-#if NET7_0_OR_GREATER
         if (Vector128.IsHardwareAccelerated)
         {
             return Unsafe.As<Ulid, Vector128<byte>>(ref Unsafe.AsRef(in left)) == Unsafe.As<Ulid, Vector128<byte>>(ref Unsafe.AsRef(in right));
         }
-#endif
-#if NET6_0_OR_GREATER
         if (Sse2.IsSupported)
         {
             var vA = Unsafe.As<Ulid, Vector128<byte>>(ref Unsafe.AsRef(in left));
@@ -588,7 +598,6 @@ public readonly partial struct Ulid :
             var cmp = Sse2.CompareEqual(vA, vB);
             return Sse2.MoveMask(cmp) == 0xFFFF;
         }
-#endif
 
         ref var rA = ref Unsafe.As<Ulid, long>(ref Unsafe.AsRef(in left));
         ref var rB = ref Unsafe.As<Ulid, long>(ref Unsafe.AsRef(in right));
@@ -610,69 +619,69 @@ public readonly partial struct Ulid :
 
     public int CompareTo(Ulid other)
     {
-        if (this.timestamp0 != other.timestamp0)
+        if (_timestamp0 != other._timestamp0)
         {
-            return GetResult(this.timestamp0, other.timestamp0);
+            return GetResult(_timestamp0, other._timestamp0);
         }
-        if (this.timestamp1 != other.timestamp1)
+        if (_timestamp1 != other._timestamp1)
         {
-            return GetResult(this.timestamp1, other.timestamp1);
+            return GetResult(_timestamp1, other._timestamp1);
         }
-        if (this.timestamp2 != other.timestamp2)
+        if (_timestamp2 != other._timestamp2)
         {
-            return GetResult(this.timestamp2, other.timestamp2);
+            return GetResult(_timestamp2, other._timestamp2);
         }
-        if (this.timestamp3 != other.timestamp3)
+        if (_timestamp3 != other._timestamp3)
         {
-            return GetResult(this.timestamp3, other.timestamp3);
+            return GetResult(_timestamp3, other._timestamp3);
         }
-        if (this.timestamp4 != other.timestamp4)
+        if (_timestamp4 != other._timestamp4)
         {
-            return GetResult(this.timestamp4, other.timestamp4);
+            return GetResult(_timestamp4, other._timestamp4);
         }
-        if (this.timestamp5 != other.timestamp5)
+        if (_timestamp5 != other._timestamp5)
         {
-            return GetResult(this.timestamp5, other.timestamp5);
+            return GetResult(_timestamp5, other._timestamp5);
         }
-        if (this.randomness0 != other.randomness0)
+        if (_randomness0 != other._randomness0)
         {
-            return GetResult(this.randomness0, other.randomness0);
+            return GetResult(_randomness0, other._randomness0);
         }
-        if (this.randomness1 != other.randomness1)
+        if (_randomness1 != other._randomness1)
         {
-            return GetResult(this.randomness1, other.randomness1);
+            return GetResult(_randomness1, other._randomness1);
         }
-        if (this.randomness2 != other.randomness2)
+        if (_randomness2 != other._randomness2)
         {
-            return GetResult(this.randomness2, other.randomness2);
+            return GetResult(_randomness2, other._randomness2);
         }
-        if (this.randomness3 != other.randomness3)
+        if (_randomness3 != other._randomness3)
         {
-            return GetResult(this.randomness3, other.randomness3);
+            return GetResult(_randomness3, other._randomness3);
         }
-        if (this.randomness4 != other.randomness4)
+        if (_randomness4 != other._randomness4)
         {
-            return GetResult(this.randomness4, other.randomness4);
+            return GetResult(_randomness4, other._randomness4);
         }
-        if (this.randomness5 != other.randomness5)
+        if (_randomness5 != other._randomness5)
         {
-            return GetResult(this.randomness5, other.randomness5);
+            return GetResult(_randomness5, other._randomness5);
         }
-        if (this.randomness6 != other.randomness6)
+        if (_randomness6 != other._randomness6)
         {
-            return GetResult(this.randomness6, other.randomness6);
+            return GetResult(_randomness6, other._randomness6);
         }
-        if (this.randomness7 != other.randomness7)
+        if (_randomness7 != other._randomness7)
         {
-            return GetResult(this.randomness7, other.randomness7);
+            return GetResult(_randomness7, other._randomness7);
         }
-        if (this.randomness8 != other.randomness8)
+        if (_randomness8 != other._randomness8)
         {
-            return GetResult(this.randomness8, other.randomness8);
+            return GetResult(_randomness8, other._randomness8);
         }
-        if (this.randomness9 != other.randomness9)
+        if (_randomness9 != other._randomness9)
         {
-            return GetResult(this.randomness9, other.randomness9);
+            return GetResult(_randomness9, other._randomness9);
         }
 
         return 0;

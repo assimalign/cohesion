@@ -80,8 +80,6 @@ public class Configuration : IConfiguration
 
         return null;
     }
-
-
     public IEnumerator<IConfigurationEntry> GetEnumerator()
     {
         return EnumeratorEntries().GetEnumerator();

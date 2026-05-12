@@ -1,39 +1,29 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel;
-
-using Hosting;
-using Logging;
-using Configuration;
-using DependencyInjection;
 
 /// <summary>
 /// 
 /// </summary>
-public interface IApplicationBuilder<TContext> : IHostBuilder where TContext : IApplicationContext
+public interface IApplicationBuilder
 {
     /// <summary>
     /// 
     /// </summary>
-    ILoggerFactoryBuilder Logging { get; }
+    /// <param name="resource"></param>
+    /// <returns></returns>
+    IApplicationBuilder AddResource(IApplicationResource resource);
 
     /// <summary>
     /// 
     /// </summary>
-    IConfigurationManager Configuration { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    IServiceProviderBuilder Services { get; }
+    /// <param name="configure"></param>
+    /// <returns></returns>
+    IApplicationBuilder AddResource(Func<IApplicationModel, IApplicationResource> configure);
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    new IApplication<TContext> Build();
+    IApplication Build();
 }

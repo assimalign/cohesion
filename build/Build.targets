@@ -5,19 +5,29 @@
 	<ItemGroup>
 		<CohesionCodeGenValueType
 			Update="@(CohesionCodeGenValueType)"
-			ObjectFilePath="$(CohesionOutputPathForCodeGen)\create-value-types\%(Identity)"
+			ObjectFilePath="$(CohesionOutputPathForCodeGen)\%(Identity)"
 			ObjectRelativePath="%(Identity)" />
 	</ItemGroup>
-	<Target Name="CohesionCreateValueType" BeforeTargets="CoreCompile" Inputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" Outputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')">
-		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionCodeGenValueType)" CodeGenOutputPath="$(CohesionOutputPathForCodeGen)\create-value-types">
+	<Target Name="CohesionCreateValueType"
+		BeforeTargets="CoreCompile"
+		Inputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')"
+		Outputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')">
+		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionCodeGenValueType)" CodeGenOutputPath="$(CohesionOutputPathForCodeGen)">
 			<Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
 		</CodeGenerationCreateValueTypeTask>
 		<!-- DEBUG: <Message Text="My ValueTypes: @(CohesionCodeGenValueType)" Importance="high" /> -->
+	</Target>
+	<PropertyGroup>
+		<CleanDependsOn>$(CleanDependsOn);CohesionCleanCodeGeneration</CleanDependsOn>
+	</PropertyGroup>
+
+	<Target Name="CohesionCleanCodeGeneration">
+		<Delete Files="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" />
+		<!-- <RemoveDir Directories="$(CohesionOutputPathForCodeGen)\create-value-types"
+			Condition="Exists('$(CohesionOutputPathForCodeGen)\create-value-types')" /> -->
 	</Target>
 	<ItemGroup>
 		<Compile Include="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
 	</ItemGroup>
 	<!-- #endregion -->
-
-	
 </Project>

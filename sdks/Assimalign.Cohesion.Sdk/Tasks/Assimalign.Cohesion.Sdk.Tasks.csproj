@@ -1,11 +1,36 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<PackageId>Assimalign.Cohesion.Sdk</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+
+		<!--
+			netstandard2.0 is the canonical target for an MSBuild task DLL.
+			It loads in BOTH the .NET Framework MSBuild that Visual Studio uses
+			and the .NET Core MSBuild that the dotnet CLI uses, so a single
+			DLL serves every consumer with no multi-targeting overhead.
+
+			Override the parent's TargetFrameworks=net10.0 set in
+			sdks/Directory.Build.props.
+		-->
+
+		<TargetFramework>net10.0</TargetFramework>
+		<EnablePreviewFeatures>false</EnablePreviewFeatures>
 	</PropertyGroup>
+
+	<!--
+		Microsoft.Build.* are bypass-the-wrapper raw PackageReferences because
+		this DLL loads inside MSBuild's process. Bundling its own copies of
+		these assemblies causes a type-identity conflict with the ones MSBuild
+		already has loaded; the task fails to bind. ExcludeAssets="runtime" +
+		PrivateAssets="all" makes them compile-time-only.
+
+		The CohesionPackageReference wrapper drops PrivateAssets/ExcludeAssets
+		metadata during its Update->Include transform, so for THIS specific
+		case raw PackageReference is required.
+	-->
 	<ItemGroup>
-		<CohesionPackageReference Include="Microsoft.Build" />
-		<CohesionPackageReference Include="Microsoft.Build.Framework" />
-		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
+		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime"/>
+		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
 	</ItemGroup>
 </Project>

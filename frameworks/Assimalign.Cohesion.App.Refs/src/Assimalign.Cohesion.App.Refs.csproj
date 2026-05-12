@@ -1,11 +1,45 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+
+		<!--
+			This project produces the Assimalign.Cohesion.App targeting pack
+			(Assimalign.Cohesion.App.Ref.nupkg). It compiles nothing of its
+			own: build/Targets/CohesionFramework.targets collects the ref
+			assemblies emitted by the App.Runtime project (via
+			ProduceReferenceAssembly=true) and packs them as
+			ref/<tfm>/<dll> alongside data/FrameworkList.xml. That layout +
+			manifest is what the SDK's KnownFrameworkReference machinery
+			expects to find when resolving <FrameworkReference Include="Assimalign.Cohesion.App" />.
+		-->
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<GenerateDependencyFile>false</GenerateDependencyFile>
+
+		<PackageId>Assimalign.Cohesion.App.Ref</PackageId>
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App</CohesionFrameworkName>
+		<CohesionFrameworkKind>Ref</CohesionFrameworkKind>
 	</PropertyGroup>
 
+	<!--
+		Pure build dependency on App.Runtime. ReferenceOutputAssembly=false
+		because the targeting pack consumes Runtime's *ref* output (under
+		obj/<cfg>/<tfm>/ref/), not its compiled assembly.
+		UndefineProperties drops our TargetFramework/RuntimeIdentifier so
+		Runtime builds in its default (RID-less) configuration - enough to
+		emit the ref assemblies.
+	-->
 	<ItemGroup>
-		
-		
-		
+		<ProjectReference Include="..\..\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj"
+			ReferenceOutputAssembly="false"
+			SkipGetTargetFrameworkProperties="true"
+			UndefineProperties="TargetFramework;RuntimeIdentifier" />
 	</ItemGroup>
+
+	<Import Project="$(CohesionRepositoryDirectory)build\Targets\CohesionFramework.targets" />
 </Project>

@@ -67,6 +67,16 @@ When work is coming from the Cohesion GitHub Project, treat project fields as ex
 - Preserve later-wave requirements in planning and design notes even when only implementing current-wave scope.
 - When a ticket requires prerequisite work from another ticket, call that out explicitly rather than silently skipping the project ordering.
 
+### Backlog Authoring Guidance
+
+When creating or refining GitHub backlog items, include architectural boundary guidance when it helps a future implementation session make better decisions.
+
+- If a design naturally decomposes into a project family, call out the suggested project family in the feature or story body.
+- Suggested project families are advisory implementation guidance unless the ticket explicitly marks them as required.
+- When suggesting a project family, include the candidate project names, the responsibility of each project, and the intended dependency direction between them.
+- Call out boundaries that matter for AOT, source generation, validation, serialization, transport, or service integration so later implementation does not have to rediscover them from scratch.
+- Use backlog issue bodies to preserve this architectural context even when placeholder folders or placeholder projects already exist in the repository.
+
 ## General Rules
 
 ### ✅ Required Patterns

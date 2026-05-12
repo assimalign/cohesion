@@ -1,10 +1,38 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<PackageId>Assimalign.Cohesion.App</PackageId>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App</AssemblyName>
+
+		<!--
+			Emit a ref assembly alongside the implementation so the App.Refs
+			project can collect it for the targeting pack.
+		-->
+		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<!--
+			Framework runtime packs are per-RID by convention. Each RID
+			produces a separate .nupkg whose ID embeds the RID. Without an
+			explicit RID (e.g. design-time builds in the IDE) we leave the
+			default empty - the CohesionCollectRuntimePack target is gated
+			on RuntimeIdentifier != '' so it simply doesn't run, which is
+			correct for IDE compile.
+		-->
+		<PackageId Condition="'$(RuntimeIdentifier)' != ''">Assimalign.Cohesion.App.Runtime.$(RuntimeIdentifier)</PackageId>
+		<PackageId Condition="'$(RuntimeIdentifier)' == ''">Assimalign.Cohesion.App.Runtime</PackageId>
+
 		<IsPackable>true</IsPackable>
-		<EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App</CohesionFrameworkName>
+		<CohesionFrameworkKind>Runtime</CohesionFrameworkKind>
 	</PropertyGroup>
+
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
+
+	<Import Project="$(CohesionRepositoryDirectory)build\Targets\CohesionFramework.targets" />
 </Project>

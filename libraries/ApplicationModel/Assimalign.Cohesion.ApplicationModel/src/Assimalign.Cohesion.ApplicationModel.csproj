@@ -1,9 +1,17 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionCodeGenValueType Include="ValueTypes\ResourceName.cs" 
+								  ObjectRuntimeType="String" 
+								  ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
+							      ObjectAccessModifier="public" 
+								  ObjectHasImplicitOperators="true" />
+		<CohesionCodeGenValueType Include="ValueTypes\ResourceId.cs"
+								  ObjectRuntimeType="Guid"
+								  ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+							      ObjectAccessModifier="public"
+								  ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

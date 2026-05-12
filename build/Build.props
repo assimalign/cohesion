@@ -2,12 +2,15 @@
 	<PropertyGroup>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 	</PropertyGroup>
 	<PropertyGroup>
 		<CohesionRepositoryDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)\..'))\</CohesionRepositoryDirectory>
 		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
 		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
+		<CohesionOutputPathForCli>$(CohesionOutputPath)\dotnet</CohesionOutputPathForCli>
 		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
+		<CohesionOutputPathForPacks>$(CohesionOutputPath)\dotnet\packs</CohesionOutputPathForPacks>
 		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
 		<CohesionOutputPathForCodeGen>$(CohesionOutputPath)\code-generation</CohesionOutputPathForCodeGen>
 		<CohesionOutputPathForDevScripts>$(CohesionRepositoryDirectory)scripts\modules</CohesionOutputPathForDevScripts>
@@ -25,4 +28,7 @@
 		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
 		AssemblyFile="$(MSBuildThisFileDirectory)Tasks\bin\$(Configuration)\$(TargetFrameworkForBuild)\Assimalign.Cohesion.Build.Tasks.dll"
 		Runtime="NET" />
+	<ItemGroup Condition="Exists('$(CohesionRepositoryDirectory).editorconfig')">
+		<AdditionalFiles Include="$(CohesionRepositoryDirectory).editorconfig" />
+	</ItemGroup>
 </Project>

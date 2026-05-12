@@ -1,15 +1,23 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
-using Assimalign.Cohesion.Hosting;
-
-public interface IApplication<TContext> : IHost where TContext : IApplicationContext
+/// <summary>
+/// 
+/// </summary>
+public interface IApplication
 {
-    new TContext Context { get; }
+    /// <summary>
+    /// 
+    /// </summary>
+    IApplicationModel Model { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    Task RunAsync(CancellationToken cancellationToken = default);
 }
