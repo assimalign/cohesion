@@ -1,0 +1,7 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
+    <!-- <Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.targets"/> -->
+    <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
+    <Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.targets" />
+    <Import Project="..\Targets\Assimalign.Cohesion.Sdk.NameOnly.ProjectReference.targets" />
+
+</Project>

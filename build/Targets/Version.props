@@ -1,0 +1,5 @@
+<Project>
+    <PropertyGroup>
+        <CohesionVersion>10.0.0</CohesionVersion> <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
+    </PropertyGroup>
+</Project>

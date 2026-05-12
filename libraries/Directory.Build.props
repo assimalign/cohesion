@@ -1,38 +1,56 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
 	<PropertyGroup>
-		<!-- 
-		All projects should follow the same directory pattern
-
-		/ Service 
-			/ Library
-				/src
-				/test
-				/benchmarks
-	 -->
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('src'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">$(TargetFrameworksForLibraries)</TargetFrameworks>
-		<TargetFrameworks Condition="$(MSBuildProjectDirectory.EndsWith('benchmarks'))">$(TargetFrameworksForBenchmark)</TargetFrameworks>
-		
-		<Nullable>enable</Nullable>
-		<LangVersion>latest</LangVersion>
-
+		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
+		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
+	</PropertyGroup>
+	<!-- #region Frameworks Specific Props
+			All projects should follow the same directory pattern
+			/ Service 
+				/ Library
+					/src
+					/test
+					-->
+	<PropertyGroup>
+		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
+		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+		<RollForward>LatestPatch</RollForward>
 		<!-- AOT-->
-		<IsAotCompatible Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">true</IsAotCompatible>
-		<StripSymbols Condition="$(TargetFramework) != 'net6.0' and $(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols>
+		<IsAotCompatible>true</IsAotCompatible>
+		<!-- <StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols> -->
 	</PropertyGroup>
+	<!-- #endregion -->
 
-	<!-- #region Packaging Props-->
-	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
-		<PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">README.md</PackageReadmeFile>
-		<PackageLicenseFile Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">LICENSE</PackageLicenseFile>
+	<!-- #region Packaging (Nuget): General Props -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' and $(IsSourceProject)">
+		<PackageVersion>$(CohesionVersion)</PackageVersion>
+		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+
+		<!-- <SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>
-	<ItemGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
-		<None Include="..\README.md" Condition="Exists('$(MSBuildProjectDirectory)\..\README.md')">
+	<!-- #endregion -->
+
+	<!-- #region Packaging (Nuget): README-->
+	<!-- <PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+		<None Include="..\README.md">
 			<Pack>true</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
-		<None Include="..\..\..\..\LICENSE" Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
+	</ItemGroup> -->
+	<!-- #endregion -->
+
+	<!-- #region Packaging (Nuget): License File -->
+	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+	</PropertyGroup>
+	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\..\..\..\LICENSE')">
+		<None Include="..\..\..\..\LICENSE">
 			<Pack>True</Pack>
 			<PackagePath>\</PackagePath>
 		</None>

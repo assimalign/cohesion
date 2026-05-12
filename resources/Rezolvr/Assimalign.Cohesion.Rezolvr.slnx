@@ -1,0 +1,20 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Rezolvr/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/">
+        <File Path="Assimalign.Cohesion.Rezolvr/README.md" />
+    </Folder>
+    <Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/src/">
+        <Project Path="Assimalign.Cohesion.Rezolvr/src/Assimalign.Cohesion.Rezolvr.csproj" />
+    </Folder>
+    <Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
+        <Project Path="Assimalign.Cohesion.Rezolvr/tests/Assimalign.Cohesion.Rezolvr.Tests.csproj" />
+    </Folder>
+</Solution>

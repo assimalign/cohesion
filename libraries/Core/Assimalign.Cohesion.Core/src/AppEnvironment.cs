@@ -1,6 +1,5 @@
 ﻿using System;
 
-
 namespace Assimalign.Cohesion;
 
 /// <summary>
@@ -10,6 +9,7 @@ public static partial class AppEnvironment
 {
     public static string? GetEnvironmentName()
     {
+
         return Environment.GetEnvironmentVariable(Keys.EnvironmentKey, EnvironmentVariableTarget.Process);
     }
 }

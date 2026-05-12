@@ -1,0 +1,35 @@
+name: Configuration
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Configuration/**"
+      - ".github/actions/build/**" # When Shared Build Action Changes
+      - ".github/workflows/library-configuration.yml" # When Pipeline File Changes
+jobs:
+  build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.Configuration',
+            'Assimalign.Cohesion.Configuration.CommandLine',
+            'Assimalign.Cohesion.Configuration.EnvironmentVariables',
+            'Assimalign.Cohesion.Configuration.FileSystem',
+            'Assimalign.Cohesion.Configuration.Json',
+            'Assimalign.Cohesion.Configuration.Xml',
+            # 'Assimalign.Cohesion.Configuration.Ini',
+          ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with: 
+          area: 'libraries'
+          category: 'Configuration'
+          project: ${{ matrix.projects }}

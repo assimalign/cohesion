@@ -1,0 +1,25 @@
+name: Load Balancer
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "resources/LoadBalancer/**"
+      - ".github/workflows/resource-load-balancer.yml" # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: ["Assimalign.Cohesion.LoadBalancer"]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: "resources"
+          category: "LoadBalancer"
+          project: ${{ matrix.projects }}

@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<ItemGroup>
+		<Analyzer Include="C:\Source\repos\assimalign\tooling\libraries\Analyzers\Assimalign.CodeAnalysis.Internal\src\bin\Debug\netstandard2.0\Assimalign.CodeAnalysis.Internal.dll" />
+	</ItemGroup>
+
+</Project>

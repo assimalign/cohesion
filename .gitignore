@@ -3,7 +3,22 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# AI & Note generation
 *.obsidian
+*.claude
+.linqpad
+.dotnet-cli-home
+.codex-temp
+
+
+# Extensions & Local Tooling
+
+CLAUDE.md
+.nuke/temp
+
+scripts/**/*.txt
+scripts/modules
+
 
 # User-specific files
 *.rsuser
@@ -14,6 +29,11 @@
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
+
+# Build output folder
+.out
+_out
+_archive
 
 # Mono auto generated files
 mono_crash.*

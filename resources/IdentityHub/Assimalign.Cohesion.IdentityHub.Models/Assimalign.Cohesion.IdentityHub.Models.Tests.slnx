@@ -1,0 +1,12 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/" />
+	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/src/" />
+	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/tests/">
+		<Project Path="tests/Assimalign.Cohesion.IdentityHub.Models.csproj" />
+	</Folder>
+</Solution>

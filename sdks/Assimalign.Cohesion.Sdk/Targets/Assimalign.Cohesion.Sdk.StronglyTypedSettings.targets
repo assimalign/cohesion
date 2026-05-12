@@ -1,0 +1,35 @@
+<Project>
+    <PropertyGroup>
+        <_StronglyTypedSettingsOutput>$(_CohesionIntermediateOutputPath)\$(AppSettingsClass).generated.cs</_StronglyTypedSettingsOutput>
+        <_StronglyTypedSettingsInputsCache>$(_CohesionIntermediateOutputPath)\$(AppSettingsClass).generated.txt</_StronglyTypedSettingsInputsCache>
+    </PropertyGroup>
+    <ItemGroup>
+        <_AppSettings Include="$(MSBuildProjectDirectory)\appsettings*.json" />
+    </ItemGroup>
+    <!-- Gather all the appsettings.{}.json files in the current project directory  -->
+    <Target Name="_CollectStronglyTypedSettingsInputs">
+        <MakeDir Directories="$(_CohesionIntermediateOutputPath)" />
+        <WriteLinesToFile
+            File="$(_StronglyTypedSettingsInputsCache)"
+            Lines="@(_AppSettings)"
+            Overwrite="true" />
+    </Target>
+    <Target Name="_GeneratedStronglyTypedAppSettings"
+            BeforeTargets="CoreCompile"
+            DependsOnTargets="_CollectStronglyTypedSettingsInputs"
+            Inputs="$(_StronglyTypedSettingsInputsCache)"
+            Outputs="$(_StronglyTypedSettingsOutput)">
+        <Message Text="File Gen Running" Importance="high" />
+        <CreateStronglyTypedSettingsTask
+            AppSettingsClass="$(AppSettingsClass)"
+            AppSettingsNamespace="$(AppSettingsNamespace)"
+            AppSettingsFiles="@(_AppSettings)"
+            AppSettingsOutputPath="$(_StronglyTypedSettingsOutput)" />
+        <ItemGroup>
+            <Compile Include="$(_StronglyTypedSettingsOutput)" />
+        </ItemGroup>
+    </Target>
+    <Target Name="AfterClean">
+        <Delete Files="$(_StronglyTypedSettingsOutput)" />
+    </Target>
+</Project>

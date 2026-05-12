@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/template",
+  "name": "Cohesion Mono App",
+  "shortName": "Mono App",
+  "author": "Assimalign",
+  "classifications": [
+    "Service"
+  ],
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "identity": "Assimalign.Cohesion.CSharp.9.0",
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework for the project.",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net8.0",
+          "description": "Target net8.0"
+        },
+        {
+          "choice": "net9.0",
+          "description": "Target net9.0"
+        }
+      ]
+    },
+    "UseSqlDb": {
+      "type": "parameter",
+      "datatype": ""
+    }
+  }
+}

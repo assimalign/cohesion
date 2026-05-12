@@ -1,0 +1,17 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/" />
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/docs/">
+		<File Path="docs/Design.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/src/">
+		<Project Path="src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/refs/" >
+		<Project Path="../../IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+	</Folder>
+</Solution>

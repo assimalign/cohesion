@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Scheduler</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Scheduler" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
+	</ItemGroup>
+</Project>

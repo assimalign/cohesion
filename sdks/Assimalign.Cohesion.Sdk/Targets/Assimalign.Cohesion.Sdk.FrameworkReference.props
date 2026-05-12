@@ -1,0 +1,52 @@
+<Project>
+    <!--
+        Registers the Assimalign.Cohesion.App shared framework with the .NET SDK.
+
+        Consumers writing <Project Sdk="Assimalign.Cohesion.Sdk"> (or any chained
+        SDK such as Assimalign.Cohesion.Sdk.Web) automatically:
+
+          1. Get a KnownFrameworkReference entry for "Assimalign.Cohesion.App",
+             so <FrameworkReference Include="Assimalign.Cohesion.App" /> resolves
+             to the targeting pack Assimalign.Cohesion.App.Ref and the per-RID
+             runtime pack Assimalign.Cohesion.App.Runtime.<rid>.
+
+          2. Have <FrameworkReference Include="Assimalign.Cohesion.App" /> added
+             implicitly, so no consumer-side opt-in is required.
+
+        Pack resolution: the SDK first looks for these packs locally under
+        $(NetCoreTargetingPackRoot) / $(NetCoreRuntimePackRoot). When not found
+        there (which is the normal case for third-party frameworks), the SDK
+        auto-restores them from the configured NuGet feeds - the same feeds
+        that serve all other PackageReferences. No custom resolver, no install,
+        no admin required.
+
+        CohesionAutoIncludeAppFramework=false disables the implicit
+        <FrameworkReference>. The KnownFrameworkReference registration stays,
+        so an explicit <FrameworkReference Include="Assimalign.Cohesion.App" />
+        keeps working.
+
+        CohesionAppFrameworkVersion floats independently of $(CohesionVersion)
+        if a consumer needs to pin or roll forward separately.
+    -->
+
+    <PropertyGroup>
+        <CohesionAppFrameworkVersion Condition="'$(CohesionAppFrameworkVersion)' == ''">$(CohesionVersion)</CohesionAppFrameworkVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+        <FrameworkReference Include="Assimalign.Cohesion.App" />
+    </ItemGroup>
+</Project>

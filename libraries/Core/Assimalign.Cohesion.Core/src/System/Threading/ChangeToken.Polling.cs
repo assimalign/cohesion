@@ -8,7 +8,7 @@ namespace System.Threading;
 
 using Assimalign.Cohesion.Internal;
 
-public abstract class PollingChangeToken<T> : IChangeToken<T>, IDisposable
+public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
 {
     private readonly Timer timer;
     private readonly List<IDisposable> subscribers;
@@ -42,11 +42,11 @@ public abstract class PollingChangeToken<T> : IChangeToken<T>, IDisposable
     }
 
 
-    public virtual IDisposable OnChange(Action<object> callback)
+    public virtual IDisposable OnChange(Action<object?> callback, object? state)
     {
         if (callback is not Action<T>)
         {
-            ThrowHelper.ThrowInvalidOperationException("");
+            //ThrowHelper.ThrowInvalidOperationException("");
         }
         return OnChange((callback as Action<T>)!);
     }

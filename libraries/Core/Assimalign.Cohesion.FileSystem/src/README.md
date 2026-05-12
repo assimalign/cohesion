@@ -1,6 +1,0 @@
-﻿# Markdown File
-
-
-
-## Terminology
-

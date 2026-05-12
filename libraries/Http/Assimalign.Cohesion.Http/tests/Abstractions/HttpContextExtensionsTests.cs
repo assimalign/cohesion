@@ -1,0 +1,63 @@
+using Assimalign.Cohesion.Http.Tests.TestObjects;
+
+using Shouldly;
+
+using Xunit;
+
+namespace Assimalign.Cohesion.Http.Tests;
+
+public class HttpContextExtensionsTests
+{
+    [Fact]
+    public void Deconstruct_AbstractContext_ShouldReturnTypedRequestAndResponse()
+    {
+        // Arrange
+        TestHttpRequest request = new()
+        {
+            Host = "api.example.com",
+            Path = "/v1/health",
+            Method = HttpMethod.Get,
+            Scheme = HttpScheme.Https
+        };
+        TestHttpResponse response = new()
+        {
+            StatusCode = HttpStatusCode.Accepted
+        };
+        TestHttpContext context = new(
+            HttpVersion.Http20,
+            new HttpSession("session-id"),
+            request,
+            response);
+
+        // Act
+        context.Deconstruct(out HttpVersion version, out IHttpSession session, out HttpRequest actualRequest, out HttpResponse actualResponse);
+
+        // Assert
+        version.ShouldBe(HttpVersion.Http20);
+        session.Id.ShouldBe("session-id");
+        actualRequest.ShouldBeSameAs(request);
+        actualResponse.ShouldBeSameAs(response);
+    }
+
+    [Fact]
+    public void Deconstruct_InterfaceContext_ShouldReturnInterfaceViewsOverSameInstances()
+    {
+        // Arrange
+        TestHttpRequest request = new();
+        TestHttpResponse response = new();
+        IHttpContext context = new TestHttpContext(
+            HttpVersion.Http11,
+            new HttpSession("session-id"),
+            request,
+            response);
+
+        // Act
+        context.Deconstruct(out HttpVersion version, out IHttpSession session, out IHttpRequest actualRequest, out IHttpResponse actualResponse);
+
+        // Assert
+        version.ShouldBe(HttpVersion.Http11);
+        session.ShouldBeOfType<HttpSession>();
+        actualRequest.ShouldBeSameAs(request);
+        actualResponse.ShouldBeSameAs(response);
+    }
+}

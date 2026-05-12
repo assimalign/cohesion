@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description></Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+	</ItemGroup>
+</Project>

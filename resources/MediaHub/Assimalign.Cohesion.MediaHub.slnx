@@ -1,0 +1,15 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/MediaHub/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/" />
+    <Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/src/">
+        <Project Path="Assimalign.Cohesion.MediaHub/src/Assimalign.Cohesion.MediaHub.csproj" />
+    </Folder>
+</Solution>

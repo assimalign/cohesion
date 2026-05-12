@@ -1,0 +1,39 @@
+﻿namespace Assimalign.Cohesion.Resilience;
+
+/// <summary>
+/// Represents the arguments used by <see cref="RetryStrategyOptions{TResult}.DelayGenerator"/> for generating the next retry delay.
+/// </summary>
+/// <typeparam name="TResult">The type of result.</typeparam>
+/// <remarks>
+/// Always use the constructor when creating this struct, otherwise we do not guarantee binary compatibility.
+/// </remarks>
+public readonly struct RetryDelayGeneratorArguments
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RetryDelayGeneratorArguments"/> struct.
+    /// </summary>
+    /// <param name="outcome">The context in which the resilience operation or event occurred.</param>
+    /// <param name="context">The outcome of the resilience operation or event.</param>
+    /// <param name="attempts">The zero-based attempt number.</param>
+    public RetryDelayGeneratorArguments(IResilienceContext context, Outcome outcome, int attempts)
+    {
+        Context = context;
+        Outcome = outcome;
+        Attempts = attempts;
+    }
+
+    /// <summary>
+    /// Gets the outcome of the resilience operation or event.
+    /// </summary>
+    public Outcome Outcome { get; }
+
+    /// <summary>
+    /// Gets the context in which the resilience operation or event occurred.
+    /// </summary>
+    public IResilienceContext Context { get; }
+
+    /// <summary>
+    /// Gets The zero-based attempt number.
+    /// </summary>
+    public int Attempts { get; }
+}

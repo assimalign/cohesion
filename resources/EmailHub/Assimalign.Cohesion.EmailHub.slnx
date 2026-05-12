@@ -1,0 +1,20 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/EmailHub/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/">
+        <File Path="Assimalign.Cohesion.EmailHub/README.md" />
+    </Folder>
+    <Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/src/">
+        <Project Path="Assimalign.Cohesion.EmailHub/src/Assimalign.Cohesion.EmailHub.csproj" />
+    </Folder>
+    <Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/tests/">
+        <Project Path="Assimalign.Cohesion.EmailHub/tests/Assimalign.Cohesion.EmailHub.Tests.csproj" />
+    </Folder>
+</Solution>

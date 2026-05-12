@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+PackageIdentifier: Assimalign.Cohesion
+PackageVersion: {{Version}}
+InstallerType: wix
+Scope: machine
+InstallModes:
+  - silent
+  - silentWithProgress
+  - interactive
+UpgradeBehavior: install
+ReleaseDate: {{ReleaseDate}}
+Installers:
+  - Architecture: x64
+    InstallerLocale: en-US
+    InstallerUrl: {{InstallerUrl}}
+    InstallerSha256: {{Sha256}}
+    ProductCode: '{{ProductCode}}'
+    AppsAndFeaturesEntries:
+      - DisplayName: Assimalign Cohesion SDK
+        Publisher: Assimalign
+        DisplayVersion: {{Version}}
+        ProductCode: '{{ProductCode}}'
+        UpgradeCode: '{A8F2E5D6-3B4C-4D5E-9F1A-2B3C4D5E6F7A}'
+        InstallerType: wix
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="EnsureVSTestSupportFiles" AfterTargets="Build">
+    <Copy SourceFiles="$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll"
+          DestinationFiles="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(OutputPath)xunit.runner.visualstudio.testadapter.dll'))"
+          SkipUnchangedFiles="true"
+          Condition="'$(Pkgxunit_runner_visualstudio)' != '' and Exists('$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll')" />
+  </Target>
+
+</Project>

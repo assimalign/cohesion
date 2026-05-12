@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<Description>Command line configuration provider implementation for Assimalign.Cohesion.Configuration.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+	  <CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+	</ItemGroup>
+	
+</Project>

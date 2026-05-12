@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Resilience</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Resilience" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="System.Threading.RateLimiting" />
+	</ItemGroup>
+</Project>

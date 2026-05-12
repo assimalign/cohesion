@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace Assimalign.Cohesion.Utilities;
+namespace Assimalign.Cohesion;
 
 public static class Memoise<TIn, TOut>
     where TIn : notnull

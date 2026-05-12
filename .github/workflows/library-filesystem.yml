@@ -1,0 +1,33 @@
+name: FileSystem
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/FileSystem/**"
+      - ".github/actions/build/**" # When Shared Build Action Changes
+      - ".github/workflows/library-filesystem.yml" # When Pipeline File Changes
+jobs:
+  build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            "Assimalign.Cohesion.FileSystem",
+            'Assimalign.Cohesion.FileSystem.Globbing',
+            'Assimalign.Cohesion.FileSystem.InMemory',
+            'Assimalign.Cohesion.FileSystem.Physical',
+            # 'Assimalign.Cohesion.FileSystem.Composite',
+          ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with: 
+          area: 'libraries'
+          category: 'FileSystem'
+          project: ${{ matrix.projects }}

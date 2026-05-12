@@ -1,0 +1,33 @@
+name: Resilience
+on:
+  push:
+    paths: 
+      - '**/Directory.Build.props'                        # When the Global Props File Changes
+      - 'libraries/Resilience/**'
+      - '.github/workflows/library-resilience.yml'                 # When Pipeline File Changes
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.Resilience',
+            'Assimalign.Cohesion.Resilience.CircuitBreaker',
+            'Assimalign.Cohesion.Resilience.Fallback',
+            'Assimalign.Cohesion.Resilience.Hedging',
+            'Assimalign.Cohesion.Resilience.RateLimiting',
+            'Assimalign.Cohesion.Resilience.Retry',
+            'Assimalign.Cohesion.Resilience.Timeout',
+        ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with: 
+          area: 'libraries'
+          category: 'Resilience'
+          project: ${{ matrix.projects }}

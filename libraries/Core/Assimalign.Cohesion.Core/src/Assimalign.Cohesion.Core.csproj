@@ -1,12 +1,27 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<PackageId>Assimalign.Cohesion.Core</PackageId>
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
-		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
-	  <None Include="..\..\..\..\LICENSE">
-	    <Pack>True</Pack>
-	    <PackagePath>\</PackagePath>
-	  </None>
+		<Compile Remove="Internal\TypeHelper.cs" />
+		<Compile Remove="System\Net\CidrBlock.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Update="Properties\ErrorMessages.Designer.cs">
+			<DesignTime>True</DesignTime>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>ErrorMessages.resx</DependentUpon>
+		</Compile>
+	</ItemGroup>
+	<ItemGroup>
+		<EmbeddedResource Update="Properties\ErrorMessages.resx">
+			<Generator>ResXFileCodeGenerator</Generator>
+			<LastGenOutput>ErrorMessages.Designer.cs</LastGenOutput>
+		</EmbeddedResource>
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="System\Decorators\" />
 	</ItemGroup>
 </Project>

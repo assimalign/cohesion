@@ -1,0 +1,47 @@
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.Configuration;
+
+/// <summary>
+/// Represents a type used to build application configuration.
+/// </summary>
+public interface IConfigurationBuilder
+{
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    IConfigurationBuilder AddProvider(IConfigurationProvider provider);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="provider"></param>
+    /// <returns></returns>
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, IConfigurationProvider> provider);
+
+    /// <summary>
+    /// Registers an asynchronous provider factory.
+    /// </summary>
+    /// <param name="provider">The asynchronous provider factory.</param>
+    /// <returns>The current builder.</returns>
+    IConfigurationBuilder AddProvider(Func<IConfigurationBuilderContext, Task<IConfigurationProvider>> provider);
+
+    /// <summary>
+    /// Synchronously builds the <see cref="IConfigurationRoot"/> by loading 
+    /// the providers. "<see cref="IConfigurationProvider.Load"/>"
+    /// </summary>
+    /// <returns>An <see cref="IConfigurationRoot"/> with keys and values from the registered sources.</returns>
+    IConfiguration Build();
+
+    /// <summary>
+    /// Asynchronously builds the <see cref="IConfigurationRoot"/> by loading 
+    /// the providers. "<see cref="IConfigurationProvider.LoadAsync"/>"
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    ValueTask<IConfiguration> BuildAsync(CancellationToken cancellationToken = default);
+}

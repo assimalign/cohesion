@@ -1,0 +1,183 @@
+<Project>
+    <!--
+        Assimalign.Cohesion.App framework build targets.
+
+        Imported by:
+          Assimalign.Cohesion.App.Runtime/src/...csproj  (per-RID runtime pack)
+          Assimalign.Cohesion.App.Refs/src/...csproj     (targeting pack)
+
+        Branches on the $(CohesionFrameworkKind) property the consumer csproj sets:
+
+            Ref     -> produce ref/<tfm>/<dll> + data/FrameworkList.xml
+            Runtime -> produce runtimes/<rid>/lib/<tfm>/<dll> + data/RuntimeList.xml
+
+        Driven by the @(CohesionFrameworkAssembly) item list declared in
+        Assimalign.Cohesion.App.props (sibling file) - one declarative source
+        of truth for both the project graph and the manifest contents.
+
+        Distribution is via NuGet - these targets just produce the .nupkg
+        layouts the SDK's KnownFrameworkReference machinery expects to find.
+    -->
+
+    <PropertyGroup>
+        <_CohesionRuntimeProjectDir>$(CohesionRepositoryDirectory)frameworks\Assimalign.Cohesion.App.Runtime\src\</_CohesionRuntimeProjectDir>
+
+        <!--
+            _CohesionFrameworkSourceDir is computed inside CohesionCollectFrameworkPack
+            below, NOT at file scope. We can't compute it here because the
+            Runtime kind needs $(OutputPath), which Microsoft.NET.Sdk.targets
+            defines AFTER our import - so it's empty at file evaluation time.
+            Deferring to target-execution time means $(OutputPath) is set.
+        -->
+
+        <_CohesionFrameworkListPath>$(IntermediateOutputPath)data\FrameworkList.xml</_CohesionFrameworkListPath>
+        <_CohesionRuntimeListPath>$(IntermediateOutputPath)data\RuntimeList.xml</_CohesionRuntimeListPath>
+
+        <!--
+            Hardcoded empty for now. When/if the framework gets strong-named,
+            define $(CohesionPublicKeyToken) alongside $(CohesionVersion) in
+            build/Targets/Version.props. The manifest writer uses it verbatim.
+        -->
+        <CohesionPublicKeyToken Condition="'$(CohesionPublicKeyToken)' == ''"></CohesionPublicKeyToken>
+    </PropertyGroup>
+
+    <!-- Hook into NuGet's standard extension point for dynamic pack content. -->
+    <PropertyGroup>
+        <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);CohesionCollectFrameworkPack</TargetsForTfmSpecificContentInPackage>
+    </PropertyGroup>
+
+    <!--
+        Manifest writer. Takes the declarative @(CohesionFrameworkAssembly)
+        list (each Identity is an assembly name) and emits FrameworkList.xml
+        or RuntimeList.xml depending on RootElementName. Version + PKT are
+        uniform across the framework, supplied as task parameters from
+        $(CohesionVersion) / $(CohesionPublicKeyToken). No DLL inspection.
+    -->
+    <UsingTask TaskName="CohesionWriteFrameworkList"
+               TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <AssemblyNames ParameterType="System.String[]" Required="true" />
+            <FrameworkName Required="true" />
+            <FrameworkVersion Required="true" />
+            <TargetFrameworkVersion Required="true" />
+            <PublicKeyToken Required="false" />
+            <RootElementName Required="true" />
+            <OutputPath Required="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System" />
+            <Using Namespace="System.IO" />
+            <Using Namespace="System.Linq" />
+            <Using Namespace="System.Text" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
+                // PE metadata AssemblyVersion is always 4 parts ("9.0.0" -> "9.0.0.0").
+                string asmVersion = FrameworkVersion;
+                if (asmVersion.Split('.').Length < 4) { asmVersion += ".0"; }
+                string fileVersion = asmVersion;
+                string pkt = PublicKeyToken ?? "";
+
+                var sb = new StringBuilder();
+                sb.Append("<").Append(RootElementName)
+                  .Append(" Name=\"").Append(FrameworkName).Append("\"")
+                  .Append(" TargetFrameworkIdentifier=\".NETCoreApp\"")
+                  .Append(" TargetFrameworkVersion=\"").Append(TargetFrameworkVersion).Append("\"")
+                  .Append(" FrameworkName=\"").Append(FrameworkName).Append("\">\r\n");
+
+                foreach (var name in AssemblyNames.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.Append("  <File Type=\"Managed\"")
+                      .Append(" Path=\"").Append(name).Append(".dll\"")
+                      .Append(" PublicKeyToken=\"").Append(pkt).Append("\"")
+                      .Append(" AssemblyName=\"").Append(name).Append("\"")
+                      .Append(" AssemblyVersion=\"").Append(asmVersion).Append("\"")
+                      .Append(" FileVersion=\"").Append(fileVersion).Append("\"")
+                      .Append(" />\r\n");
+                }
+
+                sb.Append("</").Append(RootElementName).Append(">\r\n");
+                File.WriteAllText(OutputPath, sb.ToString());
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="CohesionCollectFrameworkPack" DependsOnTargets="ResolveProjectReferences">
+
+        <!--
+            Resolve the source directory at execution time:
+
+              Ref kind     -> Runtime project's RID-less bin/. Built by the
+                              ProjectReference from App.Refs to App.Runtime
+                              with UndefineProperties="...;RuntimeIdentifier",
+                              so this is where the RID-less Runtime build
+                              outputs land via CopyLocal.
+
+              Runtime kind -> this project's $(OutputPath), which is
+                              bin/<cfg>/<tfm>/<rid>/ when -p:RuntimeIdentifier
+                              is set on `dotnet pack`.
+        -->
+        <PropertyGroup>
+            <_CohesionFrameworkSourceDir Condition="'$(CohesionFrameworkKind)' == 'Ref'">$(_CohesionRuntimeProjectDir)bin\$(Configuration)\$(TargetFrameworkLatest)\</_CohesionFrameworkSourceDir>
+            <_CohesionFrameworkSourceDir Condition="'$(CohesionFrameworkKind)' == 'Runtime'">$(OutputPath)</_CohesionFrameworkSourceDir>
+        </PropertyGroup>
+
+        <!-- ============ REF PACK ============ -->
+        <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Ref'">
+            <_CohesionExpectedAssembly Include="@(CohesionFrameworkAssembly->'$(_CohesionFrameworkSourceDir)%(Identity).dll')" />
+        </ItemGroup>
+
+        <!-- Batched per-item validation: Condition references %(Item.Metadata)
+             so the Error task runs once per @(_CohesionExpectedAssembly) item,
+             firing only for items whose file is missing. Same-ItemGroup form
+             with bare %(Identity) on a Condition is ambiguous; metadata-on-task
+             form unambiguously batches. -->
+        <Error Condition="'$(CohesionFrameworkKind)' == 'Ref' and !Exists('%(_CohesionExpectedAssembly.Identity)')"
+               Text="Framework assembly declared in @(CohesionFrameworkAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Confirm the library has a project under libraries/ or resources/ that CohesionProjectReference can resolve, and that the project builds successfully." />
+
+        <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Ref'"
+            AssemblyNames="@(CohesionFrameworkAssembly)"
+            FrameworkName="$(CohesionFrameworkName)"
+            FrameworkVersion="$(CohesionVersion)"
+            TargetFrameworkVersion="10.0"
+            PublicKeyToken="$(CohesionPublicKeyToken)"
+            RootElementName="FileList"
+            OutputPath="$(_CohesionFrameworkListPath)" />
+
+        <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Ref'">
+            <TfmSpecificPackageFile Include="@(_CohesionExpectedAssembly)">
+                <PackagePath>ref/$(TargetFrameworkLatest)/%(Filename)%(Extension)</PackagePath>
+            </TfmSpecificPackageFile>
+            <TfmSpecificPackageFile Include="$(_CohesionFrameworkListPath)">
+                <PackagePath>data/FrameworkList.xml</PackagePath>
+            </TfmSpecificPackageFile>
+        </ItemGroup>
+
+        <!-- ============ RUNTIME PACK ============ -->
+        <!-- Only when an RID is explicitly set; RID-less design-time builds skip pack. -->
+        <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''">
+            <_CohesionExpectedAssembly Include="@(CohesionFrameworkAssembly->'$(_CohesionFrameworkSourceDir)%(Identity).dll')" />
+        </ItemGroup>
+
+        <Error Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != '' and !Exists('%(_CohesionExpectedAssembly.Identity)')"
+               Text="Framework assembly declared in @(CohesionFrameworkAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Build must run before pack and every entry needs a ProjectReference that CopyLocals into bin." />
+
+        <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''"
+            AssemblyNames="@(CohesionFrameworkAssembly)"
+            FrameworkName="$(CohesionFrameworkName)"
+            FrameworkVersion="$(CohesionVersion)"
+            TargetFrameworkVersion="10.0"
+            PublicKeyToken="$(CohesionPublicKeyToken)"
+            RootElementName="RuntimeList"
+            OutputPath="$(_CohesionRuntimeListPath)" />
+
+        <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''">
+            <TfmSpecificPackageFile Include="@(_CohesionExpectedAssembly)">
+                <PackagePath>runtimes/$(RuntimeIdentifier)/lib/$(TargetFrameworkLatest)/%(Filename)%(Extension)</PackagePath>
+            </TfmSpecificPackageFile>
+            <TfmSpecificPackageFile Include="$(_CohesionRuntimeListPath)">
+                <PackagePath>data/RuntimeList.xml</PackagePath>
+            </TfmSpecificPackageFile>
+        </ItemGroup>
+    </Target>
+</Project>

@@ -1,0 +1,28 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+	<!-- Shared package properties -->
+	<PropertyGroup>
+		<OutputType>Library</OutputType>
+		<!-- <EnableDefaultItems>false</EnableDefaultItems> -->
+		<TargetFrameworks>$(TargetFrameworkForSdk)</TargetFrameworks>
+		<GenerateDependencyFile>false</GenerateDependencyFile>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoPackageAnalysis>true</NoPackageAnalysis>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		<AutoGenerateAssemblyVersion>true</AutoGenerateAssemblyVersion>
+		<!-- MSBuild Task DLLs need to be versioned with every build -->
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+	</PropertyGroup>
+	<!-- Package Metadata -->
+	<PropertyGroup>
+		<Version>$(CohesionVersion)</Version>
+		<PackageVersion>$(Version)</PackageVersion>
+		<Authors>Assimalign</Authors>
+		<Description>Cohesion MSBuild SDK and local packaging feed for framework, library, and resource packages.</Description>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageTags>Sdk;MSBuild;Cohesion</PackageTags>
+	</PropertyGroup>
+</Project>

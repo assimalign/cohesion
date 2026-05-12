@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: Assimalign.Cohesion
+PackageVersion: {{Version}}
+PackageLocale: en-US
+Publisher: Assimalign
+PublisherUrl: https://github.com/assimalign
+PublisherSupportUrl: https://github.com/assimalign/cohesion/issues
+PackageName: Cohesion SDK
+PackageUrl: https://github.com/assimalign/cohesion
+License: MIT
+LicenseUrl: https://github.com/assimalign/cohesion/blob/main/LICENSE
+ShortDescription: Code-first multi-service framework for .NET — SDKs, NuGet packages, MSBuild SDKs, dev scripts, and code-generation templates.
+Description: |-
+  Assimalign Cohesion is a code-first multi-service framework for .NET (similar in spirit
+  to Aspire) supporting both in-process and out-of-process hosting. This package installs
+  the full SDK distribution to C:\Programs\cohesion, including:
+    * MSBuild SDKs (Assimalign.Cohesion.Sdk and variants)
+    * The complete NuGet package set
+    * PowerShell dev scripts module
+    * Code-generation templates for value types
+  It also sets the COHESION_HOME environment variable and adds the install root to PATH.
+Moniker: cohesion
+Tags:
+  - dotnet
+  - sdk
+  - framework
+  - msbuild
+  - nuget
+  - aot
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

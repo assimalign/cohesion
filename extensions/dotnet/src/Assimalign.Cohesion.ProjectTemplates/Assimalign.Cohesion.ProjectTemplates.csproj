@@ -1,42 +1,100 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk" InitialTargets="AddTemplatesToPackageAsContent">
 
-  <PropertyGroup>
-    <!-- The package metadata. Fill in the properties marked as TODO below -->
-    <!-- Follow the instructions on https://learn.microsoft.com/en-us/nuget/create-packages/package-authoring-best-practices -->
-    <PackageId>Assimalign.Cohesion.ProjectTemplates</PackageId>
-    <PackageVersion>1.0</PackageVersion>
-    <Title>TODO: fill the package name here</Title>
-    <Authors>TODO: fill the author name or organization here</Authors>
-    <Description>TODO: fill the package description here</Description>
-    <PackageTags>TODO: fill the tags here</PackageTags>
-    <PackageProjectUrl>TODO: include a link to an associated project, repository, or company website</PackageProjectUrl>
+	<PropertyGroup>
+		<!-- The package metadata. Fill in the properties marked as TODO below -->
+		<!-- Follow the instructions on https://learn.microsoft.com/en-us/nuget/create-packages/package-authoring-best-practices -->
+		<PackageId>Assimalign.Cohesion.ProjectTemplates</PackageId>
+		<PackageVersion>1.0</PackageVersion>
+		<OutputType>Library</OutputType>
+		<IsPackable>true</IsPackable>
+		
+		<Title>TODO: fill the package name here</Title>
+		<Authors>TODO: fill the author name or organization here</Authors>
+		<Description>TODO: fill the package description here</Description>
+		<PackageTags>TODO: fill the tags here</PackageTags>
 
-    <!-- Keep package type as 'Template' to show the package as a template package on nuget.org and make your template available in dotnet new search.-->
-    <PackageType>Template</PackageType>
-    <TargetFramework>net8.0</TargetFramework>
-    <IncludeContentInPack>true</IncludeContentInPack>
-    <IncludeBuildOutput>false</IncludeBuildOutput>
-    <ContentTargetFolders>content</ContentTargetFolders>
-    <NoWarn>$(NoWarn);NU5128</NoWarn>
-    <NoDefaultExcludes>true</NoDefaultExcludes>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-  </PropertyGroup>
 
-  <PropertyGroup>
-    <LocalizeTemplates>false</LocalizeTemplates>
-  </PropertyGroup>
+		<!-- Keep package type as 'Template' to show the package as a template package on nuget.org and make your template available in dotnet new search.-->
+		<PackageType>Template</PackageType>
+		<TargetFramework>net9.0</TargetFramework>
+		<IncludeContentInPack>true</IncludeContentInPack>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<ContentTargetFolders>content</ContentTargetFolders>
+		<NoWarn>$(NoWarn);NU5128</NoWarn>
+		<EnableDefaultItems>false</EnableDefaultItems>
+		<UsingToolTemplateLocalizer>true</UsingToolTemplateLocalizer>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.TemplateEngine.Tasks" Version="*" PrivateAssets="all" IsImplicitlyDefined="true"/>
-  </ItemGroup>
+	<ItemGroup>
+		<None Include="templates\**\*" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Content Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
-    <Compile Remove="**\*" />
-  </ItemGroup>
+	<ItemGroup>
+	  <Folder Include="templates\cohesion-apimanager\9.2\" />
+	  <Folder Include="templates\cohesion-rezolvr\9.2\" />
+	  <Folder Include="templates\cohesion-emailhub\9.2\" />
+	  <Folder Include="templates\cohesion-eventhub\9.2\" />
+	  <Folder Include="templates\cohesion-identityhub\9.2\" />
+	  <Folder Include="templates\cohesion-iothub\9.2\" />
+	  <Folder Include="templates\cohesion-loadbalancer\9.2\" />
+	  <Folder Include="templates\cohesion-mediahub\9.2\" />
+	  <Folder Include="templates\cohesion-messagehub\9.2\" />
+	  <Folder Include="templates\cohesion-notificationhub\9.2\" />
+	  <Folder Include="templates\cohesion-scheduler\9.2\" />
+	  <Folder Include="templates\cohesion-secretstore\9.2\" />
+	  <Folder Include="templates\cohesion-webapi\9.2\" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="" />
-  </ItemGroup>
+	<!--<ItemGroup>
+		<Content Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
+		<Compile Remove="**\*" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="cohesion-database\.template.config\template.json" />
+		<Content Include="cohesion-mono\.template.config\ide.host.json" />
+		<Content Include="cohesion-mono\.template.config\template.json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Folder Include="cohesion-mono\9.2\" />
+		<Folder Include="cohesion-web\" />
+	</ItemGroup>-->
+
+
+	<!-- When building a package, this target will run to copy all the templates into the intermediate directory,
+       replaces the package versions, and adds them to the package.-->
+	<Target Name="AddTemplatesToPackageAsContent" DependsOnTargets="ReplacePackageVersionOnTemplates">
+		<!-- Creating a temporary item instead of defining content items directly in order to avoid MSBuild MSB4120
+    message shown when an item within a target references itself which may cuase unintended expansion. -->
+		<ItemGroup>
+			<_TemplatesForPackage Include="$(IntermediateOutputPath)\content\templates\**\*" />
+		</ItemGroup>
+		<ItemGroup>
+			<Content Include="%(_TemplatesForPackage.Identity)" PackagePath="content/templates/%(_TemplatesForPackage.RecursiveDir)" />
+		</ItemGroup>
+	</Target>
+
+	<!-- Replaces the versions referenced by the templates projects to use the version of the packages being live-built -->
+	<Target Name="ReplacePackageVersionOnTemplates" DependsOnTargets="CopyTemplatesToIntermediateOutputPath">
+		<ItemGroup>
+			<TemplateProjectFiles Include="templates\**\*.csproj" />
+			<TemplateProjectFiles>
+				<DestinationFile>$(IntermediateOutputPath)\content\templates\%(RecursiveDir)%(Filename)%(Extension)</DestinationFile>
+			</TemplateProjectFiles>
+		</ItemGroup>
+
+		<WriteLinesToFile File="%(TemplateProjectFiles.DestinationFile)" Lines="$([System.IO.File]::ReadAllText('%(TemplateProjectFiles.FullPath)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_LATEST_VERSION!!', '$(PackageVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_ASPNETCORE_9_VERSION!!', '$(MicrosoftAspNetCorePackageVersionForNet9)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_DOTNET_EXTENSIONS_VERSION!!', '$(MicrosoftExtensionsHttpResilienceVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_LTS_VERSION!!', '$(OpenTelemetryLTSVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_EXPORTER_VERSION!!', '$(OpenTelemetryExporterOpenTelemetryProtocolVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_HOSTING_VERSION!!', '$(OpenTelemetryInstrumentationExtensionsHostingVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_ASPNETCORE_VERSION!!', '$(OpenTelemetryInstrumentationAspNetCoreVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_HTTP_VERSION!!', '$(OpenTelemetryInstrumentationHttpVersion)')&#xD;&#xA;                                                 .Replace('!!REPLACE_WITH_OTEL_RUNTIME_VERSION!!', '$(OpenTelemetryInstrumentationRuntimeVersion)') )" Overwrite="true" />
+	</Target>
+
+	<!-- Grabs the contents of the templates folder and copies them to IntermediateOutputPath directory -->
+	<Target Name="CopyTemplatesToIntermediateOutputPath">
+
+		<ItemGroup>
+			<_ContentFilesToPackage Include="templates\**\*" Exclude="templates\**\bin\**;templates\**\obj\**;templates\**\*.csproj" />
+		</ItemGroup>
+
+		<Copy SourceFiles="@(_ContentFilesToPackage)" SkipUnchangedFiles="true" DestinationFolder="$(IntermediateOutputPath)\content\templates\%(RecursiveDir)" />
+	</Target>
 
 </Project>

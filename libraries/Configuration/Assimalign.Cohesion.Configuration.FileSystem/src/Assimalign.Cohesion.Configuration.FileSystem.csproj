@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration.FileSystem</RootNamespace>
+		<Description>Shared file-backed configuration provider abstractions for Assimalign.Cohesion.Configuration.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
+	</ItemGroup>
+</Project>

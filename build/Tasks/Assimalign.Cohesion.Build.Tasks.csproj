@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkForBuild)</TargetFramework>
+		<DebugType>embedded</DebugType>
+		<IsPackable>true</IsPackable>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
+		<None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
+	</ItemGroup>
+</Project>

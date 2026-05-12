@@ -1,0 +1,30 @@
+name: Http
+on:
+  push:
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Http/**"
+      - ".github/actions/build/**" # When Shared Build Action Changes
+      - ".github/workflows/library-http.yml" # When Pipeline File Changes
+jobs:
+  build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            "Assimalign.Cohesion.Http",
+            "Assimalign.Cohesion.Http.Transports"
+          ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with: 
+          area: 'libraries'
+          category: 'Http'
+          project: ${{ matrix.projects }}

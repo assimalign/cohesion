@@ -1,0 +1,11 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.{Web|Database|MessageHub}">
+    <PropertyGroup>
+        <CohesionResourceType>Web</CohesionResourceType>
+        
+
+        <!-- Strongly Typed Settings Configuration - Use these configurations to -->
+        <CohesionStronglyTypedSettingsName>{The name of the }</CohesionStronglyTypedSettingsName>
+
+
+    </PropertyGroup>
+</Project>

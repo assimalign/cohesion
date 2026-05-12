@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+	  <Compile Remove="Http\**" />
+	  <EmbeddedResource Remove="Http\**" />
+	  <None Remove="Http\**" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Abstractions\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+</Project>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    Assimalign Cohesion SDK installer.
+
+    Installs the contents of the repository's `_out/` build output to a fixed
+    location (C:\Program Files\cohesion) so the bits can be referenced by:
+      * NuGet (the primary consumption path) via $env:COHESION_HOME\packages
+      * SDK files via $env:COHESION_HOME\dotnet\sdk\<version>\sdks
+      * PowerShell modules via $env:COHESION_HOME\scripts\modules
+      * Code generation templates via $env:COHESION_HOME\code-generation
+
+    The MSI is per-machine and intentionally winget-friendly (silent install
+    via `msiexec /i Assimalign.Cohesion.msi /qn`).
+
+    Note: this MSI is for offline / corporate / CI scenarios. The primary
+    distribution path for Cohesion is NuGet -- consumers add an `msbuild-sdks`
+    entry to their global.json and the standard NuGet MSBuild SDK resolver
+    handles SDK + framework resolution, no installer required.
+  -->
+  <Package Name="Assimalign Cohesion SDK"
+           Manufacturer="Assimalign"
+           Version="$(var.ProductVersion).0"
+           UpgradeCode="A8F2E5D6-3B4C-4D5E-9F1A-2B3C4D5E6F7A"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Assimalign Cohesion SDKs, NuGet packages, dev scripts, and code-generation templates."
+                        Manufacturer="Assimalign" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <!--
+      INSTALLFOLDER is rooted under a standard directory so WiX can auto-generate
+      stable component GUIDs at build time. At install time, <SetDirectory> below
+      redirects the actual on-disk path to the requested fixed location.
+    -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Cohesion" />
+    </StandardDirectory>
+
+    <!-- Pin the install path to C:\Program Files\cohesion. Runs in both UI and Execute sequences. -->
+    <SetDirectory Id="INSTALLFOLDER" Value="C:\Program Files\cohesion" Sequence="both" />
+
+    <!-- Surface the install location in Add/Remove Programs. -->
+    <Property Id="ARPINSTALLLOCATION" Value="C:\Program Files\cohesion" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/assimalign/cohesion" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/assimalign/cohesion" />
+
+    <!--
+      Each <Files> element recursively harvests every file under the given
+      pattern, assigns each file to a generated Component, and preserves the
+      relative directory structure under INSTALLFOLDER\<Subdirectory>. We
+      harvest each top-level _out folder explicitly so loose root-level
+      artifacts (e.g. root-restore-diag.log) are naturally skipped.
+    -->
+    <Feature Id="CohesionPayload"
+             Title="Cohesion SDKs, packages, scripts, and templates"
+             Description="Installs every artifact under the repository's _out folder."
+             Level="1"
+             Display="expand"
+             AllowAbsent="no">
+      <Files Include="$(var.PayloadDir)dotnet\**"
+             Directory="INSTALLFOLDER" />
+    </Feature>
+
+    <!-- <Feature Id="EnvironmentVariables"
+             Title="Environment variables and PATH entry"
+             Description="Adds COHESION_HOME and prepends C:\Programs\cohesion to the system PATH."
+             Level="1">
+      <Component Id="CohesionEnvironment" Directory="INSTALLFOLDER" Guid="6D7E8F9A-1B2C-3D4E-5F6A-7B8C9D0E1F2A">
+        <Environment Id="CohesionHome"
+                     Name="COHESION_HOME"
+                     Value="[INSTALLFOLDER]"
+                     Permanent="no"
+                     Part="all"
+                     Action="set"
+                     System="yes" />
+        <Environment Id="CohesionPath"
+                     Name="PATH"
+                     Value="[INSTALLFOLDER]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Assimalign\Cohesion"
+                       Name="InstallLocation"
+                       Type="string"
+                       Value="[INSTALLFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </Feature> -->
+
+  </Package>
+</Wix>

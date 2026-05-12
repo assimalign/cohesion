@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration.Xml</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+	  <CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="System.Security.Cryptography.Xml" />
+	</ItemGroup>
+</Project>

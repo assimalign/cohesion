@@ -1,0 +1,47 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+        <Platform Name="x64" />
+        <Platform Name="x86" />
+    </Configurations>
+    <Folder Name="/Scheduler/">
+        <File Path="Directory.Build.props" />
+        <File Path="Directory.Build.targets" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/">
+        <File Path="Assimalign.Cohesion.Scheduler/README.md" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/src/">
+        <Project Path="Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
+        <Project Path="Assimalign.Cohesion.Scheduler/tests/Assimalign.Cohesion.Scheduler.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/">
+        <File Path="Assimalign.Cohesion.Scheduler.Cron/README.md" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/tests/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Cron/tests/Assimalign.Cohesion.Scheduler.Cron.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/">
+        <File Path="Assimalign.Cohesion.Scheduler.Hosting/README.md" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Hosting/src/Assimalign.Cohesion.Scheduler.Hosting.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/tests/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Hosting/tests/Assimalign.Cohesion.Scheduler.Hosting.Tests.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/">
+        <File Path="Assimalign.Cohesion.Scheduler.Timer/README.md" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj" />
+    </Folder>
+    <Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/tests/">
+        <Project Path="Assimalign.Cohesion.Scheduler.Timer/tests/Assimalign.Cohesion.Scheduler.Timer.Tests.csproj" />
+    </Folder>
+</Solution>
