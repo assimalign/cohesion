@@ -6,12 +6,11 @@
 		<!--
 			This project produces the Assimalign.Cohesion.App targeting pack
 			(Assimalign.Cohesion.App.Ref.nupkg). It compiles nothing of its
-			own: build/Targets/CohesionFramework.targets collects the ref
-			assemblies emitted by the App.Runtime project (via
-			ProduceReferenceAssembly=true) and packs them as
-			ref/<tfm>/<dll> alongside data/FrameworkList.xml. That layout +
-			manifest is what the SDK's KnownFrameworkReference machinery
-			expects to find when resolving <FrameworkReference Include="Assimalign.Cohesion.App" />.
+			own: build/Targets/CohesionFramework.targets generates
+			data/FrameworkList.xml from the authoritative
+			@(CohesionFrameworkAssembly) list (imported below) and packs the
+			matching ref assemblies that App.Runtime's bin folder contains
+			via CopyLocal.
 		-->
 		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
@@ -28,11 +27,12 @@
 
 	<!--
 		Pure build dependency on App.Runtime. ReferenceOutputAssembly=false
-		because the targeting pack consumes Runtime's *ref* output (under
-		obj/<cfg>/<tfm>/ref/), not its compiled assembly.
-		UndefineProperties drops our TargetFramework/RuntimeIdentifier so
-		Runtime builds in its default (RID-less) configuration - enough to
-		emit the ref assemblies.
+		because the targeting pack consumes Runtime's bin folder (where every
+		framework assembly CopyLocal'd in) via the collection target, not
+		Runtime's compiled assembly directly. UndefineProperties drops our
+		TargetFramework/RuntimeIdentifier so Runtime builds in its default
+		(RID-less) configuration - that's the bin/ path the collection target
+		reads from.
 	-->
 	<ItemGroup>
 		<ProjectReference Include="..\..\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj"
@@ -41,5 +41,9 @@
 			UndefineProperties="TargetFramework;RuntimeIdentifier" />
 	</ItemGroup>
 
-	<Import Project="$(CohesionRepositoryDirectory)build\Targets\CohesionFramework.targets" />
+	<!-- Import the authoritative framework manifest so the manifest writer
+	     in CohesionFramework.targets can iterate it. -->
+	<Import Project="..\..\Assimalign.Cohesion.App.props" />
+
+	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
 </Project>

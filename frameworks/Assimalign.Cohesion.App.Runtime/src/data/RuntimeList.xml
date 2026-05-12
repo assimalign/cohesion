@@ -1,4 +1,29 @@
 <RuntimeList Name="Assimalign.Cohesion.App" TargetFrameworkIdentifier=".NETCoreApp" TargetFrameworkVersion="10.0" FrameworkName="Assimalign.Cohesion.App">
-  <File Type="Managed" Path="Assimalign.Cohesion.App.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.App" AssemblyVersion="9.0.0.0" FileVersion="9.0.0.0" />
-  <File Type="Managed" Path="Assimalign.Cohesion.Core.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Core" AssemblyVersion="9.0.0.0" FileVersion="9.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Amqp.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Amqp" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Amqp.Transports.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Amqp.Transports" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.App.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.App" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.CommandLine.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.CommandLine" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.EnvironmentVariables.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.EnvironmentVariables" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.FileSystem.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.FileSystem" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.Ini.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.Ini" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.Json.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.Json" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Configuration.Xml.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Configuration.Xml" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Core.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Core" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.DependencyInjection.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.DependencyInjection" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.FileSystem.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.FileSystem" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.FileSystem.Globbing.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.FileSystem.Globbing" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.FileSystem.InMemory.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.FileSystem.InMemory" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.FileSystem.Physical.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.FileSystem.Physical" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Hosting.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Hosting" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.ObjectPool.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.ObjectPool" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.ObjectValidation.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.ObjectValidation" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.CircuitBreaker.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.CircuitBreaker" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.Fallback.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.Fallback" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.Hedging.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.Hedging" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.RateLimiting.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.RateLimiting" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.Retry.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.Retry" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Resilience.Timeout.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Resilience.Timeout" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
+  <File Type="Managed" Path="Assimalign.Cohesion.Transports.dll" PublicKeyToken="" AssemblyName="Assimalign.Cohesion.Transports" AssemblyVersion="10.0.0.0" FileVersion="10.0.0.0" />
 </RuntimeList>

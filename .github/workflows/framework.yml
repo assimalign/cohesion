@@ -59,6 +59,11 @@ jobs:
   pack:
     name: Pack SDK + framework (all RIDs)
     runs-on: ubuntu-latest
+    outputs:
+      # Exposed so the smoke-test job can pin its inline csproj's
+      # Sdk="Assimalign.Cohesion.Sdk/<ver>" to the same version we just packed,
+      # without needing to checkout source or duplicate the read of Version.props.
+      version: ${{ steps.read-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,6 +73,16 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+
+      - name: Read CohesionVersion from Version.props
+        id: read-version
+        shell: pwsh
+        run: |
+          [xml]$v = Get-Content build/Targets/Version.props
+          $ver = $v.Project.PropertyGroup.CohesionVersion.Trim()
+          if (-not $ver) { throw "Could not read CohesionVersion from Version.props" }
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "CohesionVersion = $ver"
 
       - name: Pack everything
         shell: pwsh
@@ -93,8 +108,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Explicit RID per OS rather than relying on $(RuntimeIdentifier) defaults.
+      # macos-latest moved to ARM-based runners (osx-arm64); a stale default of
+      # osx-x64 would resolve the wrong runtime pack and fail.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
     steps:
       - name: Install .NET
         uses: actions/setup-dotnet@v4
@@ -109,13 +133,16 @@ jobs:
 
       - name: Materialize smoke-test consumer
         shell: pwsh
-        # Inline, self-contained consumer: nuget.config points at the artifact
-        # feed, csproj references the SDK by inline version, Program.cs touches
-        # a type from Assimalign.Cohesion.Core to prove the targeting pack
-        # surfaces it (not just App.dll).
+        env:
+          COHESION_VERSION: ${{ needs.pack.outputs.version }}
+        # Inline self-contained consumer: nuget.config points at the artifact
+        # feed, csproj references the SDK by the version we just packed, and
+        # Program.cs touches a type from Assimalign.Cohesion.Core to prove the
+        # targeting pack surfaces it (not just App.dll).
         run: |
           New-Item -ItemType Directory -Path SmokeTest -Force | Out-Null
           $feedPath = (Resolve-Path packages).Path
+          $version = $env:COHESION_VERSION
 
           @"
           <?xml version=`"1.0`" encoding=`"utf-8`"?>
@@ -137,7 +164,7 @@ jobs:
           "@ | Set-Content -Encoding utf8 SmokeTest/nuget.config
 
           @"
-          <Project Sdk=`"Assimalign.Cohesion.Sdk/9.0.0`">
+          <Project Sdk=`"Assimalign.Cohesion.Sdk/$version`">
             <PropertyGroup>
               <OutputType>Exe</OutputType>
               <TargetFramework>net10.0</TargetFramework>
@@ -151,19 +178,35 @@ jobs:
           @"
           using Assimalign.Cohesion;
 
-          // Type bind proves Core.dll is in the targeting pack -- App.dll alone
+          // Type bind proves Core.dll is in the targeting pack; App.dll alone
           // wouldn't expose AppEnvironment.
           Console.WriteLine(`$"Core type resolved: {typeof(AppEnvironment).FullName}");
           "@ | Set-Content -Encoding utf8 SmokeTest/Program.cs
 
-      - name: Build smoke test
+      - name: Build smoke test (validates targeting pack)
         shell: pwsh
         working-directory: SmokeTest
         run: dotnet build --configuration Release --nologo
 
-      - name: Run smoke test
+      - name: Publish self-contained for ${{ matrix.rid }} (validates runtime pack)
         shell: pwsh
         working-directory: SmokeTest
-        # Confirms the runtime pack for the host RID was also pulled correctly
-        # (compile alone only exercises the targeting pack).
-        run: dotnet run --configuration Release --no-build
+        # Self-contained publish is what pulls Assimalign.Cohesion.App.Runtime.<rid>
+        # and copies its DLLs into the publish output. Framework-dependent run
+        # (dotnet run) would fail here because the App framework isn't installed
+        # in <DOTNET_ROOT>/shared/, only in the NuGet cache.
+        run: dotnet publish --configuration Release --runtime ${{ matrix.rid }} --self-contained --nologo
+
+      - name: Run published smoke test
+        shell: pwsh
+        working-directory: SmokeTest
+        # Cross-platform: the apphost extension is .exe on Windows, none on
+        # Linux/macOS. Probe via $IsWindows rather than hardcoding.
+        run: |
+          $publishDir = "bin/Release/net10.0/${{ matrix.rid }}/publish"
+          $apphost = if ($IsWindows) { "$publishDir/SmokeTest.exe" } else { "$publishDir/SmokeTest" }
+          if (-not (Test-Path -LiteralPath $apphost)) {
+              throw "Apphost not found at '$apphost'. Publish step must run first."
+          }
+          & $apphost
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test exited $LASTEXITCODE" }

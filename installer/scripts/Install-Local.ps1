@@ -67,6 +67,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
 
+# Read the canonical version from Version.props so the script never drifts from
+# whatever the build is actually producing. Bumping the version is a one-line
+# edit to build/Targets/Version.props; this script picks it up automatically.
+$versionPropsPath = Join-Path $repoRoot 'build\Targets\Version.props'
+[xml]$versionXml = Get-Content -LiteralPath $versionPropsPath
+$cohesionVersion = $versionXml.Project.PropertyGroup.CohesionVersion
+if ([string]::IsNullOrWhiteSpace($cohesionVersion)) {
+    throw "Could not read <CohesionVersion> from '$versionPropsPath'."
+}
+
 if (-not $Rids -or $Rids.Count -eq 0) {
     $Rids = @((& dotnet --info | Select-String -Pattern '^\s*RID:\s*(\S+)').Matches.Groups[1].Value)
     if (-not $Rids -or [string]::IsNullOrWhiteSpace($Rids[0])) {
@@ -75,6 +85,7 @@ if (-not $Rids -or $Rids.Count -eq 0) {
 }
 
 Write-Host "Cohesion local pack" -ForegroundColor Cyan
+Write-Host "  Version       : $cohesionVersion"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  RIDs          : $($Rids -join ', ')"
 Write-Host "  Repo root     : $repoRoot"
@@ -82,8 +93,8 @@ Write-Host "  Feed          : $feedDir"
 Write-Host ""
 
 # Same-version repack workaround. NuGet's global-packages cache caches the
-# extracted contents of packages by id+version. Repacking 9.0.0 from a changed
-# source tree without bumping the version means the consumer's restore keeps
+# extracted contents of packages by id+version. Repacking a version from a
+# changed source tree without bumping it means the consumer's restore keeps
 # serving the OLD extract from ~/.nuget/packages/ instead of re-reading the
 # fresh .nupkg in our local feed. Prune cached extracts up front so the next
 # restore picks up the fresh package.
@@ -107,9 +118,9 @@ $globalPackagesRoot = & dotnet nuget locals global-packages --list 2>$null |
 # would attempt, so a successful probe means NuGet will also succeed.
 if ($globalPackagesRoot -and -not $Force) {
     $tasksDlls = @(
-        'assimalign.cohesion.sdk\9.0.0\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll',
-        'assimalign.cohesion.sdk.web\9.0.0\Tasks\Assimalign.Cohesion.Sdk.Web.Tasks.dll',
-        'assimalign.cohesion.sdk.database\9.0.0\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.dll'
+        "assimalign.cohesion.sdk\$cohesionVersion\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll",
+        "assimalign.cohesion.sdk.web\$cohesionVersion\Tasks\Assimalign.Cohesion.Sdk.Web.Tasks.dll",
+        "assimalign.cohesion.sdk.database\$cohesionVersion\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.dll"
     )
     $lockedPaths = @()
     foreach ($rel in $tasksDlls) {

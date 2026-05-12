@@ -6,7 +6,7 @@
 
 		<!--
 			Emit a ref assembly alongside the implementation so the App.Refs
-			project can collect it for the targeting pack.
+			project can collect it if it ever needs to.
 		-->
 		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
 		<IsAotCompatible>true</IsAotCompatible>
@@ -30,9 +30,18 @@
 		<CohesionFrameworkKind>Runtime</CohesionFrameworkKind>
 	</PropertyGroup>
 
+	<!--
+		Import the authoritative framework manifest, then generate
+		<CohesionProjectReference> items for every assembly except this
+		project's own output (the umbrella App.dll). Exclude= filters by
+		Identity match without needing %()-batching in a Condition, which
+		MSBuild only allows inside <Target> elements (MSB4190).
+	-->
+	<Import Project="..\..\Assimalign.Cohesion.App.props" />
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
+		                          Exclude="$(AssemblyName)" />
 	</ItemGroup>
 
-	<Import Project="$(CohesionRepositoryDirectory)build\Targets\CohesionFramework.targets" />
+	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
 </Project>
