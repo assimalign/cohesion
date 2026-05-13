@@ -1,61 +1,107 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
+using Assimalign.Cohesion.Logging.Internal;
 
 namespace Assimalign.Cohesion.Logging;
 
-using Cohesion.Internal;
-using Cohesion.Logging.Internal;
-
-public class LoggerFactory : ILoggerFactory
+/// <summary>
+/// Default <see cref="ILoggerFactory"/>. Caches composite loggers per category and owns the
+/// registered providers' lifecycle.
+/// </summary>
+public sealed class LoggerFactory : ILoggerFactory
 {
-    private readonly Lock _lock;
-    private readonly ConcurrentDictionary<string, ILogger> _factory;
-    private readonly ConcurrentDictionary<string, ILogger>.AlternateLookup<ReadOnlySpan<char>> _lookup;
-    private readonly List<ILoggerProvider> _providers;
+    private readonly ConcurrentDictionary<string, ILogger> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LoggerFactoryOptions _options;
+    private int _disposed;
 
-    public LoggerFactory(IEnumerable<ILoggerProvider> providers)
+    /// <summary>
+    /// Initializes a factory with the supplied options. Most callers use
+    /// <see cref="LoggerFactoryBuilder"/> instead of this constructor.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    public LoggerFactory(LoggerFactoryOptions options)
     {
-        _providers = providers.ToList();
-        _factory = new ConcurrentDictionary<string, ILogger>(StringComparer.OrdinalIgnoreCase);
-        _lookup = _factory.GetAlternateLookup<ReadOnlySpan<char>>();
-        _lock = new Lock();
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
     }
 
-    public IEnumerable<ILoggerProvider> Providers => _providers;
+    /// <inheritdoc />
+    public IReadOnlyList<ILoggerProvider> Providers => _options.Providers;
 
-    public ILogger Create(string loggerName)
+    internal LoggerFactoryOptions Options => _options;
+
+    /// <inheritdoc />
+    public ILogger Create(string category)
     {
-        ArgumentNullException.ThrowIfNullOrEmpty(loggerName);
+        ArgumentException.ThrowIfNullOrEmpty(category);
+        ThrowIfDisposed();
 
-        var lookupName = loggerName.AsSpan();
+        return _cache.GetOrAdd(category, static (key, factory) => factory.CreateComposite(key), this);
+    }
 
-        if (!_lookup.TryGetValue(lookupName, out ILogger? logger)) 
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            lock (_lock)
+            return;
+        }
+
+        foreach (var provider in _options.Providers)
+        {
+            try
             {
-                var loggers = new ILogger[_providers.Count];
+                provider.Dispose();
+            }
+            catch
+            {
+                // Provider disposal failures must not abort the rest of teardown.
+            }
+        }
+    }
 
-                for (int i = 0; i < _providers.Count; i++)
-                {
-                    loggers[i] = _providers[i].Create(loggerName);
+    internal LogLevel ResolveMinimumLevel(string category)
+    {
+        // Pick the longest matching prefix so the most specific filter wins.
+        int bestLength = -1;
+        LogLevel bestLevel = _options.MinimumLevel;
 
-                    logger = new CompositeLogger(loggers);
-
-                    _lookup[lookupName] = logger;
-                }
+        foreach (var pair in _options.Filters)
+        {
+            if (category.StartsWith(pair.Key, StringComparison.OrdinalIgnoreCase) && pair.Key.Length > bestLength)
+            {
+                bestLength = pair.Key.Length;
+                bestLevel = pair.Value;
             }
         }
 
-        return logger!;
+        return bestLevel;
     }
 
-    public void Dispose()
+    private CompositeLogger CreateComposite(string category)
     {
-        throw new NotImplementedException();
+        var minimumLevel = ResolveMinimumLevel(category);
+
+        var underlying = new ILogger[_options.Providers.Count];
+        for (int i = 0; i < _options.Providers.Count; i++)
+        {
+            underlying[i] = _options.Providers[i].Create(category);
+        }
+
+        return new CompositeLogger(
+            category: category,
+            underlying: underlying,
+            enrichers: _options.Enrichers,
+            minimumLevel: minimumLevel);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            throw new ObjectDisposedException(nameof(LoggerFactory));
+        }
     }
 }

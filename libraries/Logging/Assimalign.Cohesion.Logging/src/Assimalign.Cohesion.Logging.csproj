@@ -1,4 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Logging</RootNamespace>
+		<Description>Cohesion logging foundation: structured log event model, logger contracts, factory composition, scope and enrichment primitives. Concrete sinks live in sibling packages.</Description>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
@@ -10,24 +15,10 @@
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
-
-
-	<!--<UsingTask
-	TaskName="Assimalign.Cohesion.Build.Tasks.GenerateValueObject" AssemblyFile="C:\Source\repos\assimalign\cohesion\build\Tasks\bin\Debug\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll" />
-	<Target Name="GenValueObjects" BeforeTargets="CoreCompile">
-		<GenerateValueObject Path="$(MSBuildProjectDirectory)" />-->
-	<!--Our
-	generated file is included to be compiled--><!--
-		<ItemGroup>
-			<Compile Remove="$(SettingClassFileName)" />
-			<Compile Include="$(SettingClassFileName)" />
-		</ItemGroup>-->
-	<!--</Target>-->
-
-	<!--The
-	generated file is deleted after a general clean. It will force the regeneration on rebuild-->
-	<!--<Target
-	Name="AfterClean">
-		<Delete Files="$(RootFolder)\$(SettingClass).generated.cs" />
-	</Target>-->
+	<ItemGroup>
+		<None Include="..\README.md" Condition="Exists('..\README.md')">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 </Project>
