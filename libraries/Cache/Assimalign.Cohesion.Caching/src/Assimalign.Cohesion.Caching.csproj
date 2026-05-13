@@ -1,6 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	
-
-
-	
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Caching</RootNamespace>
+		<Description>Cohesion cache foundation contracts. Defines the shared cache, entry, expiration, eviction, and invalidation primitives used by every Cohesion cache implementation.</Description>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="..\README.md" Condition="Exists('..\README.md')">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 </Project>

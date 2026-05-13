@@ -1,3 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Caching.InMemory</RootNamespace>
+		<Description>In-process implementation of the Cohesion cache contracts. Provides a thread-safe MemoryCache with absolute, sliding, token-driven expiration and priority-aware size eviction.</Description>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="..\README.md" Condition="Exists('..\README.md')">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
 </Project>
