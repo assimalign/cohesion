@@ -1,11 +1,11 @@
-name: Core
+name: ObjectPool
 on:
   push:
     paths:
       - "**/Directory.Build.props" # When the Global Props File Changes
-      - "libraries/Core/**"
+      - "libraries/ObjectPool/**"
       - ".github/actions/build/**" # When Shared Build Action Changes
-      - ".github/workflows/library-core.yml" # When Pipeline File Changes
+      - ".github/workflows/library-object-pool.yml" # When Pipeline File Changes
 permissions:
   contents: read
   packages: write
@@ -19,8 +19,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            "Assimalign.Cohesion.Core",
-            "Assimalign.Cohesion.ObjectValidation"
+            'Assimalign.Cohesion.ObjectPool'
           ]
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +27,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with:
+        with: 
           area: 'libraries'
-          category: 'Core'
+          category: 'ObjectPool'
           project: ${{ matrix.projects }}
