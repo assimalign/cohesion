@@ -3,15 +3,15 @@
 ## Summary
 
 `Assimalign.Cohesion.Caching` is the cache foundation library for the Cohesion platform. It
-defines the contracts every Cohesion cache implementation honors: `ICache`, `IMemoryCache`,
-`IDistributedCache`, `ICacheEntry`, the eviction enums, the post-eviction callback shape,
-and the diagnostics exception. It contains no runtime cache itself; implementations live in
-sibling packages such as `Assimalign.Cohesion.Caching.InMemory`.
+defines the contracts every Cohesion cache implementation honors: `ICache`, `ICacheEntry`,
+the eviction enums, the post-eviction callback shape, and the diagnostics exception. It
+contains no runtime cache itself; implementations live in sibling packages such as
+`Assimalign.Cohesion.Caching.InMemory`.
 
 ## Status
 
 - Status: Stable foundation.
-- Production source files: 11 (4 interfaces, 2 enums, 1 delegate, 1 callback record, 1
+- Production source files: 9 (2 interfaces, 2 enums, 1 delegate, 1 callback record, 1
   exception, 1 error-code enum, 1 extensions class).
 - Project references: `Assimalign.Cohesion.Core` (for `IChangeToken`).
 - Package references: None.
@@ -40,8 +40,6 @@ sibling packages such as `Assimalign.Cohesion.Caching.InMemory`.
 ## Key Types
 
 - `ICache` - sync entry-CRUD contract with `CreateEntry`, `TryGetValue`, `Remove`, `Clear`.
-- `IMemoryCache` - marker for in-process caches.
-- `IDistributedCache` - marker for out-of-process caches.
 - `ICacheEntry` - configurable, disposable, commits on `Dispose`.
 - `CacheEntryPriority` - `Low`, `Normal`, `High`, `NeverRemove`.
 - `CacheEvictionReason` - `None`, `Removed`, `Replaced`, `Expired`, `TokenExpired`, `Capacity`.
@@ -51,9 +49,9 @@ sibling packages such as `Assimalign.Cohesion.Caching.InMemory`.
 
 ## Source Layout
 
-- `src/Abstractions` - root contracts (`ICache`, `ICacheEntry`, the marker interfaces).
+- `src/Abstractions` - root contracts (`ICache`, `ICacheEntry`).
 - `src/Extensions` - `CacheExtensions`.
 - `src/Exceptions` - `CacheException`, `CacheErrorCode`.
 - `src/` - eviction primitives (`CacheEntryPriority`, `CacheEvictionReason`,
   `PostEvictionDelegate`, `PostEvictionCallbackRegistration`).
-- `src/Properties/AssemblyInfo.cs` - `InternalsVisibleTo` declarations for test + InMemory.
+- `src/Properties/AssemblyInfo.cs` - `InternalsVisibleTo` declaration for the test project only.

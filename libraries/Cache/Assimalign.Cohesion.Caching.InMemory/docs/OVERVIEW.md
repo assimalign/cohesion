@@ -19,8 +19,7 @@ AOT-friendly cache that honors every expiration, eviction, and invalidation rule
 
 ## Primary Responsibilities
 
-- Implement `IMemoryCache` (and therefore `ICache`) with a `ConcurrentDictionary`-backed
-  storage layer.
+- Implement `ICache` with a `ConcurrentDictionary`-backed storage layer.
 - Honor `AbsoluteExpiration`, `AbsoluteExpirationRelativeToNow`, `SlidingExpiration`, and
   `ExpirationTokens` from the foundation contract.
 - Run lazy expiration scans on access plus throttled bulk scans bounded by

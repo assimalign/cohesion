@@ -24,13 +24,12 @@ public class MemoryCacheTests
         Assert.Throws<ArgumentNullException>(() => new MemoryCache(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - MemoryCache: implements IMemoryCache and ICache")]
+    [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - MemoryCache: implements ICache")]
     public void Implements_ContractMarkers()
     {
         using var cache = new MemoryCache();
 
         Assert.IsAssignableFrom<ICache>(cache);
-        Assert.IsAssignableFrom<IMemoryCache>(cache);
     }
 
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - CreateEntry: null key throws")]

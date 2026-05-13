@@ -1,6 +1,6 @@
 # `Assimalign.Cohesion.Caching.InMemory.MemoryCache`
 
-In-process implementation of `Assimalign.Cohesion.Caching.IMemoryCache`.
+In-process implementation of `Assimalign.Cohesion.Caching.ICache`.
 
 ## Constructors
 

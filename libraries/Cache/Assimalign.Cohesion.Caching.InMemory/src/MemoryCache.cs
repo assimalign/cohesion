@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Caching.InMemory.Internal;
 namespace Assimalign.Cohesion.Caching.InMemory;
 
 /// <summary>
-/// In-process implementation of <see cref="IMemoryCache"/>.
+/// In-process implementation of <see cref="ICache"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Caching.InMemory;
 /// still respect explicit removal, expiration, and token-driven invalidation.
 /// </para>
 /// </remarks>
-public sealed class MemoryCache : IMemoryCache
+public sealed class MemoryCache : ICache
 {
     private readonly ConcurrentDictionary<object, StoredEntry> _entries = new();
     private readonly MemoryCacheOptions _options;

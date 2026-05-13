@@ -110,8 +110,6 @@ Assimalign.Cohesion.Caching/
     Assimalign.Cohesion.Caching.csproj
     Abstractions/
       ICache.cs
-      IMemoryCache.cs
-      IDistributedCache.cs
       ICacheEntry.cs
     Exceptions/
       CacheErrorCode.cs
