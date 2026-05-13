@@ -9,4 +9,4 @@ Configuration shape for `ConsoleLoggerProvider`.
 | `IncludeAttributes` | `bool` | `true` | Render structured attributes inline. |
 | `IncludeException` | `bool` | `true` | Render exception `ToString()` on a follow-up line. |
 | `IncludeParentId` | `bool` | `false` | Render `parentId=...` for scoped entries. |
-| `Formatter` | `Action<ILogEntry, TextWriter>?` | `null` | Override the built-in renderer. |
+| `Formatter` | `Action<ILoggerEntry, TextWriter>?` | `null` | Override the built-in renderer. |

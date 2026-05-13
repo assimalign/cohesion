@@ -22,7 +22,7 @@ no entry would be emitted.
 
 - Implement `ILoggerProvider` so the console sink can be registered with
   `LoggerFactoryBuilder.AddProvider`.
-- Render `ILogEntry` to a textual line, including timestamp, level, category, message,
+- Render `ILoggerEntry` to a textual line, including timestamp, level, category, message,
   attributes, and exception (each controlled by an option flag).
 - Route entries at `LogLevel.Error` or above to the error writer; everything else goes to
   the standard writer.

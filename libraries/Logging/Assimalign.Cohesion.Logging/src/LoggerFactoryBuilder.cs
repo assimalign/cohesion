@@ -4,16 +4,19 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Default <see cref="ILoggerFactoryBuilder"/> implementation. Build the factory in a single
-/// thread; the resulting <see cref="ILoggerFactory"/> is the thread-safe handle for callers.
+/// Default <see cref="ILoggerFactoryBuilder"/> implementation. Populates a fresh
+/// <see cref="LoggerFactoryOptions"/> through the fluent API and materializes the factory in
+/// <see cref="Build"/>.
 /// </summary>
+/// <remarks>
+/// Builders are not thread-safe; treat them as scratch space scoped to a single setup routine.
+/// The resulting <see cref="ILoggerFactory"/> IS thread-safe.
+/// </remarks>
 public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
 {
-    private readonly List<ILoggerProvider> _providers = new();
-    private readonly List<ILogEnricher> _enrichers = new();
-    private readonly Dictionary<string, LogLevel> _filters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LoggerFactoryOptions _options = new();
     private readonly HashSet<string> _providerNames = new(StringComparer.OrdinalIgnoreCase);
-    private LogLevel _minimumLevel = LogLevel.Information;
+    private readonly List<KeyValuePair<string, LogLevel>> _categoryRules = new();
     private bool _built;
 
     /// <inheritdoc />
@@ -28,7 +31,7 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
                 $"A provider named '{provider.Name}' is already registered.");
         }
 
-        _providers.Add(provider);
+        _options.Providers.Add(provider);
         return this;
     }
 
@@ -36,7 +39,7 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     public ILoggerFactoryBuilder SetMinimumLevel(LogLevel level)
     {
         ThrowIfBuilt();
-        _minimumLevel = level;
+        _options.MinimumLevel = level;
         return this;
     }
 
@@ -45,16 +48,25 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     {
         ArgumentException.ThrowIfNullOrEmpty(categoryPrefix);
         ThrowIfBuilt();
-        _filters[categoryPrefix] = minimumLevel;
+        _categoryRules.Add(new KeyValuePair<string, LogLevel>(categoryPrefix, minimumLevel));
         return this;
     }
 
     /// <inheritdoc />
-    public ILoggerFactoryBuilder AddEnricher(ILogEnricher enricher)
+    public ILoggerFactoryBuilder UseFilter(ILoggerFilter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ThrowIfBuilt();
+        _options.Filter = filter;
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder AddEnricher(ILoggerEnricher enricher)
     {
         ArgumentNullException.ThrowIfNull(enricher);
         ThrowIfBuilt();
-        _enrichers.Add(enricher);
+        _options.Enrichers.Add(enricher);
         return this;
     }
 
@@ -64,11 +76,18 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
         ThrowIfBuilt();
         _built = true;
 
-        return new LoggerFactory(new LoggerFactoryOptions(
-            providers: _providers.ToArray(),
-            enrichers: _enrichers.ToArray(),
-            minimumLevel: _minimumLevel,
-            filters: new Dictionary<string, LogLevel>(_filters, StringComparer.OrdinalIgnoreCase)));
+        // Compose any AddFilter category rules into a CategoryLoggerFilter and combine with an
+        // explicitly supplied filter (if any). When both are present, the explicit filter wins
+        // first and the category rules act as a fallback.
+        if (_categoryRules.Count > 0)
+        {
+            var categoryFilter = new CategoryLoggerFilter(_categoryRules);
+            _options.Filter = _options.Filter is null
+                ? categoryFilter
+                : new CompositeLoggerFilter(_options.Filter, categoryFilter);
+        }
+
+        return new LoggerFactory(_options);
     }
 
     private void ThrowIfBuilt()
@@ -78,5 +97,19 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
             throw new InvalidOperationException(
                 "LoggerFactoryBuilder has already been used to build a factory; create a new builder.");
         }
+    }
+
+    private sealed class CompositeLoggerFilter : ILoggerFilter
+    {
+        private readonly ILoggerFilter _first;
+        private readonly ILoggerFilter _second;
+
+        public CompositeLoggerFilter(ILoggerFilter first, ILoggerFilter second)
+        {
+            _first = first;
+            _second = second;
+        }
+
+        public bool ShouldLog(ILoggerEntry entry) => _first.ShouldLog(entry) && _second.ShouldLog(entry);
     }
 }

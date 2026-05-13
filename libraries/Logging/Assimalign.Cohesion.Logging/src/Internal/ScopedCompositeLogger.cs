@@ -4,8 +4,9 @@ using System.Threading;
 namespace Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
-/// Scope handle returned from <see cref="CompositeLogger.BeginScope(ILogEntry)"/>. Re-emits the
-/// composite's behavior but stamps the scope's parent id onto every entry written through it.
+/// Scope handle returned from <see cref="CompositeLogger.BeginScope(ILoggerEntry)"/>. Re-emits
+/// the composite's behavior but stamps the scope's parent id onto every entry written through
+/// it.
 /// </summary>
 internal sealed class ScopedCompositeLogger : IScopedLogger
 {
@@ -24,7 +25,7 @@ internal sealed class ScopedCompositeLogger : IScopedLogger
 
     public bool IsEnabled(LogLevel level) => _composite.IsEnabled(level);
 
-    public void Log(ILogEntry entry)
+    public void Log(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ThrowIfDisposed();
@@ -33,7 +34,7 @@ internal sealed class ScopedCompositeLogger : IScopedLogger
         // overwrite an explicit parent id - that supports nested scopes where the caller already
         // built their own chain.
         var stamped = entry.ParentId is null
-            ? new LogEntry(
+            ? new LoggerEntry(
                 level: entry.Level,
                 category: entry.Category,
                 message: entry.Message,
@@ -47,7 +48,7 @@ internal sealed class ScopedCompositeLogger : IScopedLogger
         _composite.Log(stamped);
     }
 
-    public IScopedLogger BeginScope(ILogEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ThrowIfDisposed();
@@ -55,7 +56,7 @@ internal sealed class ScopedCompositeLogger : IScopedLogger
         // Stamp the parent id on the seed before opening a nested scope so children of this scope
         // chain back to this scope's seed.
         var stamped = entry.ParentId is null
-            ? new LogEntry(
+            ? new LoggerEntry(
                 level: entry.Level,
                 category: entry.Category,
                 message: entry.Message,

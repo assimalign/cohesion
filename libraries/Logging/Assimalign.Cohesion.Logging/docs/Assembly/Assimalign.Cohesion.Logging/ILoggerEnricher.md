@@ -1,4 +1,4 @@
-# `Assimalign.Cohesion.Logging.ILogEnricher`
+# `Assimalign.Cohesion.Logging.ILoggerEnricher`
 
 Adds attributes to every log entry before fan-out. Examples: machine identity, current
 trace / span ids, environment name, runtime version.
@@ -6,7 +6,7 @@ trace / span ids, environment name, runtime version.
 ## Method
 
 ```csharp
-void Enrich(ILogEntry entry, IDictionary<string, object?> attributes);
+void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes);
 ```
 
 - `entry` is the entry being enriched (immutable; provided for context).
@@ -25,9 +25,9 @@ void Enrich(ILogEntry entry, IDictionary<string, object?> attributes);
 ## Example
 
 ```csharp
-internal sealed class ActivityEnricher : ILogEnricher
+internal sealed class ActivityEnricher : ILoggerEnricher
 {
-    public void Enrich(ILogEntry entry, IDictionary<string, object?> attributes)
+    public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
     {
         if (System.Diagnostics.Activity.Current is { } activity)
         {

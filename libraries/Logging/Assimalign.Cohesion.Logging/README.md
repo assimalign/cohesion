@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Logging
 
-Cohesion logging foundation. Defines `ILogEntry`, `ILogger`, `IScopedLogger`,
+Cohesion logging foundation. Defines `ILoggerEntry`, `ILogger`, `IScopedLogger`,
 `ILoggerProvider`, `ILoggerFactory`, the fluent builder, the enricher contract, and the
 default `LoggerFactory`/`LoggerFactoryBuilder` implementations.
 

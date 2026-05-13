@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Logging.Console.Internal;
 /// </summary>
 internal static class ConsoleLogFormatter
 {
-    public static void Write(ILogEntry entry, TextWriter writer, ConsoleLoggerOptions options)
+    public static void Write(ILoggerEntry entry, TextWriter writer, ConsoleLoggerOptions options)
     {
         writer.Write('[');
         writer.Write(entry.Timestamp.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));

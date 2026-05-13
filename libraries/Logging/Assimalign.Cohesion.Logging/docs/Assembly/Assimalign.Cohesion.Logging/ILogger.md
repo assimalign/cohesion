@@ -8,8 +8,8 @@ Writes structured log events to one or more sinks. Loggers are normally obtained
 | Member | Description |
 | --- | --- |
 | `bool IsEnabled(LogLevel level)` | True when at least one sink would accept an entry at `level`. Callers MAY use this to short-circuit expensive payload construction. |
-| `void Log(ILogEntry entry)` | Writes the entry to every underlying sink. Per-sink failures are isolated. |
-| `IScopedLogger BeginScope(ILogEntry entry)` | Opens a scope. Entries written through the scope inherit `entry.Id` as their `ParentId`. |
+| `void Log(ILoggerEntry entry)` | Writes the entry to every underlying sink. Per-sink failures are isolated. |
+| `IScopedLogger BeginScope(ILoggerEntry entry)` | Opens a scope. Entries written through the scope inherit `entry.Id` as their `ParentId`. |
 
 ## Thread safety
 

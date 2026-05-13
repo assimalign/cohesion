@@ -4,31 +4,35 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
-/// Fans out a single <see cref="ILogEntry"/> to every registered provider logger.
+/// Fans out a single <see cref="ILoggerEntry"/> to every registered provider logger.
 /// </summary>
 /// <remarks>
-/// The composite owns the per-category minimum-level decision (which respects category-specific
-/// filters) and runs enrichers in registration order before fan-out. Failures from a single
-/// underlying logger are isolated: the composite swallows them so a misbehaving sink cannot abort
-/// fan-out to healthy sinks.
+/// The composite owns the factory minimum-level decision, the optional <see cref="ILoggerFilter"/>
+/// gate, the enrichment pipeline (which runs in registration order; enrichers may add new
+/// attribute keys but cannot overwrite caller-supplied attributes), and fan-out to every
+/// registered provider with per-provider failure isolation: an exception from one sink never
+/// aborts fan-out to the others.
 /// </remarks>
 internal sealed class CompositeLogger : ILogger
 {
     private readonly string _category;
     private readonly ILogger[] _underlying;
-    private readonly IReadOnlyList<ILogEnricher> _enrichers;
+    private readonly IReadOnlyList<ILoggerEnricher> _enrichers;
     private readonly LogLevel _minimumLevel;
+    private readonly ILoggerFilter? _filter;
 
     public CompositeLogger(
         string category,
         ILogger[] underlying,
-        IReadOnlyList<ILogEnricher> enrichers,
-        LogLevel minimumLevel)
+        IReadOnlyList<ILoggerEnricher> enrichers,
+        LogLevel minimumLevel,
+        ILoggerFilter? filter)
     {
         _category = category;
         _underlying = underlying;
         _enrichers = enrichers;
         _minimumLevel = minimumLevel;
+        _filter = filter;
     }
 
     public bool IsEnabled(LogLevel level)
@@ -49,13 +53,30 @@ internal sealed class CompositeLogger : ILogger
         return false;
     }
 
-    public void Log(ILogEntry entry)
+    public void Log(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
         if (!IsEnabled(entry.Level))
         {
             return;
+        }
+
+        // Per-entry filter runs after the factory minimum so it can inspect category, level,
+        // attributes, and exception together. A throw here is non-fatal: we swallow and admit.
+        if (_filter is not null)
+        {
+            try
+            {
+                if (!_filter.ShouldLog(entry))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Bad filter cannot abort the pipeline.
+            }
         }
 
         var enriched = ApplyEnrichment(entry);
@@ -73,7 +94,7 @@ internal sealed class CompositeLogger : ILogger
         }
     }
 
-    public IScopedLogger BeginScope(ILogEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
@@ -97,7 +118,7 @@ internal sealed class CompositeLogger : ILogger
         return new ScopedCompositeLogger(this, enriched.Id, underlyingScopes);
     }
 
-    private ILogEntry ApplyEnrichment(ILogEntry entry)
+    private ILoggerEntry ApplyEnrichment(ILoggerEntry entry)
     {
         if (_enrichers.Count == 0)
         {
@@ -123,7 +144,7 @@ internal sealed class CompositeLogger : ILogger
             return entry;
         }
 
-        return new LogEntry(
+        return new LoggerEntry(
             level: entry.Level,
             category: entry.Category,
             message: entry.Message,

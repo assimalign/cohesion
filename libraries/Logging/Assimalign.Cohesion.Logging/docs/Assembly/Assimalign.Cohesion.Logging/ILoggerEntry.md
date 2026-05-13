@@ -1,4 +1,4 @@
-# `Assimalign.Cohesion.Logging.ILogEntry`
+# `Assimalign.Cohesion.Logging.ILoggerEntry`
 
 Immutable structured log event handed to every provider in the fan-out pipeline.
 
@@ -19,6 +19,6 @@ Immutable structured log event handed to every provider in the fan-out pipeline.
 
 - Implementations are immutable; consumers MUST NOT mutate the entry or the attribute
   dictionary returned by `Attributes`.
-- Construct entries through `LogEntryBuilder` or the typed helpers on `LoggerExtensions`.
+- Construct entries through `LoggerEntryBuilder` or the typed helpers on `LoggerExtensions`.
 - Attribute keys are case-sensitive. Values may be null; consumers that flatten attributes
   to text should render null as the literal string "null".

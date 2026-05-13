@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Logging;
 /// <remarks>
 /// The helpers short-circuit on <see cref="ILogger.IsEnabled(LogLevel)"/> so they do not allocate
 /// an entry when no underlying sink would accept it. Callers that already know they are enabled
-/// can build a <see cref="LogEntryBuilder"/> directly.
+/// can build a <see cref="LoggerEntryBuilder"/> directly.
 /// </remarks>
 public static class LoggerExtensions
 {
@@ -43,14 +43,14 @@ public static class LoggerExtensions
 
     /// <summary>
     /// Opens a scope keyed on a freshly built entry. Convenience wrapper around
-    /// <see cref="ILogger.BeginScope(ILogEntry)"/>.
+    /// <see cref="ILogger.BeginScope(ILoggerEntry)"/>.
     /// </summary>
     public static IScopedLogger BeginScope(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrEmpty(category);
 
-        var seed = new LogEntry(
+        var seed = new LoggerEntry(
             level: LogLevel.Information,
             category: category,
             message: message,
@@ -75,7 +75,7 @@ public static class LoggerExtensions
             return;
         }
 
-        var entry = new LogEntry(
+        var entry = new LoggerEntry(
             level: level,
             category: category,
             message: message,

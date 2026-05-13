@@ -3,17 +3,20 @@
 ## Design Intent
 
 The foundation package is a contract-and-composition layer, not a transport. It defines what a
-log event looks like, how loggers are created and cached, how scopes nest, and how enrichers
-contribute attributes; transports (console, debug, file, structured collectors) live in
-sibling packages.
+log event looks like, how loggers are created and cached, how scopes nest, how enrichers
+contribute attributes, and how an optional per-entry filter gates fan-out. Transports
+(console, debug, file, structured collectors) live in sibling packages.
 
 ## Architecture
 
 ```text
-caller -> ILogger.Log(ILogEntry)
-                                 |
-                                 v
+caller -> ILogger.Log(ILoggerEntry)
+                                   |
+                                   v
                   CompositeLogger (per category, cached by LoggerFactory)
+                  |   filter gate (ILoggerFilter, optional)
+                  |   enrichment pipeline (ILoggerEnricher, ordered)
+                  |   per-sink fan-out (failures isolated)
                     |   |   |
                     v   v   v
         ILogger (provider 1)   ...   ILogger (provider N)
@@ -21,16 +24,20 @@ caller -> ILogger.Log(ILogEntry)
 
 `CompositeLogger` is the only logger callers normally see. It owns:
 
-1. The per-category minimum-level decision (defaults to `LoggerFactoryOptions.MinimumLevel`
-   with category-prefix overrides from `Filters`).
-2. The enrichment pipeline (runs in registration order; enrichers may add new attribute keys
-   but cannot overwrite caller-supplied attributes).
-3. Fan-out to every registered provider, with per-provider failure isolation: an exception
+1. The factory minimum level check (`LoggerFactoryOptions.MinimumLevel`); entries below the
+   factory floor never reach the filter.
+2. The optional per-entry filter (`ILoggerFilter`) gate; the filter receives the full
+   `ILoggerEntry` so it can branch on category, level, attributes, exception, or any
+   combination of them. A throwing filter is treated as `true` (admit) so a bad filter never
+   silently drops entries.
+3. The enrichment pipeline; enrichers run in registration order. Enrichers may add new
+   attribute keys but cannot overwrite caller-supplied attributes.
+4. Fan-out to every registered provider, with per-provider failure isolation: an exception
    from one sink never aborts fan-out to the others.
 
 ## Log Entry Contract
 
-`ILogEntry` is immutable and carries:
+`ILoggerEntry` is immutable and carries:
 
 | Property | Type | Purpose |
 | --- | --- | --- |
@@ -43,19 +50,35 @@ caller -> ILogger.Log(ILogEntry)
 | `Exception` | `Exception?` | Optional captured exception. |
 | `Attributes` | `IReadOnlyDictionary<string, object?>` | Structured key-value payload. |
 
-Build entries through `LogEntryBuilder` for full control or through `LoggerExtensions`
+Build entries through `LoggerEntryBuilder` for full control or through `LoggerExtensions`
 helpers (`LogTrace`, `LogInformation`, `LogError`, ...) for the common shapes.
+
+### `LoggerEntry` is a class, not a struct
+
+The entry crosses the `ILoggerEntry` interface boundary multiple times in the pipeline
+(extension method -> composite logger -> enrichment view -> underlying providers). Each cast
+through the interface would box a struct, allocating a fresh heap object per boundary -
+strictly worse than the single class allocation the current design produces. The class shape
+also keeps the entry copy-by-reference, which matters for the enrichment pipeline that
+re-emits enriched copies.
 
 ## Levels and Filtering
 
 `LogLevel` ordering: `Trace < Debug < Information < Warning < Error < Critical < Event`,
 plus `None` (which always returns `false` from `IsEnabled`).
 
-Filtering is configured at build time:
+Filtering happens in two stages:
 
-- `SetMinimumLevel` sets the factory default (defaults to `Information`).
-- `AddFilter("App.Network", LogLevel.Debug)` overrides for any category that starts with
-  `App.Network` (case-insensitive). The most specific (longest) prefix wins.
+1. **Factory minimum** (`LoggerFactoryOptions.MinimumLevel`, default `Information`). Applied
+   unconditionally before anything else; entries below the floor are dropped before the
+   filter sees them.
+2. **`ILoggerFilter`** (optional). Sees the full entry and decides per-entry. The fluent
+   `AddFilter(prefix, level)` helper accumulates rules into a `CategoryLoggerFilter`. Custom
+   logic plugs in through `UseFilter(myFilter)`. Both can coexist; the entry must pass both.
+
+To express "category X logs at Trace while everything else logs at Warning", set
+`MinimumLevel = Trace` and add a filter that requires `entry.Level >= Warning` unless the
+category matches X.
 
 ## Factory Lifecycle
 
@@ -69,6 +92,11 @@ Filtering is configured at build time:
 `LoggerFactoryBuilder` is single-use: once `Build` has been called the builder is locked.
 Duplicate provider names are rejected.
 
+`LoggerFactoryOptions` exposes its provider and enricher lists as mutable `IList<>`
+collections so callers may populate the options directly when bypassing the builder. The
+factory snapshots both lists at construction time; mutating the options after the factory
+has been constructed has no effect on already-cached loggers.
+
 ## Scopes
 
 `ILogger.BeginScope(seed)` returns an `IScopedLogger`. Entries written through the scope
@@ -81,7 +109,7 @@ so the composite stays stable.
 
 ## Enrichment
 
-`ILogEnricher.Enrich(entry, attributes)` runs once per entry per fan-out. The mutable
+`ILoggerEnricher.Enrich(entry, attributes)` runs once per entry per fan-out. The mutable
 dictionary handed to the enricher prevents overwrites: if the entry already carries a key,
 the enricher's add is dropped. Enricher exceptions are swallowed and the entry still ships.
 
@@ -118,21 +146,24 @@ Assimalign.Cohesion.Logging/
   src/
     Assimalign.Cohesion.Logging.csproj
     Abstractions/
-      ILogEntry.cs
+      ILoggerEntry.cs
       ILogger.cs
-      IScopedLogger.cs
+      ILogger.Scoped.cs
       ILoggerProvider.cs
       ILoggerFactory.cs
       ILoggerFactoryBuilder.cs
-      ILogEnricher.cs
+      ILoggerEnricher.cs
+      ILoggerFilter.cs
     Extensions/
       LoggerExtensions.cs
+    Filters/
+      CategoryLoggerFilter.cs
     Internal/
       CompositeLogger.cs
       ScopedCompositeLogger.cs
       NoopScopedLogger.cs
-    LogEntry.cs
-    LogEntryBuilder.cs
+    LoggerEntry.cs
+    LoggerEntryBuilder.cs
     LogLevel.cs
     LoggerFactory.cs
     LoggerFactoryBuilder.cs
@@ -155,7 +186,7 @@ ILoggerFactory factory = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
     .AddProvider(new DebugLoggerProvider())
     .SetMinimumLevel(LogLevel.Information)
-    .AddFilter("App.Network", LogLevel.Debug)
+    .AddFilter("App.Network", LogLevel.Debug) // Network category must be Debug+
     .AddEnricher(new ProcessEnricher())
     .Build();
 
@@ -166,4 +197,18 @@ logger.LogInformation("App.Network.Http", "Request {Method} {Url}",
 using IScopedLogger scope = logger.BeginScope("App.Network.Http", "request scope");
 scope.LogDebug("App.Network.Http", "response {Status}",
     attributes: new Dictionary<string, object?> { ["Status"] = 200 });
+```
+
+## Example: custom filter
+
+```csharp
+internal sealed class AuditOnlyFilter : ILoggerFilter
+{
+    public bool ShouldLog(ILoggerEntry entry) => entry.Attributes.ContainsKey("audit");
+}
+
+ILoggerFactory auditOnly = new LoggerFactoryBuilder()
+    .AddProvider(new ConsoleLoggerProvider())
+    .UseFilter(new AuditOnlyFilter())
+    .Build();
 ```

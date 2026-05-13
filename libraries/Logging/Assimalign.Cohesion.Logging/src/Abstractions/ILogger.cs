@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Writes <see cref="ILogEntry"/> events to one or more sinks.
+/// Writes <see cref="ILoggerEntry"/> events to one or more sinks.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,14 +30,14 @@ public interface ILogger
     /// when a single sink fails; failures are isolated to the sink that raised them.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="entry"/> is <see langword="null"/>.</exception>
-    void Log(ILogEntry entry);
+    void Log(ILoggerEntry entry);
 
     /// <summary>
     /// Opens a logical scope. Entries produced inside the scope share the scope's
-    /// <see cref="IScopedLogger.ParentId"/> through their <see cref="ILogEntry.ParentId"/>.
+    /// <see cref="IScopedLogger.ParentId"/> through their <see cref="ILoggerEntry.ParentId"/>.
     /// </summary>
     /// <param name="entry">The seed entry that opens the scope. Required.</param>
     /// <returns>A disposable scoped logger; disposing the scope closes it.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entry"/> is <see langword="null"/>.</exception>
-    IScopedLogger BeginScope(ILogEntry entry);
+    IScopedLogger BeginScope(ILoggerEntry entry);
 }

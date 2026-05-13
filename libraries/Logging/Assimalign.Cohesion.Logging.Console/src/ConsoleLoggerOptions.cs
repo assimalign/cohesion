@@ -42,5 +42,5 @@ public sealed class ConsoleLoggerOptions
     /// Optional formatter override. When non-null, the provider invokes it instead of the
     /// built-in renderer.
     /// </summary>
-    public Action<ILogEntry, TextWriter>? Formatter { get; set; }
+    public Action<ILoggerEntry, TextWriter>? Formatter { get; set; }
 }

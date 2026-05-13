@@ -4,12 +4,12 @@ using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Logging.Tests;
 
-public class LogEntryBuilderTests
+public class LoggerEntryBuilderTests
 {
-    [Fact(DisplayName = "Cohesion Test [Logging] - LogEntryBuilder: builds with required pieces")]
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerEntryBuilder: builds with required pieces")]
     public void Build_MinimumValues()
     {
-        var entry = new LogEntryBuilder(LogLevel.Warning, "Category").Build();
+        var entry = new LoggerEntryBuilder(LogLevel.Warning, "Category").Build();
 
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Equal("Category", entry.Category);
@@ -17,7 +17,7 @@ public class LogEntryBuilderTests
         Assert.Empty(entry.Attributes);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - LogEntryBuilder: fluent setters propagate")]
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerEntryBuilder: fluent setters propagate")]
     public void Build_FluentSettersPropagate()
     {
         var ts = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -25,7 +25,7 @@ public class LogEntryBuilderTests
         var id = LogId.New();
         var exception = new InvalidOperationException("boom");
 
-        var entry = new LogEntryBuilder(LogLevel.Information, "A")
+        var entry = new LoggerEntryBuilder(LogLevel.Information, "A")
             .WithLevel(LogLevel.Critical)
             .WithCategory("B")
             .WithMessage("hello")
@@ -49,10 +49,10 @@ public class LogEntryBuilderTests
         Assert.Equal("v", entry.Attributes["k2"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - LogEntryBuilder: WithAttributes merges in batch")]
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerEntryBuilder: WithAttributes merges in batch")]
     public void Build_WithAttributesBatch()
     {
-        var entry = new LogEntryBuilder(LogLevel.Information, "A")
+        var entry = new LoggerEntryBuilder(LogLevel.Information, "A")
             .WithAttribute("k", 1)
             .WithAttributes(new[]
             {
@@ -65,13 +65,13 @@ public class LogEntryBuilderTests
         Assert.Equal(3, entry.Attributes["k2"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - LogEntryBuilder: rejects null/empty arguments")]
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerEntryBuilder: rejects null/empty arguments")]
     public void Ctor_RejectsBadArguments()
     {
-        Assert.Throws<ArgumentNullException>(() => new LogEntryBuilder(LogLevel.Information, null!));
-        Assert.Throws<ArgumentException>(() => new LogEntryBuilder(LogLevel.Information, ""));
-        Assert.Throws<ArgumentException>(() => new LogEntryBuilder(LogLevel.Information, "Cat").WithCategory(""));
-        Assert.Throws<ArgumentException>(() => new LogEntryBuilder(LogLevel.Information, "Cat").WithAttribute("", 1));
-        Assert.Throws<ArgumentNullException>(() => new LogEntryBuilder(LogLevel.Information, "Cat").WithAttributes(null!));
+        Assert.Throws<ArgumentNullException>(() => new LoggerEntryBuilder(LogLevel.Information, null!));
+        Assert.Throws<ArgumentException>(() => new LoggerEntryBuilder(LogLevel.Information, ""));
+        Assert.Throws<ArgumentException>(() => new LoggerEntryBuilder(LogLevel.Information, "Cat").WithCategory(""));
+        Assert.Throws<ArgumentException>(() => new LoggerEntryBuilder(LogLevel.Information, "Cat").WithAttribute("", 1));
+        Assert.Throws<ArgumentNullException>(() => new LoggerEntryBuilder(LogLevel.Information, "Cat").WithAttributes(null!));
     }
 }

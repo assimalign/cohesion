@@ -150,7 +150,7 @@ public class ConsoleLoggerProviderTests
             .Build();
 
         var logger = factory.Create("App");
-        var seed = new LogEntry(LogLevel.Information, "App", "scope");
+        var seed = new LoggerEntry(LogLevel.Information, "App", "scope");
         using var scope = logger.BeginScope(seed);
         scope.LogInformation("App", "inner");
 

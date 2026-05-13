@@ -18,7 +18,7 @@ internal sealed class RecordingProvider : ILoggerProvider
     }
 
     public string Name { get; }
-    public ConcurrentBag<ILogEntry> Entries { get; } = new();
+    public ConcurrentBag<ILoggerEntry> Entries { get; } = new();
     public int DisposeCount;
     public bool ThrowOnLog { get; }
     public bool ThrowOnScope { get; }
@@ -41,7 +41,7 @@ internal sealed class RecordingProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel level) => level != LogLevel.None && !_owner.IsDisposed;
 
-        public void Log(ILogEntry entry)
+        public void Log(ILoggerEntry entry)
         {
             if (_owner.ThrowOnLog)
             {
@@ -50,7 +50,7 @@ internal sealed class RecordingProvider : ILoggerProvider
             _owner.Entries.Add(entry);
         }
 
-        public IScopedLogger BeginScope(ILogEntry entry)
+        public IScopedLogger BeginScope(ILoggerEntry entry)
         {
             if (_owner.ThrowOnScope)
             {
@@ -78,9 +78,9 @@ internal sealed class RecordingProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel level) => Volatile.Read(ref _disposed) == 0 && level != LogLevel.None;
 
-        public void Log(ILogEntry entry) => _owner.Entries.Add(entry);
+        public void Log(ILoggerEntry entry) => _owner.Entries.Add(entry);
 
-        public IScopedLogger BeginScope(ILogEntry entry)
+        public IScopedLogger BeginScope(ILoggerEntry entry)
         {
             _owner.Entries.Add(entry);
             return new RecordingScope(entry.Id, _category, _owner);

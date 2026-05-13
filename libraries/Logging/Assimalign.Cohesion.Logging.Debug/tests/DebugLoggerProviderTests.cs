@@ -113,7 +113,7 @@ public class DebugLoggerProviderTests
         using var provider = new DebugLoggerProvider(new DebugLoggerOptions { Writer = captured.Add });
 
         var logger = provider.Create("App");
-        using var scope = logger.BeginScope(new LogEntry(LogLevel.Information, "App", "open"));
+        using var scope = logger.BeginScope(new LoggerEntry(LogLevel.Information, "App", "open"));
         scope.LogInformation("App", "inside scope");
 
         Assert.Equal(2, captured.Count);

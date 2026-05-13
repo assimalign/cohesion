@@ -21,7 +21,7 @@ internal sealed class ConsoleLogger : ILogger
 
     public bool IsEnabled(LogLevel level) => level != LogLevel.None && !_provider.IsDisposed;
 
-    public void Log(ILogEntry entry)
+    public void Log(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
@@ -33,7 +33,7 @@ internal sealed class ConsoleLogger : ILogger
         _provider.Write(entry);
     }
 
-    public IScopedLogger BeginScope(ILogEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
@@ -63,7 +63,7 @@ internal sealed class ConsoleLogger : ILogger
 
         public bool IsEnabled(LogLevel level) => Volatile.Read(ref _disposed) == 0 && level != LogLevel.None && !_provider.IsDisposed;
 
-        public void Log(ILogEntry entry)
+        public void Log(ILoggerEntry entry)
         {
             ArgumentNullException.ThrowIfNull(entry);
             if (!IsEnabled(entry.Level))
@@ -73,7 +73,7 @@ internal sealed class ConsoleLogger : ILogger
             _provider.Write(entry);
         }
 
-        public IScopedLogger BeginScope(ILogEntry entry)
+        public IScopedLogger BeginScope(ILoggerEntry entry)
         {
             ArgumentNullException.ThrowIfNull(entry);
 

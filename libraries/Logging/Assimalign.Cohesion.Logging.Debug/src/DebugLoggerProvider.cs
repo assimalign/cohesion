@@ -76,7 +76,7 @@ public sealed class DebugLoggerProvider : ILoggerProvider
         return true;
     }
 
-    internal void Write(ILogEntry entry)
+    internal void Write(ILoggerEntry entry)
     {
         if (!IsEnabledFor(entry.Level))
         {

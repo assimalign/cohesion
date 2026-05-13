@@ -1,49 +1,32 @@
-using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Snapshot of registration-time configuration consumed by <see cref="LoggerFactory"/>.
+/// Configuration shape consumed by <see cref="LoggerFactory"/>.
 /// </summary>
 /// <remarks>
-/// Populated by <see cref="LoggerFactoryBuilder"/>. Once the factory is built the options are
-/// frozen; callers wishing to change levels or filters MUST build a new factory.
+/// <para>
+/// The options expose mutable collections so callers can populate <see cref="Providers"/> and
+/// <see cref="Enrichers"/> directly (or through <see cref="LoggerFactoryBuilder"/>). After the
+/// factory is constructed the lists are read by reference; mutating them post-construction is
+/// not supported and may lead to undefined behavior.
+/// </para>
 /// </remarks>
 public sealed class LoggerFactoryOptions
 {
-    private static readonly IReadOnlyList<ILoggerProvider> EmptyProviders = Array.Empty<ILoggerProvider>();
-    private static readonly IReadOnlyList<ILogEnricher> EmptyEnrichers = Array.Empty<ILogEnricher>();
-    private static readonly IReadOnlyDictionary<string, LogLevel> EmptyFilters = new Dictionary<string, LogLevel>(0, StringComparer.OrdinalIgnoreCase);
+    /// <summary>Providers the factory fans out to. Add provider instances directly.</summary>
+    public IList<ILoggerProvider> Providers { get; } = new List<ILoggerProvider>();
+
+    /// <summary>Enrichers, in execution order. Add enricher instances directly.</summary>
+    public IList<ILoggerEnricher> Enrichers { get; } = new List<ILoggerEnricher>();
+
+    /// <summary>Factory-wide minimum level. Defaults to <see cref="LogLevel.Information"/>.</summary>
+    public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
 
     /// <summary>
-    /// Initializes a new options snapshot.
+    /// Optional per-entry filter. When non-null the filter sees every entry that already passed
+    /// <see cref="MinimumLevel"/>; entries the filter rejects do not reach any provider.
     /// </summary>
-    /// <param name="providers">The providers fan-out targets. Required.</param>
-    /// <param name="enrichers">The enrichment pipeline in execution order. May be empty.</param>
-    /// <param name="minimumLevel">Default minimum log level. Defaults to <see cref="LogLevel.Information"/>.</param>
-    /// <param name="filters">Per-category overrides (case-insensitive prefix match).</param>
-    public LoggerFactoryOptions(
-        IReadOnlyList<ILoggerProvider>? providers = null,
-        IReadOnlyList<ILogEnricher>? enrichers = null,
-        LogLevel minimumLevel = LogLevel.Information,
-        IReadOnlyDictionary<string, LogLevel>? filters = null)
-    {
-        Providers = providers ?? EmptyProviders;
-        Enrichers = enrichers ?? EmptyEnrichers;
-        MinimumLevel = minimumLevel;
-        Filters = filters ?? EmptyFilters;
-    }
-
-    /// <summary>Providers the factory fans out to.</summary>
-    public IReadOnlyList<ILoggerProvider> Providers { get; }
-
-    /// <summary>Enrichers, in execution order.</summary>
-    public IReadOnlyList<ILogEnricher> Enrichers { get; }
-
-    /// <summary>Factory-wide minimum level.</summary>
-    public LogLevel MinimumLevel { get; }
-
-    /// <summary>Category prefix to minimum-level overrides.</summary>
-    public IReadOnlyDictionary<string, LogLevel> Filters { get; }
+    public ILoggerFilter? Filter { get; set; }
 }

@@ -10,9 +10,9 @@ public class LoggerFactoryBuilderTests
     public void DuplicateProvider_Throws()
     {
         var builder = new LoggerFactoryBuilder();
-        builder.AddProvider(new RecordingProvider("alpha"));
+        builder.AddProvider(new TestProvider("alpha"));
 
-        Assert.Throws<InvalidOperationException>(() => builder.AddProvider(new RecordingProvider("alpha")));
+        Assert.Throws<InvalidOperationException>(() => builder.AddProvider(new TestProvider("alpha")));
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: AddProvider rejects null")]
@@ -27,6 +27,12 @@ public class LoggerFactoryBuilderTests
         Assert.Throws<ArgumentException>(() => new LoggerFactoryBuilder().AddFilter("", LogLevel.Trace));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: UseFilter rejects null")]
+    public void UseFilter_RejectsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() => new LoggerFactoryBuilder().UseFilter(null!));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: AddEnricher rejects null")]
     public void AddEnricher_NullThrows()
     {
@@ -37,37 +43,76 @@ public class LoggerFactoryBuilderTests
     public void Rebuild_Throws()
     {
         var builder = new LoggerFactoryBuilder();
-        builder.AddProvider(new RecordingProvider("p"));
+        builder.AddProvider(new TestProvider("p"));
         builder.Build();
 
         Assert.Throws<InvalidOperationException>(() => builder.Build());
-        Assert.Throws<InvalidOperationException>(() => builder.AddProvider(new RecordingProvider("q")));
+        Assert.Throws<InvalidOperationException>(() => builder.AddProvider(new TestProvider("q")));
         Assert.Throws<InvalidOperationException>(() => builder.SetMinimumLevel(LogLevel.Trace));
         Assert.Throws<InvalidOperationException>(() => builder.AddFilter("X", LogLevel.Trace));
+        Assert.Throws<InvalidOperationException>(() => builder.UseFilter(new PassthroughFilter()));
         Assert.Throws<InvalidOperationException>(() => builder.AddEnricher(new NoopEnricher()));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: minimum level + filters propagate")]
-    public void Build_PassesOptions()
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: factory minimum level governs IsEnabled")]
+    public void Build_MinimumLevel_GovernsIsEnabled()
     {
-        var provider = new RecordingProvider("rec");
         ILoggerFactory factory = new LoggerFactoryBuilder()
-            .AddProvider(provider)
+            .AddProvider(new RecordingProvider("rec"))
             .SetMinimumLevel(LogLevel.Warning)
-            .AddFilter("App.Network", LogLevel.Trace)
             .Build();
 
-        var generic = factory.Create("Other");
-        Assert.False(generic.IsEnabled(LogLevel.Information)); // below factory default
-        Assert.True(generic.IsEnabled(LogLevel.Warning));
-
-        var network = factory.Create("App.Network.Http");
-        Assert.True(network.IsEnabled(LogLevel.Trace)); // filter override
+        var logger = factory.Create("Other");
+        Assert.False(logger.IsEnabled(LogLevel.Information));
+        Assert.True(logger.IsEnabled(LogLevel.Warning));
     }
 
-    private sealed class RecordingProvider : ILoggerProvider
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: AddFilter raises per-category minimum")]
+    public void Build_AddFilter_RaisesMinimumForCategory()
     {
-        public RecordingProvider(string name) { Name = name; }
+        var provider = new RecordingProvider();
+        ILoggerFactory factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddFilter("App.Network", LogLevel.Error)
+            .Build();
+
+        // App.Network requires Error+ via the filter; Warning is rejected.
+        factory.Create("App.Network.Http").LogWarning("App.Network.Http", "below filter");
+        // Other categories defer to the factory minimum (Trace), so Debug passes.
+        factory.Create("Other").LogDebug("Other", "above floor");
+
+        Assert.Single(provider.Entries);
+        Assert.Equal("above floor", System.Linq.Enumerable.Single(provider.Entries).Message);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactoryBuilder: UseFilter composes with AddFilter")]
+    public void Build_UseFilter_ComposesWithCategoryRules()
+    {
+        var provider = new RecordingProvider();
+        var customFilter = new CategoryContainsFilter(forbidden: "secret");
+
+        ILoggerFactory factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Trace)
+            .UseFilter(customFilter)
+            .AddFilter("App", LogLevel.Information)
+            .Build();
+
+        // App + Information: passes both filters.
+        factory.Create("App.Other").LogInformation("App.Other", "ok");
+        // App + Debug: blocked by category filter (App requires Information+).
+        factory.Create("App.Other").LogDebug("App.Other", "filtered by category");
+        // App.secret: blocked by custom filter regardless of level.
+        factory.Create("App.secret.Component").LogInformation("App.secret.Component", "blocked by custom");
+
+        Assert.Single(provider.Entries);
+        Assert.Equal("ok", System.Linq.Enumerable.Single(provider.Entries).Message);
+    }
+
+    private sealed class TestProvider : ILoggerProvider
+    {
+        public TestProvider(string name) { Name = name; }
         public string Name { get; }
         public ILogger Create(string category) => new TestLogger();
         public void Dispose() { }
@@ -76,21 +121,33 @@ public class LoggerFactoryBuilderTests
     private sealed class TestLogger : ILogger
     {
         public bool IsEnabled(LogLevel level) => true;
-        public void Log(ILogEntry entry) { }
-        public IScopedLogger BeginScope(ILogEntry entry) => new TestScope();
+        public void Log(ILoggerEntry entry) { }
+        public IScopedLogger BeginScope(ILoggerEntry entry) => new TestScope();
     }
 
     private sealed class TestScope : IScopedLogger
     {
         public LogId ParentId => LogId.Empty;
         public bool IsEnabled(LogLevel level) => true;
-        public void Log(ILogEntry entry) { }
-        public IScopedLogger BeginScope(ILogEntry entry) => this;
+        public void Log(ILoggerEntry entry) { }
+        public IScopedLogger BeginScope(ILoggerEntry entry) => this;
         public void Dispose() { }
     }
 
-    private sealed class NoopEnricher : ILogEnricher
+    private sealed class NoopEnricher : ILoggerEnricher
     {
-        public void Enrich(ILogEntry entry, IDictionary<string, object?> attributes) { }
+        public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes) { }
+    }
+
+    private sealed class PassthroughFilter : ILoggerFilter
+    {
+        public bool ShouldLog(ILoggerEntry entry) => true;
+    }
+
+    private sealed class CategoryContainsFilter : ILoggerFilter
+    {
+        private readonly string _forbidden;
+        public CategoryContainsFilter(string forbidden) { _forbidden = forbidden; }
+        public bool ShouldLog(ILoggerEntry entry) => !entry.Category.Contains(_forbidden, StringComparison.OrdinalIgnoreCase);
     }
 }

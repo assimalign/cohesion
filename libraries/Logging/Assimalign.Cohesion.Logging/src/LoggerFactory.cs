@@ -14,6 +14,8 @@ public sealed class LoggerFactory : ILoggerFactory
 {
     private readonly ConcurrentDictionary<string, ILogger> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LoggerFactoryOptions _options;
+    private readonly ILoggerProvider[] _providersSnapshot;
+    private readonly ILoggerEnricher[] _enrichersSnapshot;
     private int _disposed;
 
     /// <summary>
@@ -24,13 +26,20 @@ public sealed class LoggerFactory : ILoggerFactory
     public LoggerFactory(LoggerFactoryOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
         _options = options;
+
+        // Snapshot the lists so post-construction mutation of the options object cannot reshape
+        // an already-running factory.
+        _providersSnapshot = new ILoggerProvider[options.Providers.Count];
+        options.Providers.CopyTo(_providersSnapshot, 0);
+
+        _enrichersSnapshot = new ILoggerEnricher[options.Enrichers.Count];
+        options.Enrichers.CopyTo(_enrichersSnapshot, 0);
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ILoggerProvider> Providers => _options.Providers;
-
-    internal LoggerFactoryOptions Options => _options;
+    public IReadOnlyList<ILoggerProvider> Providers => _providersSnapshot;
 
     /// <inheritdoc />
     public ILogger Create(string category)
@@ -49,7 +58,7 @@ public sealed class LoggerFactory : ILoggerFactory
             return;
         }
 
-        foreach (var provider in _options.Providers)
+        foreach (var provider in _providersSnapshot)
         {
             try
             {
@@ -62,39 +71,20 @@ public sealed class LoggerFactory : ILoggerFactory
         }
     }
 
-    internal LogLevel ResolveMinimumLevel(string category)
-    {
-        // Pick the longest matching prefix so the most specific filter wins.
-        int bestLength = -1;
-        LogLevel bestLevel = _options.MinimumLevel;
-
-        foreach (var pair in _options.Filters)
-        {
-            if (category.StartsWith(pair.Key, StringComparison.OrdinalIgnoreCase) && pair.Key.Length > bestLength)
-            {
-                bestLength = pair.Key.Length;
-                bestLevel = pair.Value;
-            }
-        }
-
-        return bestLevel;
-    }
-
     private CompositeLogger CreateComposite(string category)
     {
-        var minimumLevel = ResolveMinimumLevel(category);
-
-        var underlying = new ILogger[_options.Providers.Count];
-        for (int i = 0; i < _options.Providers.Count; i++)
+        var underlying = new ILogger[_providersSnapshot.Length];
+        for (int i = 0; i < _providersSnapshot.Length; i++)
         {
-            underlying[i] = _options.Providers[i].Create(category);
+            underlying[i] = _providersSnapshot[i].Create(category);
         }
 
         return new CompositeLogger(
             category: category,
             underlying: underlying,
-            enrichers: _options.Enrichers,
-            minimumLevel: minimumLevel);
+            enrichers: _enrichersSnapshot,
+            minimumLevel: _options.MinimumLevel,
+            filter: _options.Filter);
     }
 
     private void ThrowIfDisposed()

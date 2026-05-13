@@ -4,10 +4,10 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Fluent builder for <see cref="LogEntry"/>. Use through <see cref="LoggerExtensions"/> or
+/// Fluent builder for <see cref="LoggerEntry"/>. Use through <see cref="LoggerExtensions"/> or
 /// directly when a caller needs more control than the typed log methods give.
 /// </summary>
-public sealed class LogEntryBuilder
+public sealed class LoggerEntryBuilder
 {
     private readonly Dictionary<string, object?> _attributes = new(StringComparer.Ordinal);
     private LogId? _parentId;
@@ -24,7 +24,7 @@ public sealed class LogEntryBuilder
     /// <param name="level">Event severity.</param>
     /// <param name="category">Logger category. Required, non-empty.</param>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
-    public LogEntryBuilder(LogLevel level, string category)
+    public LoggerEntryBuilder(LogLevel level, string category)
     {
         ArgumentException.ThrowIfNullOrEmpty(category);
 
@@ -33,7 +33,7 @@ public sealed class LogEntryBuilder
     }
 
     /// <summary>Sets the event severity.</summary>
-    public LogEntryBuilder WithLevel(LogLevel level)
+    public LoggerEntryBuilder WithLevel(LogLevel level)
     {
         _level = level;
         return this;
@@ -41,7 +41,7 @@ public sealed class LogEntryBuilder
 
     /// <summary>Sets the logger category.</summary>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
-    public LogEntryBuilder WithCategory(string category)
+    public LoggerEntryBuilder WithCategory(string category)
     {
         ArgumentException.ThrowIfNullOrEmpty(category);
         _category = category;
@@ -49,35 +49,35 @@ public sealed class LogEntryBuilder
     }
 
     /// <summary>Sets the human-readable message.</summary>
-    public LogEntryBuilder WithMessage(string? message)
+    public LoggerEntryBuilder WithMessage(string? message)
     {
         _message = message;
         return this;
     }
 
     /// <summary>Sets the optional exception associated with the event.</summary>
-    public LogEntryBuilder WithException(Exception? exception)
+    public LoggerEntryBuilder WithException(Exception? exception)
     {
         _exception = exception;
         return this;
     }
 
     /// <summary>Sets the optional parent log id.</summary>
-    public LogEntryBuilder WithParentId(LogId? parentId)
+    public LoggerEntryBuilder WithParentId(LogId? parentId)
     {
         _parentId = parentId;
         return this;
     }
 
     /// <summary>Overrides the generated id.</summary>
-    public LogEntryBuilder WithId(LogId id)
+    public LoggerEntryBuilder WithId(LogId id)
     {
         _id = id;
         return this;
     }
 
     /// <summary>Overrides the captured timestamp.</summary>
-    public LogEntryBuilder WithTimestamp(DateTimeOffset timestamp)
+    public LoggerEntryBuilder WithTimestamp(DateTimeOffset timestamp)
     {
         _timestamp = timestamp;
         return this;
@@ -87,7 +87,7 @@ public sealed class LogEntryBuilder
     /// Adds a single attribute. Existing keys are overwritten with the new value.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="key"/> is null or empty.</exception>
-    public LogEntryBuilder WithAttribute(string key, object? value)
+    public LoggerEntryBuilder WithAttribute(string key, object? value)
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
         _attributes[key] = value;
@@ -98,7 +98,7 @@ public sealed class LogEntryBuilder
     /// Adds a batch of attributes. Existing keys are overwritten.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="attributes"/> is <see langword="null"/>.</exception>
-    public LogEntryBuilder WithAttributes(IEnumerable<KeyValuePair<string, object?>> attributes)
+    public LoggerEntryBuilder WithAttributes(IEnumerable<KeyValuePair<string, object?>> attributes)
     {
         ArgumentNullException.ThrowIfNull(attributes);
 
@@ -111,15 +111,15 @@ public sealed class LogEntryBuilder
     }
 
     /// <summary>
-    /// Returns the configured <see cref="LogEntry"/>.
+    /// Returns the configured <see cref="LoggerEntry"/>.
     /// </summary>
-    public LogEntry Build()
+    public LoggerEntry Build()
     {
         IReadOnlyDictionary<string, object?>? attributes = _attributes.Count == 0
             ? null
             : new Dictionary<string, object?>(_attributes, StringComparer.Ordinal);
 
-        return new LogEntry(
+        return new LoggerEntry(
             level: _level,
             category: _category,
             message: _message,

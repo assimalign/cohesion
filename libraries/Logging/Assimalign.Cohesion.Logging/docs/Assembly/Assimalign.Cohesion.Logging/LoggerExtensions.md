@@ -1,6 +1,6 @@
 # `Assimalign.Cohesion.Logging.LoggerExtensions`
 
-Typed-level helpers over `ILogger`. Each helper builds a `LogEntry`, runs the level guard,
+Typed-level helpers over `ILogger`. Each helper builds a `LoggerEntry`, runs the level guard,
 and writes to the logger.
 
 ## Methods
@@ -19,7 +19,7 @@ and writes to the logger.
 ## Short-circuiting
 
 Each helper calls `ILogger.IsEnabled(level)` first; when the logger is not enabled, no
-`LogEntry` is allocated.
+`LoggerEntry` is allocated.
 
 ## Argument validation
 

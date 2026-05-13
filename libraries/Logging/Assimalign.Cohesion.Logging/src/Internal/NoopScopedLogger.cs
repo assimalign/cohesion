@@ -18,12 +18,12 @@ internal sealed class NoopScopedLogger : IScopedLogger
 
     public bool IsEnabled(LogLevel level) => false;
 
-    public void Log(ILogEntry entry)
+    public void Log(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
     }
 
-    public IScopedLogger BeginScope(ILogEntry entry)
+    public IScopedLogger BeginScope(ILoggerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         return this;

@@ -72,7 +72,7 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
         }
     }
 
-    internal void Write(ILogEntry entry)
+    internal void Write(ILoggerEntry entry)
     {
         if (IsDisposed)
         {

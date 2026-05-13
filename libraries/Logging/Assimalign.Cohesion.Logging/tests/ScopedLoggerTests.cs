@@ -16,7 +16,7 @@ public class ScopedLoggerTests
             .Build();
 
         var logger = factory.Create("Cat");
-        var seed = new LogEntry(LogLevel.Information, "Cat", "open scope");
+        var seed = new LoggerEntry(LogLevel.Information, "Cat", "open scope");
         using IScopedLogger scope = logger.BeginScope(seed);
 
         scope.LogInformation("Cat", "inside scope");
@@ -36,7 +36,7 @@ public class ScopedLoggerTests
             .SetMinimumLevel(LogLevel.Trace)
             .Build();
 
-        var seed = new LogEntry(LogLevel.Information, "Cat", "open scope");
+        var seed = new LoggerEntry(LogLevel.Information, "Cat", "open scope");
         using IScopedLogger scope = factory.Create("Cat").BeginScope(seed);
 
         Assert.Equal(seed.Id, scope.ParentId);
@@ -51,10 +51,10 @@ public class ScopedLoggerTests
             .SetMinimumLevel(LogLevel.Trace)
             .Build();
 
-        var seedA = new LogEntry(LogLevel.Information, "Cat", "outer");
+        var seedA = new LoggerEntry(LogLevel.Information, "Cat", "outer");
         using IScopedLogger outer = factory.Create("Cat").BeginScope(seedA);
 
-        var seedB = new LogEntry(LogLevel.Information, "Cat", "inner");
+        var seedB = new LoggerEntry(LogLevel.Information, "Cat", "inner");
         using IScopedLogger inner = outer.BeginScope(seedB);
 
         inner.LogInformation("Cat", "leaf");
@@ -78,9 +78,9 @@ public class ScopedLoggerTests
 
         var customParent = LogId.New();
         using IScopedLogger scope = factory.Create("Cat").BeginScope(
-            new LogEntry(LogLevel.Information, "Cat", "open scope"));
+            new LoggerEntry(LogLevel.Information, "Cat", "open scope"));
 
-        scope.Log(new LogEntry(LogLevel.Information, "Cat", "explicit parent", parentId: customParent));
+        scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "explicit parent", parentId: customParent));
 
         var entry = provider.Entries.Single(e => e.Message == "explicit parent");
         Assert.Equal(customParent, entry.ParentId);
@@ -92,7 +92,7 @@ public class ScopedLoggerTests
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(new RecordingProvider())
             .Build();
-        var seed = new LogEntry(LogLevel.Information, "Cat", "open");
+        var seed = new LoggerEntry(LogLevel.Information, "Cat", "open");
         var scope = factory.Create("Cat").BeginScope(seed);
         scope.Dispose();
         scope.Dispose(); // no throw
@@ -104,11 +104,11 @@ public class ScopedLoggerTests
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(new RecordingProvider())
             .Build();
-        var scope = factory.Create("Cat").BeginScope(new LogEntry(LogLevel.Information, "Cat", "open"));
+        var scope = factory.Create("Cat").BeginScope(new LoggerEntry(LogLevel.Information, "Cat", "open"));
         scope.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() =>
-            scope.Log(new LogEntry(LogLevel.Information, "Cat", "after dispose")));
+            scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "after dispose")));
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - Scope: provider that throws on BeginScope is replaced with noop")]
@@ -122,7 +122,7 @@ public class ScopedLoggerTests
             .Build();
 
         using IScopedLogger scope = factory.Create("Cat").BeginScope(
-            new LogEntry(LogLevel.Information, "Cat", "open"));
+            new LoggerEntry(LogLevel.Information, "Cat", "open"));
 
         // Good provider observes the seed; bad provider threw before recording.
         Assert.Empty(bad.Entries);

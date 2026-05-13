@@ -17,12 +17,12 @@ namespace Assimalign.Cohesion.Logging;
 /// blocking work belongs elsewhere.
 /// </para>
 /// </remarks>
-public interface ILogEnricher
+public interface ILoggerEnricher
 {
     /// <summary>
     /// Add attributes for <paramref name="entry"/>.
     /// </summary>
     /// <param name="entry">The entry being enriched. Required.</param>
     /// <param name="attributes">Mutable attribute bag the enricher may add to. Required.</param>
-    void Enrich(ILogEntry entry, IDictionary<string, object?> attributes);
+    void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes);
 }

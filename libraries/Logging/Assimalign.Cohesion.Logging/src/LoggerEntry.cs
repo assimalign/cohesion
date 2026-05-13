@@ -4,9 +4,9 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Default immutable implementation of <see cref="ILogEntry"/>.
+/// Default immutable implementation of <see cref="ILoggerEntry"/>.
 /// </summary>
-public sealed class LogEntry : ILogEntry
+public sealed class LoggerEntry : ILoggerEntry
 {
     private static readonly IReadOnlyDictionary<string, object?> EmptyAttributes = new Dictionary<string, object?>(capacity: 0);
 
@@ -22,7 +22,7 @@ public sealed class LogEntry : ILogEntry
     /// <param name="id">Optional explicit id. When omitted, a fresh <see cref="LogId"/> is generated.</param>
     /// <param name="timestamp">Optional timestamp. When omitted, captures <see cref="DateTimeOffset.UtcNow"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
-    public LogEntry(
+    public LoggerEntry(
         LogLevel level,
         string category,
         string? message = null,

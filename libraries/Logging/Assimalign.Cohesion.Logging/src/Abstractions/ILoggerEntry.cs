@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Logging;
 /// Log entries are the unit of work for the Cohesion logging pipeline. A consumer (provider or
 /// enricher) reads the entry's <see cref="Level"/>, <see cref="Message"/>, <see cref="Exception"/>,
 /// <see cref="Category"/>, <see cref="Timestamp"/>, and <see cref="Attributes"/>; it MUST NOT mutate
-/// the entry. Construct entries through <see cref="LogEntryBuilder"/> or
+/// the entry. Construct entries through <see cref="LoggerEntryBuilder"/> or
 /// <see cref="LoggerExtensions"/>.
 /// </para>
 /// <para>
@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Logging;
 /// payload should render <see langword="null"/> as the literal string "null".
 /// </para>
 /// </remarks>
-public interface ILogEntry
+public interface ILoggerEntry
 {
     /// <summary>
     /// Unique identifier for the entry. Monotonically increasing within a single process.

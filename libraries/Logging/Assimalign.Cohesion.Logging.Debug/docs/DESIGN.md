@@ -2,10 +2,10 @@
 
 ## Design Intent
 
-The debug sink mirrors the console provider's responsibility narrowly: render an `ILogEntry`
-to text and emit through `System.Diagnostics.Debug.WriteLine`. It exists so a developer
-running under a debugger sees Cohesion log events in the IDE output window without setting
-up any additional sinks.
+The debug sink mirrors the console provider's responsibility narrowly: render an
+`ILoggerEntry` to text and emit through `System.Diagnostics.Debug.WriteLine`. It exists so a
+developer running under a debugger sees Cohesion log events in the IDE output window without
+setting up any additional sinks.
 
 ## Render Format
 

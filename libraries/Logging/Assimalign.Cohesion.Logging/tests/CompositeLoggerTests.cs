@@ -39,25 +39,28 @@ public class CompositeLoggerTests
         Assert.Empty(provider.Entries);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: filter override raises and lowers minimum level")]
-    public void Filter_Override()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: AddFilter raises minimum for matching category")]
+    public void Filter_RaisesMinimumForCategory()
     {
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
-            .SetMinimumLevel(LogLevel.Warning)
-            .AddFilter("App.Network", LogLevel.Trace)
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddFilter("App.Network", LogLevel.Error)
             .Build();
 
-        // Default category - Warning required.
+        // Generic category - factory minimum (Trace) governs.
         var generic = factory.Create("Generic");
-        generic.LogInformation("Generic", "filtered");
-        Assert.Empty(provider.Entries);
-
-        // Network category - filter override accepts Trace.
-        var network = factory.Create("App.Network.Http");
-        network.LogTrace("App.Network.Http", "should fire");
+        generic.LogTrace("Generic", "passes floor");
         Assert.Single(provider.Entries);
+
+        // Network category - filter raises required level to Error+.
+        var network = factory.Create("App.Network.Http");
+        network.LogWarning("App.Network.Http", "below filter");
+        Assert.Single(provider.Entries); // count unchanged
+
+        network.LogError("App.Network.Http", "above filter");
+        Assert.Equal(2, provider.Entries.Count);
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - Composite: longest filter prefix wins")]
@@ -66,18 +69,54 @@ public class CompositeLoggerTests
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
-            .SetMinimumLevel(LogLevel.Information)
+            .SetMinimumLevel(LogLevel.Trace)
             .AddFilter("App", LogLevel.Error)
             .AddFilter("App.Important", LogLevel.Trace)
             .Build();
 
-        var important = factory.Create("App.Important.Component");
-        important.LogTrace("App.Important.Component", "should fire");
+        // App.Important.* allowed at Trace because the more specific rule wins.
+        factory.Create("App.Important.Component").LogTrace("App.Important.Component", "should fire");
         Assert.Single(provider.Entries);
 
-        var generic = factory.Create("App.Other");
-        generic.LogInformation("App.Other", "below Error filter");
+        // App.Other still gated by Error+.
+        factory.Create("App.Other").LogInformation("App.Other", "below Error filter");
         Assert.Single(provider.Entries); // count unchanged
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: UseFilter applies entry-level predicate")]
+    public void UseFilter_AppliesEntryLevelPredicate()
+    {
+        var provider = new RecordingProvider();
+        using var factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Trace)
+            .UseFilter(new AttributeKeyFilter("audit"))
+            .Build();
+
+        // Without the audit attribute - rejected.
+        factory.Create("Cat").LogInformation("Cat", "missing audit");
+        Assert.Empty(provider.Entries);
+
+        // With the audit attribute - accepted.
+        factory.Create("Cat").LogInformation(
+            "Cat",
+            "carries audit",
+            attributes: new Dictionary<string, object?> { ["audit"] = true });
+        Assert.Single(provider.Entries);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: throwing filter is treated as accept")]
+    public void Filter_Throw_Admits()
+    {
+        var provider = new RecordingProvider();
+        using var factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Trace)
+            .UseFilter(new ThrowingFilter())
+            .Build();
+
+        factory.Create("Cat").LogInformation("Cat", "should fire despite filter throw");
+        Assert.Single(provider.Entries);
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - Composite: failure from one provider does not block others")]
@@ -183,28 +222,40 @@ public class CompositeLoggerTests
         Assert.Throws<ArgumentNullException>(() => logger.BeginScope(null!));
     }
 
-    private sealed class ProcessEnricher : ILogEnricher
+    private sealed class ProcessEnricher : ILoggerEnricher
     {
-        public void Enrich(ILogEntry entry, IDictionary<string, object?> attributes)
+        public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
         {
             attributes["process.id"] = Environment.ProcessId;
         }
     }
 
-    private sealed class FixedValueEnricher : ILogEnricher
+    private sealed class FixedValueEnricher : ILoggerEnricher
     {
         private readonly string _key;
         private readonly object? _value;
         public FixedValueEnricher(string key, object? value) { _key = key; _value = value; }
-        public void Enrich(ILogEntry entry, IDictionary<string, object?> attributes)
+        public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
         {
             attributes[_key] = _value;
         }
     }
 
-    private sealed class ThrowingEnricher : ILogEnricher
+    private sealed class ThrowingEnricher : ILoggerEnricher
     {
-        public void Enrich(ILogEntry entry, IDictionary<string, object?> attributes)
+        public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
             => throw new InvalidOperationException("enrich failed");
+    }
+
+    private sealed class AttributeKeyFilter : ILoggerFilter
+    {
+        private readonly string _key;
+        public AttributeKeyFilter(string key) { _key = key; }
+        public bool ShouldLog(ILoggerEntry entry) => entry.Attributes.ContainsKey(_key);
+    }
+
+    private sealed class ThrowingFilter : ILoggerFilter
+    {
+        public bool ShouldLog(ILoggerEntry entry) => throw new InvalidOperationException("filter failed");
     }
 }

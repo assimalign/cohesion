@@ -1,7 +1,7 @@
 # `Assimalign.Cohesion.Logging.IScopedLogger`
 
 Disposable logger bound to a parent scope. Entries written through the scoped logger
-inherit the scope's `ParentId` as their `ILogEntry.ParentId` unless the entry author
+inherit the scope's `ParentId` as their `ILoggerEntry.ParentId` unless the entry author
 supplied a `ParentId` explicitly.
 
 ## Properties
