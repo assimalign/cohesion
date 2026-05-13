@@ -23,9 +23,9 @@ jobs:
             'Assimalign.Cohesion.Configuration.CommandLine',
             'Assimalign.Cohesion.Configuration.EnvironmentVariables',
             'Assimalign.Cohesion.Configuration.FileSystem',
+            'Assimalign.Cohesion.Configuration.Ini',
             'Assimalign.Cohesion.Configuration.Json',
             'Assimalign.Cohesion.Configuration.Xml',
-            # 'Assimalign.Cohesion.Configuration.Ini',
           ]
     steps:
       - uses: actions/checkout@v4
