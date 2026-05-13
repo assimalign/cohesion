@@ -23,15 +23,18 @@
         <_CohesionRuntimeProjectDir>$(CohesionRepositoryDirectory)frameworks\Assimalign.Cohesion.App.Runtime\src\</_CohesionRuntimeProjectDir>
 
         <!--
-            _CohesionFrameworkSourceDir is computed inside CohesionCollectFrameworkPack
-            below, NOT at file scope. We can't compute it here because the
-            Runtime kind needs $(OutputPath), which Microsoft.NET.Sdk.targets
-            defines AFTER our import - so it's empty at file evaluation time.
-            Deferring to target-execution time means $(OutputPath) is set.
+            _CohesionFrameworkSourceDir, _CohesionFrameworkListPath, and
+            _CohesionRuntimeListPath are computed inside CohesionCollectFrameworkPack
+            below, NOT at file scope. We can't compute them here because:
+              - _CohesionFrameworkSourceDir (Runtime kind) needs $(OutputPath)
+              - _Cohesion*ListPath needs $(IntermediateOutputPath)
+            Both are defined by Microsoft.NET.Sdk.targets, which imports AFTER
+            our targets file. At file-scope evaluation time those are empty
+            (verified the hard way on Linux CI: empty IntermediateOutputPath
+            -> empty OutputPath param to the writer task -> ArgumentException
+            from Directory.CreateDirectory). Deferring to target-execution
+            time means both are set.
         -->
-
-        <_CohesionFrameworkListPath>$(IntermediateOutputPath)data\FrameworkList.xml</_CohesionFrameworkListPath>
-        <_CohesionRuntimeListPath>$(IntermediateOutputPath)data\RuntimeList.xml</_CohesionRuntimeListPath>
 
         <!--
             Hardcoded empty for now. When/if the framework gets strong-named,
@@ -135,6 +138,13 @@
         <PropertyGroup>
             <_CohesionFrameworkSourceDir Condition="'$(CohesionFrameworkKind)' == 'Ref'">$(_CohesionRuntimeProjectDir)bin\$(Configuration)\$(TargetFrameworkLatest)\</_CohesionFrameworkSourceDir>
             <_CohesionFrameworkSourceDir Condition="'$(CohesionFrameworkKind)' == 'Runtime'">$(OutputPath)</_CohesionFrameworkSourceDir>
+
+            <!-- Forward slashes for cross-platform safety: backslashes are not
+                 path separators on Linux, so Path.GetDirectoryName treats
+                 "obj/Debug/net10.0/data\RuntimeList.xml" inconsistently across
+                 OSes. Sticking to / works everywhere. -->
+            <_CohesionFrameworkListPath>$(IntermediateOutputPath)data/FrameworkList.xml</_CohesionFrameworkListPath>
+            <_CohesionRuntimeListPath>$(IntermediateOutputPath)data/RuntimeList.xml</_CohesionRuntimeListPath>
         </PropertyGroup>
 
         <!-- ============ REF PACK ============ -->
