@@ -23,4 +23,16 @@
 	<Folder Name="/frameworks/Assimalign.Cohesion.App.Runtime/tests/">
 		<Project Path="Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj" />
 	</Folder>
+	<Folder Name="/frameworks/Assimalign.Cohesion.App.Web.Refs/src/">
+		<Project Path="Assimalign.Cohesion.App.Web.Refs/src/Assimalign.Cohesion.App.Web.Refs.csproj" />
+	</Folder>
+	<Folder Name="/frameworks/Assimalign.Cohesion.App.Web.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.App.Web.Runtime/src/Assimalign.Cohesion.App.Web.Runtime.csproj" />
+	</Folder>
+	<Folder Name="/frameworks/Assimalign.Cohesion.App.Database.Refs/src/">
+		<Project Path="Assimalign.Cohesion.App.Database.Refs/src/Assimalign.Cohesion.App.Database.Refs.csproj" />
+	</Folder>
+	<Folder Name="/frameworks/Assimalign.Cohesion.App.Database.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.App.Database.Runtime/src/Assimalign.Cohesion.App.Database.Runtime.csproj" />
+	</Folder>
 </Solution>

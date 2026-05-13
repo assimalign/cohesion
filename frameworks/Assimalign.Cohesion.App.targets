@@ -20,7 +20,15 @@
     -->
 
     <PropertyGroup>
-        <_CohesionRuntimeProjectDir>$(CohesionRepositoryDirectory)frameworks\Assimalign.Cohesion.App.Runtime\src\</_CohesionRuntimeProjectDir>
+        <!--
+            Each framework has its own Runtime project at
+            frameworks/<FrameworkName>.Runtime/src/. The Refs project
+            for the same framework reads bin/ from there to collect
+            assemblies. Compute the path from $(CohesionFrameworkName)
+            so the same targets file serves all three frameworks
+            (App, App.Web, App.Database) without per-framework branches.
+        -->
+        <_CohesionRuntimeProjectDir>$(CohesionRepositoryDirectory)frameworks\$(CohesionFrameworkName).Runtime\src\</_CohesionRuntimeProjectDir>
 
         <!--
             _CohesionFrameworkSourceDir, _CohesionFrameworkListPath, and

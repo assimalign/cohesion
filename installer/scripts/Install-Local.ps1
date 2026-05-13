@@ -98,12 +98,23 @@ Write-Host ""
 # serving the OLD extract from ~/.nuget/packages/ instead of re-reading the
 # fresh .nupkg in our local feed. Prune cached extracts up front so the next
 # restore picks up the fresh package.
+# Per-framework families: each has a Ref pack (one .nupkg) and a per-RID
+# Runtime pack (one .nupkg per RID). Keep this list aligned with the
+# framework projects under frameworks/ and the KnownFrameworkReferences
+# in sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
+$cohesionFrameworks = @(
+    'Assimalign.Cohesion.App',
+    'Assimalign.Cohesion.App.Web',
+    'Assimalign.Cohesion.App.Database'
+)
+
 $cohesionPackages = @(
     'assimalign.cohesion.sdk',
     'assimalign.cohesion.sdk.web',
-    'assimalign.cohesion.sdk.database',
-    'assimalign.cohesion.app.ref'
-) + ($Rids | ForEach-Object { "assimalign.cohesion.app.runtime.$_" })
+    'assimalign.cohesion.sdk.database'
+) `
+    + ($cohesionFrameworks | ForEach-Object { "$($_.ToLowerInvariant()).ref" }) `
+    + ($cohesionFrameworks | ForEach-Object { $fw = $_.ToLowerInvariant(); $Rids | ForEach-Object { "$fw.runtime.$_" } })
 
 $globalPackagesRoot = & dotnet nuget locals global-packages --list 2>$null |
     ForEach-Object { ($_ -split ':\s*', 2)[-1].Trim() } |
@@ -205,14 +216,20 @@ else {
 }
 #endregion
 
-#region 3. App runtime packs (per RID) -------------------------------------
+#region 3. Framework runtime packs (per framework x per RID) ---------------
 if (-not $SkipFramework) {
-    Write-Host "[3/4] Packing Assimalign.Cohesion.App runtime pack(s)..." -ForegroundColor Cyan
-    $runtimeProj = Join-Path $repoRoot 'frameworks\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj'
-    foreach ($rid in $Rids) {
-        Write-Host "  pack runtime ($rid)" -ForegroundColor DarkGray
-        & dotnet pack $runtimeProj -c $Configuration -p:RuntimeIdentifier=$rid --nologo
-        if ($LASTEXITCODE -ne 0) { throw "Runtime pack failed for RID $rid" }
+    Write-Host "[3/4] Packing framework runtime pack(s)..." -ForegroundColor Cyan
+    foreach ($framework in $cohesionFrameworks) {
+        $runtimeProj = Join-Path $repoRoot "frameworks\$framework.Runtime\src\$framework.Runtime.csproj"
+        if (-not (Test-Path -LiteralPath $runtimeProj)) {
+            Write-Host "  (skip, not found) $runtimeProj" -ForegroundColor DarkGray
+            continue
+        }
+        foreach ($rid in $Rids) {
+            Write-Host "  pack $framework runtime ($rid)" -ForegroundColor DarkGray
+            & dotnet pack $runtimeProj -c $Configuration -p:RuntimeIdentifier=$rid --nologo
+            if ($LASTEXITCODE -ne 0) { throw "Runtime pack failed for $framework / $rid" }
+        }
     }
 }
 else {
@@ -220,13 +237,19 @@ else {
 }
 #endregion
 
-#region 4. App targeting pack ----------------------------------------------
+#region 4. Framework targeting packs (one per framework) -------------------
 if (-not $SkipFramework) {
-    Write-Host "[4/4] Packing Assimalign.Cohesion.App targeting pack..." -ForegroundColor Cyan
-    $refsProj = Join-Path $repoRoot 'frameworks\Assimalign.Cohesion.App.Refs\src\Assimalign.Cohesion.App.Refs.csproj'
-    Write-Host "  pack refs" -ForegroundColor DarkGray
-    & dotnet pack $refsProj -c $Configuration --nologo
-    if ($LASTEXITCODE -ne 0) { throw "Targeting pack build failed." }
+    Write-Host "[4/4] Packing framework targeting pack(s)..." -ForegroundColor Cyan
+    foreach ($framework in $cohesionFrameworks) {
+        $refsProj = Join-Path $repoRoot "frameworks\$framework.Refs\src\$framework.Refs.csproj"
+        if (-not (Test-Path -LiteralPath $refsProj)) {
+            Write-Host "  (skip, not found) $refsProj" -ForegroundColor DarkGray
+            continue
+        }
+        Write-Host "  pack $framework refs" -ForegroundColor DarkGray
+        & dotnet pack $refsProj -c $Configuration --nologo
+        if ($LASTEXITCODE -ne 0) { throw "Targeting pack failed for $framework" }
+    }
 }
 else {
     Write-Host "[4/4] Skipping targeting pack (-SkipFramework)." -ForegroundColor DarkYellow

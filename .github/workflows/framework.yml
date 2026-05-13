@@ -137,20 +137,24 @@ jobs:
           name: cohesion-packages
           path: packages
 
-      - name: Materialize smoke-test consumer
+      - name: Materialize smoke-test consumers (one per SDK profile)
         shell: pwsh
         env:
           COHESION_VERSION: ${{ needs.pack.outputs.version }}
-        # Inline self-contained consumer: nuget.config points at the artifact
-        # feed, csproj references the SDK by the version we just packed, and
-        # Program.cs touches a type from Assimalign.Cohesion.Core to prove the
-        # targeting pack surfaces it (not just App.dll).
+        # Three inline consumer csprojs, one per SDK profile. Each references
+        # a Core type to prove the App framework reference resolves through
+        # whichever chained SDK it's using:
+        #
+        #   SmokeTest.App      -> Sdk          -> App
+        #   SmokeTest.Web      -> Sdk.Web      -> App + App.Web
+        #   SmokeTest.Database -> Sdk.Database -> App + App.Database
+        #
+        # All three share one nuget.config that points at the artifact feed.
         run: |
-          New-Item -ItemType Directory -Path SmokeTest -Force | Out-Null
           $feedPath = (Resolve-Path packages).Path
           $version = $env:COHESION_VERSION
 
-          @"
+          $nugetConfig = @"
           <?xml version=`"1.0`" encoding=`"utf-8`"?>
           <configuration>
             <packageSources>
@@ -167,10 +171,41 @@ jobs:
               </packageSource>
             </packageSourceMapping>
           </configuration>
-          "@ | Set-Content -Encoding utf8 SmokeTest/nuget.config
+          "@
 
-          @"
-          <Project Sdk=`"Assimalign.Cohesion.Sdk/$version`">
+          $program = @"
+          using Assimalign.Cohesion;
+          Console.WriteLine(`$"Core type resolved: {typeof(AppEnvironment).FullName}");
+          "@
+
+          # global.json pins all three Cohesion SDKs. Sdk.Web and Sdk.Database
+          # both chain to Assimalign.Cohesion.Sdk via <Import Sdk="..."> which
+          # doesn't honor inline-version syntax - the base SDK has to be
+          # pinned here for the chain to resolve.
+          $globalJson = @"
+          {
+              "msbuild-sdks": {
+                  "Assimalign.Cohesion.Sdk":          "$version",
+                  "Assimalign.Cohesion.Sdk.Web":      "$version",
+                  "Assimalign.Cohesion.Sdk.Database": "$version"
+              }
+          }
+          "@
+
+          $profiles = @(
+              @{ Dir='SmokeTest.App';      Sdk='Assimalign.Cohesion.Sdk' },
+              @{ Dir='SmokeTest.Web';      Sdk='Assimalign.Cohesion.Sdk.Web' },
+              @{ Dir='SmokeTest.Database'; Sdk='Assimalign.Cohesion.Sdk.Database' }
+          )
+
+          foreach ($p in $profiles) {
+              New-Item -ItemType Directory -Path $p.Dir -Force | Out-Null
+              $nugetConfig | Set-Content -Encoding utf8 "$($p.Dir)/nuget.config"
+              $globalJson  | Set-Content -Encoding utf8 "$($p.Dir)/global.json"
+              $program     | Set-Content -Encoding utf8 "$($p.Dir)/Program.cs"
+
+              $csproj = @"
+          <Project Sdk=`"$($p.Sdk)`">
             <PropertyGroup>
               <OutputType>Exe</OutputType>
               <TargetFramework>net10.0</TargetFramework>
@@ -179,43 +214,54 @@ jobs:
               <EnablePreviewFeatures>true</EnablePreviewFeatures>
             </PropertyGroup>
           </Project>
-          "@ | Set-Content -Encoding utf8 SmokeTest/SmokeTest.csproj
-
-          @"
-          using Assimalign.Cohesion;
-
-          // Type bind proves Core.dll is in the targeting pack; App.dll alone
-          // wouldn't expose AppEnvironment.
-          Console.WriteLine(`$"Core type resolved: {typeof(AppEnvironment).FullName}");
-          "@ | Set-Content -Encoding utf8 SmokeTest/Program.cs
-
-      - name: Build smoke test (validates targeting pack)
-        shell: pwsh
-        working-directory: SmokeTest
-        run: dotnet build --configuration Release --nologo
-
-      - name: Publish self-contained for ${{ matrix.rid }} (validates runtime pack)
-        shell: pwsh
-        working-directory: SmokeTest
-        # Self-contained publish is what pulls Assimalign.Cohesion.App.Runtime.<rid>
-        # and copies its DLLs into the publish output. Framework-dependent run
-        # (dotnet run) would fail here because the App framework isn't installed
-        # in <DOTNET_ROOT>/shared/, only in the NuGet cache.
-        run: dotnet publish --configuration Release --runtime ${{ matrix.rid }} --self-contained --nologo
-
-      - name: Run published smoke test
-        shell: pwsh
-        working-directory: SmokeTest
-        # Cross-platform: the apphost extension is .exe on Windows, none on
-        # Linux/macOS. Probe via $IsWindows rather than hardcoding.
-        run: |
-          $publishDir = "bin/Release/net10.0/${{ matrix.rid }}/publish"
-          $apphost = if ($IsWindows) { "$publishDir/SmokeTest.exe" } else { "$publishDir/SmokeTest" }
-          if (-not (Test-Path -LiteralPath $apphost)) {
-              throw "Apphost not found at '$apphost'. Publish step must run first."
+          "@
+              $csproj | Set-Content -Encoding utf8 "$($p.Dir)/$($p.Dir).csproj"
           }
-          & $apphost
-          if ($LASTEXITCODE -ne 0) { throw "Smoke test exited $LASTEXITCODE" }
+
+      - name: Build smoke tests (validates targeting packs)
+        shell: pwsh
+        run: |
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+              Write-Host "::group::$dir build"
+              Push-Location $dir
+              try {
+                  dotnet build --configuration Release --nologo
+                  if ($LASTEXITCODE -ne 0) { throw "$dir build failed" }
+              } finally { Pop-Location }
+              Write-Host "::endgroup::"
+          }
+
+      - name: Publish self-contained for ${{ matrix.rid }} (validates runtime packs)
+        shell: pwsh
+        # Self-contained publish pulls each framework's Runtime pack for the
+        # current RID. If any of the three runtime packs is missing or has a
+        # bad RuntimeList.xml, this step fails for that SDK profile.
+        run: |
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+              Write-Host "::group::$dir publish"
+              Push-Location $dir
+              try {
+                  dotnet publish --configuration Release --runtime ${{ matrix.rid }} --self-contained --nologo
+                  if ($LASTEXITCODE -ne 0) { throw "$dir publish failed" }
+              } finally { Pop-Location }
+              Write-Host "::endgroup::"
+          }
+
+      - name: Run published smoke tests
+        shell: pwsh
+        # Cross-platform: apphost extension is .exe on Windows, none elsewhere.
+        run: |
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+              $publishDir = "$dir/bin/Release/net10.0/${{ matrix.rid }}/publish"
+              $apphost = if ($IsWindows) { "$publishDir/$dir.exe" } else { "$publishDir/$dir" }
+              if (-not (Test-Path -LiteralPath $apphost)) {
+                  throw "Apphost not found at '$apphost'."
+              }
+              Write-Host "::group::$dir run"
+              & $apphost
+              if ($LASTEXITCODE -ne 0) { throw "$dir smoke test exited $LASTEXITCODE" }
+              Write-Host "::endgroup::"
+          }
 
   publish:
     # Pushes every .nupkg produced by the pack job to GitHub Packages.

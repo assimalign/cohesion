@@ -1,3 +1,22 @@
 <Project>
     <Import Project="..\Directory.Build.props" />
+
+    <!--
+        Force the framework projects' NuGet package versions to use $(CohesionVersion).
+
+        Microsoft.NET.Sdk sets <VersionPrefix>1.0.0</VersionPrefix> as a default
+        early in evaluation, which makes the Version-mapping in
+        build/Targets/Build.Global.props (Condition="'$(Version)' == ''")
+        a no-op for framework csprojs - the resulting .nupkg lands at 1.0.0
+        instead of $(CohesionVersion).
+
+        Setting VersionPrefix here (after the global props have run, so
+        $(CohesionVersion) is defined; before Microsoft.NET.Sdk.targets, which
+        builds Version=$(VersionPrefix) at the end) is the canonical fix.
+        All six framework projects (App/Web/Database * Refs/Runtime) inherit
+        it without per-csproj edits.
+    -->
+    <PropertyGroup>
+        <VersionPrefix>$(CohesionVersion)</VersionPrefix>
+    </PropertyGroup>
 </Project>

@@ -1,3 +1,17 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		Chain to the base Cohesion SDK (registers all three Cohesion KnownFrameworkReferences
+		and auto-includes the App framework).
+	-->
+	<!-- Consumers of Sdk.Database also need to pin Assimalign.Cohesion.Sdk in
+	     their global.json's msbuild-sdks block. <Import Sdk="X/version"> syntax
+	     isn't honored - only <Project Sdk="X/version"> is. -->
 	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+
+	<!--
+		Layer the Database-specific framework on top. Consumer gets App + App.Database.
+	-->
+	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App.Database" />
+	</ItemGroup>
 </Project>

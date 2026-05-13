@@ -1,32 +1,31 @@
 <Project>
     <!--
-        Registers the Assimalign.Cohesion.App shared framework with the .NET SDK.
+        Registers the Cohesion shared framework family with the .NET SDK.
 
-        Consumers writing <Project Sdk="Assimalign.Cohesion.Sdk"> (or any chained
-        SDK such as Assimalign.Cohesion.Sdk.Web) automatically:
+        Three frameworks are registered here, all on the base SDK so the
+        registrations are available to consumers using any chained SDK:
 
-          1. Get a KnownFrameworkReference entry for "Assimalign.Cohesion.App",
-             so <FrameworkReference Include="Assimalign.Cohesion.App" /> resolves
-             to the targeting pack Assimalign.Cohesion.App.Ref and the per-RID
-             runtime pack Assimalign.Cohesion.App.Runtime.<rid>.
+            Assimalign.Cohesion.App           (base)
+            Assimalign.Cohesion.App.Web       (web extension)
+            Assimalign.Cohesion.App.Database  (database extension)
 
-          2. Have <FrameworkReference Include="Assimalign.Cohesion.App" /> added
-             implicitly, so no consumer-side opt-in is required.
+        Each SDK auto-includes the right set of <FrameworkReference>s:
+            Sdk          -> App                (this file)
+            Sdk.Web      -> App + App.Web      (Sdk.Web's Sdk.props adds App.Web)
+            Sdk.Database -> App + App.Database (Sdk.Database's Sdk.props adds App.Database)
 
-        Pack resolution: the SDK first looks for these packs locally under
-        $(NetCoreTargetingPackRoot) / $(NetCoreRuntimePackRoot). When not found
-        there (which is the normal case for third-party frameworks), the SDK
-        auto-restores them from the configured NuGet feeds - the same feeds
-        that serve all other PackageReferences. No custom resolver, no install,
-        no admin required.
+        Pack resolution: the SDK looks for these packs locally under
+        $(NetCoreTargetingPackRoot) / $(NetCoreRuntimePackRoot). When not
+        found there (the normal case for third-party frameworks), the SDK
+        auto-restores them from the configured NuGet feeds.
 
         CohesionAutoIncludeAppFramework=false disables the implicit
-        <FrameworkReference>. The KnownFrameworkReference registration stays,
-        so an explicit <FrameworkReference Include="Assimalign.Cohesion.App" />
-        keeps working.
+        <FrameworkReference> on App (and any chained SDK's auto-include).
+        The KnownFrameworkReference registrations stay so explicit
+        <FrameworkReference> entries keep working.
 
-        CohesionAppFrameworkVersion floats independently of $(CohesionVersion)
-        if a consumer needs to pin or roll forward separately.
+        CohesionAppFrameworkVersion lets consumers pin or roll forward
+        independently of the SDK version. All three frameworks share it.
     -->
 
     <PropertyGroup>
@@ -44,8 +43,33 @@
             RuntimePackNamePatterns="Assimalign.Cohesion.App.Runtime.**RID**"
             RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
             IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.Web"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.Web"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.Web.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.Web.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.Database"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.Database"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.Database.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.Database.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
     </ItemGroup>
 
+    <!-- The base SDK auto-includes only the App framework. Sdk.Web and
+         Sdk.Database layer their own framework references on top in their
+         own Sdk.props files. -->
     <ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
         <FrameworkReference Include="Assimalign.Cohesion.App" />
     </ItemGroup>

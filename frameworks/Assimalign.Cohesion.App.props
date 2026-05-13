@@ -1,36 +1,48 @@
 <Project>
     <!--
-        Authoritative list of assemblies that ship in the Assimalign.Cohesion.App
-        shared framework.
+        Authoritative list of assemblies that ship in the Cohesion shared
+        framework family (Assimalign.Cohesion.App, .App.Web, .App.Database).
 
-        Two consumers read this file:
+        Multiple consumers read this file:
 
-          1. frameworks/Assimalign.Cohesion.App.Runtime/src/...csproj
-             Generates <CohesionProjectReference> items from this list so each
-             library is built and CopyLocal'd into App.Runtime's bin folder.
+          1. frameworks/Assimalign.Cohesion.App[.Web|.Database].Runtime/src/...csproj
+             Generates <CohesionProjectReference> items so each library is
+             built and CopyLocal'd into the Runtime project's bin folder.
 
-          2. frameworks/Assimalign.Cohesion.App.Refs/src/...csproj
-             (and indirectly, build/Targets/CohesionFramework.targets which it
-             imports) reads this list to drive FrameworkList.xml and
-             RuntimeList.xml generation - no DLL inspection needed.
+          2. frameworks/Assimalign.Cohesion.App[.Web|.Database].Refs/src/...csproj
+             (and indirectly, Assimalign.Cohesion.App.targets) drives
+             FrameworkList.xml and RuntimeList.xml generation - no DLL
+             inspection needed.
 
-        Adding a library to the framework is a one-line edit here. The library's
-        project must live somewhere CohesionProjectReference can resolve (under
-        libraries/ or resources/), and its assembly name must match the Identity
-        below.
+        The ItemGroups below are conditioned on $(CohesionFrameworkName), which
+        every Refs/Runtime csproj sets in its PropertyGroup BEFORE importing
+        this file. The right set of <CohesionFrameworkAssembly> items lights
+        up for the current framework; other frameworks' items don't exist
+        in this evaluation. Property-based conditions on top-level ItemGroups
+        are MSBuild-legal (item-metadata-based conditions are not - hence
+        the property approach rather than a single list with %(Framework)
+        metadata).
 
-        The umbrella assembly (Assimalign.Cohesion.App, produced by the
-        App.Runtime project itself) is listed too so the manifests include it.
-        The Runtime csproj skips it when generating ProjectReferences (you
-        can't reference yourself).
+        The umbrella assembly per framework (Assimalign.Cohesion.App.dll,
+        .App.Web.dll, .App.Database.dll) is included so the manifest lists
+        it; the corresponding Runtime csproj skips it when generating
+        ProjectReferences (you can't reference yourself).
+
+        Inheritance: each SDK auto-includes the right set of <FrameworkReference>s:
+            Sdk          -> App
+            Sdk.Web      -> App + App.Web
+            Sdk.Database -> App + App.Database
+        See sdks/Assimalign.Cohesion.Sdk[.Web|.Database]/Sdk/Sdk.props.
     -->
-    <ItemGroup>
+
+    <!-- ================================================================
+         Assimalign.Cohesion.App: the base framework. Bundled with every
+         Cohesion app via the base SDK.
+         ================================================================ -->
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp.Transports" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" /> -->
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.CommandLine" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
@@ -38,44 +50,16 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.Ini" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.Json" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.Xml" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Binary" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Bmff" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Ebml" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Exe" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Markdown" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Media" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Mkv" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Mpeg" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Pdf" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Content.Text" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Core" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.DependencyInjection" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Globbing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.InMemory" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Isolated" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Physical" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Transports" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Transports" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenApi" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" /> -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.CircuitBreaker" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Fallback" />
@@ -83,12 +67,55 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.RateLimiting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Retry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Timeout" />
-        <!-- <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" /> -->
-        <!-- Future additions: one line each, alphabetical for sanity.
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.DependencyInjection" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience" />
-        ...
+
+        <!-- WIP / not yet building - uncomment as each library comes online:
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Isolated" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" />
+        -->
+    </ItemGroup>
+
+    <!-- ================================================================
+         Assimalign.Cohesion.App.Web: HTTP / web extension. Added on top
+         of App by Sdk.Web. Starts with just the umbrella; categorize
+         web-specific libraries here as they come online.
+         ================================================================ -->
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
+
+        <!-- Move from App when ready:
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Transports" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenApi" />
+        ...resources/Web/* projects belong here too once they build...
+        -->
+    </ItemGroup>
+
+    <!-- ================================================================
+         Assimalign.Cohesion.App.Database: database extension. Added on top
+         of App by Sdk.Database. Starts with just the umbrella.
+         ================================================================ -->
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Database'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Database" />
+
+        <!-- Add as resources/Database/* projects come online:
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
+        ...etc...
         -->
     </ItemGroup>
 </Project>
