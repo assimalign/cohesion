@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App.NatGateway</AssemblyName>
+
+		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<PackageId Condition="'$(RuntimeIdentifier)' != ''">Assimalign.Cohesion.App.NatGateway.Runtime.$(RuntimeIdentifier)</PackageId>
+		<PackageId Condition="'$(RuntimeIdentifier)' == ''">Assimalign.Cohesion.App.NatGateway.Runtime</PackageId>
+
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App.NatGateway</CohesionFrameworkName>
+		<CohesionFrameworkKind>Runtime</CohesionFrameworkKind>
+	</PropertyGroup>
+
+	<Import Project="..\..\Assimalign.Cohesion.App.props" />
+	<ItemGroup>
+		<CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
+		                          Exclude="$(AssemblyName)" />
+	</ItemGroup>
+
+	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
+</Project>

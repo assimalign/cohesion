@@ -1,0 +1,4 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!-- Version resolved via consumer's global.json msbuild-sdks pin. -->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+</Project>

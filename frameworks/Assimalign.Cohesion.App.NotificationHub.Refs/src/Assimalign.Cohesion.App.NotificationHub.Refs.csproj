@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<GenerateDependencyFile>false</GenerateDependencyFile>
+
+		<PackageId>Assimalign.Cohesion.App.NotificationHub.Ref</PackageId>
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App.NotificationHub</CohesionFrameworkName>
+		<CohesionFrameworkKind>Ref</CohesionFrameworkKind>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.App.NotificationHub.Runtime\src\Assimalign.Cohesion.App.NotificationHub.Runtime.csproj"
+			ReferenceOutputAssembly="false"
+			SkipGetTargetFrameworkProperties="true"
+			UndefineProperties="TargetFramework;RuntimeIdentifier" />
+	</ItemGroup>
+
+	<Import Project="..\..\Assimalign.Cohesion.App.props" />
+	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
+</Project>

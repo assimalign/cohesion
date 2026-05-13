@@ -1,0 +1,19 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		Chain to the base Cohesion SDK (registers all three+ Cohesion
+		KnownFrameworkReferences and auto-includes the App framework).
+	-->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+
+	<!--
+		Layer the LogSpace-specific framework on top. Consumer gets
+		App + App.LogSpace.
+
+		Note: <Import Sdk> doesn't honor inline-version syntax; consumers
+		of Sdk.LogSpace must pin Assimalign.Cohesion.Sdk in their global.json
+		alongside Sdk.LogSpace.
+	-->
+	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App.LogSpace" />
+	</ItemGroup>
+</Project>

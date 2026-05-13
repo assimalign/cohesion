@@ -1,0 +1,19 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		Chain to the base Cohesion SDK (registers all three+ Cohesion
+		KnownFrameworkReferences and auto-includes the App framework).
+	-->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+
+	<!--
+		Layer the SecretStore-specific framework on top. Consumer gets
+		App + App.SecretStore.
+
+		Note: <Import Sdk> doesn't honor inline-version syntax; consumers
+		of Sdk.SecretStore must pin Assimalign.Cohesion.Sdk in their global.json
+		alongside Sdk.SecretStore.
+	-->
+	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App.SecretStore" />
+	</ItemGroup>
+</Project>

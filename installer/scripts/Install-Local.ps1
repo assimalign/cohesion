@@ -105,7 +105,23 @@ Write-Host ""
 $cohesionFrameworks = @(
     'Assimalign.Cohesion.App',
     'Assimalign.Cohesion.App.Web',
-    'Assimalign.Cohesion.App.Database'
+    'Assimalign.Cohesion.App.Database',
+    'Assimalign.Cohesion.App.ApiManager',
+    'Assimalign.Cohesion.App.ConfigurationStore',
+    'Assimalign.Cohesion.App.EmailHub',
+    'Assimalign.Cohesion.App.EventHub',
+    'Assimalign.Cohesion.App.IdentityHub',
+    'Assimalign.Cohesion.App.IoTHub',
+    'Assimalign.Cohesion.App.LoadBalancer',
+    'Assimalign.Cohesion.App.LogSpace',
+    'Assimalign.Cohesion.App.MediaHub',
+    'Assimalign.Cohesion.App.MessageHub',
+    'Assimalign.Cohesion.App.NatGateway',
+    'Assimalign.Cohesion.App.NotificationHub',
+    'Assimalign.Cohesion.App.Rezolvr',
+    'Assimalign.Cohesion.App.Scheduler',
+    'Assimalign.Cohesion.App.SecretStore',
+    'Assimalign.Cohesion.App.VpnGateway'
 )
 
 $cohesionPackages = @(
@@ -196,11 +212,31 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for $buildTasksProj" }
 #region 2. SDK packs --------------------------------------------------------
 if (-not $SkipSdks) {
     Write-Host "[2/4] Packing SDK projects..." -ForegroundColor Cyan
+    # SDK project list. Each entry maps to sdks/<SdkName>/Tasks/<SdkName>.Tasks.csproj.
+    # Resource-domain SDKs are scaffolded by New-CohesionDomainScaffold.ps1; each
+    # corresponds to a folder under resources/ and a framework family in
+    # frameworks/. The base Sdk must come first because the others chain to it.
     $sdkProjects = @(
-        Join-Path $repoRoot 'sdks\Assimalign.Cohesion.Sdk\Tasks\Assimalign.Cohesion.Sdk.Tasks.csproj'
-        Join-Path $repoRoot 'sdks\Assimalign.Cohesion.Sdk.Web\Tasks\Assimalign.Cohesion.Sdk.Web.Tasks.csproj'
-        Join-Path $repoRoot 'sdks\Assimalign.Cohesion.Sdk.Database\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.csproj'
-    )
+        'Assimalign.Cohesion.Sdk',
+        'Assimalign.Cohesion.Sdk.Web',
+        'Assimalign.Cohesion.Sdk.Database',
+        'Assimalign.Cohesion.Sdk.ApiManager',
+        'Assimalign.Cohesion.Sdk.ConfigurationStore',
+        'Assimalign.Cohesion.Sdk.EmailHub',
+        'Assimalign.Cohesion.Sdk.EventHub',
+        'Assimalign.Cohesion.Sdk.IdentityHub',
+        'Assimalign.Cohesion.Sdk.IoTHub',
+        'Assimalign.Cohesion.Sdk.LoadBalancer',
+        'Assimalign.Cohesion.Sdk.LogSpace',
+        'Assimalign.Cohesion.Sdk.MediaHub',
+        'Assimalign.Cohesion.Sdk.MessageHub',
+        'Assimalign.Cohesion.Sdk.NatGateway',
+        'Assimalign.Cohesion.Sdk.NotificationHub',
+        'Assimalign.Cohesion.Sdk.Rezolvr',
+        'Assimalign.Cohesion.Sdk.Scheduler',
+        'Assimalign.Cohesion.Sdk.SecretStore',
+        'Assimalign.Cohesion.Sdk.VpnGateway'
+    ) | ForEach-Object { Join-Path $repoRoot "sdks\$_\Tasks\$_.Tasks.csproj" }
     foreach ($proj in $sdkProjects) {
         if (-not (Test-Path -LiteralPath $proj)) {
             Write-Host "  (skip, not found) $proj" -ForegroundColor DarkGray

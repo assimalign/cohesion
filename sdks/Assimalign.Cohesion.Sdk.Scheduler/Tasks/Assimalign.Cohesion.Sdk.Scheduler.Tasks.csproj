@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<PackageId>Assimalign.Cohesion.Sdk.Scheduler</PackageId>
+		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build" />
+		<CohesionPackageReference Include="Microsoft.Build.Framework" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
+	</ItemGroup>
+</Project>

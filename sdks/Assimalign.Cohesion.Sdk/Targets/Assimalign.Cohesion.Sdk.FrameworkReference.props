@@ -65,6 +65,189 @@
             RuntimePackNamePatterns="Assimalign.Cohesion.App.Database.Runtime.**RID**"
             RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
             IsTrimmable="true" />
+
+        <!-- ============================================================
+             Resource-domain frameworks. Each corresponds to a folder under
+             resources/ and is auto-included by its matching Sdk.<Name>.
+             Currently each contains just the umbrella assembly; add
+             <CohesionFrameworkAssembly> entries to App.props as the
+             resources/<Name>/* projects come online.
+             ============================================================ -->
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.ApiManager"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.ApiManager"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.ApiManager.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.ApiManager.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.ConfigurationStore"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.ConfigurationStore"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.ConfigurationStore.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.ConfigurationStore.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.EmailHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.EmailHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.EmailHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.EmailHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.EventHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.EventHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.EventHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.EventHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.IdentityHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.IdentityHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.IdentityHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.IdentityHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.IoTHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.IoTHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.IoTHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.IoTHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.LoadBalancer"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.LoadBalancer"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.LoadBalancer.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.LoadBalancer.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.LogSpace"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.LogSpace"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.LogSpace.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.LogSpace.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.MediaHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.MediaHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.MediaHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.MediaHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.MessageHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.MessageHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.MessageHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.MessageHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.NatGateway"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.NatGateway"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.NatGateway.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.NatGateway.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.NotificationHub"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.NotificationHub"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.NotificationHub.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.NotificationHub.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.Rezolvr"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.Rezolvr"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.Rezolvr.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.Rezolvr.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.Scheduler"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.Scheduler"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.Scheduler.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.Scheduler.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.SecretStore"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.SecretStore"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.SecretStore.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.SecretStore.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
+
+        <KnownFrameworkReference Include="Assimalign.Cohesion.App.VpnGateway"
+            TargetFramework="net10.0"
+            RuntimeFrameworkName="Assimalign.Cohesion.App.VpnGateway"
+            DefaultRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            LatestRuntimeFrameworkVersion="$(CohesionAppFrameworkVersion)"
+            TargetingPackName="Assimalign.Cohesion.App.VpnGateway.Ref"
+            TargetingPackVersion="$(CohesionAppFrameworkVersion)"
+            RuntimePackNamePatterns="Assimalign.Cohesion.App.VpnGateway.Runtime.**RID**"
+            RuntimePackRuntimeIdentifiers="win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64"
+            IsTrimmable="true" />
     </ItemGroup>
 
     <!-- The base SDK auto-includes only the App framework. Sdk.Web and

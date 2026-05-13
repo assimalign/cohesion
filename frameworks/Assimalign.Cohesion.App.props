@@ -118,4 +118,91 @@
         ...etc...
         -->
     </ItemGroup>
+
+    <!-- ================================================================
+         Resource-domain frameworks. Each corresponds to a folder under
+         resources/ and ships an empty umbrella assembly until you add
+         projects to its ItemGroup. Adding a project is a one-line
+         <CohesionFrameworkAssembly> entry plus a matching csproj under
+         resources/<Name>/* that CohesionProjectReference can resolve.
+         ================================================================ -->
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ApiManager'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ApiManager" />
+        <!-- Add resources/ApiManager/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ConfigurationStore'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
+        <!-- Add resources/ConfigurationStore/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EmailHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EmailHub" />
+        <!-- Add resources/EmailHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EventHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EventHub" />
+        <!-- Add resources/EventHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IdentityHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
+        <!-- Add resources/IdentityHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IoTHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IoTHub" />
+        <!-- Add resources/IoTHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LoadBalancer'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LoadBalancer" />
+        <!-- Add resources/LoadBalancer/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LogSpace'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LogSpace" />
+        <!-- Add resources/LogSpace/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MediaHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MediaHub" />
+        <!-- Add resources/MediaHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MessageHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MessageHub" />
+        <!-- Add resources/MessageHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NatGateway'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NatGateway" />
+        <!-- Add resources/NatGateway/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NotificationHub'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NotificationHub" />
+        <!-- Add resources/NotificationHub/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Rezolvr'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Rezolvr" />
+        <!-- Add resources/Rezolvr/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Scheduler'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Scheduler" />
+        <!-- Add resources/Scheduler/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.SecretStore'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.SecretStore" />
+        <!-- Add resources/SecretStore/* projects here as they come online. -->
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.VpnGateway'">
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.VpnGateway" />
+        <!-- Add resources/VpnGateway/* projects here as they come online. -->
+    </ItemGroup>
 </Project>

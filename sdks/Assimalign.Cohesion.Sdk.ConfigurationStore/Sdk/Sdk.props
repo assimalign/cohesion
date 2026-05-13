@@ -1,0 +1,19 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		Chain to the base Cohesion SDK (registers all three+ Cohesion
+		KnownFrameworkReferences and auto-includes the App framework).
+	-->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+
+	<!--
+		Layer the ConfigurationStore-specific framework on top. Consumer gets
+		App + App.ConfigurationStore.
+
+		Note: <Import Sdk> doesn't honor inline-version syntax; consumers
+		of Sdk.ConfigurationStore must pin Assimalign.Cohesion.Sdk in their global.json
+		alongside Sdk.ConfigurationStore.
+	-->
+	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App.ConfigurationStore" />
+	</ItemGroup>
+</Project>
