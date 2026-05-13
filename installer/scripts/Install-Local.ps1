@@ -70,7 +70,7 @@ $feedDir  = Join-Path $repoRoot '_out\packages'
 # Read the canonical version from Version.props so the script never drifts from
 # whatever the build is actually producing. Bumping the version is a one-line
 # edit to build/Targets/Version.props; this script picks it up automatically.
-$versionPropsPath = Join-Path $repoRoot 'build\Targets\Version.props'
+$versionPropsPath = Join-Path $repoRoot 'build\Targets\Build.Version.props'
 [xml]$versionXml = Get-Content -LiteralPath $versionPropsPath
 $cohesionVersion = $versionXml.Project.PropertyGroup.CohesionVersion
 if ([string]::IsNullOrWhiteSpace($cohesionVersion)) {

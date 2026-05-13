@@ -12,7 +12,7 @@
 		<None Include="$(MSBuildProjectDirectory)\..\Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)">
 			<Visible>false</Visible>
 		</None>
-        <None Include="$(CohesionRepositoryDirectory)build\Targets\Version.props" Pack="true" PackagePath="Targets\Version.props" />
+        <None Include="$(CohesionRepositoryDirectory)build\Targets\Build.Version.props" Pack="true" PackagePath="Targets\Build.Version.props" />
         <None Include="$(CohesionRepositoryDirectory)sdks\README.md" Pack="true" PackagePath="README.md" />
     </ItemGroup>
 
@@ -31,7 +31,7 @@
     </Target>
     <Target Name="CopyVersionProps" AfterTargets="Build">
         <ItemGroup>
-            <MySourceFiles3 Include="$([System.IO.Path]::GetFullPath('$(CohesionRepositoryDirectory)'))\build\Targets\Version.props" />
+            <MySourceFiles3 Include="$([System.IO.Path]::GetFullPath('$(CohesionRepositoryDirectory)'))\build\Targets\Build.Version.props" />
         </ItemGroup>
         <Copy SourceFiles="@(MySourceFiles3)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\" />
     </Target>

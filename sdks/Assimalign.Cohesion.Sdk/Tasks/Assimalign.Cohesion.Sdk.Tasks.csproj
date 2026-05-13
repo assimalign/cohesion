@@ -13,7 +13,6 @@
 			sdks/Directory.Build.props.
 		-->
 
-		<TargetFramework>net10.0</TargetFramework>
 		<EnablePreviewFeatures>false</EnablePreviewFeatures>
 	</PropertyGroup>
 
