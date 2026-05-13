@@ -62,6 +62,20 @@
             <FrameworkVersion Required="true" />
             <TargetFrameworkVersion Required="true" />
             <PublicKeyToken Required="false" />
+            <!--
+                Prefix prepended to each <File Path="..."> entry.
+
+                FrameworkList.xml (Ref pack): empty. Microsoft's convention is
+                bare-filename Path attributes; the SDK's ResolveTargetingPackAssets
+                task knows the layout is ref/<tfm>/<file> and resolves implicitly.
+
+                RuntimeList.xml (Runtime pack): "runtimes/<rid>/lib/<tfm>/". The
+                SDK's ResolveRuntimePackAssets task treats Path as fully
+                package-relative; without the prefix it looks for the DLL at the
+                package root and errors with MSB3030 "Could not copy the file
+                ... because it was not found".
+            -->
+            <PathPrefix Required="false" />
             <RootElementName Required="true" />
             <OutputPath Required="true" />
         </ParameterGroup>
@@ -72,11 +86,12 @@
             <Using Namespace="System.Text" />
             <Code Type="Fragment" Language="cs"><![CDATA[
                 Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
-                // PE metadata AssemblyVersion is always 4 parts ("9.0.0" -> "9.0.0.0").
+                // PE metadata AssemblyVersion is always 4 parts ("10.0.0" -> "10.0.0.0").
                 string asmVersion = FrameworkVersion;
                 if (asmVersion.Split('.').Length < 4) { asmVersion += ".0"; }
                 string fileVersion = asmVersion;
                 string pkt = PublicKeyToken ?? "";
+                string pathPrefix = PathPrefix ?? "";
 
                 var sb = new StringBuilder();
                 sb.Append("<").Append(RootElementName)
@@ -88,7 +103,7 @@
                 foreach (var name in AssemblyNames.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
                 {
                     sb.Append("  <File Type=\"Managed\"")
-                      .Append(" Path=\"").Append(name).Append(".dll\"")
+                      .Append(" Path=\"").Append(pathPrefix).Append(name).Append(".dll\"")
                       .Append(" PublicKeyToken=\"").Append(pkt).Append("\"")
                       .Append(" AssemblyName=\"").Append(name).Append("\"")
                       .Append(" AssemblyVersion=\"").Append(asmVersion).Append("\"")
@@ -141,6 +156,7 @@
             FrameworkVersion="$(CohesionVersion)"
             TargetFrameworkVersion="10.0"
             PublicKeyToken="$(CohesionPublicKeyToken)"
+            PathPrefix=""
             RootElementName="FileList"
             OutputPath="$(_CohesionFrameworkListPath)" />
 
@@ -168,6 +184,7 @@
             FrameworkVersion="$(CohesionVersion)"
             TargetFrameworkVersion="10.0"
             PublicKeyToken="$(CohesionPublicKeyToken)"
+            PathPrefix="runtimes/$(RuntimeIdentifier)/lib/$(TargetFrameworkLatest)/"
             RootElementName="RuntimeList"
             OutputPath="$(_CohesionRuntimeListPath)" />
 
