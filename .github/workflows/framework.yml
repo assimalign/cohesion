@@ -80,13 +80,13 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Read CohesionVersion from Version.props
+      - name: Read CohesionVersion from Build.Version.props
         id: read-version
         shell: pwsh
         run: |
-          [xml]$v = Get-Content build/Targets/Version.props
+          [xml]$v = Get-Content build/Targets/Build.Version.props
           $ver = $v.Project.PropertyGroup.CohesionVersion.Trim()
-          if (-not $ver) { throw "Could not read CohesionVersion from Version.props" }
+          if (-not $ver) { throw "Could not read CohesionVersion from Build.Version.props" }
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "CohesionVersion = $ver"
 
