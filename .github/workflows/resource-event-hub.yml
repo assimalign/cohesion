@@ -6,6 +6,10 @@ on:
       - 'resources/EventHub/**'
       - '.github/workflows/resource-event-hub.yml'        # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

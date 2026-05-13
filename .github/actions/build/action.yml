@@ -1,5 +1,5 @@
 name: Cohesion Build
-description: Restores, builds, and tests a Cohesion project.
+description: Restores, builds, tests, and (on main, from Linux only) packs and pushes a Cohesion project to GitHub Packages.
 
 inputs:
   area:
@@ -47,9 +47,37 @@ runs:
       shell: pwsh
       run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore
 
+    # -----------------------------------------------------------------
+    # Pack + push: only on main, only from Linux.
+    #
+    # The matrix runs three OSes; without the runner.os gate we'd try to
+    # push three identical .nupkgs. Linux is the cheapest runner, so it
+    # gets the publish job.
+    #
+    # The GitHub feed is used as a QA/UAT staging registry, so every
+    # push to main on the same version REPLACES the previous publish.
+    # Publish-Nupkg.ps1 deletes the existing version on the feed (if
+    # any) before pushing the fresh copy. No --skip-duplicate.
+    # -----------------------------------------------------------------
 
-    # - name: '.NET Benchmarks: ${{ matrix.projects }}'
-    #   if: hashFiles(format('./libraries/Core/{0}/benchmarks/{1}.Benchmarks.csproj', matrix.projects, matrix.projects)) != ''
-    #   run: dotnet run -c Release --project ./libraries/Core/${{ matrix.projects }}/benchmarks/${{ matrix.projects }}.Benchmarks.csproj --filter "*" --
-    #   working-directory: './libraries/Core/${{ matrix.projects }}'
+    - name: Pack ${{ inputs.project }}
+      if: ${{ github.ref == 'refs/heads/main' && runner.os == 'Linux' }}
+      shell: pwsh
+      run: dotnet pack "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-build
 
+    - name: Push ${{ inputs.project }} to GitHub Packages
+      if: ${{ github.ref == 'refs/heads/main' && runner.os == 'Linux' }}
+      shell: pwsh
+      env:
+        # Built-in workflow token; the workflow must declare
+        #   permissions:
+        #     packages: write
+        # for this to have rights to both push and delete on the feed.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        $nupkg = Get-ChildItem -Path "./_out/packages" -Filter "${{ inputs.project }}.*.nupkg" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $nupkg) {
+            Write-Host "No .nupkg produced for ${{ inputs.project }} (IsPackable=false?); skipping push."
+            exit 0
+        }
+        ./.github/scripts/Publish-Nupkg.ps1 -NupkgPath $nupkg.FullName

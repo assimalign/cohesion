@@ -6,6 +6,10 @@ on:
       - 'libraries/IdentityModel/**'
       - '.github/workflows/library-identity-model.yml'                 # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

@@ -6,6 +6,10 @@ on:
       - "libraries/Http/**"
       - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-http.yml" # When Pipeline File Changes
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"

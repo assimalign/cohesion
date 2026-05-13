@@ -6,6 +6,10 @@ on:
       - 'resources/ConfigurationStore/**'
       - '.github/workflows/resource-configuration-store.yml'        # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

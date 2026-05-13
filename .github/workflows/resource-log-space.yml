@@ -6,6 +6,10 @@ on:
       - "resources/LogSpace/**"
       - ".github/workflows/resource-log-space.yml" # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

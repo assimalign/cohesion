@@ -55,6 +55,12 @@ concurrency:
   group: framework-${{ github.ref }}
   cancel-in-progress: true
 
+# Workflow-level permissions. The publish job below pushes .nupkgs to GitHub
+# Packages via the built-in GITHUB_TOKEN, which needs write:packages.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   pack:
     name: Pack SDK + framework (all RIDs)
@@ -210,3 +216,46 @@ jobs:
           }
           & $apphost
           if ($LASTEXITCODE -ne 0) { throw "Smoke test exited $LASTEXITCODE" }
+
+  publish:
+    # Pushes every .nupkg produced by the pack job to GitHub Packages.
+    # Gated on: branch == main AND both upstream jobs succeeded. Runs on
+    # Linux only -- the same artifact gets pushed once, not per-OS.
+    #
+    # The GitHub feed is QA/UAT staging: every main push REPLACES the
+    # previous publish at the same version. The shared helper script
+    # deletes the existing version before pushing the fresh copy.
+    name: Publish to GitHub Packages
+    if: github.ref == 'refs/heads/main'
+    needs: [pack, smoke-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for .github/scripts/Publish-Nupkg.ps1)
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: cohesion-packages
+          path: packages
+
+      - name: Push to GitHub Packages
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $nupkgs = @(Get-ChildItem -Path packages -Filter '*.nupkg')
+          if ($nupkgs.Count -eq 0) { throw "No .nupkg files in artifact." }
+          Write-Host "Publishing $($nupkgs.Count) .nupkg file(s) (delete-then-push)..."
+          foreach ($nupkg in $nupkgs) {
+              ./.github/scripts/Publish-Nupkg.ps1 -NupkgPath $nupkg.FullName
+          }

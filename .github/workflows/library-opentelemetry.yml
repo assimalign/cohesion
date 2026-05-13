@@ -7,6 +7,10 @@ on:
       - 'libraries/OpenTelemetry/**'
       - '.github/workflows/library-opentelemetry.yml'                 # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}

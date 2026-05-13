@@ -6,6 +6,10 @@ on:
       - "resources/NatGateway/**"
       - ".github/workflows/resource-nat-gateway.yml" # When Pipeline File Changes
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
