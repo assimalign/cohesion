@@ -1,5 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
- <ItemGroup>
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration.Ini</RootNamespace>
+		<Description>INI configuration provider implementation for Assimalign.Cohesion.Configuration.</Description>
+	</PropertyGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="..\README.md">
+			<Pack>true</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
 	</ItemGroup>
 </Project>
