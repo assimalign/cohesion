@@ -12,13 +12,13 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectPool" />
 	</ItemGroup>
 	<ItemGroup>
-		<!--<CohesionCodeGenValueType
+		<!--<CohesionValueType
 			Include="ValueTypes\PipelineName.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.Resilience"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />-->
-		<CohesionCodeGenValueType Include="ValueTypes\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueTypes\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Update="Properties\ErrorMessages.Designer.cs">

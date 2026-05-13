@@ -1,7 +1,3 @@
 <Project>
-	<Import Project="build\Targets\TargetFramework.props" />
-	<Import Project="build\Targets\Branding.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
-	<Import Project="build\Targets\Version.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
-	<Import Project="build\Targets\Constants.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
-	<Import Project="build\Build.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="build\Build.props" />
 </Project>

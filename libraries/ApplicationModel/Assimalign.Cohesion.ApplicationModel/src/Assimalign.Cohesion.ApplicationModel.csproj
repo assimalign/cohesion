@@ -3,15 +3,17 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionCodeGenValueType Include="ValueTypes\ResourceName.cs" 
-								  ObjectRuntimeType="String" 
-								  ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
-							      ObjectAccessModifier="public" 
-								  ObjectHasImplicitOperators="true" />
-		<CohesionCodeGenValueType Include="ValueTypes\ResourceId.cs"
-								  ObjectRuntimeType="Guid"
-								  ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-							      ObjectAccessModifier="public"
-								  ObjectHasImplicitOperators="true" />
+		<CohesionValueType 
+			Include="ValueTypes\ResourceName.cs" 
+			ObjectRuntimeType="String" 
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
+			ObjectAccessModifier="public" 
+			ObjectHasImplicitOperators="true" />
+		<CohesionValueType 
+			Include="ValueTypes\ResourceId.cs"
+			ObjectRuntimeType="Guid"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 </Project>

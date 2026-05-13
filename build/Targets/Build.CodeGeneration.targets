@@ -1,0 +1,28 @@
+<Project>
+    <ItemGroup>
+		<CohesionValueType
+			Update="@(CohesionValueType)"
+			ObjectFilePath="$(_CohesionCodeGenPath)%(Identity)"
+			ObjectRelativePath="%(Identity)" />
+	</ItemGroup>
+	<Target Name="CohesionCreateValueType"
+		BeforeTargets="CoreCompile"
+		Inputs="$(MSBuildProjectFile)"
+		Outputs="@(CohesionValueType->'%(ObjectFilePath)')">
+		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionValueType)" CodeGenOutputPath="$(_CohesionCodeGenPath)">
+			<Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
+		</CodeGenerationCreateValueTypeTask>
+		<Message Text="Generated: @(CohesionValueType->'%(ObjectFilePath)')" Importance="High" />
+	</Target>
+	<ItemGroup>
+		<Compile Include="@(CohesionValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
+	</ItemGroup>
+	<PropertyGroup>
+		<CleanDependsOn>$(CleanDependsOn);CohesionCleanCodeGeneration</CleanDependsOn>
+	</PropertyGroup>
+
+	<Target Name="CohesionCleanCodeGeneration">
+		<Delete Files="@(CohesionValueType->'%(ObjectFilePath)')" />
+	</Target>
+	
+</Project>

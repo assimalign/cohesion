@@ -5,6 +5,8 @@
 		<Platform Name="x86" />
 	</Configurations>
 	<Folder Name="/frameworks/">
+		<File Path="Assimalign.Cohesion.App.props" />
+		<File Path="Assimalign.Cohesion.App.targets" />
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 	</Folder>

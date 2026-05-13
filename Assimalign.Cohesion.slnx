@@ -28,18 +28,27 @@
 	<Folder Name="/cohesion/.github/actions/release/">
 		<File Path=".github/actions/release/action.yml" />
 	</Folder>
+	<Folder Name="/cohesion/.github/scripts/">
+		<File Path=".github/scripts/Publish-Nupkg.ps1" />
+	</Folder>
 	<Folder Name="/cohesion/.github/workflows/">
+		<File Path=".github/workflows/framework.yml" />
 		<File Path=".github/workflows/library-amqp.yml" />
 		<File Path=".github/workflows/library-application-model.yml" />
 		<File Path=".github/workflows/library-configuration.yml" />
 		<File Path=".github/workflows/library-content.yml" />
 		<File Path=".github/workflows/library-core.yml" />
+		<File Path=".github/workflows/library-dependency-injection.yml" />
 		<File Path=".github/workflows/library-dns.yml" />
 		<File Path=".github/workflows/library-filesystem.yml" />
 		<File Path=".github/workflows/library-hosting.yml" />
 		<File Path=".github/workflows/library-http.yml" />
 		<File Path=".github/workflows/library-identity-model.yml" />
 		<File Path=".github/workflows/library-logging.yml" />
+		<File Path=".github/workflows/library-net.yml" />
+		<File Path=".github/workflows/library-object-mapping.yml" />
+		<File Path=".github/workflows/library-object-pool.yml" />
+		<File Path=".github/workflows/library-object-validation.yml" />
 		<File Path=".github/workflows/library-openapi.yml" />
 		<File Path=".github/workflows/library-opentelemetry.yml" />
 		<File Path=".github/workflows/library-resilience.yml" />
@@ -116,6 +125,8 @@
 		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/frameworks/">
+		<File Path="frameworks/Assimalign.Cohesion.App.props" />
+		<File Path="frameworks/Assimalign.Cohesion.App.targets" />
 		<File Path="frameworks/Directory.Build.props" />
 		<File Path="frameworks/Directory.Build.targets" />
 	</Folder>
@@ -430,7 +441,7 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/">
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/DESIGN.md" />
-		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/OVERVIEW.md" />
+		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Overview.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />

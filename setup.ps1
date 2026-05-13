@@ -4,7 +4,9 @@ Import-Module Assimalign.Cohesion.DevScripts -Force
 
 $Solutions = @(
     "$BasePath\Assimalign.Cohesion.slnx" ,
-    "$BasePath\frameworks\Assimalign.Cohesion.Frameworks.slnx"
+    "$BasePath\frameworks\Assimalign.Cohesion.Frameworks.slnx",
+    "$BasePath\libraries\Assimalign.Cohesion.Libraries.slnx",
+    "$BasePath\libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.slnx"
 )
 
 $Solutions | ForEach-Object {

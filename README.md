@@ -11,42 +11,42 @@ Cohesion is
 - [Repository Structure](#repository-structure)
 
 # Sdk
-![SDK](https://github.com/assimalign/cohesion/actions/workflows/framework.yml/badge.svg?branch=development)
+![SDK](https://github.com/assimalign/cohesion/actions/workflows/framework.yml/badge.svg?branch=main)
 
 Cohesion is a mono repository 
 
 ## Libraries
-![amqp](https://github.com/assimalign/cohesion/actions/workflows/library-amqp.yml/badge.svg?branch=development)
-![application model](https://github.com/assimalign/cohesion/actions/workflows/library-application-model.yml/badge.svg?branch=development)
-![configuration](https://github.com/assimalign/cohesion/actions/workflows/library-configuration.yml/badge.svg?branch=development)
-![content](https://github.com/assimalign/cohesion/actions/workflows/library-content.yml/badge.svg?branch=development)
-![core](https://github.com/assimalign/cohesion/actions/workflows/library-core.yml/badge.svg?branch=development)
-![dns](https://github.com/assimalign/cohesion/actions/workflows/library-dns.yml/badge.svg?branch=development)
-![filesystem](https://github.com/assimalign/cohesion/actions/workflows/library-filesystem.yml/badge.svg?branch=development)
-![hosting](https://github.com/assimalign/cohesion/actions/workflows/library-hosting.yml/badge.svg?branch=development)
-![http](https://github.com/assimalign/cohesion/actions/workflows/library-http.yml/badge.svg?branch=development)
-![identity model](https://github.com/assimalign/cohesion/actions/workflows/library-identity-model.yml/badge.svg?branch=development)
-![logging](https://github.com/assimalign/cohesion/actions/workflows/library-logging.yml/badge.svg?branch=development)
-![openapi](https://github.com/assimalign/cohesion/actions/workflows/library-openapi.yml/badge.svg?branch=development)
-![opentelemetry](https://github.com/assimalign/cohesion/actions/workflows/library-opentelemetry.yml/badge.svg?branch=development)
-![resilience](https://github.com/assimalign/cohesion/actions/workflows/library-resilience.yml/badge.svg?branch=development)
+![amqp](https://github.com/assimalign/cohesion/actions/workflows/library-amqp.yml/badge.svg?branch=main)
+![application model](https://github.com/assimalign/cohesion/actions/workflows/library-application-model.yml/badge.svg?branch=main)
+![configuration](https://github.com/assimalign/cohesion/actions/workflows/library-configuration.yml/badge.svg?branch=main)
+![content](https://github.com/assimalign/cohesion/actions/workflows/library-content.yml/badge.svg?branch=main)
+![core](https://github.com/assimalign/cohesion/actions/workflows/library-core.yml/badge.svg?branch=main)
+![dns](https://github.com/assimalign/cohesion/actions/workflows/library-dns.yml/badge.svg?branch=main)
+![filesystem](https://github.com/assimalign/cohesion/actions/workflows/library-filesystem.yml/badge.svg?branch=main)
+![hosting](https://github.com/assimalign/cohesion/actions/workflows/library-hosting.yml/badge.svg?branch=main)
+![http](https://github.com/assimalign/cohesion/actions/workflows/library-http.yml/badge.svg?branch=main)
+![identity model](https://github.com/assimalign/cohesion/actions/workflows/library-identity-model.yml/badge.svg?branch=main)
+![logging](https://github.com/assimalign/cohesion/actions/workflows/library-logging.yml/badge.svg?branch=main)
+![openapi](https://github.com/assimalign/cohesion/actions/workflows/library-openapi.yml/badge.svg?branch=main)
+![opentelemetry](https://github.com/assimalign/cohesion/actions/workflows/library-opentelemetry.yml/badge.svg?branch=main)
+![resilience](https://github.com/assimalign/cohesion/actions/workflows/library-resilience.yml/badge.svg?branch=main)
 
 
 
 ## Services/Resources
-![api manager](https://github.com/assimalign/cohesion/actions/workflows/resource-api-manager.yml/badge.svg?branch=development)
-![Configuration Store](https://github.com/assimalign/cohesion/actions/workflows/resource-configuration-store.yml/badge.svg?branch=development)
-![database](https://github.com/assimalign/cohesion/actions/workflows/resource-database.yml/badge.svg?branch=development)
-![event hub](https://github.com/assimalign/cohesion/actions/workflows/resource-event-hub.yml/badge.svg?branch=development)
-![iot hub](https://github.com/assimalign/cohesion/actions/workflows/resource-iot-hub.yml/badge.svg?branch=development)
-![load balancer](https://github.com/assimalign/cohesion/actions/workflows/resource-load-balancer.yml/badge.svg?branch=development)
-![log space](https://github.com/assimalign/cohesion/actions/workflows/resource-log-space.yml/badge.svg?branch=development)
-![media hub](https://github.com/assimalign/cohesion/actions/workflows/resource-media-hub.yml/badge.svg?branch=development)
-![message hub](https://github.com/assimalign/cohesion/actions/workflows/resource-message-hub.yml/badge.svg?branch=development)
-![nat gateway](https://github.com/assimalign/cohesion/actions/workflows/resource-nat-gateway.yml/badge.svg?branch=development)
-![notification hub](https://github.com/assimalign/cohesion/actions/workflows/resource-notification-hub.yml/badge.svg?branch=development)
-![secret store](https://github.com/assimalign/cohesion/actions/workflows/resource-secret-store.yml/badge.svg?branch=development)
-![web](https://github.com/assimalign/cohesion/actions/workflows/resource-web.yml/badge.svg?branch=development)
+![api manager](https://github.com/assimalign/cohesion/actions/workflows/resource-api-manager.yml/badge.svg?branch=main)
+![Configuration Store](https://github.com/assimalign/cohesion/actions/workflows/resource-configuration-store.yml/badge.svg?branch=main)
+![database](https://github.com/assimalign/cohesion/actions/workflows/resource-database.yml/badge.svg?branch=main)
+![event hub](https://github.com/assimalign/cohesion/actions/workflows/resource-event-hub.yml/badge.svg?branch=main)
+![iot hub](https://github.com/assimalign/cohesion/actions/workflows/resource-iot-hub.yml/badge.svg?branch=main)
+![load balancer](https://github.com/assimalign/cohesion/actions/workflows/resource-load-balancer.yml/badge.svg?branch=main)
+![log space](https://github.com/assimalign/cohesion/actions/workflows/resource-log-space.yml/badge.svg?branch=main)
+![media hub](https://github.com/assimalign/cohesion/actions/workflows/resource-media-hub.yml/badge.svg?branch=main)
+![message hub](https://github.com/assimalign/cohesion/actions/workflows/resource-message-hub.yml/badge.svg?branch=main)
+![nat gateway](https://github.com/assimalign/cohesion/actions/workflows/resource-nat-gateway.yml/badge.svg?branch=main)
+![notification hub](https://github.com/assimalign/cohesion/actions/workflows/resource-notification-hub.yml/badge.svg?branch=main)
+![secret store](https://github.com/assimalign/cohesion/actions/workflows/resource-secret-store.yml/badge.svg?branch=main)
+![web](https://github.com/assimalign/cohesion/actions/workflows/resource-web.yml/badge.svg?branch=main)
 
 The service section of this repository is broken into a two layer approach folder structure `Layer 1 [Service/Resource] -> Layer 2 [Library]`. This approach
 

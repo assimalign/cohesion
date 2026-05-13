@@ -1,34 +1,8 @@
 <Project>
-	<PropertyGroup>
-		<Nullable>enable</Nullable>
-		<LangVersion>preview</LangVersion>
-		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-	</PropertyGroup>
-	<PropertyGroup>
-		<CohesionRepositoryDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)\..'))\</CohesionRepositoryDirectory>
-		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
-		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
-		<CohesionOutputPathForCli>$(CohesionOutputPath)\dotnet</CohesionOutputPathForCli>
-		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
-		<CohesionOutputPathForPacks>$(CohesionOutputPath)\dotnet\packs</CohesionOutputPathForPacks>
-		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
-		<CohesionOutputPathForCodeGen>$(CohesionOutputPath)\code-generation</CohesionOutputPathForCodeGen>
-		<CohesionOutputPathForDevScripts>$(CohesionRepositoryDirectory)scripts\modules</CohesionOutputPathForDevScripts>
-	</PropertyGroup>
-	<PropertyGroup Condition="'$(IsPackable)' != 'false'">
-		<Version Condition="'$(Version)' == ''">$(CohesionVersion)</Version>
-		<PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>
-		<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">$(CohesionOutputPathForLibraries)</PackageOutputPath>
-	</PropertyGroup>
-	<!-- Cohesion Build Properties -->
-	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
-		<DebugType>none</DebugType>
-	</PropertyGroup>
-	<UsingTask
-		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
-		AssemblyFile="$(MSBuildThisFileDirectory)Tasks\bin\$(Configuration)\$(TargetFrameworkForBuild)\Assimalign.Cohesion.Build.Tasks.dll"
-		Runtime="NET" />
-	<ItemGroup Condition="Exists('$(CohesionRepositoryDirectory).editorconfig')">
-		<AdditionalFiles Include="$(CohesionRepositoryDirectory).editorconfig" />
-	</ItemGroup>
+	<Import Project="Targets\Build.Global.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.TargetFramework.props" />
+	<Import Project="Targets\Build.Branding.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.Version.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.Constants.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.CodeGeneration.props" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'"/>
 </Project>

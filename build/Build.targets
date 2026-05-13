@@ -1,33 +1,10 @@
 <Project>
 	<!--Metadata Reference: https://learn.microsoft.com/en-us/visualstudio/msbuild/msbuild-well-known-item-metadata?view=vs-2022-->
 
-	<!-- #region: Code Generation: Value Types Targets -->
-	<ItemGroup>
-		<CohesionCodeGenValueType
-			Update="@(CohesionCodeGenValueType)"
-			ObjectFilePath="$(CohesionOutputPathForCodeGen)\%(Identity)"
-			ObjectRelativePath="%(Identity)" />
-	</ItemGroup>
-	<Target Name="CohesionCreateValueType"
-		BeforeTargets="CoreCompile"
-		Inputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')"
-		Outputs="@(CohesionCodeGenValueType->'%(ObjectFilePath)')">
-		<CodeGenerationCreateValueTypeTask ValueTypes="@(CohesionCodeGenValueType)" CodeGenOutputPath="$(CohesionOutputPathForCodeGen)">
-			<Output TaskParameter="ValueTypesCreated" ItemName="ValueTypesGenerated" />
-		</CodeGenerationCreateValueTypeTask>
-		<!-- DEBUG: <Message Text="My ValueTypes: @(CohesionCodeGenValueType)" Importance="high" /> -->
-	</Target>
-	<PropertyGroup>
-		<CleanDependsOn>$(CleanDependsOn);CohesionCleanCodeGeneration</CleanDependsOn>
-	</PropertyGroup>
+	<Import Project="Targets\Build.CodeGeneration.targets" Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.References.Packages.targets"  Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<Import Project="Targets\Build.References.Projects.targets"  Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<!-- <Import Project="Targets\Build.References.Analyzers.targets" /> -->
+	<!-- <Import Project="Targets\SharedFiles.targets" /> -->
 
-	<Target Name="CohesionCleanCodeGeneration">
-		<Delete Files="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" />
-		<!-- <RemoveDir Directories="$(CohesionOutputPathForCodeGen)\create-value-types"
-			Condition="Exists('$(CohesionOutputPathForCodeGen)\create-value-types')" /> -->
-	</Target>
-	<ItemGroup>
-		<Compile Include="@(CohesionCodeGenValueType->'%(ObjectFilePath)')" Link="/%(ObjectRelativePath)" />
-	</ItemGroup>
-	<!-- #endregion -->
 </Project>

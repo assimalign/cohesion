@@ -3,7 +3,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionCodeGenValueType
+		<CohesionValueType
 			Include="ValueTypes\LogId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.Logging"

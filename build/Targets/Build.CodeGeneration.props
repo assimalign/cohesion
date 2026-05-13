@@ -1,0 +1,10 @@
+<Project>
+    <UsingTask
+		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
+		AssemblyFile="$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\$(TargetFrameworkForBuild)\Assimalign.Cohesion.Build.Tasks.dll"
+		Runtime="NET" />
+
+	<PropertyGroup>
+        <_CohesionCodeGenPath>$(_CohesionIntermediateOutputPath)CodeGeneration\</_CohesionCodeGenPath>
+    </PropertyGroup>
+</Project>
