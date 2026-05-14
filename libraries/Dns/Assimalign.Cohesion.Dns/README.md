@@ -1,16 +1,16 @@
 # Assimalign.Cohesion.Dns
 
-Root contract package for the Cohesion DNS family. Defines
-`IDnsClient`, `IDnsResolver`, `IDnsAuthority`, `IDnsZone`,
-`IDnsTransport`, the wire-format domain model (`DnsMessage`,
-`DnsRecord`, `DnsName`, `DnsQuestion`, the `DnsRecordType` /
-`DnsClass` / `DnsOpCode` / `DnsResponseCode` enums), and the
-`DnsException` + `DnsErrorCode` error model.
+Root contract package for the Cohesion DNS family. Defines the
+abstract-class contracts `DnsClient`, `DnsResolver`, `DnsAuthority`,
+`DnsZone`, `DnsTransport`, the wire-format domain model
+(`DnsMessage`, `DnsRecord`, `DnsName`, `DnsQuestion`, the
+`DnsRecordType` / `DnsClass` / `DnsOpCode` / `DnsResponseCode`
+enums), and the `DnsException` + `DnsErrorCode` error model.
 
 ```csharp
 using Assimalign.Cohesion.Dns;
 
-IDnsResolver resolver = /* from Assimalign.Cohesion.Dns.Client */;
+DnsResolver resolver = /* from Assimalign.Cohesion.Dns.Client */;
 DnsMessage response = await resolver.ResolveAsync(
     new DnsQuestion("example.com", DnsRecordType.A));
 ```

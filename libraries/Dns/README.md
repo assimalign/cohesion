@@ -1,15 +1,22 @@
 # Assimalign.Cohesion.Dns
 
-The Cohesion DNS family. Provides a uniform `IDnsClient` / `IDnsResolver` /
-`IDnsAuthority` surface across multiple DNS deployment shapes — stub
+The Cohesion DNS family. Provides a uniform `DnsClient` / `DnsResolver` /
+`DnsAuthority` surface across multiple DNS deployment shapes — stub
 client, recursive resolver, authoritative server — all on top of a single
 wire-format domain model.
+
+Contracts are **abstract classes**, not interfaces. DNS is a protocol-
+layer library where every concrete implementation has the same shape, so
+the abstract-class form lets the base type own `IDisposable` +
+`IAsyncDisposable` plumbing and other cross-cutting concerns once.
+Concrete clients inherit from `DnsClient`, override `QueryAsync` plus an
+optional `DisposeCore` hook, and get the rest for free.
 
 ## Packages
 
 | Package | Role | Status |
 |---------|------|--------|
-| `Assimalign.Cohesion.Dns` | Root contracts: `IDnsClient`, `IDnsResolver`, `IDnsAuthority`, `IDnsZone`, `IDnsTransport`, plus the wire-format types (`DnsMessage`, `DnsRecord`, `DnsName`, `DnsQuestion`, RR/class/op/RCODE enums) and `DnsException`. | Scaffolded — wire formats land in Feature 03. |
+| `Assimalign.Cohesion.Dns` | Root contracts: `DnsClient`, `DnsResolver`, `DnsAuthority`, `DnsZone`, `DnsTransport`, plus the wire-format types (`DnsMessage`, `DnsRecord`, `DnsName`, `DnsQuestion`, RR/class/op/RCODE enums) and `DnsException`. | Scaffolded — wire formats land in Feature 03. |
 | `Assimalign.Cohesion.Dns.Client` | Resolving DNS client: recursive resolver, cache, pluggable UDP / TCP / DoT / DoH / DoQ transports. | Scaffolded — implementation lands in Features 05–06. |
 
 Future packages (decided after Feature 06 lands): `.Authority` for
@@ -35,9 +42,10 @@ are.
 
 ## Conventions
 
-- Single `IDnsClient` contract — every concrete provider returns a
+- Single `DnsClient` abstract base — every concrete client returns a
   `DnsMessage` and signals failure through `DnsException` with an
-  explicit `DnsErrorCode`.
+  explicit `DnsErrorCode`. Lifecycle is owned by the base
+  (`IDisposable`, `IAsyncDisposable`, `ThrowIfDisposed`).
 - Async-only public surface; DNS is a network operation.
 - All names use the `DnsName` value type (presentation form, '/'
   separators are illegal — DNS uses '.').

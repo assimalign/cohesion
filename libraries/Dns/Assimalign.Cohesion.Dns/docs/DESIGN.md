@@ -10,13 +10,46 @@ the consumer surface.
 
 The package is intentionally narrow:
 
-- One async query method per shape (`IDnsClient.QueryAsync`,
-  `IDnsResolver.ResolveAsync`).
-- One transport plug point (`IDnsTransport.ExchangeAsync`).
+- One async query method per shape (`DnsClient.QueryAsync`,
+  `DnsResolver.ResolveAsync`).
+- One transport plug point (`DnsTransport.ExchangeAsync`).
 - One wire-format domain model (`DnsName`, `DnsQuestion`, `DnsRecord`,
   `DnsMessage`) shared by every layer.
 - One exception type (`DnsException`) with an explicit, additive error
   enum (`DnsErrorCode`).
+
+## Why abstract classes (not interfaces)
+
+DNS sits at the protocol layer, not the application-transport layer.
+That has two consequences for the contract design:
+
+1. **Implementations are uniform.** A `DnsClient` is always "take a
+   `DnsQuestion`, serialize it, push the bytes through a transport,
+   parse the response, return a `DnsMessage`." There are no callers
+   that need to bolt DNS-client behavior onto an existing class they
+   already inherit from — DNS implementations are written from scratch.
+2. **The base type can own lifecycle plumbing.** `IDisposable` +
+   `IAsyncDisposable` are subtle to implement correctly. An abstract
+   class implements the pattern once and exposes simple
+   `DisposeCore` / `DisposeAsyncCore` override hooks plus a
+   `ThrowIfDisposed` guard. Every derived client gets correct
+   idempotent disposal for free.
+
+Future cross-cutting concerns (telemetry, metrics, deadline
+propagation) can be added as sealed members on the abstract base
+without breaking implementers — a freedom an interface contract does
+not provide.
+
+The trade-off: a concrete class cannot inherit from two Cohesion DNS
+bases at once. That's deliberate; if a single object needs to be both
+a `DnsClient` and a `DnsAuthority`, that's a code-smell that should
+surface as a composition design, not a multi-inheritance workaround.
+
+Contrast with the FileSystem family: `IFileSystem` is an interface
+because file systems are an application-transport layer with wildly
+different backends (process memory, OS file system, isolated storage,
+aggregate routing). DNS is a single protocol with one shape — abstract
+classes match that shape better.
 
 ## Family map
 
@@ -29,8 +62,33 @@ The package is intentionally narrow:
 
 Dependency direction is one-way: every package depends on the root
 package; no package depends on a sibling. Transport plugins (if they
-become separate packages later) would depend on `Dns` for `IDnsTransport`
+become separate packages later) would depend on `Dns` for `DnsTransport`
 and not on each other.
+
+## Lifecycle pattern
+
+`DnsClient`, `DnsAuthority`, and `DnsTransport` all expose the same
+disposal shape:
+
+```csharp
+public abstract class DnsClient : IDisposable, IAsyncDisposable
+{
+    public abstract Task<DnsMessage> QueryAsync(DnsQuestion question, CancellationToken ct = default);
+
+    public void Dispose() { /* idempotent guard + DisposeCore + SuppressFinalize */ }
+    public ValueTask DisposeAsync() { /* idempotent guard + DisposeAsyncCore + SuppressFinalize */ }
+
+    protected virtual void DisposeCore() { }
+    protected virtual ValueTask DisposeAsyncCore() { DisposeCore(); return default; }
+    protected void ThrowIfDisposed() { /* ... */ }
+}
+```
+
+Derived clients only override `DisposeCore` (and optionally
+`DisposeAsyncCore` for truly async cleanup paths). The idempotency
+guard, `GC.SuppressFinalize`, and the `IsDisposed` flag are owned by
+the base class. Tests in `DnsClientLifecycleTests` lock down this
+behavior so derived clients can rely on it.
 
 ## Error model
 
@@ -83,6 +141,11 @@ surface intentionally avoids:
   be a sealed hierarchy, not plugin-loaded)
 - `Type.GetType(string)`-style lookups
 
+Abstract-class dispatch is a small AOT win over interface dispatch in
+some scenarios (devirtualization is more reliable when the type
+hierarchy is sealed), but the bigger reason for the choice is the
+shared-plumbing one above.
+
 If a future story needs dynamic dispatch (e.g., user-extensible RR
 types), it ships as an explicit opt-in extension point, not as
 implicit reflection.
@@ -112,7 +175,7 @@ callers don't have to be defensive.
    `tests/`.
 2. Reference `Assimalign.Cohesion.Dns` via
    `<CohesionProjectReference Include="Assimalign.Cohesion.Dns" />`.
-3. Implement the relevant interface(s).
+3. Inherit from the relevant abstract class(es).
 4. Add an entry to the workflow matrix in
    `.github/workflows/library-dns.yml`.
 5. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`
@@ -129,3 +192,7 @@ callers don't have to be defensive.
   AOT-clean.
 - **Compatibility with the old (deleted) Technitium-derived surface.**
   Names and shapes are being redefined freely.
+- **Multiple-contract inheritance on one type.** Concrete classes
+  inherit from exactly one of `DnsClient`, `DnsResolver`,
+  `DnsAuthority`, or `DnsTransport`. Combining roles is a composition
+  problem, not a contract problem.
