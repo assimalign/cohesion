@@ -80,7 +80,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Isolated" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" />

@@ -2,33 +2,33 @@ using System;
 using System.IO.IsolatedStorage;
 using Assimalign.Cohesion.FileSystem;
 
-namespace Assimalign.Cohesion.FileSystem.Isolated.Tests;
+namespace Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests;
 
 /// <summary>
 /// Shared helpers for the isolated test suite. Every test acquires the per-user assembly store,
 /// clears any leftover entries from prior runs or failed tests, and returns a fresh
-/// <see cref="IsolatedFileSystem"/> over it.
+/// <see cref="IsolatedStorageFileSystem"/> over it.
 /// </summary>
-internal static class IsolatedFileSystemTestFixture
+internal static class IsolatedStorageFileSystemTestFixture
 {
     /// <summary>
-    /// Returns a fresh <see cref="IsolatedFileSystem"/> rooted at an empty store. The backing
+    /// Returns a fresh <see cref="IsolatedStorageFileSystem"/> rooted at an empty store. The backing
     /// store is forcibly cleared first so leftover state from prior tests cannot leak in.
     /// </summary>
     /// <param name="isReadOnly">Open the store in read-only mode.</param>
     /// <param name="watchPollInterval">
-    /// Override <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>. Defaults to
+    /// Override <see cref="IsolatedStorageFileSystemOptions.WatchPollInterval"/>. Defaults to
     /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> so the standard suite (which never
     /// exercises Watch) doesn't pay for a background timer or risk timing flakes. Watch-specific
     /// tests pass an explicit short interval.
     /// </param>
-    public static IsolatedFileSystem CreateFreshFileSystem(
+    public static IsolatedStorageFileSystem CreateFreshFileSystem(
         bool isReadOnly = false,
         System.TimeSpan? watchPollInterval = null)
     {
         ClearUserStoreForAssembly();
 
-        return new IsolatedFileSystem(new IsolatedFileSystemOptions
+        return new IsolatedStorageFileSystem(new IsolatedStorageFileSystemOptions
         {
             IsReadOnly = isReadOnly,
             WatchPollInterval = watchPollInterval ?? System.Threading.Timeout.InfiniteTimeSpan,

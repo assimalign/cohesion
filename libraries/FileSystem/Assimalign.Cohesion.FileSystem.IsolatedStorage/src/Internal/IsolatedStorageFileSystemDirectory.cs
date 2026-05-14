@@ -11,14 +11,14 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// <summary>
 /// <see cref="IFileSystemDirectory"/> implementation backed by a relative path inside an
 /// <see cref="IsolatedStorageFile"/>. All store interaction goes through
-/// <see cref="IsolatedPathHelper"/> so the public <see cref="FileSystemPath"/> surface stays
+/// <see cref="IsolatedStoragePathHelper"/> so the public <see cref="FileSystemPath"/> surface stays
 /// '/' separated regardless of the host OS.
 /// </summary>
 [DebuggerDisplay("[D] - {Path}")]
-internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFileSystemDirectory
+internal sealed class IsolatedStorageFileSystemDirectory : IsolatedStorageFileSystemInfo, IFileSystemDirectory
 {
-    public IsolatedFileSystemDirectory(
-        IsolatedFileSystem fileSystem,
+    public IsolatedStorageFileSystemDirectory(
+        IsolatedStorageFileSystem fileSystem,
         IsolatedStorageFile storage,
         FileSystemPath path)
         : base(fileSystem, storage, path)
@@ -42,17 +42,17 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
         get
         {
             string text = Path.ToString();
-            if (text == IsolatedPathHelper.Root || string.IsNullOrEmpty(text))
+            if (text == IsolatedStoragePathHelper.Root || string.IsNullOrEmpty(text))
             {
                 return null;
             }
 
             int lastSep = text.LastIndexOf('/');
             FileSystemPath parentPath = lastSep <= 0
-                ? IsolatedPathHelper.Root
+                ? IsolatedStoragePathHelper.Root
                 : text.Substring(0, lastSep);
 
-            return new IsolatedFileSystemDirectory(FileSystem, Storage, parentPath);
+            return new IsolatedStorageFileSystemDirectory(FileSystem, Storage, parentPath);
         }
     }
 
@@ -83,7 +83,7 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
     /// <inheritdoc />
     public IEnumerable<IFileSystemDirectory> GetDirectories()
     {
-        string pattern = IsolatedPathHelper.ChildSearchPattern(Path);
+        string pattern = IsolatedStoragePathHelper.ChildSearchPattern(Path);
         string[] names;
 
         try
@@ -99,7 +99,7 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
         var directories = new List<IFileSystemDirectory>(names.Length);
         foreach (var name in names)
         {
-            directories.Add(new IsolatedFileSystemDirectory(
+            directories.Add(new IsolatedStorageFileSystemDirectory(
                 FileSystem,
                 Storage,
                 Path.Join(name)));
@@ -111,7 +111,7 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
     /// <inheritdoc />
     public IEnumerable<IFileSystemFile> GetFiles()
     {
-        string pattern = IsolatedPathHelper.ChildSearchPattern(Path);
+        string pattern = IsolatedStoragePathHelper.ChildSearchPattern(Path);
         string[] names;
 
         try
@@ -127,7 +127,7 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
         var files = new List<IFileSystemFile>(names.Length);
         foreach (var name in names)
         {
-            files.Add(new IsolatedFileSystemFile(
+            files.Add(new IsolatedStorageFileSystemFile(
                 FileSystem,
                 Storage,
                 Path.Join(name)));
@@ -150,8 +150,8 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
     /// <inheritdoc />
     /// <remarks>
     /// Returns a polling token scoped to this directory subtree. The cadence is configured via
-    /// <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>; see
-    /// <see cref="IsolatedFileSystem.Watch(Glob?)"/> for details.
+    /// <see cref="IsolatedStorageFileSystemOptions.WatchPollInterval"/>; see
+    /// <see cref="IsolatedStorageFileSystem.Watch(Glob?)"/> for details.
     /// </remarks>
     public IFileSystemEventToken Watch(Glob? pattern)
         => FileSystem.CreateWatchToken(Path, pattern);
@@ -163,14 +163,14 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     private static IEnumerable<IFileSystemInfo> EnumerateCore(
-        IsolatedFileSystemDirectory directory,
+        IsolatedStorageFileSystemDirectory directory,
         FileSystemEnumerationOptions options)
     {
         foreach (var dir in directory.GetDirectories())
         {
             yield return dir;
 
-            if (options.Recurse && dir is IsolatedFileSystemDirectory child)
+            if (options.Recurse && dir is IsolatedStorageFileSystemDirectory child)
             {
                 foreach (var nested in EnumerateCore(child, options))
                 {

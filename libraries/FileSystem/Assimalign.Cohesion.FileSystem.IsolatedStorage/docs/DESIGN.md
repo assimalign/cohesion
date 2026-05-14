@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.FileSystem.Isolated Design
+# Assimalign.Cohesion.FileSystem.IsolatedStorage Design
 
 ## Design Intent
 
@@ -10,16 +10,16 @@ Examples below document the intended public shape; some members still throw NotI
 
 ## Architecture
 
-- IsolatedFileSystem is the single public backend type for the package.
+- IsolatedStorageFileSystem is the single public backend type for the package.
 - The design should mirror the same operations exposed by the core IFileSystem contract.
 - Several members are unfinished, so the library currently describes a target direction more than a finished adapter.
 
 ## Layout Example
 
 ```text
-Assimalign.Cohesion.FileSystem.Isolated/
+Assimalign.Cohesion.FileSystem.IsolatedStorage/
   src/
-    Assimalign.Cohesion.FileSystem.Isolated.csproj
+    Assimalign.Cohesion.FileSystem.IsolatedStorage.csproj
     Internal/
   tests/
   docs/
@@ -30,13 +30,13 @@ Assimalign.Cohesion.FileSystem.Isolated/
 ## Example 1: Current public shape
 
 ```csharp
-IFileSystem fileSystem = new IsolatedFileSystem();
+IFileSystem fileSystem = new IsolatedStorageFileSystem();
 ```
 
 ## Example 2: Intended responsibility
 
 ```text
-IsolatedFileSystem
+IsolatedStorageFileSystem
   -> should adapt isolated storage to the shared IFileSystem contract
   -> while preserving the same caller-facing operations as other backends
 ```

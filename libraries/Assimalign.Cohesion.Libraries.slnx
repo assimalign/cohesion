@@ -398,18 +398,18 @@
 	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/">
 		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/Assimalign.Cohesion.FileSystem.InMemory.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/">
-		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.Isolated/README.md" />
+	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/">
+		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/README.md" />
 	</Folder>
-	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/docs/">
-		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.Isolated/docs/DESIGN.md" />
-		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.Isolated/docs/OVERVIEW.md" />
+	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/docs/">
+		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/docs/DESIGN.md" />
+		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/src/">
-		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.Isolated/src/Assimalign.Cohesion.FileSystem.Isolated.csproj" />
+	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/src/">
+		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/src/Assimalign.Cohesion.FileSystem.IsolatedStorage.csproj" />
 	</Folder>
-	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/tests/">
-		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.Isolated/tests/Assimalign.Cohesion.FileSystem.Isolated.Tests.csproj" />
+	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/tests/">
+		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/tests/Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/">
 		<File Path="FileSystem/Assimalign.Cohesion.FileSystem.Physical/README.md" />

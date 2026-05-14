@@ -23,8 +23,8 @@ jobs:
             'Assimalign.Cohesion.FileSystem.Globbing',
             'Assimalign.Cohesion.FileSystem.InMemory',
             'Assimalign.Cohesion.FileSystem.Physical',
-            'Assimalign.Cohesion.FileSystem.Isolated',
-            # 'Assimalign.Cohesion.FileSystem.Aggregate',
+            'Assimalign.Cohesion.FileSystem.IsolatedStorage',
+            'Assimalign.Cohesion.FileSystem.Aggregate',
           ]
     steps:
       - uses: actions/checkout@v4

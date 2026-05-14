@@ -14,7 +14,7 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// <summary>
 /// <see cref="IFileSystem"/> implementation backed by an
 /// <see cref="System.IO.IsolatedStorage.IsolatedStorageFile"/> store. The store is acquired
-/// according to <see cref="IsolatedFileSystemOptions.Scope"/> and the supplied evidence types.
+/// according to <see cref="IsolatedStorageFileSystemOptions.Scope"/> and the supplied evidence types.
 /// The provider exposes a Cohesion-style <see cref="FileSystemPath"/> surface ('/' separated,
 /// rooted at "/") while delegating actual storage to the underlying isolated store.
 /// </summary>
@@ -30,10 +30,10 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// </list>
 /// </remarks>
 [DebuggerDisplay("{Name} - Size: {Size}, Used: {SpaceUsed}")]
-public sealed class IsolatedFileSystem : IFileSystem
+public sealed class IsolatedStorageFileSystem : IFileSystem
 {
     private readonly IsolatedStorageFile _storage;
-    private readonly IsolatedFileSystemDirectory _root;
+    private readonly IsolatedStorageFileSystemDirectory _root;
     private readonly string _name;
     private readonly bool _isReadOnly;
     private readonly bool _removeStoreOnDispose;
@@ -42,28 +42,28 @@ public sealed class IsolatedFileSystem : IFileSystem
     private bool _isDisposed;
 
     /// <summary>
-    /// Creates a new <see cref="IsolatedFileSystem"/> using the default user+assembly scope.
+    /// Creates a new <see cref="IsolatedStorageFileSystem"/> using the default user+assembly scope.
     /// </summary>
-    public IsolatedFileSystem()
-        : this(new IsolatedFileSystemOptions())
+    public IsolatedStorageFileSystem()
+        : this(new IsolatedStorageFileSystemOptions())
     {
     }
 
     /// <summary>
-    /// Creates a new <see cref="IsolatedFileSystem"/> using the supplied <paramref name="options"/>.
+    /// Creates a new <see cref="IsolatedStorageFileSystem"/> using the supplied <paramref name="options"/>.
     /// </summary>
     /// <param name="options">Configuration for the store and its read-only behavior.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
-    public IsolatedFileSystem(IsolatedFileSystemOptions options)
+    public IsolatedStorageFileSystem(IsolatedStorageFileSystemOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _name = options.Name ?? nameof(IsolatedFileSystem);
+        _name = options.Name ?? nameof(IsolatedStorageFileSystem);
         _isReadOnly = options.IsReadOnly;
         _removeStoreOnDispose = options.RemoveStoreOnDispose;
         _watchPollInterval = options.WatchPollInterval;
         _storage = OpenStore(options);
-        _root = new IsolatedFileSystemDirectory(this, _storage, IsolatedPathHelper.Root);
+        _root = new IsolatedStorageFileSystemDirectory(this, _storage, IsolatedStoragePathHelper.Root);
     }
 
     /// <summary>
@@ -82,10 +82,10 @@ public sealed class IsolatedFileSystem : IFileSystem
 
         if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
         {
-            return IsolatedFileSystemNoopEventToken.Instance;
+            return IsolatedStorageFileSystemNoopEventToken.Instance;
         }
 
-        var token = IsolatedFileSystemPollingEventToken.ForDirectory(
+        var token = IsolatedStorageFileSystemPollingEventToken.ForDirectory(
             _storage,
             anchor,
             pattern,
@@ -108,10 +108,10 @@ public sealed class IsolatedFileSystem : IFileSystem
 
         if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
         {
-            return IsolatedFileSystemNoopEventToken.Instance;
+            return IsolatedStorageFileSystemNoopEventToken.Instance;
         }
 
-        var token = IsolatedFileSystemPollingEventToken.ForFile(
+        var token = IsolatedStorageFileSystemPollingEventToken.ForFile(
             _storage,
             filePath,
             _watchPollInterval);
@@ -188,7 +188,7 @@ public sealed class IsolatedFileSystem : IFileSystem
     public bool Exists(FileSystemPath path)
     {
         CheckIfDisposed();
-        string store = IsolatedPathHelper.ToStorePath(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(path);
 
         // The root always exists; the store-relative form is the empty string.
         if (string.IsNullOrEmpty(store))
@@ -205,8 +205,8 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(CreateDirectory));
 
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store))
         {
@@ -239,7 +239,7 @@ public sealed class IsolatedFileSystem : IFileSystem
             FileSystemException.ThrowDirectoryNotFound(absolute, ex);
         }
 
-        return new IsolatedFileSystemDirectory(this, _storage, absolute);
+        return new IsolatedStorageFileSystemDirectory(this, _storage, absolute);
     }
 
     /// <inheritdoc />
@@ -248,8 +248,8 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(CreateFile));
 
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store))
         {
@@ -282,7 +282,7 @@ public sealed class IsolatedFileSystem : IFileSystem
             FileSystemException.ThrowDirectoryNotFound(absolute, ex);
         }
 
-        return new IsolatedFileSystemFile(this, _storage, absolute);
+        return new IsolatedStorageFileSystemFile(this, _storage, absolute);
     }
 
     /// <inheritdoc />
@@ -291,8 +291,8 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(DeleteDirectory));
 
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store) || !_storage.DirectoryExists(store))
         {
@@ -323,8 +323,8 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(DeleteFile));
 
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store) || !_storage.FileExists(store))
         {
@@ -353,8 +353,8 @@ public sealed class IsolatedFileSystem : IFileSystem
     public IFileSystemInfo GetInfo(FileSystemPath path)
     {
         CheckIfDisposed();
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store))
         {
@@ -363,12 +363,12 @@ public sealed class IsolatedFileSystem : IFileSystem
 
         if (_storage.DirectoryExists(store))
         {
-            return new IsolatedFileSystemDirectory(this, _storage, absolute);
+            return new IsolatedStorageFileSystemDirectory(this, _storage, absolute);
         }
 
         if (_storage.FileExists(store))
         {
-            return new IsolatedFileSystemFile(this, _storage, absolute);
+            return new IsolatedStorageFileSystemFile(this, _storage, absolute);
         }
 
         FileSystemException.ThrowPathNotFound(absolute);
@@ -379,8 +379,8 @@ public sealed class IsolatedFileSystem : IFileSystem
     public IFileSystemDirectory GetDirectory(FileSystemPath path)
     {
         CheckIfDisposed();
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store))
         {
@@ -392,22 +392,22 @@ public sealed class IsolatedFileSystem : IFileSystem
             FileSystemException.ThrowDirectoryNotFound(absolute);
         }
 
-        return new IsolatedFileSystemDirectory(this, _storage, absolute);
+        return new IsolatedStorageFileSystemDirectory(this, _storage, absolute);
     }
 
     /// <inheritdoc />
     public IFileSystemFile GetFile(FileSystemPath path)
     {
         CheckIfDisposed();
-        FileSystemPath absolute = IsolatedPathHelper.ToAbsolute(path);
-        string store = IsolatedPathHelper.ToStorePath(absolute);
+        FileSystemPath absolute = IsolatedStoragePathHelper.ToAbsolute(path);
+        string store = IsolatedStoragePathHelper.ToStorePath(absolute);
 
         if (string.IsNullOrEmpty(store) || !_storage.FileExists(store))
         {
             FileSystemException.ThrowFileNotFound(absolute);
         }
 
-        return new IsolatedFileSystemFile(this, _storage, absolute);
+        return new IsolatedStorageFileSystemFile(this, _storage, absolute);
     }
 
     /// <inheritdoc />
@@ -416,10 +416,10 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(CopyFile));
 
-        FileSystemPath sourceAbs = IsolatedPathHelper.ToAbsolute(source);
-        FileSystemPath destAbs = IsolatedPathHelper.ToAbsolute(destination);
-        string sourceStore = IsolatedPathHelper.ToStorePath(sourceAbs);
-        string destStore = IsolatedPathHelper.ToStorePath(destAbs);
+        FileSystemPath sourceAbs = IsolatedStoragePathHelper.ToAbsolute(source);
+        FileSystemPath destAbs = IsolatedStoragePathHelper.ToAbsolute(destination);
+        string sourceStore = IsolatedStoragePathHelper.ToStorePath(sourceAbs);
+        string destStore = IsolatedStoragePathHelper.ToStorePath(destAbs);
 
         if (string.IsNullOrEmpty(sourceStore) || !_storage.FileExists(sourceStore))
         {
@@ -461,10 +461,10 @@ public sealed class IsolatedFileSystem : IFileSystem
         CheckIfDisposed();
         CheckIfReadOnly(nameof(Move));
 
-        FileSystemPath sourceAbs = IsolatedPathHelper.ToAbsolute(source);
-        FileSystemPath destAbs = IsolatedPathHelper.ToAbsolute(destination);
-        string sourceStore = IsolatedPathHelper.ToStorePath(sourceAbs);
-        string destStore = IsolatedPathHelper.ToStorePath(destAbs);
+        FileSystemPath sourceAbs = IsolatedStoragePathHelper.ToAbsolute(source);
+        FileSystemPath destAbs = IsolatedStoragePathHelper.ToAbsolute(destination);
+        string sourceStore = IsolatedStoragePathHelper.ToStorePath(sourceAbs);
+        string destStore = IsolatedStoragePathHelper.ToStorePath(destAbs);
 
         if (string.IsNullOrEmpty(sourceStore))
         {
@@ -509,11 +509,11 @@ public sealed class IsolatedFileSystem : IFileSystem
     /// <inheritdoc />
     /// <remarks>
     /// IsolatedStorageFile has no native change notifications. The provider snapshots the store
-    /// on <see cref="IsolatedFileSystemOptions.WatchPollInterval"/> ticks and dispatches diff
+    /// on <see cref="IsolatedStorageFileSystemOptions.WatchPollInterval"/> ticks and dispatches diff
     /// events. When the interval is non-positive or <see cref="Timeout.InfiniteTimeSpan"/>,
     /// polling is disabled and this returns a noop token that never fires.
     /// </remarks>
-    public IFileSystemEventToken Watch(Glob? pattern) => CreateWatchToken(IsolatedPathHelper.Root, pattern);
+    public IFileSystemEventToken Watch(Glob? pattern) => CreateWatchToken(IsolatedStoragePathHelper.Root, pattern);
 
     /// <inheritdoc />
     public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
@@ -580,7 +580,7 @@ public sealed class IsolatedFileSystem : IFileSystem
     /// evidence types declared on <paramref name="options"/>. Mirrors the overload selection
     /// rules baked into <see cref="IsolatedStorageFile.GetStore(IsolatedStorageScope, Type, Type)"/>.
     /// </summary>
-    private static IsolatedStorageFile OpenStore(IsolatedFileSystemOptions options)
+    private static IsolatedStorageFile OpenStore(IsolatedStorageFileSystemOptions options)
     {
         bool hasApplication = (options.Scope & IsolatedStorageScope.Application) != 0;
         bool hasDomain = (options.Scope & IsolatedStorageScope.Domain) != 0;
