@@ -43,6 +43,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp.Transports" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Cache" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Cache.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.CommandLine" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
@@ -57,6 +59,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Physical" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Transports" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
