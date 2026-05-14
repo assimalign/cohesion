@@ -85,6 +85,41 @@ public sealed class IterativeDnsResolverOptions
     /// <summary>Time source used by the cache. Defaults to <see cref="System.TimeProvider.System"/>.</summary>
     public TimeProvider? TimeProvider { get; set; }
 
+    /// <summary>
+    /// When <see langword="true"/>, the resolver caches NS delegations by zone so subsequent
+    /// queries for names under the same zone skip the root&rarr;TLD walk. Defaults to
+    /// <see langword="true"/>.
+    /// </summary>
+    public bool EnableDelegationCache { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of cached delegations. Defaults to 2,000 &#8211; enough for a stub
+    /// resolver to remember every TLD it has seen without bloating memory.
+    /// </summary>
+    public int DelegationCacheCapacity { get; set; } = 2_000;
+
+    /// <summary>
+    /// When <see langword="true"/>, every outgoing query carries an EDNS Cookie option per
+    /// RFC 7873. Server cookies are cached by upstream IP for the resolver's lifetime; a
+    /// BADCOOKIE response (RCODE 23) triggers one retry with the new cookie. Defaults to
+    /// <see langword="true"/>.
+    /// </summary>
+    public bool EnableEdnsCookies { get; set; } = true;
+
+    /// <summary>
+    /// Optional explicit 8-octet client cookie. When <see langword="null"/>, the resolver
+    /// generates a cryptographically random cookie at construction. Tests pin a known
+    /// cookie via this property to verify the exact bytes the resolver puts on the wire.
+    /// </summary>
+    public byte[]? EdnsClientCookie { get; set; }
+
+    /// <summary>
+    /// Maximum number of recursive sub-resolves the resolver will perform to find IPs for
+    /// out-of-bailiwick NS names. Bounds the budget consumed by NS-name resolution detours.
+    /// Defaults to 5.
+    /// </summary>
+    public int MaxNsResolutionDepth { get; set; } = 5;
+
     private static DnsTransport DefaultUdpFactory(IPEndPoint endpoint)
         => new UdpDnsTransport(new UdpDnsTransportOptions
         {

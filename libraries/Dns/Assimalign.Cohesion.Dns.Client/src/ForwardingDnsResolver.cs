@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Dns.Internal;
@@ -51,6 +52,7 @@ public sealed class ForwardingDnsResolver : DnsResolver
 {
     private readonly ForwardingDnsResolverOptions _options;
     private readonly DnsAnswerCache? _cache;
+    private readonly DnsCookieStore? _cookies;
 
     /// <summary>
     /// Initializes a new <see cref="ForwardingDnsResolver"/>.
@@ -83,9 +85,21 @@ public sealed class ForwardingDnsResolver : DnsResolver
                 nameof(options));
         }
 
+        if (options.EdnsClientCookie is { } cc && cc.Length != 8)
+        {
+            throw new ArgumentException(
+                $"{nameof(ForwardingDnsResolverOptions)}.{nameof(ForwardingDnsResolverOptions.EdnsClientCookie)} must be exactly 8 octets when set.",
+                nameof(options));
+        }
+
         _options = options;
         _cache = options.EnableCache
             ? new DnsAnswerCache(options.CacheCapacity, options.MinCacheTtl, options.MaxCacheTtl, options.TimeProvider)
+            : null;
+        _cookies = options.EnableEdnsCookies
+            ? options.EdnsClientCookie is { } seed
+                ? new DnsCookieStore(seed)
+                : DnsCookieStore.CreateRandom()
             : null;
     }
 
@@ -156,6 +170,22 @@ public sealed class ForwardingDnsResolver : DnsResolver
                 }
             }
 
+            // BADCOOKIE (RCODE 23): the server demands a server cookie. The cookie store
+            // already cached the new cookie in ExchangeAsync; retry once with it. BADCOOKIE
+            // is an extended RCODE so we read the combined header + OPT value.
+            if (DnsQueryHelper.EffectiveRcode(response) == DnsResponseCode.BadCookie && _cookies is not null)
+            {
+                try
+                {
+                    response = await ExchangeAsync(forwarder, question, timeoutCts, cancellationToken).ConfigureAwait(false);
+                }
+                catch (DnsException ex) when (ex.Code is DnsErrorCode.Transport or DnsErrorCode.Timeout)
+                {
+                    lastFailure = ex;
+                    continue; // retry the next forwarder
+                }
+            }
+
             _cache?.Put(question, response);
             return ThrowIfNonSuccess(response, question);
         }
@@ -177,23 +207,43 @@ public sealed class ForwardingDnsResolver : DnsResolver
         return Task.CompletedTask;
     }
 
-    private Task<DnsMessage> ExchangeAsync(
+    private async Task<DnsMessage> ExchangeAsync(
         DnsTransport transport,
         DnsQuestion question,
         CancellationTokenSource timeoutCts,
         CancellationToken externalToken)
     {
+        System.Net.IPAddress? serverIp = TryGetServerIp(transport.Endpoint);
+        IReadOnlyList<DnsEdnsOption>? options = null;
+        if (_cookies is not null && serverIp is not null && _options.EdnsPayloadSize > 0)
+        {
+            options = new DnsEdnsOption[] { _cookies.BuildOption(serverIp) };
+        }
+
         DnsMessage query = DnsQueryHelper.BuildQuery(
             DnsQueryHelper.NewTransactionId(),
             question,
             recursionDesired: true,
-            ednsPayloadSize: _options.EdnsPayloadSize);
-        return DnsQueryHelper.ExchangeAsync(transport, query, timeoutCts, externalToken);
+            ednsPayloadSize: _options.EdnsPayloadSize,
+            ednsOptions: options);
+
+        DnsMessage response = await DnsQueryHelper.ExchangeAsync(transport, query, timeoutCts, externalToken).ConfigureAwait(false);
+        if (_cookies is not null && serverIp is not null)
+        {
+            _cookies.TryRecordServerCookie(serverIp, response);
+        }
+        return response;
     }
+
+    private static System.Net.IPAddress? TryGetServerIp(System.Net.EndPoint endpoint) => endpoint switch
+    {
+        System.Net.IPEndPoint ip => ip.Address,
+        _ => null,
+    };
 
     private static DnsMessage ThrowIfNonSuccess(DnsMessage response, DnsQuestion question)
     {
-        DnsResponseCode rcode = response.Header.ResponseCode;
+        DnsResponseCode rcode = DnsQueryHelper.EffectiveRcode(response);
         if (rcode == DnsResponseCode.NoError)
         {
             return response;

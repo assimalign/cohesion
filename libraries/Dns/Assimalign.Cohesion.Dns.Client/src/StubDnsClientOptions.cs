@@ -30,4 +30,18 @@ public sealed class StubDnsClientOptions
     /// octets. Set to zero to omit the OPT record entirely.
     /// </summary>
     public ushort EdnsPayloadSize { get; set; } = 1232;
+
+    /// <summary>
+    /// When <see langword="true"/>, every outgoing query carries an EDNS Cookie option per
+    /// RFC 7873. The server cookie is cached for the lifetime of this client; a BADCOOKIE
+    /// response (RCODE 23) triggers one retry with the new cookie. Defaults to
+    /// <see langword="true"/>.
+    /// </summary>
+    public bool EnableEdnsCookies { get; set; } = true;
+
+    /// <summary>
+    /// Optional explicit 8-octet client cookie. When <see langword="null"/>, the client
+    /// generates a cryptographically random cookie at construction.
+    /// </summary>
+    public byte[]? EdnsClientCookie { get; set; }
 }
