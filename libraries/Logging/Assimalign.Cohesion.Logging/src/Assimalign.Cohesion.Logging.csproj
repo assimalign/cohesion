@@ -2,7 +2,6 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Logging</RootNamespace>
 		<Description>Cohesion logging foundation: structured log event model, logger contracts, factory composition, scope and enrichment primitives. Concrete sinks live in sibling packages.</Description>
-		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />

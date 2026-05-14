@@ -2,7 +2,6 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Logging.Console</RootNamespace>
 		<Description>Console sink for Cohesion logging. Writes structured log entries to System.Console with optional color and configurable formatting.</Description>
-		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />

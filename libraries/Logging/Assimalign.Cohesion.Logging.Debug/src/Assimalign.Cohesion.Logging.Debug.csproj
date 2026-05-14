@@ -2,7 +2,6 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Logging.Debug</RootNamespace>
 		<Description>Debug sink for Cohesion logging. Emits structured log entries via System.Diagnostics.Debug, gated on whether a debugger is attached.</Description>
-		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
