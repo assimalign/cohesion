@@ -1,31 +1,70 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Logging;
 
-public class LoggerEntry : ILoggerEntry
+/// <summary>
+/// Default immutable implementation of <see cref="ILoggerEntry"/>.
+/// </summary>
+public sealed class LoggerEntry : ILoggerEntry
 {
+    private static readonly IReadOnlyDictionary<string, object?> EmptyAttributes = new Dictionary<string, object?>(capacity: 0);
 
-    public LoggerEntry(LogId id, LogLevel level, string message)
+    /// <summary>
+    /// Initializes a new entry.
+    /// </summary>
+    /// <param name="level">Event severity.</param>
+    /// <param name="category">Logger category. Required, non-empty.</param>
+    /// <param name="message">Human-readable message. Defaults to empty when null.</param>
+    /// <param name="exception">Optional exception associated with the event.</param>
+    /// <param name="attributes">Optional structured attributes.</param>
+    /// <param name="parentId">Optional parent log id.</param>
+    /// <param name="id">Optional explicit id. When omitted, a fresh <see cref="LogId"/> is generated.</param>
+    /// <param name="timestamp">Optional timestamp. When omitted, captures <see cref="DateTimeOffset.UtcNow"/>.</param>
+    /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
+    public LoggerEntry(
+        LogLevel level,
+        string category,
+        string? message = null,
+        Exception? exception = null,
+        IReadOnlyDictionary<string, object?>? attributes = null,
+        LogId? parentId = null,
+        LogId? id = null,
+        DateTimeOffset? timestamp = null)
     {
-        ArgumentNullException.ThrowIfNullOrEmpty(message);
-        ArgumentException.ThrowIfEnumNotDefined(level);
+        ArgumentException.ThrowIfNullOrEmpty(category);
 
-        Id = id;
-        Level = level;
-        Message = message;
-    }
-
-    public LoggerEntry(LogId id, LogId parentId, LogLevel level, string message) : this(id, level, message)
-    {
-        Id = id;
+        Id = id ?? LogId.New();
         ParentId = parentId;
+        Level = level;
+        Category = category;
+        Message = message ?? string.Empty;
+        Exception = exception;
+        Timestamp = timestamp ?? DateTimeOffset.UtcNow;
+        Attributes = attributes ?? EmptyAttributes;
     }
-    public LogId Id { get; set; } = LogId.New();
-    public LogId? ParentId { get; set; }
-    public LogLevel Level { get; set; }
-    public string? Message { get; set; }
+
+    /// <inheritdoc />
+    public LogId Id { get; }
+
+    /// <inheritdoc />
+    public LogId? ParentId { get; }
+
+    /// <inheritdoc />
+    public DateTimeOffset Timestamp { get; }
+
+    /// <inheritdoc />
+    public LogLevel Level { get; }
+
+    /// <inheritdoc />
+    public string Category { get; }
+
+    /// <inheritdoc />
+    public string Message { get; }
+
+    /// <inheritdoc />
+    public Exception? Exception { get; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, object?> Attributes { get; }
 }

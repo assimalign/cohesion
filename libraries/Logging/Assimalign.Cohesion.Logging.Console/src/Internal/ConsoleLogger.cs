@@ -1,51 +1,55 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+namespace Assimalign.Cohesion.Logging.Console.Internal;
 
-namespace Assimalign.Cohesion.Logging.Internal;
-
-using Cohesion.Internal;
-
-public class ConsoleLogger : ILogger
+/// <summary>
+/// Per-category logger created by <see cref="ConsoleLoggerProvider"/>.
+/// </summary>
+internal sealed class ConsoleLogger : Logger
 {
-    public IScopedLogger BeginScope(ILoggerEntry entry)
+    private readonly ConsoleLoggerProvider _provider;
+
+    public ConsoleLogger(string category, ConsoleLoggerProvider provider)
+        : base(category)
     {
-
-
-        throw new NotImplementedException();
+        _provider = provider;
     }
 
-    public void Log(ILoggerEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
+    public override bool IsEnabled(LogLevel level) => base.IsEnabled(level) && !_provider.IsDisposed;
 
+    protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
+
+    protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
+    {
+        // Emit the seed so the developer sees scope-open events in the console stream.
+        if (IsEnabled(entry.Level))
+        {
+            _provider.Write(entry);
+        }
+
+        return new ConsoleScopedLogger(Category, _provider, entry.Id);
     }
 
-
-    partial class ScopeConsoleLogger : IScopedLogger
+    private sealed class ConsoleScopedLogger : ScopedLogger
     {
-        public ScopeConsoleLogger(LogId parentId)
+        private readonly ConsoleLoggerProvider _provider;
+
+        public ConsoleScopedLogger(string category, ConsoleLoggerProvider provider, LogId parentId)
+            : base(category, parentId)
         {
-            ParentId = parentId;
+            _provider = provider;
         }
 
-        public LogId ParentId { get; }
+        public override bool IsEnabled(LogLevel level) => base.IsEnabled(level) && !_provider.IsDisposed;
 
-        public IScopedLogger BeginScope(ILoggerEntry entry)
-        {
-            throw new NotImplementedException();
-        }
+        protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
 
-        public void Dispose()
+        protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
         {
-            throw new NotImplementedException();
-        }
+            if (IsEnabled(entry.Level))
+            {
+                _provider.Write(entry);
+            }
 
-        public void Log(ILoggerEntry entry)
-        {
-            throw new NotImplementedException();
+            return new ConsoleScopedLogger(Category, _provider, entry.Id);
         }
     }
 }

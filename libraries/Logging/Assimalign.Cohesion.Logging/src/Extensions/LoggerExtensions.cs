@@ -1,28 +1,87 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Logging;
 
-using Cohesion.Internal;
-
+/// <summary>
+/// Ergonomic typed-level helpers over <see cref="ILogger"/>.
+/// </summary>
+/// <remarks>
+/// The helpers short-circuit on <see cref="ILogger.IsEnabled(LogLevel)"/> so they do not allocate
+/// an entry when no underlying sink would accept it. Callers that already know they are enabled
+/// can build a <see cref="LoggerEntryBuilder"/> directly.
+/// </remarks>
 public static class LoggerExtensions
 {
+    /// <summary>Writes a trace-level entry under <paramref name="category"/>.</summary>
+    public static void LogTrace(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Trace, category, message, exception: null, attributes);
 
+    /// <summary>Writes a debug-level entry under <paramref name="category"/>.</summary>
+    public static void LogDebug(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Debug, category, message, exception: null, attributes);
 
-    public static void LogError(this ILogger logger, Exception exception)
+    /// <summary>Writes an information-level entry under <paramref name="category"/>.</summary>
+    public static void LogInformation(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Information, category, message, exception: null, attributes);
+
+    /// <summary>Writes a warning-level entry under <paramref name="category"/>.</summary>
+    public static void LogWarning(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Warning, category, message, exception: null, attributes);
+
+    /// <summary>Writes an error-level entry under <paramref name="category"/>. Captures <paramref name="exception"/> when supplied.</summary>
+    public static void LogError(this ILogger logger, string category, string message, Exception? exception = null, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Error, category, message, exception, attributes);
+
+    /// <summary>Writes a critical-level entry under <paramref name="category"/>. Captures <paramref name="exception"/> when supplied.</summary>
+    public static void LogCritical(this ILogger logger, string category, string message, Exception? exception = null, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, LogLevel.Critical, category, message, exception, attributes);
+
+    /// <summary>Writes an entry at the supplied <paramref name="level"/>.</summary>
+    public static void Log(this ILogger logger, LogLevel level, string category, string message, Exception? exception = null, IReadOnlyDictionary<string, object?>? attributes = null)
+        => Write(logger, level, category, message, exception, attributes);
+
+    /// <summary>
+    /// Opens a scope keyed on a freshly built entry. Convenience wrapper around
+    /// <see cref="ILogger.BeginScope(ILoggerEntry)"/>.
+    /// </summary>
+    public static IScopedLogger BeginScope(this ILogger logger, string category, string message, IReadOnlyDictionary<string, object?>? attributes = null)
     {
-        //ThrowHelper.ThrowIfNull(logger).Log(new LoggerEntry()
-        //{
-        //    Level = LogLevel.Error,
-            
-        //});
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentException.ThrowIfNullOrEmpty(category);
+
+        var seed = new LoggerEntry(
+            level: LogLevel.Information,
+            category: category,
+            message: message,
+            attributes: attributes);
+
+        return logger.BeginScope(seed);
     }
 
-    public static void Trace(this ILogger logger)
+    private static void Write(
+        ILogger logger,
+        LogLevel level,
+        string category,
+        string message,
+        Exception? exception,
+        IReadOnlyDictionary<string, object?>? attributes)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentException.ThrowIfNullOrEmpty(category);
 
+        if (!logger.IsEnabled(level))
+        {
+            return;
+        }
+
+        var entry = new LoggerEntry(
+            level: level,
+            category: category,
+            message: message,
+            exception: exception,
+            attributes: attributes);
+
+        logger.Log(entry);
     }
 }

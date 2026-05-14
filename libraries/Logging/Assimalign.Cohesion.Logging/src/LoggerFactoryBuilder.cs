@@ -1,12 +1,88 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Logging
+namespace Assimalign.Cohesion.Logging;
+
+/// <summary>
+/// Default <see cref="ILoggerFactoryBuilder"/> implementation. Populates a fresh
+/// <see cref="LoggerFactoryOptions"/> through the fluent API and materializes the factory in
+/// <see cref="Build"/>.
+/// </summary>
+/// <remarks>
+/// Builders are not thread-safe; treat them as scratch space scoped to a single setup routine.
+/// The resulting <see cref="ILoggerFactory"/> IS thread-safe.
+/// </remarks>
+public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
 {
-    class LoggerFactoryBuilder
+    private readonly LoggerFactoryOptions _options = new();
+    private readonly HashSet<string> _providerNames = new(StringComparer.OrdinalIgnoreCase);
+    private bool _built;
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder AddProvider(ILoggerProvider provider)
     {
+        ArgumentNullException.ThrowIfNull(provider);
+        ThrowIfBuilt();
+
+        if (!_providerNames.Add(provider.Name ?? string.Empty))
+        {
+            throw new InvalidOperationException(
+                $"A provider named '{provider.Name}' is already registered.");
+        }
+
+        _options.Providers.Add(provider);
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder SetMinimumLevel(LogLevel level)
+    {
+        ThrowIfBuilt();
+        _options.MinimumLevel = level;
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder AddRule(LoggerFilterRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        ThrowIfBuilt();
+        _options.FilterRules.Add(rule);
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder AddRule(string categoryPrefix, LogLevel minimumLevel)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(categoryPrefix);
+        ThrowIfBuilt();
+        _options.FilterRules.Add(new LoggerFilterRule(category: categoryPrefix, level: minimumLevel));
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactoryBuilder AddEnricher(ILoggerEnricher enricher)
+    {
+        ArgumentNullException.ThrowIfNull(enricher);
+        ThrowIfBuilt();
+        _options.Enrichers.Add(enricher);
+        return this;
+    }
+
+    /// <inheritdoc />
+    public ILoggerFactory Build()
+    {
+        ThrowIfBuilt();
+        _built = true;
+        return new LoggerFactory(_options);
+    }
+
+    private void ThrowIfBuilt()
+    {
+        if (_built)
+        {
+            throw new InvalidOperationException(
+                "LoggerFactoryBuilder has already been used to build a factory; create a new builder.");
+        }
     }
 }
