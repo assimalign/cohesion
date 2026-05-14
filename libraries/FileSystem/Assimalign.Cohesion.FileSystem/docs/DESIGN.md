@@ -1,49 +1,98 @@
-# Assimalign.Cohesion.FileSystem Design
+# Assimalign.Cohesion.FileSystem — Design
 
-## Design Intent
+## Design intent
 
-This is the abstraction layer that keeps the rest of the ecosystem storage-agnostic. Callers depend on IFileSystem and related interfaces, while concrete backends live in sibling packages.
+A single `IFileSystem` contract that every concrete backend implements
+identically. Callers depend on the contract, not the backend, so a service
+can swap in-memory storage for a tested fixture, isolated storage for
+per-user persistence, and physical storage in production — without changing
+its consumer surface.
 
-## Architecture
+The contract is intentionally narrow:
 
-- IFileSystem, IFileSystemFile, IFileSystemDirectory, and related interfaces define the common contract.
-- FileSystemFactoryBuilder handles named and typed backend registration.
-- Events, glob-aware watching, and helper extensions are part of the base abstraction rather than optional add-ons.
+- File / directory / info hierarchy
+- Read-write streams (no async file I/O surface — `Stream` already gives that)
+- Change-token-shaped watch events
+- Enumeration with optional recursion
+- Lifetime via `IDisposable` + `IAsyncDisposable`
 
-## Layout Example
+## Error model
 
-```text
-Assimalign.Cohesion.FileSystem/
-  src/
-    Assimalign.Cohesion.FileSystem.csproj
-    Abstractions/
-    Exceptions/
-    Extensions/
-    Internal/
-    Properties/
-  tests/
-  docs/
-    OVERVIEW.md
-    DESIGN.md
-```
+Every provider raises `FileSystemException` with one of the explicit codes
+in `FileSystemErrorCode`. The base class has `[DoesNotReturn]` static helpers
+(`ThrowFileNotFound`, `ThrowReadOnly`, etc.) so providers don't construct
+exceptions inline.
 
-## Example 1: Register a named file system
+| Code | When |
+|------|------|
+| `NotFound` | The requested path doesn't exist. |
+| `Conflict` | The destination path already exists when it shouldn't. |
+| `ReadOnly` | A mutating op was rejected because the file system is read-only. |
+| `AccessDenied` | OS / store rejected the operation (permissions, locked file). |
+| `NotEnoughSpace` | Write would exceed the configured quota. |
+| `PathTooLong` | The OS reported `PathTooLongException`. |
+| `PathInUse` | Another handle holds an incompatible share. |
+| `Other` | Catch-all; should be paired with a wrapped inner exception. |
+
+## Factory and lifecycle
+
+`FileSystemFactoryBuilder` is single-use. After `Build()` returns the
+factory, further calls throw `InvalidOperationException` — preserving
+ownership clarity. The factory itself caches each created file system by
+name (case-insensitive lookup) and cascades `Dispose` to every materialized
+instance.
 
 ```csharp
-var builder = new FileSystemFactoryBuilder();
+using var factory = new FileSystemFactoryBuilder()
+    .AddInMemoryFileSystem(o => o.Name = "scratch")
+    .Build();
 
-builder.AddFileSystem("primary", myFileSystem);
-
-IFileSystemFactory factory = builder.Build();
-IFileSystem fileSystem = factory.Create("primary");
+IFileSystem fs = factory.Create("scratch");       // first call materializes
+IFileSystem same = factory.Create("scratch");     // subsequent calls return the cache
+Assert.Same(fs, same);
 ```
 
-## Example 2: Register and resolve by type
+## Contract suite
 
-```csharp
-var builder = new FileSystemFactoryBuilder();
+`tests/Shared/FileSystemStandardTests.cs` defines 32 provider-agnostic
+contract tests. Each concrete provider inherits the suite via
+`<Compile Include="..\..\Assimalign.Cohesion.FileSystem\tests\Shared\FileSystemStandardTests.cs" Link="Shared\FileSystemStandardTests.cs" />`
+in its test csproj.
 
-builder.AddFileSystem(() => new MyFileSystem());
+The suite is the source of truth for provider compatibility. A new provider
+adds an inheritor, overrides `GetFileSystem()`, and the 32 tests light up
+against the new implementation. The Aggregate PR and the IsolatedStorage
+work both exercised this pattern — the suite caught nine real bugs in
+Physical, an event-path doubling bug in InMemory, and a fan-in glob default
+bug in Aggregate before any consumer code shipped.
 
-IFileSystem fileSystem = builder.Build().Create<MyFileSystem>();
-```
+## Path model
+
+`FileSystemPath` (defined in `Assimalign.Cohesion.Core`, namespace
+`System.IO`) is the single representation:
+
+- Uses `/` as the separator on every OS.
+- Optional leading `/` marks an absolute path.
+- `Merge` performs `..`-aware joining with normalization.
+- `GetSegments`, `GetFileName`, `GetDirectoryName` return strongly-typed parts.
+
+Providers normalize incoming paths into absolute form using `Merge` against
+their root before any further work.
+
+## Adding a new provider
+
+1. Create `Assimalign.Cohesion.FileSystem.<Name>/src/` and `tests/` under
+   `libraries/FileSystem/`.
+2. Implement `IFileSystem` (typically using helper types in `Internal/` for
+   the directory / file / info wrappers).
+3. Add a `FileSystemFactoryBuilder` extension named `Add<Name>FileSystem`.
+4. Create `tests/<Name>FileSystemStandardTests.cs` inheriting
+   `FileSystemStandardTests`, plus any provider-specific tests in a
+   separate file.
+5. Add an entry to `.github/workflows/library-filesystem.yml`'s matrix.
+6. List the assembly in `frameworks/Assimalign.Cohesion.App.props` under
+   the active `<CohesionFrameworkAssembly>` block.
+7. Update `libraries/FileSystem/README.md` and add per-package
+   `README.md` + `docs/{OVERVIEW,DESIGN}.md`. Update
+   `Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md` with the
+   new row.

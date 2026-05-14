@@ -317,6 +317,14 @@ public class PhysicalFileSystem : IFileSystem
                 FileSystemException.ThrowFileNotFound(source);
             }
 
+            // File.Copy on Linux throws raw IOException (with no HResult that maps cleanly to
+            // our existing catch handlers) when the destination exists. Match the InMemory
+            // contract by pre-checking and raising the unified Conflict exception.
+            if (File.Exists(destinationFullPath) || Directory.Exists(destinationFullPath))
+            {
+                FileSystemException.ThrowPathAlreadyExist(destination);
+            }
+
             // Mirror the InMemory provider and auto-create the destination's parent chain.
             var destinationInfo = new FileInfo(destinationFullPath);
             if (destinationInfo.Directory is { Exists: false } parent)
