@@ -79,6 +79,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client.Dot" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client.Doh" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client.Doq" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
