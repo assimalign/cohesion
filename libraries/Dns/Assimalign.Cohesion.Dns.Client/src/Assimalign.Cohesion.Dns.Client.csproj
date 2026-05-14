@@ -6,4 +6,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Dns" />
 	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Assimalign.Cohesion.Dns.Client.Tests" />
+	</ItemGroup>
 </Project>

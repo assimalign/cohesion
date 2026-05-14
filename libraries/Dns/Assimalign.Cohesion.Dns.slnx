@@ -26,4 +26,28 @@
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client/tests/">
 		<Project Path="Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/">
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/README.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
+		<Project Path="Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doh/">
+		<File Path="Assimalign.Cohesion.Dns.Client.Doh/README.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Doh/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Doh/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doh/src/">
+		<Project Path="Assimalign.Cohesion.Dns.Client.Doh/src/Assimalign.Cohesion.Dns.Client.Doh.csproj" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doq/">
+		<File Path="Assimalign.Cohesion.Dns.Client.Doq/README.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Doq/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Doq/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doq/src/">
+		<Project Path="Assimalign.Cohesion.Dns.Client.Doq/src/Assimalign.Cohesion.Dns.Client.Doq.csproj" />
+	</Folder>
 </Solution>

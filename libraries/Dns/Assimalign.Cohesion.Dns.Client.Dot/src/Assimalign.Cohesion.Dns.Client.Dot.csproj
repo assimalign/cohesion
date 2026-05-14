@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Dns</RootNamespace>
+		<Description>DNS-over-TLS (DoT, RFC 7858) transport for the Cohesion DNS family. Placeholder package — implementation deferred until the broader Cohesion HTTP / TLS story matures; see docs/REQUIREMENTS.md for the implementation contract.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Dns.Client" />
+	</ItemGroup>
+</Project>

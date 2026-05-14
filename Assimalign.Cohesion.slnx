@@ -636,6 +636,36 @@
 	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/">
 		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/OVERVIEW.md" />
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
+		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/OVERVIEW.md" />
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/src/">
+		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/src/Assimalign.Cohesion.Dns.Client.Doh.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/">
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/OVERVIEW.md" />
+		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/src/">
+		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/src/Assimalign.Cohesion.Dns.Client.Doq.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/FileSystem/">
 		<File Path="libraries/FileSystem/Directory.Build.props" />
 		<File Path="libraries/FileSystem/Directory.Build.targets" />

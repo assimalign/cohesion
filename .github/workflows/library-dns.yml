@@ -21,6 +21,9 @@ jobs:
         projects: [
             "Assimalign.Cohesion.Dns",
             "Assimalign.Cohesion.Dns.Client",
+            "Assimalign.Cohesion.Dns.Client.Dot",
+            "Assimalign.Cohesion.Dns.Client.Doh",
+            "Assimalign.Cohesion.Dns.Client.Doq",
           ]
     steps:
       - uses: actions/checkout@v4
