@@ -74,9 +74,9 @@ providers are left alone. `DisposeAsync()` follows the same rule.
 
 ## Test coverage
 
-75 tests including:
+77 tests including:
 
-- 32 contract tests from `FileSystemStandardTests` against an aggregate
+- 34 contract tests from `FileSystemStandardTests` against an aggregate
   with InMemory mounted at `/` (exercises the wrapper layer + standard
   contract simultaneously).
 - 18 router unit tests covering longest-prefix, segment-boundary,
