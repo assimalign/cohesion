@@ -365,4 +365,164 @@ public abstract class FileSystemStandardTests
 
         Assert.Equal(2, dirs.Count);
     }
+
+    // -----------------------------------------------------------------------
+    // Compatibility scenarios — Story L01.01.09.09.01.
+    // The tests in this section guard against regressions in path depth,
+    // payload size, and edge cases that the per-operation tests above don't
+    // explicitly exercise. Every provider must satisfy them.
+    // -----------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - Deep nesting: 10 levels of auto-created parents")]
+    public void DeepNesting_AutoCreatesEveryLevel()
+    {
+        using var fs = GetFileSystem();
+
+        // 10 segments is comfortably under any realistic path-length limit while still being
+        // deep enough to surface off-by-one bugs in segment iteration logic.
+        const string deepPath = "lvl1/lvl2/lvl3/lvl4/lvl5/lvl6/lvl7/lvl8/lvl9/leaf.txt";
+        var file = fs.CreateFile(deepPath);
+
+        Assert.NotNull(file);
+        Assert.True(fs.Exists(deepPath));
+        // Spot-check several intermediate levels to make sure the entire chain materialized.
+        Assert.True(fs.Exists("lvl1"));
+        Assert.True(fs.Exists("lvl1/lvl2/lvl3/lvl4"));
+        Assert.True(fs.Exists("lvl1/lvl2/lvl3/lvl4/lvl5/lvl6/lvl7/lvl8/lvl9"));
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - Large file: 1 MB round trip")]
+    public void LargeFile_OneMegabyte_RoundTrips()
+    {
+        using var fs = GetFileSystem();
+        var file = fs.CreateFile("large.bin");
+
+        // 1 MiB filled with a recognizable pattern so a buffer truncation defect would corrupt
+        // recognizable spots in the readback.
+        var payload = new byte[1024 * 1024];
+        for (int i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i & 0xFF);
+        }
+
+        using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+        {
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        Assert.Equal(payload.Length, file.Size.Length);
+
+        var readBack = new byte[payload.Length];
+        using (var stream = file.Open(FileMode.Open, FileAccess.Read))
+        {
+            stream.ReadExactly(readBack);
+        }
+
+        Assert.Equal(payload, readBack);
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - Empty file: zero-byte file round-trips")]
+    public void EmptyFile_ZeroBytes_RoundTrips()
+    {
+        using var fs = GetFileSystem();
+        var file = fs.CreateFile("empty.bin");
+
+        Assert.Equal(0L, file.Size.Length);
+
+        using (var stream = file.Open(FileMode.Open, FileAccess.Read))
+        {
+            // Reading from an empty stream must return 0 without throwing.
+            var buffer = new byte[16];
+            int read = stream.Read(buffer, 0, buffer.Length);
+            Assert.Equal(0, read);
+        }
+
+        Assert.True(fs.Exists("empty.bin"));
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - CopyFile: destination already exists throws Conflict")]
+    public void CopyFile_DestinationExists_Conflict()
+    {
+        using var fs = GetFileSystem();
+        fs.CreateFile("src.bin");
+        fs.CreateFile("dst.bin");
+
+        var exception = Assert.Throws<FileSystemException>(() => fs.CopyFile("src.bin", "dst.bin"));
+        Assert.Equal(FileSystemErrorCode.Conflict, exception.Code);
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - Move: source missing throws NotFound")]
+    public void Move_SourceMissing_NotFound()
+    {
+        using var fs = GetFileSystem();
+
+        var exception = Assert.Throws<FileSystemException>(() => fs.Move("missing.txt", "moved.txt"));
+        Assert.Equal(FileSystemErrorCode.NotFound, exception.Code);
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - Directory: empty directory enumerates to no children")]
+    public void EmptyDirectory_HasNoChildren()
+    {
+        using var fs = GetFileSystem();
+        var dir = fs.CreateDirectory("empty");
+
+        Assert.Empty(dir.GetFiles());
+        Assert.Empty(dir.GetDirectories());
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - GetFile: aggregate path is preserved through GetFile + Directory")]
+    public void GetFile_PathPreserved()
+    {
+        using var fs = GetFileSystem();
+        fs.CreateFile("docs/readme.txt");
+
+        var file = fs.GetFile("docs/readme.txt");
+
+        // The exact string representation may vary across providers (e.g. leading slash), but
+        // the leaf name must always be addressable through the returned IFileSystemFile.
+        var segments = file.Path.GetSegments();
+        Assert.Equal("readme.txt", segments[^1]);
+        Assert.Equal("docs", segments[^2]);
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - File: re-open after dispose returns fresh stream")]
+    public void File_ReopenAfterDispose_FreshStream()
+    {
+        using var fs = GetFileSystem();
+        var file = fs.CreateFile("rotated.log");
+        var payload = Encoding.UTF8.GetBytes("first");
+
+        // Write, dispose the stream, then re-open and read. The reopen must surface the bytes
+        // we just wrote — a stream cached internally by the provider would otherwise stale out.
+        using (var stream = file.Open(FileMode.Open, FileAccess.Write))
+        {
+            stream.Write(payload, 0, payload.Length);
+        }
+
+        var readBack = new byte[payload.Length];
+        using (var stream = file.Open(FileMode.Open, FileAccess.Read))
+        {
+            stream.ReadExactly(readBack);
+        }
+
+        Assert.Equal(payload, readBack);
+    }
+
+    [Fact(DisplayName = "Cohesion Contract [FileSystem] - File: CreatedOn populated after Create")]
+    public void File_CreatedOn_Populated()
+    {
+        using var fs = GetFileSystem();
+        var before = DateTime.UtcNow.AddSeconds(-5);
+        var file = fs.CreateFile("timestamped.txt");
+        var after = DateTime.UtcNow.AddSeconds(5);
+
+        // CreatedOn is supplied by the provider — it may be UTC or local time. Normalize to UTC
+        // for the comparison; either kind is acceptable as long as the value sits in the window.
+        var createdUtc = file.CreatedOn.Kind == DateTimeKind.Utc
+            ? file.CreatedOn
+            : file.CreatedOn.ToUniversalTime();
+
+        Assert.True(createdUtc >= before, $"CreatedOn={createdUtc:o} is before window start {before:o}");
+        Assert.True(createdUtc <= after, $"CreatedOn={createdUtc:o} is after window end {after:o}");
+    }
 }

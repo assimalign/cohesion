@@ -2,37 +2,61 @@
 
 ## Summary
 
-Defines the common file-system abstraction for Cohesion, including factories, paths, file and directory contracts, events, watchers, and file-system extensions.
+The root contract package for the Cohesion file-system family. Defines the
+`IFileSystem` surface (files, directories, events, enumeration) and the
+factory used to wire concrete providers into an application by name.
 
-## Current Evaluation
+## Status
 
-- Status: Implemented
-- Production source files: 17; key type candidates discovered: 8; test files discovered: 2.
-- Project references: Assimalign.Cohesion.Core
-- Package references: None
-- NotImplementedException markers: 0
+Implemented. Zero `NotImplementedException` markers in production code. 39
+unit tests live in this package; 32 of those make up the provider-agnostic
+contract suite shared into every concrete provider via `<Compile Include …>`.
 
-## Primary Responsibilities
+## Public surface
 
-- IFileSystem, IFileSystemFile, IFileSystemDirectory, and related interfaces define the common contract.
-- FileSystemFactoryBuilder handles named and typed backend registration.
-- Events, glob-aware watching, and helper extensions are part of the base abstraction rather than optional add-ons.
+| Type | Role |
+|------|------|
+| `IFileSystem` | Contract for a directory-and-file tree. Inherits `IDisposable` + `IAsyncDisposable`. |
+| `IFileSystemFile`, `IFileSystemDirectory`, `IFileSystemInfo` | Entry contracts returned from the file system. |
+| `IFileSystemEventToken` | Change-notification token. Inherits `IChangeToken`. |
+| `IFileSystemFactory` | Resolves a named `IFileSystem` from a builder-registered table. |
+| `FileSystemFactoryBuilder` | Single-use builder with case-insensitive name registration, duplicate rejection, lazy instantiation. |
+| `FileSystemException` + `FileSystemErrorCode` | Domain exception with explicit error codes (`NotFound`, `Conflict`, `ReadOnly`, `AccessDenied`, `NotEnoughSpace`, `PathTooLong`, `PathInUse`, `Other`). |
+| `FileSystemPath` | Lives in `Assimalign.Cohesion.Core` (`System.IO` namespace) — '/' separated, rooted-or-relative. |
 
-## Key Types
+## Key responsibilities
 
-- ErrorMessages
-- FileSystemEnumerationOptions
-- FileSystemErrorCode
-- FileSystemEvent
-- FileSystemEventType
-- FileSystemException
-- FileSystemExtensions
-- FileSystemFactoryBuilder
+- **Contract definition** — every concrete provider in
+  `Assimalign.Cohesion.FileSystem.*` implements these abstractions.
+- **Factory registration** — `FileSystemFactoryBuilder` exposes three
+  `AddFileSystem` overloads (pre-built instance, named factory delegate,
+  typed factory delegate using `typeof(T).Name`). Provider packages add
+  fluent extensions (`AddInMemoryFileSystem`, `AddPhysicalFileSystem`,
+  `AddIsolatedStorageFileSystem`, `AddAggregateFileSystem`).
+- **Exception mapping** — every provider raises `FileSystemException` with
+  the same `FileSystemErrorCode` regardless of OS or backing technology, so
+  callers can branch on the code instead of catching ad-hoc inner types.
 
-## Source Layout
+## Source layout
 
-- src/Abstractions
-- src/Exceptions
-- src/Extensions
-- src/Internal
-- src/Properties
+```
+src/
+  Abstractions/          IFileSystem family + IFileSystemFactory
+  Exceptions/            FileSystemException, FileSystemErrorCode
+  Extensions/            FluentLogger-style extension methods
+  Internal/              Implementation helpers (not exposed)
+  Properties/            InternalsVisibleTo declarations
+  FileSystemFactory.cs       (concrete factory, lazy creation, cascading dispose)
+  FileSystemFactoryBuilder.cs (single-use builder)
+tests/
+  FileSystemExceptionTests.cs       (Throw* helpers + ordinal stability)
+  FileSystemFactoryBuilderTests.cs  (validation, lazy materialization, Dispose)
+  Shared/FileSystemStandardTests.cs (32 contract tests shared with every provider)
+```
+
+## Related
+
+- Per-provider packages: `InMemory`, `Physical`, `IsolatedStorage`, `Aggregate`.
+- Path-matching helpers: `Assimalign.Cohesion.FileSystem.Globbing`.
+- Provider selection cheat-sheet: `libraries/FileSystem/README.md`.
+- AOT + OS support matrix: `libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md`.
