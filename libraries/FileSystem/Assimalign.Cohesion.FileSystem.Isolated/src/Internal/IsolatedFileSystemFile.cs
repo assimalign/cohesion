@@ -1,53 +1,124 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
+using System.Diagnostics;
 using System.IO;
 using System.IO.IsolatedStorage;
-using System.Text;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-internal class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSystemFile
+/// <summary>
+/// <see cref="IFileSystemFile"/> implementation backed by an entry inside an
+/// <see cref="IsolatedStorageFile"/>. Each stream open delegates to
+/// <see cref="IsolatedStorageFile.OpenFile(string, FileMode, FileAccess, FileShare)"/>; no
+/// stream is cached so the file can be opened many times concurrently subject to the supplied
+/// share mode.
+/// </summary>
+[DebuggerDisplay("[F] - {Path}")]
+internal sealed class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSystemFile
 {
-    private readonly Lazy<IsolatedStorageFileStream> _stream;
-    public IsolatedFileSystemFile(IsolatedFileSystem fileSystem, IsolatedStorageFile storage, FileSystemPath path) 
+    public IsolatedFileSystemFile(
+        IsolatedFileSystem fileSystem,
+        IsolatedStorageFile storage,
+        FileSystemPath path)
         : base(fileSystem, storage, path)
     {
-        _stream = new Lazy<IsolatedStorageFileStream>(() => new IsolatedStorageFileStream(path, FileMode.OpenOrCreate, storage));
     }
 
-    public Size Size => throw new NotImplementedException();
+    /// <inheritdoc />
+    public FileName Name => Path.GetFileName() ?? throw new InvalidOperationException(
+        $"Path '{Path}' does not contain a file name.");
 
-    public FileName Name => Path.GetFileName()!.Value;
-
-    public IFileSystemDirectory Directory => throw new NotImplementedException();
-
-    public void Dispose()
+    /// <inheritdoc />
+    public Size Size
     {
-        throw new NotImplementedException();
+        get
+        {
+            // IsolatedStorageFile has no Size accessor — open the file in shared-read mode and
+            // measure the stream length. Returns 0 for files that no longer exist so callers can
+            // chain after a delete without observing an exception.
+            try
+            {
+                using var stream = Storage.OpenFile(StorePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                return stream.Length;
+            }
+            catch (FileNotFoundException)
+            {
+                return 0L;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return 0L;
+            }
+            catch (IsolatedStorageException)
+            {
+                return 0L;
+            }
+        }
     }
 
-    public Stream Open()
+    /// <inheritdoc />
+    public IFileSystemDirectory Directory
     {
-        throw new NotImplementedException();
+        get
+        {
+            string text = Path.ToString();
+            int lastSep = text.LastIndexOf('/');
+            FileSystemPath parentPath = lastSep <= 0
+                ? IsolatedPathHelper.Root
+                : text.Substring(0, lastSep);
+
+            return new IsolatedFileSystemDirectory(FileSystem, Storage, parentPath);
+        }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Returns a polling token scoped to this file only. The cadence is configured via
+    /// <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>; see
+    /// <see cref="IsolatedFileSystem.Watch(Glob?)"/> for details.
+    /// </remarks>
+    public IFileSystemEventToken Watch() => FileSystem.CreateFileWatchToken(Path);
+
+    /// <inheritdoc />
+    public Stream Open() => Open(FileMode.Open);
+
+    /// <inheritdoc />
     public Stream Open(FileMode fileMode)
-    {
-        throw new NotImplementedException();
-    }
+        => Open(fileMode, FileSystem.IsReadOnly ? FileAccess.Read : FileAccess.ReadWrite);
 
-    public Stream Open(FileMode fileMode, FileAccess fileAccess)
-    {
-        throw new NotImplementedException();
-    }
+    /// <inheritdoc />
+    public Stream Open(FileMode fileMode, FileAccess fileAccess) => Open(fileMode, fileAccess, FileShare.None);
 
+    /// <inheritdoc />
     public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
     {
-        throw new NotImplementedException();
-    }
+        if (FileSystem.IsReadOnly && (fileAccess != FileAccess.Read || fileMode != FileMode.Open))
+        {
+            FileSystemException.ThrowReadOnly(nameof(Open));
+        }
 
-    public IFileSystemEventToken Watch()
-    {
-        throw new NotImplementedException();
+        try
+        {
+            return Storage.OpenFile(StorePath, fileMode, fileAccess, fileShare);
+        }
+        catch (FileNotFoundException ex)
+        {
+            FileSystemException.ThrowFileNotFound(Path, ex);
+            throw; // unreachable — keeps the compiler aware of the non-null return.
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            FileSystemException.ThrowDirectoryNotFound(Path, ex);
+            throw;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            FileSystemException.ThrowAccessDenied(Path, ex);
+            throw;
+        }
+        catch (IsolatedStorageException ex)
+        {
+            FileSystemException.ThrowAccessDenied(Path, ex);
+            throw;
+        }
     }
 }
