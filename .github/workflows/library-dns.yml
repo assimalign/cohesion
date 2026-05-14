@@ -1,31 +1,34 @@
-name: DNS
+name: Dns
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
-      - 'libraries/Dns/**'
-      - '.github/workflows/library-dns.yml'                 # When Pipeline File Changes
-
+    paths:
+      - "**/Directory.Build.props" # When the Global Props File Changes
+      - "libraries/Dns/**"
+      - ".github/actions/build/**" # When Shared Build Action Changes
+      - ".github/workflows/library-dns.yml" # When Pipeline File Changes
 permissions:
   contents: read
   packages: write
 
 jobs:
   build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
+    continue-on-error: false
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            'Assimalign.Cohesion.Dns'
-        ]
+            "Assimalign.Cohesion.Dns",
+            "Assimalign.Cohesion.Dns.Client",
+          ]
     steps:
       - uses: actions/checkout@v4
         name: "Checkout: ${{ matrix.projects }}"
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'Dns'
           project: ${{ matrix.projects }}

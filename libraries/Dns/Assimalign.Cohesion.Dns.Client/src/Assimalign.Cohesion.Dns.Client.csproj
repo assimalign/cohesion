@@ -1,5 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Net.Dns</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Dns</RootNamespace>
+		<Description>Resolving DNS client for Cohesion. Provides recursive resolution, caching, and pluggable UDP/TCP/DoT/DoH/DoQ transports on top of the Assimalign.Cohesion.Dns contracts.</Description>
 	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Dns" />
+	</ItemGroup>
 </Project>
