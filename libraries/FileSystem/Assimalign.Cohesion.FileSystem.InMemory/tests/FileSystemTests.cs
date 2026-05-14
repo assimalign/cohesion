@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 
 using Xunit;
 
@@ -1159,6 +1160,124 @@ public class InMemoryFileSystemTests
             var options = new InMemoryFileSystemOptions();
             options.RootPath = "../relative";
         });
+    }
+
+    // ================================================================
+    // Watch / Events Tests
+    // ================================================================
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnCreate observed path should equal new file's full path")]
+    public void Watch_CreateFileAtRoot_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnCreate<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.CreateFile("/foo.txt");
+
+        lock (observed)
+        {
+            Assert.Single(observed);
+            Assert.Equal((FileSystemPath)"/foo.txt", observed[0]);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnCreate observed path for nested file should equal full path")]
+    public void Watch_CreateNestedFile_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        fileSystem.CreateDirectory("var/log");
+
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnCreate<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.CreateFile("/var/log/syslog.txt");
+
+        lock (observed)
+        {
+            Assert.Contains((FileSystemPath)"/var/log/syslog.txt", observed);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnCreate observed path for new directory should equal full path")]
+    public void Watch_CreateDirectoryAtRoot_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnCreate<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.CreateDirectory("/etc");
+
+        lock (observed)
+        {
+            Assert.Single(observed);
+            Assert.Equal((FileSystemPath)"/etc", observed[0]);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnCreate observed path for nested directory should equal full path")]
+    public void Watch_CreateNestedDirectory_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        fileSystem.CreateDirectory("/usr");
+
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnCreate<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.CreateDirectory("/usr/local/bin");
+
+        lock (observed)
+        {
+            Assert.Contains((FileSystemPath)"/usr/local/bin", observed);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnDelete observed path for deleted file should equal full path")]
+    public void Watch_DeleteFile_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        fileSystem.CreateFile("/tmp/todelete.txt");
+
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnDelete<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.DeleteFile("/tmp/todelete.txt");
+
+        lock (observed)
+        {
+            Assert.Single(observed);
+            Assert.Equal((FileSystemPath)"/tmp/todelete.txt", observed[0]);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - Watch: OnDelete observed path for deleted directory should equal full path")]
+    public void Watch_DeleteDirectory_ShouldObserveExactFullPath()
+    {
+        var fileSystem = CreateFileSystem();
+        fileSystem.CreateDirectory("/tmp/empty");
+
+        var token = fileSystem.Watch(Glob.Parse("/**"));
+
+        var observed = new List<FileSystemPath>();
+        using var reg = token.OnDelete<object?>(e => { lock (observed) { observed.Add(e.Path); } }, state: null);
+
+        fileSystem.DeleteDirectory("/tmp/empty");
+
+        lock (observed)
+        {
+            Assert.Single(observed);
+            Assert.Equal((FileSystemPath)"/tmp/empty", observed[0]);
+        }
     }
 
     // ================================================================
