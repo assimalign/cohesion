@@ -319,7 +319,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             {
                 _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
                     WatcherChangeTypes.Created,
-                    result.Path,
+                    result.Parent?.Path ?? _root.Path,
                     result.Name));
             }
             manager.Dispose();
@@ -396,7 +396,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             {
                 _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
                     WatcherChangeTypes.Created,
-                    result.Path,
+                    result.Directory.Path,
                     result.Name));
             }
             manager.Dispose();
@@ -456,7 +456,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             {
                 _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
                     WatcherChangeTypes.Deleted,
-                    directory.Path,
+                    directory.Parent?.Path ?? _root.Path,
                     directory.Name));
             }
             manager.Dispose();
@@ -511,7 +511,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             {
                 _root.Dispatcher.RaiseEvent(new FileSystemEventArgs(
                     WatcherChangeTypes.Deleted,
-                    file.Path,
+                    file.Directory.Path,
                     file.Name));
             }
             manager.Dispose();
