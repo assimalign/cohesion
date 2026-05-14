@@ -62,9 +62,9 @@ rather than silent no-ops.
 
 ## Test coverage
 
-76 tests including:
+78 tests including:
 
-- 32 contract tests from `FileSystemStandardTests`.
+- 34 contract tests from `FileSystemStandardTests`.
 - Provider-specific tests for options validation, read-only enforcement
   (every write op throws `FileSystemException(ReadOnly)`), watch
   fan-out across polling intervals, glob filtering, dispose semantics,

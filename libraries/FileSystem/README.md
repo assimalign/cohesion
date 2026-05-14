@@ -60,7 +60,7 @@ Provider-agnostic contract tests live in
 `Assimalign.Cohesion.FileSystem/tests/Shared/FileSystemStandardTests.cs` and
 are shared (via `<Compile Include …>`) into every provider's test project.
 Adding a new provider means inheriting from `FileSystemStandardTests`,
-overriding `GetFileSystem()`, and watching the 32 contract tests pass.
+overriding `GetFileSystem()`, and watching the 34 contract tests pass.
 
 ## Watch semantics
 
