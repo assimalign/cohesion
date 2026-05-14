@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.IsolatedStorage;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem;
@@ -36,6 +37,8 @@ public sealed class IsolatedFileSystem : IFileSystem
     private readonly string _name;
     private readonly bool _isReadOnly;
     private readonly bool _removeStoreOnDispose;
+    private readonly TimeSpan _watchPollInterval;
+    private readonly List<IDisposable> _ownedTokens = new();
     private bool _isDisposed;
 
     /// <summary>
@@ -58,8 +61,67 @@ public sealed class IsolatedFileSystem : IFileSystem
         _name = options.Name ?? nameof(IsolatedFileSystem);
         _isReadOnly = options.IsReadOnly;
         _removeStoreOnDispose = options.RemoveStoreOnDispose;
+        _watchPollInterval = options.WatchPollInterval;
         _storage = OpenStore(options);
         _root = new IsolatedFileSystemDirectory(this, _storage, IsolatedPathHelper.Root);
+    }
+
+    /// <summary>
+    /// Polling interval surfaced to internal callers (directory and file watch overloads) so
+    /// every watch on this file system uses the same configured cadence.
+    /// </summary>
+    internal TimeSpan WatchPollInterval => _watchPollInterval;
+
+    /// <summary>
+    /// Creates a directory-scoped polling token. Centralized so the file system can track every
+    /// outstanding token and dispose them when the provider itself is disposed.
+    /// </summary>
+    internal IFileSystemEventToken CreateWatchToken(FileSystemPath anchor, Glob? pattern)
+    {
+        CheckIfDisposed();
+
+        if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
+        {
+            return IsolatedFileSystemNoopEventToken.Instance;
+        }
+
+        var token = IsolatedFileSystemPollingEventToken.ForDirectory(
+            _storage,
+            anchor,
+            pattern,
+            _watchPollInterval);
+
+        lock (_ownedTokens)
+        {
+            _ownedTokens.Add(token);
+        }
+
+        return token;
+    }
+
+    /// <summary>
+    /// Creates a single-file polling token used by <see cref="IFileSystemFile.Watch"/>.
+    /// </summary>
+    internal IFileSystemEventToken CreateFileWatchToken(FileSystemPath filePath)
+    {
+        CheckIfDisposed();
+
+        if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
+        {
+            return IsolatedFileSystemNoopEventToken.Instance;
+        }
+
+        var token = IsolatedFileSystemPollingEventToken.ForFile(
+            _storage,
+            filePath,
+            _watchPollInterval);
+
+        lock (_ownedTokens)
+        {
+            _ownedTokens.Add(token);
+        }
+
+        return token;
     }
 
     /// <inheritdoc />
@@ -445,13 +507,13 @@ public sealed class IsolatedFileSystem : IFileSystem
     }
 
     /// <inheritdoc />
-    public IFileSystemEventToken Watch(Glob? pattern)
-    {
-        CheckIfDisposed();
-        // IsolatedStorageFile does not surface change notifications; the noop token documents
-        // the limitation while keeping the caller pattern uniform with other providers.
-        return IsolatedFileSystemNoopEventToken.Instance;
-    }
+    /// <remarks>
+    /// IsolatedStorageFile has no native change notifications. The provider snapshots the store
+    /// on <see cref="IsolatedFileSystemOptions.WatchPollInterval"/> ticks and dispatches diff
+    /// events. When the interval is non-positive or <see cref="Timeout.InfiniteTimeSpan"/>,
+    /// polling is disabled and this returns a noop token that never fires.
+    /// </remarks>
+    public IFileSystemEventToken Watch(Glob? pattern) => CreateWatchToken(IsolatedPathHelper.Root, pattern);
 
     /// <inheritdoc />
     public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = null)
@@ -475,6 +537,19 @@ public sealed class IsolatedFileSystem : IFileSystem
         }
 
         _isDisposed = true;
+
+        // Stop outstanding polling tokens first so their timers cannot race against the store
+        // shutdown / removal below.
+        List<IDisposable> tokens;
+        lock (_ownedTokens)
+        {
+            tokens = new List<IDisposable>(_ownedTokens);
+            _ownedTokens.Clear();
+        }
+        foreach (var token in tokens)
+        {
+            try { token.Dispose(); } catch { /* best-effort */ }
+        }
 
         try
         {

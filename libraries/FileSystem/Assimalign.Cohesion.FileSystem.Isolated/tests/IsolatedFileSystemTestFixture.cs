@@ -15,13 +15,23 @@ internal static class IsolatedFileSystemTestFixture
     /// Returns a fresh <see cref="IsolatedFileSystem"/> rooted at an empty store. The backing
     /// store is forcibly cleared first so leftover state from prior tests cannot leak in.
     /// </summary>
-    public static IsolatedFileSystem CreateFreshFileSystem(bool isReadOnly = false)
+    /// <param name="isReadOnly">Open the store in read-only mode.</param>
+    /// <param name="watchPollInterval">
+    /// Override <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>. Defaults to
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> so the standard suite (which never
+    /// exercises Watch) doesn't pay for a background timer or risk timing flakes. Watch-specific
+    /// tests pass an explicit short interval.
+    /// </param>
+    public static IsolatedFileSystem CreateFreshFileSystem(
+        bool isReadOnly = false,
+        System.TimeSpan? watchPollInterval = null)
     {
         ClearUserStoreForAssembly();
 
         return new IsolatedFileSystem(new IsolatedFileSystemOptions
         {
             IsReadOnly = isReadOnly,
+            WatchPollInterval = watchPollInterval ?? System.Threading.Timeout.InfiniteTimeSpan,
             // We do NOT set RemoveStoreOnDispose here. Tests can opt into store-removal-on-dispose
             // when they exercise that flag directly; otherwise we just clear at start.
         });

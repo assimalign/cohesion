@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.IsolatedStorage;
+using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem;
 
@@ -66,4 +67,19 @@ public class IsolatedFileSystemOptions
     /// Defaults to <see langword="false"/> — disposal only releases the in-process handle.
     /// </summary>
     public bool RemoveStoreOnDispose { get; set; }
+
+    /// <summary>
+    /// Interval at which <see cref="IFileSystem.Watch"/> (and the directory / file overloads)
+    /// poll the backing isolated store for changes. <see cref="IsolatedStorageFile"/> does not
+    /// expose native change notifications, so the provider snapshots the directory tree on this
+    /// cadence and dispatches <see cref="IFileSystemEventToken.OnCreate"/> /
+    /// <see cref="IFileSystemEventToken.OnDelete"/> / <see cref="IFileSystemEventToken.OnChange"/>
+    /// events based on the diff against the previous snapshot.
+    /// <para>
+    /// Defaults to 1 second. Set to <see cref="Timeout.InfiniteTimeSpan"/> (or any non-positive
+    /// value) to disable polling — in that mode <see cref="IFileSystem.Watch"/> returns a noop
+    /// token that never fires.
+    /// </para>
+    /// </summary>
+    public TimeSpan WatchPollInterval { get; set; } = TimeSpan.FromSeconds(1);
 }

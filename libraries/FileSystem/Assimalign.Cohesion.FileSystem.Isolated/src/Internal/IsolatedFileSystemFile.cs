@@ -71,7 +71,12 @@ internal sealed class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSyst
     }
 
     /// <inheritdoc />
-    public IFileSystemEventToken Watch() => IsolatedFileSystemNoopEventToken.Instance;
+    /// <remarks>
+    /// Returns a polling token scoped to this file only. The cadence is configured via
+    /// <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>; see
+    /// <see cref="IsolatedFileSystem.Watch(Glob?)"/> for details.
+    /// </remarks>
+    public IFileSystemEventToken Watch() => FileSystem.CreateFileWatchToken(Path);
 
     /// <inheritdoc />
     public Stream Open() => Open(FileMode.Open);

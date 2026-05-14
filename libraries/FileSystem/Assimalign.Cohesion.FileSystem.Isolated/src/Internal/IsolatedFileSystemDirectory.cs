@@ -148,8 +148,13 @@ internal sealed class IsolatedFileSystemDirectory : IsolatedFileSystemInfo, IFil
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Returns a polling token scoped to this directory subtree. The cadence is configured via
+    /// <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>; see
+    /// <see cref="IsolatedFileSystem.Watch(Glob?)"/> for details.
+    /// </remarks>
     public IFileSystemEventToken Watch(Glob? pattern)
-        => IsolatedFileSystemNoopEventToken.Instance;
+        => FileSystem.CreateWatchToken(Path, pattern);
 
     /// <inheritdoc />
     public IEnumerator<IFileSystemInfo> GetEnumerator()
