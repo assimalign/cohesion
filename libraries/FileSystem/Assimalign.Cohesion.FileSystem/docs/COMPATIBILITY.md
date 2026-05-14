@@ -78,11 +78,11 @@ provider — is the effective gate.
 | Project | Contract | Provider-specific | Total |
 |---------|---------:|------------------:|------:|
 | `Assimalign.Cohesion.FileSystem` (root) | — | 39 | 39 |
-| `…InMemory` | 32 | 75 | 107 |
-| `…Physical` | 32 | 32 | 64 |
-| `…IsolatedStorage` | 32 | 44 | 76 |
-| `…Aggregate` | 32 | 43 | 75 |
-| **Total** | | | **361** |
+| `…InMemory` | 34 | 75 | 109 |
+| `…Physical` | 34 | 32 | 66 |
+| `…IsolatedStorage` | 34 | 44 | 78 |
+| `…Aggregate` | 34 | 43 | 77 |
+| **Total** | 136 | 233 | **369** |
 
 The root project's 39 tests cover the abstractions directly
 (`FileSystemFactoryBuilder`, `FileSystemException` helpers) and don't
