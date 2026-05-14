@@ -12,9 +12,9 @@ of the `Assimalign.Cohesion.Dns` contracts.
 | `TcpDnsTransport` &mdash; RFC 1035 §4.2.2 length-prefix TCP transport, RFC 7766 connection reuse | Shipping |
 | `StubDnsClient` &mdash; one-shot non-recursive client over a single transport | Shipping |
 | `ForwardingDnsResolver` &mdash; cache-aware forwarding resolver, RFC 5452 spoof protection, RFC 5966 TC fallback, RFC 2308 negative caching | Shipping |
-| `IterativeDnsResolver` &mdash; iterative resolver from root hints with bailiwick + glue policy + QNAME minimization (RFC 9156) | Shipping |
+| `IterativeDnsResolver` &mdash; iterative resolver with bailiwick + glue policy + QNAME minimization (RFC 9156) + out-of-bailiwick NS resolution + delegation caching + EDNS Cookies (RFC 7873) | Shipping |
 | `DotDnsTransport`, `DohDnsTransport`, `DoqDnsTransport` | Placeholder packages (see `Assimalign.Cohesion.Dns.Client.{Dot,Doh,Doq}`) |
-| Out-of-bailiwick NS-name resolution + delegation caching + EDNS Cookies (RFC 7873) + 0x20 case randomization | Deferred to a follow-up PR |
+| 0x20 case randomization | Deferred &mdash; interacts poorly with DNSSEC, revisit when there's demand |
 
 ## Transport contract
 
@@ -77,11 +77,28 @@ The resolver enforces:
 - **Budget enforcement** — bounded referral depth (default 30) and
   bounded total upstream exchanges (default 50) per resolve.
 
-> **PR-5 limitation:** if a referral arrives with no in-bailiwick glue,
-> the resolver currently surfaces `DnsErrorCode.Transport` rather than
-> recursing to resolve the out-of-bailiwick NS name. Well-glued
-> production zones (the IANA root + every TLD that matters) are
-> unaffected. Out-of-bailiwick NS resolution lands in a follow-up.
+**Out-of-bailiwick NS resolution** &mdash; when a referral carries no
+in-bailiwick glue (e.g. the `.com` authority delegating to
+`ns1.example-dns.net`), the resolver recursively resolves the NS
+name through its own cache and the shared per-query budget.
+Bounded by `MaxNsResolutionDepth` (default 5) so a pathological
+delegation chain can't exhaust resources.
+
+**Delegation caching** &mdash; on every successful referral the
+`(zone, NS endpoints)` pair is cached with the NS records' TTL. The
+next query for any name in the cached zone skips the
+root&rarr;TLD walk and starts from the closest enclosing
+delegation. Enabled by default;
+`IterativeDnsResolverOptions.EnableDelegationCache = false`
+forces a full walk per query.
+
+**EDNS Cookies (RFC 7873)** &mdash; every outgoing query carries an
+EDNS Cookie option. Server cookies are cached by upstream IP for
+the resolver's lifetime; a BADCOOKIE response (extended RCODE 23)
+triggers one retry with the newly-received cookie. Client cookies
+default to cryptographically random; pin a known value via
+`EdnsClientCookie` for tests. Disable entirely with
+`EnableEdnsCookies = false`.
 
 ## Stub client
 

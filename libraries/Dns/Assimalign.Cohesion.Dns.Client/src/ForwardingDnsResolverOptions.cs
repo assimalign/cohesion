@@ -71,4 +71,18 @@ public sealed class ForwardingDnsResolverOptions
     /// deterministically.
     /// </summary>
     public TimeProvider? TimeProvider { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, every outgoing query carries an EDNS Cookie option per
+    /// RFC 7873. Server cookies are cached by forwarder IP for the resolver's lifetime; a
+    /// BADCOOKIE response (RCODE 23) triggers one retry with the new cookie. Defaults to
+    /// <see langword="true"/>.
+    /// </summary>
+    public bool EnableEdnsCookies { get; set; } = true;
+
+    /// <summary>
+    /// Optional explicit 8-octet client cookie. When <see langword="null"/>, the resolver
+    /// generates a cryptographically random cookie at construction.
+    /// </summary>
+    public byte[]? EdnsClientCookie { get; set; }
 }

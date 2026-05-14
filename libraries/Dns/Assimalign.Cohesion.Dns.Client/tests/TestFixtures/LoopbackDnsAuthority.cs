@@ -104,6 +104,13 @@ internal sealed class LoopbackDnsAuthority : IAsyncDisposable
     public DnsQuestion? LastQuestion { get; private set; }
 
     /// <summary>
+    /// Optional hook invoked once per inbound query, before the authority responds. Tests
+    /// use this to capture EDNS options, header flags, or anything else not covered by the
+    /// <see cref="LastQuestion"/> shortcut.
+    /// </summary>
+    public Action<DnsMessage>? OnInboundQuery { get; set; }
+
+    /// <summary>
     /// Adds a record to this authority's zone.
     /// </summary>
     public LoopbackDnsAuthority AddRecord(DnsRecord record)
@@ -166,6 +173,7 @@ internal sealed class LoopbackDnsAuthority : IAsyncDisposable
 
         DnsQuestion q = query.Questions[0];
         LastQuestion = q;
+        OnInboundQuery?.Invoke(query);
 
         // 1. Refused if entirely outside our zone.
         if (!IsInZoneOrChild(q.Name))
