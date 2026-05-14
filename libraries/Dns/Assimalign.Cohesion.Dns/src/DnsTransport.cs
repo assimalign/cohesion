@@ -12,6 +12,13 @@ namespace Assimalign.Cohesion.Dns;
 /// </summary>
 /// <remarks>
 /// <para>
+/// One <see cref="DnsTransport"/> binds to one <see cref="Endpoint"/>. Resolvers that need to
+/// fail over between multiple upstreams hold a list of transports rather than a single
+/// transport with N endpoints — this matches the
+/// <c>Assimalign.Cohesion.Transports</c> family's <c>ClientTransport</c> shape and lets
+/// stream-based subclasses (TCP, DoT, DoQ) pool connections against a fixed remote.
+/// </para>
+/// <para>
 /// The transport works in terms of raw byte buffers; serialization and parsing live in the
 /// wire-format layer of <c>Assimalign.Cohesion.Dns</c>. This split keeps the transport
 /// implementation small and lets the resolver decide message-level concerns like EDNS
@@ -28,17 +35,20 @@ public abstract class DnsTransport : IDisposable, IAsyncDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Sends <paramref name="request"/> to <paramref name="endpoint"/> and returns the
-    /// response payload. The returned <see cref="ReadOnlyMemory{Byte}"/> may share storage
-    /// with a pooled buffer owned by the transport; callers <strong>MUST NOT</strong> retain
-    /// it beyond the lifetime of the awaited task without copying.
+    /// The upstream server bound to this transport. Set at construction; immutable.
     /// </summary>
-    /// <param name="endpoint">The upstream server to query.</param>
+    public abstract EndPoint Endpoint { get; }
+
+    /// <summary>
+    /// Sends <paramref name="request"/> to <see cref="Endpoint"/> and returns the response
+    /// payload. The returned <see cref="ReadOnlyMemory{Byte}"/> may share storage with a
+    /// pooled buffer owned by the transport; callers <strong>MUST NOT</strong> retain it
+    /// beyond the lifetime of the awaited task without copying.
+    /// </summary>
     /// <param name="request">The serialized DNS request bytes (just the DNS message; no
     /// length-prefix for stream-based transports &#8211; the transport supplies framing).</param>
     /// <param name="cancellationToken">Cancels the in-flight exchange.</param>
     public abstract Task<ReadOnlyMemory<byte>> ExchangeAsync(
-        EndPoint endpoint,
         ReadOnlyMemory<byte> request,
         CancellationToken cancellationToken = default);
 
