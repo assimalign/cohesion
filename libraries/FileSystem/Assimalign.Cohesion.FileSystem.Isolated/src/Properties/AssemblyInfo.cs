@@ -1,9 +1,6 @@
 using System.Runtime.CompilerServices;
 
-#if DEBUG
+// Friend access for the Isolated test project. The Cohesion repo is not strong-name signed in
+// CI builds, so both assemblies have PublicKeyToken=null — including a PublicKey on this
+// attribute would trip CS0281 in Release. Keep the declaration unconditional and key-free.
 [assembly: InternalsVisibleTo("Assimalign.Cohesion.FileSystem.Isolated.Tests")]
-#endif
-
-#if RELEASE
-[assembly: InternalsVisibleTo("Assimalign.Cohesion.FileSystem.Isolated.Tests, PublicKey=0024000004800000940000000602000000240000525341310004000001000100e9758208a4534e9808dc497a5642ee3f976b0565635b718294966b8b6d3235c3ded8f55a332b17c3d284333e9a41589c6e71b67d6c4b8c8304dda07d29aa60b38b4f3f85a9cbb5bea68fddecc5f08fcb9a3182a40610347ebcdd0ac63baa69b4cb7b85d819016c6afb8facb87c75a51d5ba2a0ac5b15174793a3b883e54be4d4")]
-#endif
