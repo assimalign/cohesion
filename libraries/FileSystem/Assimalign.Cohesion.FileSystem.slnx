@@ -1,0 +1,89 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/FileSystem/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/">
+		<File Path="Assimalign.Cohesion.FileSystem/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem/tests/Assimalign.Cohesion.FileSystem.Tests.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/">
+		<File Path="Assimalign.Cohesion.FileSystem.Aggregate/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem.Aggregate/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem.Aggregate/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Aggregate/src/Assimalign.Cohesion.FileSystem.Aggregate.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Aggregate/tests/Assimalign.Cohesion.FileSystem.Aggregate.Tests.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/">
+		<File Path="Assimalign.Cohesion.FileSystem.Globbing/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem.Globbing/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem.Globbing/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Globbing/src/Assimalign.Cohesion.FileSystem.Globbing.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Globbing/tests/Assimalign.Cohesion.FileSystem.Globbing.Tests.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/">
+		<File Path="Assimalign.Cohesion.FileSystem.InMemory/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem.InMemory/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem.InMemory/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem.InMemory/tests/Assimalign.Cohesion.FileSystem.InMemory.Tests.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/">
+		<File Path="Assimalign.Cohesion.FileSystem.Isolated/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem.Isolated/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem.Isolated/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Isolated/src/Assimalign.Cohesion.FileSystem.Isolated.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Isolated/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Isolated/tests/Assimalign.Cohesion.FileSystem.Isolated.Tests.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Physical/">
+		<File Path="Assimalign.Cohesion.FileSystem.Physical/README.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Physical/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem.Physical/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.FileSystem.Physical/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
+	</Folder>
+	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/">
+		<Project Path="Assimalign.Cohesion.FileSystem.Physical/tests/Assimalign.Cohesion.FileSystem.Physical.Tests.csproj" />
+	</Folder>
+</Solution>

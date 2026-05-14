@@ -1,9 +1,9 @@
 using System;
 using System.IO;
 using System.Threading;
-using Assimalign.Cohesion.Logging.Console.Internal;
+using Assimalign.Cohesion.Logging.Internal;
 
-namespace Assimalign.Cohesion.Logging.Console;
+namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// <see cref="ILoggerProvider"/> that writes structured log entries to a pair of

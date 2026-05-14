@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Assimalign.Cohesion.Logging;
-using Assimalign.Cohesion.Logging.Console;
 
-namespace Assimalign.Cohesion.Logging.Console.Tests;
+namespace Assimalign.Cohesion.Logging.Tests;
 
 public class ConsoleLoggerProviderTests
 {

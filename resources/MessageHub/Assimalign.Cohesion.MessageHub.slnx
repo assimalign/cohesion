@@ -1,24 +1,24 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/MessageHub/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub/" />
-    <Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub/src/">
-        <Project Path="Assimalign.Cohesion.MessageHub/src/Assimalign.Cohesion.MessageHub.csproj" />
-    </Folder>
-    <Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/">
-        <File Path="Assimalign.Cohesion.MessageHub.Client/README.md" />
-    </Folder>
-    <Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/">
-        <Project Path="Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj" />
-    </Folder>
-    <Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
-        <Project Path="Assimalign.Cohesion.MessageHub.Client/tests/Assimalign.Cohesion.MessageHub.Client.Tests.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/MessageHub/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub/" />
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub/src/">
+		<Project Path="Assimalign.Cohesion.MessageHub/src/Assimalign.Cohesion.MessageHub.csproj" />
+	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/">
+		<File Path="Assimalign.Cohesion.MessageHub.Client/README.md" />
+	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/">
+		<Project Path="Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj" />
+	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
+		<Project Path="Assimalign.Cohesion.MessageHub.Client/tests/Assimalign.Cohesion.MessageHub.Client.Tests.csproj" />
+	</Folder>
 </Solution>

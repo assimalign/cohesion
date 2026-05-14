@@ -1,0 +1,24 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/DependencyInjection/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/DependencyInjection/Assimalign.Cohesion.DependencyInjection/">
+		<File Path="Assimalign.Cohesion.DependencyInjection/README.md" />
+	</Folder>
+	<Folder Name="/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/">
+		<File Path="Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.DependencyInjection/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/">
+		<Project Path="Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
+	</Folder>
+	<Folder Name="/DependencyInjection/Assimalign.Cohesion.DependencyInjection/tests/">
+		<Project Path="Assimalign.Cohesion.DependencyInjection/tests/Assimalign.Cohesion.DependencyInjection.Tests.csproj" />
+	</Folder>
+</Solution>

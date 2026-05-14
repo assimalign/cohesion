@@ -1,0 +1,52 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Cache/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/">
+		<File Path="Assimalign.Cohesion.Caching/README.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/">
+		<File Path="Assimalign.Cohesion.Caching/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/" />
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/">
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEntryPriority.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEvictionReason.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheException.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheExtensions.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICache.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICacheEntry.md" />
+		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/PostEvictionCallbackRegistration.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/src/">
+		<Project Path="Assimalign.Cohesion.Caching/src/Assimalign.Cohesion.Caching.csproj" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching/tests/">
+		<Project Path="Assimalign.Cohesion.Caching/tests/Assimalign.Cohesion.Caching.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/">
+		<File Path="Assimalign.Cohesion.Caching.InMemory/README.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/">
+		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/" />
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/">
+		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCache.md" />
+		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCacheOptions.md" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/src/">
+		<Project Path="Assimalign.Cohesion.Caching.InMemory/src/Assimalign.Cohesion.Caching.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/tests/">
+		<Project Path="Assimalign.Cohesion.Caching.InMemory/tests/Assimalign.Cohesion.Caching.InMemory.Tests.csproj" />
+	</Folder>
+</Solution>

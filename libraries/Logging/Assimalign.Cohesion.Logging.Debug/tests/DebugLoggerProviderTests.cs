@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using Assimalign.Cohesion.Logging;
-using Assimalign.Cohesion.Logging.Debug;
 
-namespace Assimalign.Cohesion.Logging.Debug.Tests;
+namespace Assimalign.Cohesion.Logging.Tests;
 
 public class DebugLoggerProviderTests
 {

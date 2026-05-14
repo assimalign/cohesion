@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 
-namespace Assimalign.Cohesion.Logging.Console.Internal;
+namespace Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
 /// Default text renderer for console log entries. Output format:

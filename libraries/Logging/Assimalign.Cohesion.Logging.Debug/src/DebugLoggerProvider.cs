@@ -1,9 +1,10 @@
 using System;
 using System.Globalization;
 using System.Text;
-using Assimalign.Cohesion.Logging.Debug.Internal;
 
-namespace Assimalign.Cohesion.Logging.Debug;
+namespace Assimalign.Cohesion.Logging;
+
+using Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
 /// <see cref="ILoggerProvider"/> that writes structured log entries through

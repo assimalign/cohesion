@@ -21,6 +21,13 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Api.Controllers/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Api.Controllers/src/">
+		<Project Path="Assimalign.Cohesion.Web.Api.Controllers/src/Assimalign.Cohesion.Web.Api.Controllers.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Api.Controllers/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Api.Controllers/tests/Assimalign.Cohesion.Web.Api.Controllers.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.Web.ApplicationModel/README.md" />
 	</Folder>
@@ -58,8 +65,15 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Results/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Results/src/">
+		<Project Path="Assimalign.Cohesion.Web.Results/src/Assimalign.Cohesion.Web.Results.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="Assimalign.Cohesion.Web.Routing/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/docs/">
+		<File Path="Assimalign.Cohesion.Web.Routing/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />

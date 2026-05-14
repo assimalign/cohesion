@@ -6,10 +6,4 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.FileSystem" />
 	</ItemGroup>
-	<ItemGroup>
-		<None Include="..\README.md">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>
 </Project>

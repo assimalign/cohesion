@@ -1,20 +1,20 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/NatGateway/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/">
-        <File Path="Assimalign.Cohesion.NatGateway/README.md" />
-    </Folder>
-    <Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/src/">
-        <Project Path="Assimalign.Cohesion.NatGateway/src/Assimalign.Cohesion.NatGateway.csproj" />
-    </Folder>
-    <Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
-        <Project Path="Assimalign.Cohesion.NatGateway/tests/Assimalign.Cohesion.NatGateway.Tests.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/NatGateway/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/">
+		<File Path="Assimalign.Cohesion.NatGateway/README.md" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/src/">
+		<Project Path="Assimalign.Cohesion.NatGateway/src/Assimalign.Cohesion.NatGateway.csproj" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
+		<Project Path="Assimalign.Cohesion.NatGateway/tests/Assimalign.Cohesion.NatGateway.Tests.csproj" />
+	</Folder>
 </Solution>

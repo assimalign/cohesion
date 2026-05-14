@@ -58,6 +58,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Globbing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Physical" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />

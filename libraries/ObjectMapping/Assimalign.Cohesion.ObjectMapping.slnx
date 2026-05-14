@@ -1,0 +1,24 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/ObjectMapping/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/">
+		<File Path="Assimalign.Cohesion.ObjectMapping/README.md" />
+	</Folder>
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/docs/">
+		<File Path="Assimalign.Cohesion.ObjectMapping/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.ObjectMapping/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/">
+		<Project Path="Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj" />
+	</Folder>
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/tests/">
+		<Project Path="Assimalign.Cohesion.ObjectMapping/tests/Assimalign.Cohesion.ObjectMapping.Tests.csproj" />
+	</Folder>
+</Solution>

@@ -1,0 +1,102 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Resilience/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience/">
+		<File Path="Assimalign.Cohesion.Resilience/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience/docs/">
+		<File Path="Assimalign.Cohesion.Resilience/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience/src/">
+		<Project Path="Assimalign.Cohesion.Resilience/src/Assimalign.Cohesion.Resilience.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience/tests/Assimalign.Cohesion.Resilience.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/">
+		<File Path="Assimalign.Cohesion.Resilience.CircuitBreaker/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.CircuitBreaker/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.CircuitBreaker/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.CircuitBreaker/src/Assimalign.Cohesion.Resilience.CircuitBreaker.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.CircuitBreaker/tests/Assimalign.Cohesion.Resilience.CircuitBreaker.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Fallback/">
+		<File Path="Assimalign.Cohesion.Resilience.Fallback/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Fallback/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.Fallback/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.Fallback/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Fallback/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.Fallback/src/Assimalign.Cohesion.Resilience.Fallback.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Fallback/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.Fallback/tests/Assimalign.Cohesion.Resilience.Fallback.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Hedging/">
+		<File Path="Assimalign.Cohesion.Resilience.Hedging/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Hedging/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.Hedging/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.Hedging/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Hedging/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.Hedging/src/Assimalign.Cohesion.Resilience.Hedging.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Hedging/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.Hedging/tests/Assimalign.Cohesion.Resilience.Hedging.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/">
+		<File Path="Assimalign.Cohesion.Resilience.RateLimiting/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.RateLimiting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.RateLimiting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.RateLimiting/src/Assimalign.Cohesion.Resilience.RateLimiting.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.RateLimiting/tests/Assimalign.Cohesion.Resilience.RateLimiting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Retry/">
+		<File Path="Assimalign.Cohesion.Resilience.Retry/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Retry/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.Retry/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.Retry/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Retry/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.Retry/src/Assimalign.Cohesion.Resilience.Retry.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Retry/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.Retry/tests/Assimalign.Cohesion.Resilience.Retry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Timeout/">
+		<File Path="Assimalign.Cohesion.Resilience.Timeout/README.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Timeout/docs/">
+		<File Path="Assimalign.Cohesion.Resilience.Timeout/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Resilience.Timeout/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Timeout/src/">
+		<Project Path="Assimalign.Cohesion.Resilience.Timeout/src/Assimalign.Cohesion.Resilience.Timeout.csproj" />
+	</Folder>
+	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Timeout/tests/">
+		<Project Path="Assimalign.Cohesion.Resilience.Timeout/tests/Assimalign.Cohesion.Resilience.Timeout.Tests.csproj" />
+	</Folder>
+</Solution>

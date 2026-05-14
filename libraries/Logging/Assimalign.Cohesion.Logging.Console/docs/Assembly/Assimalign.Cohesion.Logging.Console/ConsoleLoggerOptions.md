@@ -1,4 +1,4 @@
-# `Assimalign.Cohesion.Logging.Console.ConsoleLoggerOptions`
+# `Assimalign.Cohesion.Logging.ConsoleLoggerOptions`
 
 Configuration shape for `ConsoleLoggerProvider`.
 

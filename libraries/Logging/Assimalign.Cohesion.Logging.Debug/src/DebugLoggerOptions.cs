@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Logging.Debug;
+namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// Configuration shape for <see cref="DebugLoggerProvider"/>.
