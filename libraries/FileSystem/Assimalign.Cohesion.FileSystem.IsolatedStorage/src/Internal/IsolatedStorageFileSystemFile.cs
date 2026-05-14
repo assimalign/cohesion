@@ -13,10 +13,10 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// share mode.
 /// </summary>
 [DebuggerDisplay("[F] - {Path}")]
-internal sealed class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSystemFile
+internal sealed class IsolatedStorageFileSystemFile : IsolatedStorageFileSystemInfo, IFileSystemFile
 {
-    public IsolatedFileSystemFile(
-        IsolatedFileSystem fileSystem,
+    public IsolatedStorageFileSystemFile(
+        IsolatedStorageFileSystem fileSystem,
         IsolatedStorageFile storage,
         FileSystemPath path)
         : base(fileSystem, storage, path)
@@ -63,18 +63,18 @@ internal sealed class IsolatedFileSystemFile : IsolatedFileSystemInfo, IFileSyst
             string text = Path.ToString();
             int lastSep = text.LastIndexOf('/');
             FileSystemPath parentPath = lastSep <= 0
-                ? IsolatedPathHelper.Root
+                ? IsolatedStoragePathHelper.Root
                 : text.Substring(0, lastSep);
 
-            return new IsolatedFileSystemDirectory(FileSystem, Storage, parentPath);
+            return new IsolatedStorageFileSystemDirectory(FileSystem, Storage, parentPath);
         }
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// Returns a polling token scoped to this file only. The cadence is configured via
-    /// <see cref="IsolatedFileSystemOptions.WatchPollInterval"/>; see
-    /// <see cref="IsolatedFileSystem.Watch(Glob?)"/> for details.
+    /// <see cref="IsolatedStorageFileSystemOptions.WatchPollInterval"/>; see
+    /// <see cref="IsolatedStorageFileSystem.Watch(Glob?)"/> for details.
     /// </remarks>
     public IFileSystemEventToken Watch() => FileSystem.CreateFileWatchToken(Path);
 

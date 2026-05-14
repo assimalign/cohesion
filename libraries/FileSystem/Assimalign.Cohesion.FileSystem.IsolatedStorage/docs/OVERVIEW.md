@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.FileSystem.Isolated
+# Assimalign.Cohesion.FileSystem.IsolatedStorage
 
 ## Summary
 
@@ -14,16 +14,16 @@ Introduces an isolated-storage-backed IFileSystem implementation for user-scoped
 
 ## Primary Responsibilities
 
-- IsolatedFileSystem is the single public backend type for the package.
+- IsolatedStorageFileSystem is the single public backend type for the package.
 - The design should mirror the same operations exposed by the core IFileSystem contract.
 - Several members are unfinished, so the library currently describes a target direction more than a finished adapter.
 
 ## Key Types
 
-- IsolatedFileSystem
+- IsolatedStorageFileSystem
 - IsolatedFilesystemDirectory
-- IsolatedFileSystemFile
-- IsolatedFileSystemInfo
+- IsolatedStorageFileSystemFile
+- IsolatedStorageFileSystemInfo
 
 ## Source Layout
 

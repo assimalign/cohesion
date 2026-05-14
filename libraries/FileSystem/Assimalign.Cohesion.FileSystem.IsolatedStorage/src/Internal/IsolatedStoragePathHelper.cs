@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// root prefix) and the string paths consumed by <see cref="System.IO.IsolatedStorage.IsolatedStorageFile"/>
 /// (which expects relative paths without a leading separator).
 /// </summary>
-internal static class IsolatedPathHelper
+internal static class IsolatedStoragePathHelper
 {
     /// <summary>
     /// The implicit root prefix for an <see cref="IFileSystem"/> backed by isolated storage. The
