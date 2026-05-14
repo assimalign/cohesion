@@ -47,9 +47,9 @@ no `FileSystemWatcher`.
 
 ## Test coverage
 
-107 tests including:
+109 tests including:
 
-- 32 contract tests inherited from `FileSystemStandardTests` (path
+- 34 contract tests inherited from `FileSystemStandardTests` (path
   semantics, CRUD, copy/move, enumeration, deep nesting, large files,
   timestamps).
 - 75 provider-specific tests covering quota enforcement, locking, change
