@@ -84,7 +84,7 @@ public class PhysicalFileSystem : IFileSystem
 
             if (info.Exists)
             {
-                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path);
+                FileSystemException.ThrowPathAlreadyExist(path);
             }
 
             info.Create();
@@ -129,26 +129,33 @@ public class PhysicalFileSystem : IFileSystem
 
             if (info.Exists)
             {
-                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path);
+                FileSystemException.ThrowPathAlreadyExist(path);
+            }
+
+            // FileInfo.Create does not auto-create the parent directory chain. Mirror the
+            // behavior of the InMemory provider so callers can create nested paths in one step.
+            if (info.Directory is { Exists: false } parent)
+            {
+                parent.Create();
             }
 
             info.Create().Dispose();
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(path, exception);
+            FileSystemException.ThrowPathTooLong(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path, exception);
+            FileSystemException.ThrowPathAlreadyExist(path, exception);
         }
 
         return new PhysicalFileSystemFile(this, info);
@@ -177,11 +184,11 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(path, exception);
+            FileSystemException.ThrowPathTooLong(path, exception);
         }
         catch (FileNotFoundException exception)
         {
@@ -193,11 +200,16 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path, exception);
+            FileSystemException.ThrowPathAlreadyExist(path, exception);
+        }
+
+        if (info is null)
+        {
+            FileSystemException.ThrowPathNotFound(path);
         }
 
         return info!;
@@ -213,15 +225,20 @@ public class PhysicalFileSystem : IFileSystem
 
             var info = new DirectoryInfo(fullPath);
 
+            if (!info.Exists)
+            {
+                FileSystemException.ThrowDirectoryNotFound(path);
+            }
+
             info.Delete(true);
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(path, exception);
+            FileSystemException.ThrowPathTooLong(path, exception);
         }
         catch (DirectoryNotFoundException exception)
         {
@@ -229,11 +246,11 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path, exception);
+            FileSystemException.ThrowPathAlreadyExist(path, exception);
         }
     }
 
@@ -249,14 +266,14 @@ public class PhysicalFileSystem : IFileSystem
 
             if (!info.Exists)
             {
-                throw new InvalidOperationException("the File System directory does not exist.");
+                FileSystemException.ThrowFileNotFound(path);
             }
 
             info.Delete();
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (PathTooLongException exception)
         {
@@ -268,11 +285,11 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (IOException exception) when (exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(path, exception);
+            FileSystemException.ThrowAccessDenied(path, exception);
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(path, exception);
+            FileSystemException.ThrowPathAlreadyExist(path, exception);
         }
     }
 
@@ -292,15 +309,30 @@ public class PhysicalFileSystem : IFileSystem
 
         try
         {
-            File.Copy(source, destination);
+            FileSystemPath sourceFullPath = RootDirectory.Path.Merge(source);
+            FileSystemPath destinationFullPath = RootDirectory.Path.Merge(destination);
+
+            if (!File.Exists(sourceFullPath))
+            {
+                FileSystemException.ThrowFileNotFound(source);
+            }
+
+            // Mirror the InMemory provider and auto-create the destination's parent chain.
+            var destinationInfo = new FileInfo(destinationFullPath);
+            if (destinationInfo.Directory is { Exists: false } parent)
+            {
+                parent.Create();
+            }
+
+            File.Copy(sourceFullPath, destinationFullPath);
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(source, exception);
+            FileSystemException.ThrowAccessDenied(source, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(source, exception);
+            FileSystemException.ThrowPathTooLong(source, exception);
         }
         catch (FileNotFoundException exception)
         {
@@ -316,7 +348,7 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (IOException exception) when (exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(source, exception);
+            FileSystemException.ThrowPathAlreadyExist(source, exception);
         }
     }
 
@@ -326,22 +358,29 @@ public class PhysicalFileSystem : IFileSystem
 
         try
         {
-            if (File.Exists(source))
+            FileSystemPath sourceFullPath = RootDirectory.Path.Merge(source);
+            FileSystemPath destinationFullPath = RootDirectory.Path.Merge(destination);
+
+            if (File.Exists(sourceFullPath))
             {
-                File.Move(source, destination);
+                File.Move(sourceFullPath, destinationFullPath);
             }
-            else if (Directory.Exists(source))
+            else if (Directory.Exists(sourceFullPath))
             {
-                Directory.Move(source, destination);
+                Directory.Move(sourceFullPath, destinationFullPath);
+            }
+            else
+            {
+                FileSystemException.ThrowPathNotFound(source);
             }
         }
         catch (UnauthorizedAccessException exception)
         {
-            ThrowHelper.ThrowAccessNotAllowed(source, exception);
+            FileSystemException.ThrowAccessDenied(source, exception);
         }
         catch (PathTooLongException exception)
         {
-            ThrowHelper.ThrowPathTooLong(source, exception);
+            FileSystemException.ThrowPathTooLong(source, exception);
         }
         catch (FileNotFoundException exception)
         {
@@ -349,15 +388,15 @@ public class PhysicalFileSystem : IFileSystem
         }
         catch (DirectoryNotFoundException exception)
         {
-            ThrowHelper.ThrowPathNotFound(source, exception);
+            FileSystemException.ThrowPathNotFound(source, exception);
         }
         catch (IOException exception) when(exception.HResult == -2147024864) // Win32 Code 32 - The process cannot access the file because it is being used by another process.
         {
-            ThrowHelper.ThrowAccessNotAllowed(source, exception);
+            FileSystemException.ThrowAccessDenied(source, exception);
         }
         catch (IOException exception) when(exception.HResult == -2147024816)
         {
-            ThrowHelper.ThrowFileOrDirectoryAlreadyExists(source, exception);
+            FileSystemException.ThrowPathAlreadyExist(source, exception);
         }
     }
     
@@ -404,6 +443,9 @@ public class PhysicalFileSystem : IFileSystem
 
     private void CheckIfReadOnly(string? operation = null)
     {
-        InvalidOperationException.ThrowIf(IsReadOnly, $"The operation {operation} is not allowed. FileSystem is read-only.");
+        if (IsReadOnly)
+        {
+            FileSystemException.ThrowReadOnly(operation ?? string.Empty);
+        }
     }
 }

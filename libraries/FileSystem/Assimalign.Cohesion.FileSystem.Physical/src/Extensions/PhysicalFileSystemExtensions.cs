@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-public static class PhsysicalFileSystemExtensions
+public static class PhysicalFileSystemExtensions
 {
     extension(FileSystemFactoryBuilder builder)
     {

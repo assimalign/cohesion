@@ -16,4 +16,7 @@
 	<ItemGroup>
 		<Using Include="Xunit" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\Assimalign.Cohesion.FileSystem\tests\Shared\FileSystemStandardTests.cs" Link="Shared\FileSystemStandardTests.cs" />
+	</ItemGroup>
 </Project>

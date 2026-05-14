@@ -865,16 +865,22 @@ public class InMemoryFileSystemTests
     // ReadOnly Tests
     // ================================================================
 
-    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - ReadOnly: Should throw on write operations")]
+    [Fact(DisplayName = "Cohesion Test [InMemoryFileSystem] - ReadOnly: Should throw FileSystemException(ReadOnly) on write operations")]
     public void ReadOnly_WriteOperations_ShouldThrow()
     {
         var fileSystem = CreateFileSystem(isReadOnly: true);
 
         Assert.True(fileSystem.IsReadOnly);
-        Assert.Throws<InvalidOperationException>(() => fileSystem.CreateDirectory("test"));
-        Assert.Throws<InvalidOperationException>(() => fileSystem.CreateFile("test.txt"));
-        Assert.Throws<InvalidOperationException>(() => fileSystem.DeleteDirectory("test"));
-        Assert.Throws<InvalidOperationException>(() => fileSystem.DeleteFile("test.txt"));
+        AssertReadOnly(() => fileSystem.CreateDirectory("test"));
+        AssertReadOnly(() => fileSystem.CreateFile("test.txt"));
+        AssertReadOnly(() => fileSystem.DeleteDirectory("test"));
+        AssertReadOnly(() => fileSystem.DeleteFile("test.txt"));
+
+        static void AssertReadOnly(Action action)
+        {
+            var exception = Assert.Throws<FileSystemException>(action);
+            Assert.Equal(FileSystemErrorCode.ReadOnly, exception.Code);
+        }
     }
 
     // ================================================================

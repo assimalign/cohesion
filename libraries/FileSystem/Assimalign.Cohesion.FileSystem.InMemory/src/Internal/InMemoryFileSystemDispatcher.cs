@@ -31,13 +31,13 @@ internal class InMemoryFileSystemDispatcher : IDisposable
 
     public event FileSystemEventHandler? Changed
     {
-        add => _onChanged = (FileSystemEventHandler)Delegate.Combine(_onChanged, value);
+        add => _onChanged = (FileSystemEventHandler)Delegate.Combine(_onChanged, value)!;
         remove => _onChanged = (FileSystemEventHandler)Delegate.Remove(_onChanged, value)!;
     }
 
     public event FileSystemEventHandler? Created
     {
-        add => _onCreated = (FileSystemEventHandler)Delegate.Combine(_onCreated, value);
+        add => _onCreated = (FileSystemEventHandler)Delegate.Combine(_onCreated, value)!;
         remove => _onCreated = (FileSystemEventHandler)Delegate.Remove(_onCreated, value)!;
     }
 
