@@ -10,8 +10,9 @@ of the `Assimalign.Cohesion.Dns` contracts.
 |---------|--------|
 | `UdpDnsTransport` &mdash; RFC 1035 §4.2.1 UDP transport | Shipping |
 | `TcpDnsTransport` &mdash; RFC 1035 §4.2.2 length-prefix TCP transport, RFC 7766 connection reuse | Shipping |
+| `ForwardingDnsResolver` &mdash; cache-aware forwarding resolver, RFC 5452 spoof protection, RFC 5966 TC fallback, RFC 2308 negative caching | Shipping |
 | `DotDnsTransport`, `DohDnsTransport`, `DoqDnsTransport` | Placeholder packages (see `Assimalign.Cohesion.Dns.Client.{Dot,Doh,Doq}`) |
-| Recursive resolver + cache | Deferred to a follow-up PR |
+| Iterative resolver from root hints, referral chasing, bailiwick + glue policing, QNAME minimization | Deferred to a follow-up PR |
 
 ## Transport contract
 
@@ -36,6 +37,57 @@ parsing live in `Assimalign.Cohesion.Dns`. This split keeps the
 transport implementation small and lets the resolver decide
 message-level concerns like EDNS payload size or DNSSEC bits without
 involving the network layer.
+
+## Forwarding resolver
+
+`ForwardingDnsResolver` is a cache-aware client that delegates the recursive
+walk to one or more upstream resolvers (a corporate DNS server, a public
+service like `1.1.1.1` / `9.9.9.9`, a local `unbound`). It's the right shape
+for stub resolvers, side-car caches, and any deployment where a trusted
+upstream already exists.
+
+```csharp
+using var udp = new UdpDnsTransport(new UdpDnsTransportOptions
+{
+    EndPoint = new IPEndPoint(IPAddress.Parse("1.1.1.1"), 53),
+});
+using var tcp = new TcpDnsTransport(new TcpDnsTransportOptions
+{
+    EndPoint = new IPEndPoint(IPAddress.Parse("1.1.1.1"), 53),
+});
+
+var resolver = new ForwardingDnsResolver(new ForwardingDnsResolverOptions
+{
+    Forwarders     = { udp },
+    TcpFallbacks   = { [udp] = tcp },   // retry on TCP when UDP comes back truncated
+    QueryTimeout   = TimeSpan.FromSeconds(5),
+    EdnsPayloadSize = 1232,             // RFC 6891 + dnsflagday.net guidance
+    MaxCacheTtl    = TimeSpan.FromHours(1),
+});
+
+DnsMessage answer = await resolver.ResolveAsync(new DnsQuestion("example.com", DnsRecordType.A));
+```
+
+The resolver:
+
+- **Caches** positive answers, NXDOMAIN, and NODATA (RFC 2308) by question.
+  Negative caching uses `min(SOA.TTL, SOA.MINIMUM)` from the authority
+  section. Cached non-success responses re-throw the same exception shape
+  on the next call so callers don't have to distinguish hit from miss.
+- **Validates** every response per RFC 5452: the transaction id, QR flag,
+  and question triple (name + type + class) must echo the outgoing query.
+  Failures surface as `DnsException(Spoofed)`. Transaction ids are drawn
+  from `RandomNumberGenerator` for every query.
+- **Fails over** to the next configured forwarder when an exchange fails
+  with `Transport` or `Timeout`. Authoritative non-success responses
+  (NXDOMAIN, SERVFAIL, REFUSED) are not retried &mdash; they're the answer.
+- **Falls back to TCP** when a UDP response carries the TC flag and a TCP
+  transport is registered in `TcpFallbacks` (RFC 5966). When no TCP
+  fallback exists the truncated response is returned as-is.
+
+Iterative resolution from root hints &mdash; referral chasing, bailiwick
+checks, glue policing, QNAME minimization &mdash; is a separate concern
+that lands in a follow-up.
 
 ## Connection reuse + retry semantics
 
