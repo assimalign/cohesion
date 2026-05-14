@@ -19,7 +19,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            "Assimalign.Cohesion.Core",
             "Assimalign.Cohesion.ObjectValidation"
           ]
     steps:
