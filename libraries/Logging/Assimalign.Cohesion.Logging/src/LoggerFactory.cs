@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Logging;
 /// registered providers' lifecycle.
 /// </summary>
 /// <remarks>
-/// <see cref="Create(string)"/> returns the concrete <see cref="LoggerBase"/> via covariant
+/// <see cref="Create(string)"/> returns the concrete <see cref="Logger"/> via covariant
 /// return, so callers that hold a strongly typed <see cref="LoggerFactory"/> reference pay
 /// only one virtual dispatch per log call. The factory still implements
 /// <see cref="ILoggerFactory"/>; callers that hold the interface get an <see cref="ILogger"/>
@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Logging;
 /// </remarks>
 public sealed class LoggerFactory : ILoggerFactory
 {
-    private readonly ConcurrentDictionary<string, LoggerBase> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Logger> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LoggerFactoryOptions _options;
     private readonly ILoggerProvider[] _providersSnapshot;
     private readonly ILoggerEnricher[] _enrichersSnapshot;
@@ -57,13 +57,13 @@ public sealed class LoggerFactory : ILoggerFactory
     /// registered providers on first use.
     /// </summary>
     /// <remarks>
-    /// Returns <see cref="LoggerBase"/> via covariant return; the call to
+    /// Returns <see cref="Logger"/> via covariant return; the call to
     /// <see cref="ILoggerFactory.Create(string)"/> still returns the same instance through the
     /// interface bridge.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
     /// <exception cref="ObjectDisposedException">The factory has been disposed.</exception>
-    public LoggerBase Create(string category)
+    public Logger Create(string category)
     {
         ArgumentException.ThrowIfNullOrEmpty(category);
         ThrowIfDisposed();

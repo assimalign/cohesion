@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Logging.Console;
 /// The provider is thread-safe. Output is serialized through an internal lock so concurrent
 /// log entries do not interleave on the same writer.
 /// </remarks>
-public sealed class ConsoleLoggerProvider : LoggerProviderBase
+public sealed class ConsoleLoggerProvider : LoggerProvider
 {
     private readonly ConsoleLoggerOptions _options;
     private readonly Lock _writeLock = new();
@@ -40,7 +40,7 @@ public sealed class ConsoleLoggerProvider : LoggerProviderBase
     public override string Name => "Console";
 
     /// <inheritdoc />
-    protected override LoggerBase CreateCore(string category) => new ConsoleLogger(category, this);
+    protected override Logger CreateCore(string category) => new ConsoleLogger(category, this);
 
     /// <inheritdoc />
     protected override void DisposeCore()

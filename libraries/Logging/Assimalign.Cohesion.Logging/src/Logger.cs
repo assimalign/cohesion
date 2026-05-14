@@ -24,13 +24,13 @@ namespace Assimalign.Cohesion.Logging;
 /// calls when callers hold a strongly typed reference.
 /// </para>
 /// </remarks>
-public abstract class LoggerBase : ILogger
+public abstract class Logger : ILogger
 {
     /// <summary>
     /// Initializes the base with the supplied category.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
-    protected LoggerBase(string category)
+    protected Logger(string category)
     {
         ArgumentException.ThrowIfNullOrEmpty(category);
         Category = category;

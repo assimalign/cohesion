@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// a single underlying logger are isolated: an exception from one sink never aborts fan-out to
 /// the others.
 /// </remarks>
-internal sealed class CompositeLogger : LoggerBase
+internal sealed class CompositeLogger : Logger
 {
     private readonly ILogger[] _underlying;
     private readonly IReadOnlyList<ILoggerEnricher> _enrichers;

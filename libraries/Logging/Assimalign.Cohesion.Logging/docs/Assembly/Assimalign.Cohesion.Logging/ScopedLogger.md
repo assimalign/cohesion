@@ -1,12 +1,12 @@
-# `Assimalign.Cohesion.Logging.ScopedLoggerBase`
+# `Assimalign.Cohesion.Logging.ScopedLogger`
 
 Reusable abstract base class for `IScopedLogger` implementations. Inherits the template-method
-pattern from `LoggerBase` and adds idempotent disposal plus a `ParentId` field.
+pattern from `Logger` and adds idempotent disposal plus a `ParentId` field.
 
 ## Constructor
 
 ```csharp
-protected ScopedLoggerBase(string category, LogId parentId);
+protected ScopedLogger(string category, LogId parentId);
 ```
 
 Throws `ArgumentException` when `category` is null or empty.
@@ -17,15 +17,15 @@ Throws `ArgumentException` when `category` is null or empty.
 | --- | --- |
 | `LogId ParentId { get; }` | Id of the seed entry that opened the scope. |
 | `bool IsDisposed { get; }` | True after `Dispose` has run. |
-| `override bool IsEnabled(LogLevel level)` | Returns false when `IsDisposed`; otherwise delegates to `LoggerBase.IsEnabled`. |
+| `override bool IsEnabled(LogLevel level)` | Returns false when `IsDisposed`; otherwise delegates to `Logger.IsEnabled`. |
 | `void Dispose()` | Idempotent; flips the disposed flag and calls `DisposeCore`. |
 | `protected virtual void DisposeCore()` | Implementation hook; defaults to no-op. |
-| Inherited `WriteCore`, `BeginScopeCore` | Derived classes implement these from `LoggerBase`. |
+| Inherited `WriteCore`, `BeginScopeCore` | Derived classes implement these from `Logger`. |
 
 ## Behavior after disposal
 
 - `IsEnabled(level)` returns false.
-- `Log(entry)` short-circuits through `LoggerBase.Log` (silent drop) - no exception thrown.
+- `Log(entry)` short-circuits through `Logger.Log` (silent drop) - no exception thrown.
 - `BeginScope(entry)` still creates a child scope, but operations on that child will also
   short-circuit because the parent scope's disposal cascades through `IsEnabled`. Derived
   classes can override `BeginScopeCore` to throw `ObjectDisposedException` if stricter
@@ -34,7 +34,7 @@ Throws `ArgumentException` when `category` is null or empty.
 ## Example
 
 ```csharp
-internal sealed class MyScopedLogger : ScopedLoggerBase
+internal sealed class MyScopedLogger : ScopedLogger
 {
     private readonly MyProvider _provider;
 

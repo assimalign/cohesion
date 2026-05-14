@@ -6,6 +6,10 @@ namespace Assimalign.Cohesion.Logging.Tests;
 
 public class ScopedLoggerTests
 {
+    // ----------------------------------------------------------------------
+    // Pipeline-level scope behavior (through factory.BeginScope + composite).
+    // ----------------------------------------------------------------------
+
     [Fact(DisplayName = "Cohesion Test [Logging] - Scope: entry inside scope inherits seed id as parent")]
     public void ScopedEntry_InheritsParentId()
     {
@@ -86,8 +90,8 @@ public class ScopedLoggerTests
         Assert.Equal(customParent, entry.ParentId);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Scope: dispose is idempotent")]
-    public void Dispose_Idempotent()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Scope: dispose is idempotent (pipeline)")]
+    public void Dispose_Idempotent_Pipeline()
     {
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(new RecordingProvider())
@@ -109,7 +113,7 @@ public class ScopedLoggerTests
         int countAtDispose = provider.Entries.Count;
         scope.Dispose();
 
-        // ScopedLoggerBase.IsEnabled returns false after disposal, so the LoggerBase Log path
+        // ScopedLogger.IsEnabled returns false after disposal, so the Logger.Log path
         // short-circuits without dispatching to WriteCore. This is consistent with the rest of
         // the pipeline which silently tolerates dead sinks (provider failures, filter throws).
         scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "after dispose"));
@@ -137,5 +141,58 @@ public class ScopedLoggerTests
 
         // Disposing must not throw (NoopScopedLogger substitution).
         scope.Dispose();
+    }
+
+    // ----------------------------------------------------------------------
+    // ScopedLogger abstract class - direct tests.
+    // ----------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - ScopedLogger: stores ParentId")]
+    public void ScopedLogger_Ctor_StoresParentId()
+    {
+        var parent = LogId.New();
+        var scope = new TestScope("Cat", parent);
+        Assert.Equal(parent, scope.ParentId);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - ScopedLogger: IsEnabled returns false after disposal")]
+    public void ScopedLogger_DisposedScope_IsEnabledFalse()
+    {
+        var scope = new TestScope("Cat", LogId.New());
+        Assert.True(scope.IsEnabled(LogLevel.Information));
+        scope.Dispose();
+        Assert.False(scope.IsEnabled(LogLevel.Information));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - ScopedLogger: Dispose is idempotent (direct)")]
+    public void ScopedLogger_Dispose_Idempotent()
+    {
+        var scope = new TestScope("Cat", LogId.New());
+        scope.Dispose();
+        scope.Dispose();
+        Assert.Equal(1, scope.DisposeCalls);
+        Assert.True(scope.IsDisposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - ScopedLogger: Log on disposed scope short-circuits to no-op")]
+    public void ScopedLogger_DisposedLog_NoOps()
+    {
+        var scope = new TestScope("Cat", LogId.New());
+        scope.Dispose();
+
+        // The template short-circuits via IsEnabled before reaching WriteCore.
+        scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "after dispose"));
+        Assert.Equal(0, scope.WriteCalls);
+    }
+
+    private sealed class TestScope : ScopedLogger
+    {
+        public int WriteCalls;
+        public int DisposeCalls;
+
+        public TestScope(string category, LogId parentId) : base(category, parentId) { }
+        protected override void WriteCore(ILoggerEntry entry) => WriteCalls++;
+        protected override IScopedLogger BeginScopeCore(ILoggerEntry entry) => this;
+        protected override void DisposeCore() => DisposeCalls++;
     }
 }

@@ -11,11 +11,11 @@ namespace Assimalign.Cohesion.Logging;
 /// Implements the boilerplate (category validation, idempotent disposal, the disposed flag) so
 /// concrete providers only implement <see cref="CreateCore"/> and optionally
 /// <see cref="DisposeCore"/>. <see cref="Create(string)"/> returns the concrete
-/// <see cref="LoggerBase"/> rather than the <see cref="ILogger"/> interface so callers that
+/// <see cref="Logger"/> rather than the <see cref="ILogger"/> interface so callers that
 /// hold a strongly typed reference pay only one virtual dispatch per log call instead of two.
 /// </para>
 /// </remarks>
-public abstract class LoggerProviderBase : ILoggerProvider
+public abstract class LoggerProvider : ILoggerProvider
 {
     private int _disposed;
 
@@ -27,12 +27,12 @@ public abstract class LoggerProviderBase : ILoggerProvider
 
     /// <summary>
     /// Returns a new logger for <paramref name="category"/>. Covariant return type so callers
-    /// that hold a typed <see cref="LoggerProviderBase"/> reference get the concrete logger
+    /// that hold a typed <see cref="LoggerProvider"/> reference get the concrete logger
     /// without an interface cast.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
     /// <exception cref="ObjectDisposedException">The provider has been disposed.</exception>
-    public LoggerBase Create(string category)
+    public Logger Create(string category)
     {
         ArgumentException.ThrowIfNullOrEmpty(category);
 
@@ -49,7 +49,7 @@ public abstract class LoggerProviderBase : ILoggerProvider
     /// <summary>
     /// Implementation hook: build the concrete logger for the supplied category.
     /// </summary>
-    protected abstract LoggerBase CreateCore(string category);
+    protected abstract Logger CreateCore(string category);
 
     /// <inheritdoc />
     public void Dispose()

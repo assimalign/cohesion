@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Logging.Console.Internal;
 /// <summary>
 /// Per-category logger created by <see cref="ConsoleLoggerProvider"/>.
 /// </summary>
-internal sealed class ConsoleLogger : LoggerBase
+internal sealed class ConsoleLogger : Logger
 {
     private readonly ConsoleLoggerProvider _provider;
 
@@ -28,7 +28,7 @@ internal sealed class ConsoleLogger : LoggerBase
         return new ConsoleScopedLogger(Category, _provider, entry.Id);
     }
 
-    private sealed class ConsoleScopedLogger : ScopedLoggerBase
+    private sealed class ConsoleScopedLogger : ScopedLogger
     {
         private readonly ConsoleLoggerProvider _provider;
 

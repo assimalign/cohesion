@@ -8,13 +8,13 @@ namespace Assimalign.Cohesion.Logging;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Inherits the template-method pattern from <see cref="LoggerBase"/>; adds idempotent
+/// Inherits the template-method pattern from <see cref="Logger"/>; adds idempotent
 /// disposal and a <see cref="ParentId"/> field. Derived classes only implement
-/// <see cref="LoggerBase.WriteCore"/>, <see cref="LoggerBase.BeginScopeCore"/>, and (if needed)
+/// <see cref="Logger.WriteCore"/>, <see cref="Logger.BeginScopeCore"/>, and (if needed)
 /// <see cref="DisposeCore"/>.
 /// </para>
 /// </remarks>
-public abstract class ScopedLoggerBase : LoggerBase, IScopedLogger
+public abstract class ScopedLogger : Logger, IScopedLogger
 {
     private int _disposed;
 
@@ -22,7 +22,7 @@ public abstract class ScopedLoggerBase : LoggerBase, IScopedLogger
     /// Initializes a scoped logger.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="category"/> is null or empty.</exception>
-    protected ScopedLoggerBase(string category, LogId parentId)
+    protected ScopedLogger(string category, LogId parentId)
         : base(category)
     {
         ParentId = parentId;

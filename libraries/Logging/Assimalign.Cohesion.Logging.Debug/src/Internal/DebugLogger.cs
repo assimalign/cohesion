@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Logging.Debug.Internal;
 /// <summary>
 /// Per-category logger created by <see cref="DebugLoggerProvider"/>.
 /// </summary>
-internal sealed class DebugLogger : LoggerBase
+internal sealed class DebugLogger : Logger
 {
     private readonly DebugLoggerProvider _provider;
 
@@ -27,7 +27,7 @@ internal sealed class DebugLogger : LoggerBase
         return new DebugScopedLogger(Category, _provider, entry.Id);
     }
 
-    private sealed class DebugScopedLogger : ScopedLoggerBase
+    private sealed class DebugScopedLogger : ScopedLogger
     {
         private readonly DebugLoggerProvider _provider;
 

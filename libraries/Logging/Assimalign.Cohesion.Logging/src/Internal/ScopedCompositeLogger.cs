@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// the composite's behavior but stamps the scope's parent id onto every entry written through
 /// it.
 /// </summary>
-internal sealed class ScopedCompositeLogger : ScopedLoggerBase
+internal sealed class ScopedCompositeLogger : ScopedLogger
 {
     private readonly CompositeLogger _composite;
     private readonly IScopedLogger[] _underlyingScopes;

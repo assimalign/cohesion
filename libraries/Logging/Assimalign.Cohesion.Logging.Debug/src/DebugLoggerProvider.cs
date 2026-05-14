@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Logging.Debug;
 /// Output is line-oriented so it surfaces nicely in Visual Studio's Output window or any other
 /// <c>Debug</c> listener.
 /// </remarks>
-public sealed class DebugLoggerProvider : LoggerProviderBase
+public sealed class DebugLoggerProvider : LoggerProvider
 {
     private readonly DebugLoggerOptions _options;
 
@@ -41,7 +41,7 @@ public sealed class DebugLoggerProvider : LoggerProviderBase
     public override string Name => "Debug";
 
     /// <inheritdoc />
-    protected override LoggerBase CreateCore(string category) => new DebugLogger(category, this);
+    protected override Logger CreateCore(string category) => new DebugLogger(category, this);
 
     internal bool IsEnabledFor(LogLevel level)
     {

@@ -107,7 +107,7 @@ cannot silently drop entries.
    case-insensitively).
 2. Owns its providers: disposing the factory disposes every provider it was built with.
 3. After `Dispose`, every other operation throws `ObjectDisposedException`.
-4. `Create(string category)` returns the concrete `LoggerBase` via covariant return so
+4. `Create(string category)` returns the concrete `Logger` via covariant return so
    callers holding the strongly typed `LoggerFactory` reference avoid the interface cast.
    The interface bridge (`ILoggerFactory.Create`) returns the same instance through
    `ILogger`.
@@ -124,20 +124,19 @@ has been constructed has no effect on already-cached loggers.
 
 Three abstract base classes implement the boilerplate so concrete providers stay thin:
 
-- `LoggerBase` - non-virtual `Log` and `BeginScope` that do null guards and (for `Log`) the
+- `Logger` - non-virtual `Log` and `BeginScope` that do null guards and (for `Log`) the
   `IsEnabled` short-circuit, then dispatch to a single virtual method (`WriteCore` /
   `BeginScopeCore`). Derived classes that want seed-entry emission on `BeginScope` call
   `WriteCore` themselves inside `BeginScopeCore` - the base does not auto-emit so a fan-out
   logger (composite) can keep seed emission to its underlying providers without double-writing.
-- `ScopedLoggerBase : LoggerBase, IScopedLogger` - adds `ParentId`, an idempotent `Dispose`,
-  and the convention that `IsEnabled` returns false after disposal. Disposed scopes silently
-  drop log writes through the `IsEnabled` short-circuit.
-- `LoggerProviderBase : ILoggerProvider` - owns the disposed flag, category validation, and
-  the covariant-return `Create(string)` method. `ILoggerProvider.Create` is implemented as
-  an explicit bridge so callers holding the concrete provider type get a `LoggerBase`
-  directly.
+- `ScopedLogger : Logger, IScopedLogger` - adds `ParentId`, an idempotent `Dispose`, and the
+  convention that `IsEnabled` returns false after disposal. Disposed scopes silently drop log
+  writes through the `IsEnabled` short-circuit.
+- `LoggerProvider : ILoggerProvider` - owns the disposed flag, category validation, and the
+  covariant-return `Create(string)` method. `ILoggerProvider.Create` is implemented as an
+  explicit bridge so callers holding the concrete provider type get a `Logger` directly.
 
-The hot path of `LoggerBase.Log` is a single non-virtual method that makes one virtual call
+The hot path of `Logger.Log` is a single non-virtual method that makes one virtual call
 to `WriteCore`. Sealed concrete loggers (`CompositeLogger`, `ConsoleLogger`,
 `ConsoleScopedLogger`, `DebugLogger`, `DebugScopedLogger`, `NoopScopedLogger`,
 `ScopedCompositeLogger`) give the JIT the best chance of devirtualizing when callers hold a
@@ -207,7 +206,7 @@ Assimalign.Cohesion.Logging/
       ScopedCompositeLogger.cs
       NoopScopedLogger.cs
       LoggerFilterRuleSelector.cs
-    LoggerBase.cs
+    Logger.cs
     LoggerEntry.cs
     LoggerEntryBuilder.cs
     LogLevel.cs
@@ -215,8 +214,8 @@ Assimalign.Cohesion.Logging/
     LoggerFactoryBuilder.cs
     LoggerFactoryOptions.cs
     LoggerFilterRule.cs
-    LoggerProviderBase.cs
-    ScopedLoggerBase.cs
+    LoggerProvider.cs
+    ScopedLogger.cs
     ValueTypes/
       LogId.cs           (source-generator spec)
     Properties/

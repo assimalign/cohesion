@@ -1,4 +1,4 @@
-# `Assimalign.Cohesion.Logging.LoggerBase`
+# `Assimalign.Cohesion.Logging.Logger`
 
 Reusable abstract base class for `ILogger` implementations. Folds the per-call boilerplate
 (null guards, level short-circuit) into non-virtual methods so derived classes only implement
@@ -7,7 +7,7 @@ the actual write and scope-creation work.
 ## Constructor
 
 ```csharp
-protected LoggerBase(string category);
+protected Logger(string category);
 ```
 
 Throws `ArgumentException` when `category` is null or empty.
@@ -25,14 +25,14 @@ Throws `ArgumentException` when `category` is null or empty.
 
 ## Devirtualization
 
-`Log` and `BeginScope` are non-virtual; callers holding a strongly typed `LoggerBase` (or a
+`Log` and `BeginScope` are non-virtual; callers holding a strongly typed `Logger` (or a
 sealed derived) reference pay a single virtual dispatch to `WriteCore` / `BeginScopeCore`
 instead of two through the interface. Concrete implementations should be `sealed`.
 
 ## Example
 
 ```csharp
-internal sealed class MyLogger : LoggerBase
+internal sealed class MyLogger : Logger
 {
     private readonly MyProvider _provider;
 

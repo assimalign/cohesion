@@ -4,15 +4,15 @@ namespace Assimalign.Cohesion.Logging.Tests;
 
 public class LoggerFactoryCovariantReturnTests
 {
-    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactory: Create returns LoggerBase covariantly")]
-    public void Create_ReturnsLoggerBase()
+    [Fact(DisplayName = "Cohesion Test [Logging] - LoggerFactory: Create returns Logger covariantly")]
+    public void Create_ReturnsLogger()
     {
         var concreteFactory = (LoggerFactory)new LoggerFactoryBuilder()
             .AddProvider(new RecordingProvider())
             .Build();
 
-        // Strongly typed call returns LoggerBase.
-        LoggerBase typed = concreteFactory.Create("Cat");
+        // Strongly typed call returns Logger.
+        Logger typed = concreteFactory.Create("Cat");
 
         Assert.NotNull(typed);
         Assert.Equal("Cat", typed.Category);
