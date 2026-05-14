@@ -23,9 +23,14 @@ Get-ChildItem -Path "$BasePath\resources" -Directory | ForEach-Object {
 }
 
 $Solutions | ForEach-Object {
+    $RootFolder = [System.IO.Directory]::GetParent($_).Name
+    if ($_ -eq "$BasePath\Assimalign.Cohesion.slnx") {
+        $RootFolder = "cohesion"
+    }
 
     New-CohesionDotnetSolution `
         -SolutionPath $_ `
+        -SolutionRootFolder $RootFolder `
         -IgnorePaths @(
             "$BasePath\_out"
             "$BasePath\.claude"

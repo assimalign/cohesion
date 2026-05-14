@@ -4,7 +4,7 @@
 		<Platform Name="x64" />
 		<Platform Name="x86" />
 	</Configurations>
-	<Folder Name="/dotnetcadet-hardening-02/">
+	<Folder Name="/cohesion/">
 		<File Path=".editorconfig" />
 		<File Path=".git" />
 		<File Path=".gitignore" />
@@ -16,20 +16,20 @@
 		<File Path="README.md" />
 		<File Path="setup.ps1" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/.designing/">
+	<Folder Name="/cohesion/.designing/">
 		<Project Path=".designing/project-template.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/.github/">
+	<Folder Name="/cohesion/.github/">
 		<File Path=".github/copilot-instructions.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/.github/actions/" />
-	<Folder Name="/dotnetcadet-hardening-02/.github/actions/build/">
+	<Folder Name="/cohesion/.github/actions/" />
+	<Folder Name="/cohesion/.github/actions/build/">
 		<File Path=".github/actions/build/action.yml" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/.github/scripts/">
+	<Folder Name="/cohesion/.github/scripts/">
 		<File Path=".github/scripts/Publish-Nupkg.ps1" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/.github/workflows/">
+	<Folder Name="/cohesion/.github/workflows/">
 		<File Path=".github/workflows/framework.yml" />
 		<File Path=".github/workflows/library-amqp.yml" />
 		<File Path=".github/workflows/library-application-model.yml" />
@@ -65,290 +65,290 @@
 		<File Path=".github/workflows/resource-secret-store.yml" />
 		<File Path=".github/workflows/resource-web.yml" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/analyzers/" />
-	<Folder Name="/dotnetcadet-hardening-02/analyzers/Core/" />
-	<Folder Name="/dotnetcadet-hardening-02/analyzers/Core/Assimalign.Cohesion.SourceGeneration/" />
-	<Folder Name="/dotnetcadet-hardening-02/analyzers/Core/Assimalign.Cohesion.SourceGeneration/src/">
+	<Folder Name="/cohesion/analyzers/" />
+	<Folder Name="/cohesion/analyzers/Core/" />
+	<Folder Name="/cohesion/analyzers/Core/Assimalign.Cohesion.SourceGeneration/" />
+	<Folder Name="/cohesion/analyzers/Core/Assimalign.Cohesion.SourceGeneration/src/">
 		<Project Path="analyzers/Core/Assimalign.Cohesion.SourceGeneration/src/Assimalign.Cohesion.SourceGeneration.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/assets/" />
-	<Folder Name="/dotnetcadet-hardening-02/assets/schemas/">
+	<Folder Name="/cohesion/assets/" />
+	<Folder Name="/cohesion/assets/schemas/">
 		<File Path="assets/schemas/cohesion.config.IoTHub.json" />
 		<File Path="assets/schemas/cohesion.config.json" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/build/" />
-	<Folder Name="/dotnetcadet-hardening-02/build/Tasks/">
+	<Folder Name="/cohesion/build/" />
+	<Folder Name="/cohesion/build/Tasks/">
 		<Project Path="build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/docs/">
+	<Folder Name="/cohesion/docs/">
 		<File Path="docs/DELIVERY_ROADMAP.md" />
 		<File Path="docs/overview.md" />
 		<File Path="docs/references.md" />
 		<File Path="docs/SERVICE_LAYER_DESIGN.md" />
 		<File Path="docs/SERVICE_STORY_REQUIREMENTS.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/docs/build/">
+	<Folder Name="/cohesion/docs/build/">
 		<File Path="docs/build/msbuild-cohesion-props.md" />
 		<File Path="docs/build/msbuild-common-props.md" />
 		<File Path="docs/build/msbuild-common-targets.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/docs/guidelines/">
+	<Folder Name="/cohesion/docs/guidelines/">
 		<File Path="docs/guidelines/guidelines-package-management.md" />
 		<File Path="docs/guidelines/guidelines-pull-requests.md" />
 		<File Path="docs/guidelines/guidelines.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/docs/setup/">
+	<Folder Name="/cohesion/docs/setup/">
 		<File Path="docs/setup/setup-linqpad.md" />
 		<File Path="docs/setup/setup.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/docs/versioning/">
+	<Folder Name="/cohesion/docs/versioning/">
 		<File Path="docs/versioning/versioning.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/extensions/" />
-	<Folder Name="/dotnetcadet-hardening-02/extensions/dotnet/" />
-	<Folder Name="/dotnetcadet-hardening-02/extensions/dotnet/src/">
+	<Folder Name="/cohesion/extensions/" />
+	<Folder Name="/cohesion/extensions/dotnet/" />
+	<Folder Name="/cohesion/extensions/dotnet/src/">
 		<File Path="extensions/dotnet/src/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/">
+	<Folder Name="/cohesion/extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/">
 		<Project Path="extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/Assimalign.Cohesion.ProjectTemplates.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/extensions/VisualStudio/" />
-	<Folder Name="/dotnetcadet-hardening-02/extensions/VisualStudio/src/" />
-	<Folder Name="/dotnetcadet-hardening-02/extensions/VisualStudio/src/Assimalign.Cohesion/">
+	<Folder Name="/cohesion/extensions/VisualStudio/" />
+	<Folder Name="/cohesion/extensions/VisualStudio/src/" />
+	<Folder Name="/cohesion/extensions/VisualStudio/src/Assimalign.Cohesion/">
 		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/">
+	<Folder Name="/cohesion/frameworks/">
 		<File Path="frameworks/Assimalign.Cohesion.App.props" />
 		<File Path="frameworks/Assimalign.Cohesion.App.targets" />
 		<File Path="frameworks/Directory.Build.props" />
 		<File Path="frameworks/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ApiManager.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ApiManager.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ApiManager.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ApiManager.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.ApiManager.Refs/src/Assimalign.Cohesion.App.ApiManager.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ApiManager.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ApiManager.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ApiManager.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ApiManager.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.ApiManager.Runtime/src/Assimalign.Cohesion.App.ApiManager.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.ConfigurationStore.Refs/src/Assimalign.Cohesion.App.ConfigurationStore.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.ConfigurationStore.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.ConfigurationStore.Runtime/src/Assimalign.Cohesion.App.ConfigurationStore.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Database.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Database.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Database.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Database.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Database.Refs/src/Assimalign.Cohesion.App.Database.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Database.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Database.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Database.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Database.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Database.Runtime/src/Assimalign.Cohesion.App.Database.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EmailHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EmailHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EmailHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EmailHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.EmailHub.Refs/src/Assimalign.Cohesion.App.EmailHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EmailHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EmailHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EmailHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EmailHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.EmailHub.Runtime/src/Assimalign.Cohesion.App.EmailHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EventHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EventHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EventHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EventHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.EventHub.Refs/src/Assimalign.Cohesion.App.EventHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EventHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.EventHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EventHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.EventHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.EventHub.Runtime/src/Assimalign.Cohesion.App.EventHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IdentityHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IdentityHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IdentityHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IdentityHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.IdentityHub.Refs/src/Assimalign.Cohesion.App.IdentityHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IdentityHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IdentityHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IdentityHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IdentityHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.IdentityHub.Runtime/src/Assimalign.Cohesion.App.IdentityHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IoTHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IoTHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IoTHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IoTHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.IoTHub.Refs/src/Assimalign.Cohesion.App.IoTHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IoTHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.IoTHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IoTHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.IoTHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.IoTHub.Runtime/src/Assimalign.Cohesion.App.IoTHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LoadBalancer.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LoadBalancer.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LoadBalancer.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LoadBalancer.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.LoadBalancer.Refs/src/Assimalign.Cohesion.App.LoadBalancer.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LoadBalancer.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LoadBalancer.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LoadBalancer.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LoadBalancer.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.LoadBalancer.Runtime/src/Assimalign.Cohesion.App.LoadBalancer.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LogSpace.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LogSpace.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LogSpace.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LogSpace.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.LogSpace.Refs/src/Assimalign.Cohesion.App.LogSpace.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LogSpace.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.LogSpace.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LogSpace.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.LogSpace.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.LogSpace.Runtime/src/Assimalign.Cohesion.App.LogSpace.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MediaHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MediaHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MediaHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MediaHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.MediaHub.Refs/src/Assimalign.Cohesion.App.MediaHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MediaHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MediaHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MediaHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MediaHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.MediaHub.Runtime/src/Assimalign.Cohesion.App.MediaHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MessageHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MessageHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MessageHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MessageHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.MessageHub.Refs/src/Assimalign.Cohesion.App.MessageHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MessageHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.MessageHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MessageHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.MessageHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.MessageHub.Runtime/src/Assimalign.Cohesion.App.MessageHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NatGateway.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NatGateway.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NatGateway.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NatGateway.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.NatGateway.Refs/src/Assimalign.Cohesion.App.NatGateway.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NatGateway.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NatGateway.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NatGateway.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NatGateway.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.NatGateway.Runtime/src/Assimalign.Cohesion.App.NatGateway.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NotificationHub.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NotificationHub.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NotificationHub.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NotificationHub.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.NotificationHub.Refs/src/Assimalign.Cohesion.App.NotificationHub.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NotificationHub.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.NotificationHub.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NotificationHub.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.NotificationHub.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.NotificationHub.Runtime/src/Assimalign.Cohesion.App.NotificationHub.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Refs/src/Assimalign.Cohesion.App.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Rezolvr.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Rezolvr.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Rezolvr.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Rezolvr.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Rezolvr.Refs/src/Assimalign.Cohesion.App.Rezolvr.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Rezolvr.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Rezolvr.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Rezolvr.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Rezolvr.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Rezolvr.Runtime/src/Assimalign.Cohesion.App.Rezolvr.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Runtime/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Runtime/">
 		<File Path="frameworks/Assimalign.Cohesion.App.Runtime/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Runtime/src/Assimalign.Cohesion.App.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Runtime/tests/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Runtime/tests/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Scheduler.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Scheduler.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Scheduler.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Scheduler.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Scheduler.Refs/src/Assimalign.Cohesion.App.Scheduler.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Scheduler.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Scheduler.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Scheduler.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Scheduler.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Scheduler.Runtime/src/Assimalign.Cohesion.App.Scheduler.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.SecretStore.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.SecretStore.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.SecretStore.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.SecretStore.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.SecretStore.Refs/src/Assimalign.Cohesion.App.SecretStore.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.SecretStore.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.SecretStore.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.SecretStore.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.SecretStore.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.SecretStore.Runtime/src/Assimalign.Cohesion.App.SecretStore.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.VpnGateway.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.VpnGateway.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.VpnGateway.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.VpnGateway.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.VpnGateway.Refs/src/Assimalign.Cohesion.App.VpnGateway.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.VpnGateway.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.VpnGateway.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.VpnGateway.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.VpnGateway.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.VpnGateway.Runtime/src/Assimalign.Cohesion.App.VpnGateway.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Web.Refs/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Web.Refs/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Web.Refs/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Web.Refs/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Web.Refs/src/Assimalign.Cohesion.App.Web.Refs.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Web.Runtime/" />
-	<Folder Name="/dotnetcadet-hardening-02/frameworks/Assimalign.Cohesion.App.Web.Runtime/src/">
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Web.Runtime/" />
+	<Folder Name="/cohesion/frameworks/Assimalign.Cohesion.App.Web.Runtime/src/">
 		<Project Path="frameworks/Assimalign.Cohesion.App.Web.Runtime/src/Assimalign.Cohesion.App.Web.Runtime.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/installer/">
+	<Folder Name="/cohesion/installer/">
 		<File Path="installer/.gitignore" />
 		<File Path="installer/Assimalign.Cohesion.Installer.wixproj" />
 		<File Path="installer/build.ps1" />
 		<File Path="installer/Product.wxs" />
 		<File Path="installer/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/installer/manifests/" />
-	<Folder Name="/dotnetcadet-hardening-02/installer/manifests/templates/">
+	<Folder Name="/cohesion/installer/manifests/" />
+	<Folder Name="/cohesion/installer/manifests/templates/">
 		<File Path="installer/manifests/templates/Assimalign.Cohesion.installer.yaml.template" />
 		<File Path="installer/manifests/templates/Assimalign.Cohesion.locale.en-US.yaml.template" />
 		<File Path="installer/manifests/templates/Assimalign.Cohesion.yaml.template" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/installer/scripts/">
+	<Folder Name="/cohesion/installer/scripts/">
 		<File Path="installer/scripts/Cleanup-PriorRegistrations.ps1" />
 		<File Path="installer/scripts/Install-Local.ps1" />
 		<File Path="installer/scripts/New-CohesionDomainScaffold.ps1" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/">
+	<Folder Name="/cohesion/libraries/">
 		<File Path="libraries/Directory.Build.props" />
 		<File Path="libraries/Directory.Build.targets" />
 		<File Path="libraries/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp/">
+	<Folder Name="/cohesion/libraries/Amqp/" />
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp/src/">
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp/tests/">
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/tests/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp/tests/Assimalign.Cohesion.Amqp.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/">
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/src/">
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/src/Assimalign.Cohesion.Amqp.Transports.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/">
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/Assimalign.Cohesion.Amqp.Transports.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ApplicationModel/">
+	<Folder Name="/cohesion/libraries/ApplicationModel/">
 		<File Path="libraries/ApplicationModel/Directory.Build.props" />
 		<File Path="libraries/ApplicationModel/Directory.Build.targets" />
 		<File Path="libraries/ApplicationModel/REAME.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
 		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/">
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/">
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/">
+	<Folder Name="/cohesion/libraries/Cache/">
 		<File Path="libraries/Cache/Directory.Build.props" />
 		<File Path="libraries/Cache/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/docs/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/docs/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/DESIGN.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEntryPriority.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEvictionReason.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheException.md" />
@@ -357,339 +357,339 @@
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICacheEntry.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/PostEvictionCallbackRegistration.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/src/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/src/">
 		<Project Path="libraries/Cache/Assimalign.Cohesion.Caching/src/Assimalign.Cohesion.Caching.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching/tests/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching/tests/">
 		<Project Path="libraries/Cache/Assimalign.Cohesion.Caching/tests/Assimalign.Cohesion.Caching.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/DESIGN.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/">
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCache.md" />
 		<File Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCacheOptions.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/src/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/src/">
 		<Project Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/src/Assimalign.Cohesion.Caching.InMemory.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/tests/">
+	<Folder Name="/cohesion/libraries/Cache/Assimalign.Cohesion.Caching.InMemory/tests/">
 		<Project Path="libraries/Cache/Assimalign.Cohesion.Caching.InMemory/tests/Assimalign.Cohesion.Caching.InMemory.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/">
+	<Folder Name="/cohesion/libraries/Configuration/">
 		<File Path="libraries/Configuration/Directory.Build.props" />
 		<File Path="libraries/Configuration/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration/assets/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration/assets/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration/assets/configuration-sample.json" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration/assets/configuration-sample.xml" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration/tests/Assimalign.Cohesion.Configuration.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/src/Assimalign.Cohesion.Configuration.CommandLine.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/tests/Assimalign.Cohesion.Configuration.CommandLine.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/src/Assimalign.Cohesion.Configuration.EnvironmentVariables.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/tests/Assimalign.Cohesion.Configuration.EnvironmentVariables.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/src/Assimalign.Cohesion.Configuration.FileSystem.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/tests/Assimalign.Cohesion.Configuration.FileSystem.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/ConfigurationBuilderExtensions.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/ConfigurationIniOptions.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/ConfigurationIniProvider.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/docs/Assembly/Assimalign.Cohesion.Configuration.Ini/ConfigurationIniStreamProvider.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/src/Assimalign.Cohesion.Configuration.Ini.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/tests/Assimalign.Cohesion.Configuration.Ini.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Json/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Json/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Json/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Json/src/Assimalign.Cohesion.Configuration.Json.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Json/tests/Assimalign.Cohesion.Configuration.Json.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/docs/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/docs/">
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/docs/DESIGN.md" />
 		<File Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/src/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/src/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/src/Assimalign.Cohesion.Configuration.Xml.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/tests/">
+	<Folder Name="/cohesion/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/tests/">
 		<Project Path="libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/tests/Assimalign.Cohesion.Configuration.Xml.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/">
+	<Folder Name="/cohesion/libraries/Content/">
 		<File Path="libraries/Content/Directory.Build.props" />
 		<File Path="libraries/Content/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content/docs/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/docs/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content/docs/design.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content/src/Assimalign.Cohesion.Content.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content/tests/Assimalign.Cohesion.Content.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Binary/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Binary/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Binary/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Binary/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Binary/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Binary/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Binary/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Binary/tests/Assimalign.Cohesion.Content.Binary.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Bmff/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Bmff/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Bmff/tests/Assimalign.Cohesion.Content.Bmff.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Ebml/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Ebml/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/src/Assimalign.Cohesion.Content.Ebml.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Ebml/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Ebml/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Ebml/tests/Assimalign.Cohesion.Content.Ebml.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Exe/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Exe/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Exe/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Exe/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Exe/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Exe/src/Assimalign.Cohesion.Content.Exe.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Exe/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Exe/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Exe/tests/Assimalign.Cohesion.Content.Exe.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Markdown/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Markdown/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Markdown/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Markdown/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Markdown/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Markdown/src/Assimalign.Cohesion.Content.Markdown.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Markdown/tests/Assimalign.Cohesion.Content.Markdown.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Media/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/">
 		<File Path="libraries/Content/Assimalign.Cohesion.Content.Media/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Media/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Media/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Media/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Media/tests/Assimalign.Cohesion.Content.Media.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Mkv/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Mkv/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mkv/tests/Assimalign.Cohesion.Content.Mkv.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Mpeg/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Pdf/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Pdf/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Pdf/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Pdf/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Pdf/src/Assimalign.Cohesion.Content.Pdf.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Text/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Content/Assimalign.Cohesion.Content.Text/src/">
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Text/" />
+	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content.Text/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content.Text/src/Assimalign.Cohesion.Content.Text.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/">
+	<Folder Name="/cohesion/libraries/Core/">
 		<File Path="libraries/Core/Directory.Build.props" />
 		<File Path="libraries/Core/Directory.Build.targets" />
 		<File Path="libraries/Core/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/">
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/">
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/docs/">
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/">
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/DESIGN.md" />
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Overview.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/">
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/">
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/Overview.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/src/">
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/src/">
 		<Project Path="libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Core/Assimalign.Cohesion.Core/tests/">
+	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/tests/">
 		<Project Path="libraries/Core/Assimalign.Cohesion.Core/tests/Assimalign.Cohesion.Core.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/DependencyInjection/">
+	<Folder Name="/cohesion/libraries/DependencyInjection/">
 		<File Path="libraries/DependencyInjection/Directory.Build.props" />
 		<File Path="libraries/DependencyInjection/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/">
+	<Folder Name="/cohesion/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/">
 		<File Path="libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/">
+	<Folder Name="/cohesion/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/">
 		<File Path="libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md" />
 		<File Path="libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/">
+	<Folder Name="/cohesion/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/">
 		<Project Path="libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/tests/">
+	<Folder Name="/cohesion/libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/tests/">
 		<Project Path="libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/tests/Assimalign.Cohesion.DependencyInjection.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/">
+	<Folder Name="/cohesion/libraries/Dns/">
 		<File Path="libraries/Dns/Directory.Build.props" />
 		<File Path="libraries/Dns/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns/">
 		<File Path="libraries/Dns/Assimalign.Cohesion.Dns/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns/src/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns/src/">
 		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns/src/Assimalign.Cohesion.Dns.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns/tests/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns/tests/">
 		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns/tests/Assimalign.Cohesion.Dns.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns.Client/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client/">
 		<File Path="libraries/Dns/Assimalign.Cohesion.Dns.Client/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns.Client/src/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client/src/">
 		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client/src/Assimalign.Cohesion.Dns.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/">
+	<Folder Name="/cohesion/libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/">
 		<Project Path="libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/">
+	<Folder Name="/cohesion/libraries/FileSystem/">
 		<File Path="libraries/FileSystem/Directory.Build.props" />
 		<File Path="libraries/FileSystem/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/DESIGN.md" />
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem/tests/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem/tests/Assimalign.Cohesion.FileSystem.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/docs/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/docs/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/docs/DESIGN.md" />
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/src/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/src/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/src/Assimalign.Cohesion.FileSystem.Aggregate.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/tests/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/tests/Assimalign.Cohesion.FileSystem.Aggregate.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/docs/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/docs/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/docs/DESIGN.md" />
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/src/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/src/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/src/Assimalign.Cohesion.FileSystem.Globbing.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/tests/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/tests/Assimalign.Cohesion.FileSystem.Globbing.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/docs/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/docs/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/docs/DESIGN.md" />
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/tests/Assimalign.Cohesion.FileSystem.InMemory.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/">
@@ -705,125 +705,125 @@
 	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/tests/Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/docs/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/docs/">
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/docs/DESIGN.md" />
 		<File Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/">
+	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/Assimalign.Cohesion.FileSystem.Physical.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Hosting/">
+	<Folder Name="/cohesion/libraries/Hosting/">
 		<File Path="libraries/Hosting/Directory.Build.props" />
 		<File Path="libraries/Hosting/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Hosting/Assimalign.Cohesion.Hosting/">
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/">
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Hosting/Assimalign.Cohesion.Hosting/docs/">
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/docs/">
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md" />
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Hosting/Assimalign.Cohesion.Hosting/src/">
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/src/">
 		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Hosting/Assimalign.Cohesion.Hosting/tests/">
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/tests/">
 		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting/tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/">
+	<Folder Name="/cohesion/libraries/Http/">
 		<File Path="libraries/Http/Directory.Build.props" />
 		<File Path="libraries/Http/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http/docs/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/docs/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http/docs/design.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http/src/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http/tests/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http/tests/Assimalign.Cohesion.Http.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.ClientFactory/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/src/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ClientFactory/src/Assimalign.Cohesion.Http.ClientFactory.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/Assimalign.Cohesion.Http.ClientFactory.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Transports/DESIGN_SUGGESTION.md" />
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Transports/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Transports/examples/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http1/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http1/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http1/Assimalign.Cohesion.Http.Transports.Examples.Http1.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http2/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http2/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http2/Assimalign.Cohesion.Http.Transports.Examples.Http2.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http3/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http3/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Transports/examples/Assimalign.Cohesion.Http.Transports.Examples.Http3/Assimalign.Cohesion.Http.Transports.Examples.Http3.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/src/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Transports/src/Assimalign.Cohesion.Http.Transports.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Http/Assimalign.Cohesion.Http.Transports/tests/">
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Transports/tests/Assimalign.Cohesion.Http.Transports.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/">
+	<Folder Name="/cohesion/libraries/IdentityModel/">
 		<File Path="libraries/IdentityModel/Directory.Build.props" />
 		<File Path="libraries/IdentityModel/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/" />
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/tests/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/tests/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/tests/Assimalign.Cohesion.IdentityModel.Token.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/" />
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/tests/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/tests/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/tests/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/src/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/" />
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/src/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/src/Assimalign.Cohesion.IdentityModel.Token.Saml.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/">
+	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/Assimalign.Cohesion.IdentityModel.Token.Saml.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/">
+	<Folder Name="/cohesion/libraries/Logging/">
 		<File Path="libraries/Logging/Directory.Build.props" />
 		<File Path="libraries/Logging/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/docs/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/docs/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/DESIGN.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILogger.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerEnricher.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerEntry.md" />
@@ -838,53 +838,53 @@
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/LogLevel.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ScopedLogger.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/src/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/src/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging/tests/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging/tests/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging/tests/Assimalign.Cohesion.Logging.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/DESIGN.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/ConsoleLoggerOptions.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/ConsoleLoggerProvider.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/src/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/src/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/src/Assimalign.Cohesion.Logging.Console.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Console/tests/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Console/tests/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.Console/tests/Assimalign.Cohesion.Logging.Console.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/DESIGN.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/">
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/DebugLoggerOptions.md" />
 		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/DebugLoggerProvider.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/src/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/src/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/src/Assimalign.Cohesion.Logging.Debug.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Logging/Assimalign.Cohesion.Logging.Debug/tests/">
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/tests/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/tests/Assimalign.Cohesion.Logging.Debug.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Net/">
+	<Folder Name="/cohesion/libraries/Net/">
 		<File Path="libraries/Net/Directory.Build.props" />
 		<File Path="libraries/Net/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Net/Assimalign.Cohesion.Transports/">
+	<Folder Name="/cohesion/libraries/Net/Assimalign.Cohesion.Transports/">
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/README.md" />
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/TRANSPORT_REVIEW_01_OPTION_WIRING.md" />
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/TRANSPORT_REVIEW_02_POOL_RETENTION.md" />
@@ -892,940 +892,940 @@
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/TRANSPORT_REVIEW_04_PIPELINE_CANCELLATION.md" />
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/TRANSPORT_REVIEW_05_TYPED_MIDDLEWARE_VALIDATION.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Net/Assimalign.Cohesion.Transports/docs/">
+	<Folder Name="/cohesion/libraries/Net/Assimalign.Cohesion.Transports/docs/">
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/docs/DESIGN.md" />
 		<File Path="libraries/Net/Assimalign.Cohesion.Transports/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Net/Assimalign.Cohesion.Transports/src/">
+	<Folder Name="/cohesion/libraries/Net/Assimalign.Cohesion.Transports/src/">
 		<Project Path="libraries/Net/Assimalign.Cohesion.Transports/src/Assimalign.Cohesion.Transports.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Net/Assimalign.Cohesion.Transports/tests/">
+	<Folder Name="/cohesion/libraries/Net/Assimalign.Cohesion.Transports/tests/">
 		<Project Path="libraries/Net/Assimalign.Cohesion.Transports/tests/Assimalign.Cohesion.Transports.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectMapping/">
+	<Folder Name="/cohesion/libraries/ObjectMapping/">
 		<File Path="libraries/ObjectMapping/Directory.Build.props" />
 		<File Path="libraries/ObjectMapping/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/">
+	<Folder Name="/cohesion/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/">
 		<File Path="libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/docs/">
+	<Folder Name="/cohesion/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/docs/">
 		<File Path="libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/docs/DESIGN.md" />
 		<File Path="libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/">
+	<Folder Name="/cohesion/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/">
 		<Project Path="libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/tests/">
+	<Folder Name="/cohesion/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/tests/">
 		<Project Path="libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/tests/Assimalign.Cohesion.ObjectMapping.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectPool/">
+	<Folder Name="/cohesion/libraries/ObjectPool/">
 		<File Path="libraries/ObjectPool/Directory.Build.props" />
 		<File Path="libraries/ObjectPool/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/">
+	<Folder Name="/cohesion/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/">
 		<File Path="libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/docs/">
+	<Folder Name="/cohesion/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/docs/">
 		<File Path="libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/docs/DESIGN.md" />
 		<File Path="libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/src/">
+	<Folder Name="/cohesion/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/src/">
 		<Project Path="libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/tests/">
+	<Folder Name="/cohesion/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/tests/">
 		<Project Path="libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/tests/Assimalign.Cohesion.ObjectPool.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectValidation/">
+	<Folder Name="/cohesion/libraries/ObjectValidation/">
 		<File Path="libraries/ObjectValidation/Directory.Build.props" />
 		<File Path="libraries/ObjectValidation/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/">
+	<Folder Name="/cohesion/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/">
 		<File Path="libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/docs/">
+	<Folder Name="/cohesion/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/docs/">
 		<File Path="libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/docs/DESIGN.md" />
 		<File Path="libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/">
+	<Folder Name="/cohesion/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/">
 		<Project Path="libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/tests/">
+	<Folder Name="/cohesion/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/tests/">
 		<Project Path="libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/tests/Assimalign.Cohesion.ObjectValidation.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenApi/">
+	<Folder Name="/cohesion/libraries/OpenApi/">
 		<File Path="libraries/OpenApi/Directory.Build.props" />
 		<File Path="libraries/OpenApi/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenApi/Assimalign.Cohesion.OpenApi/">
+	<Folder Name="/cohesion/libraries/OpenApi/Assimalign.Cohesion.OpenApi/">
 		<File Path="libraries/OpenApi/Assimalign.Cohesion.OpenApi/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenApi/Assimalign.Cohesion.OpenApi/src/">
+	<Folder Name="/cohesion/libraries/OpenApi/Assimalign.Cohesion.OpenApi/src/">
 		<Project Path="libraries/OpenApi/Assimalign.Cohesion.OpenApi/src/Assimalign.Cohesion.OpenApi.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
+	<Folder Name="/cohesion/libraries/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
 		<Project Path="libraries/OpenApi/Assimalign.Cohesion.OpenApi/tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenTelemetry/">
+	<Folder Name="/cohesion/libraries/OpenTelemetry/">
 		<File Path="libraries/OpenTelemetry/Directory.Build.props" />
 		<File Path="libraries/OpenTelemetry/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/" />
-	<Folder Name="/dotnetcadet-hardening-02/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/">
+	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/" />
+	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/">
 		<Project Path="libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/Assimalign.Cohesion.OpenTelemetry.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/">
+	<Folder Name="/cohesion/libraries/Resilience/">
 		<File Path="libraries/Resilience/Directory.Build.props" />
 		<File Path="libraries/Resilience/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience/src/Assimalign.Cohesion.Resilience.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience/tests/Assimalign.Cohesion.Resilience.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/src/Assimalign.Cohesion.Resilience.CircuitBreaker.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/tests/Assimalign.Cohesion.Resilience.CircuitBreaker.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/src/Assimalign.Cohesion.Resilience.Fallback.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/tests/Assimalign.Cohesion.Resilience.Fallback.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/src/Assimalign.Cohesion.Resilience.Hedging.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/tests/Assimalign.Cohesion.Resilience.Hedging.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/Assimalign.Cohesion.Resilience.RateLimiting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/tests/Assimalign.Cohesion.Resilience.RateLimiting.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/src/Assimalign.Cohesion.Resilience.Retry.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/tests/Assimalign.Cohesion.Resilience.Retry.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/docs/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/docs/">
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/docs/DESIGN.md" />
 		<File Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/src/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/src/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/src/Assimalign.Cohesion.Resilience.Timeout.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/tests/">
+	<Folder Name="/cohesion/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/tests/">
 		<Project Path="libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/tests/Assimalign.Cohesion.Resilience.Timeout.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Security/">
+	<Folder Name="/cohesion/libraries/Security/">
 		<File Path="libraries/Security/Directory.Build.props" />
 		<File Path="libraries/Security/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Security/Assimalign.Cohesion.Security.Cryptography/">
+	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security.Cryptography/">
 		<File Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Security/Assimalign.Cohesion.Security.Cryptography/docs/">
+	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security.Cryptography/docs/">
 		<File Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/docs/DESIGN.md" />
 		<File Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Security/Assimalign.Cohesion.Security.Cryptography/src/">
+	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security.Cryptography/src/">
 		<Project Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/src/Assimalign.Cohesion.Security.Cryptography.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/libraries/Security/Assimalign.Cohesion.Security.Cryptography/tests/">
+	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security.Cryptography/tests/">
 		<Project Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/tests/Assimalign.Cohesion.Security.Cryptography.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/">
+	<Folder Name="/cohesion/resources/">
 		<File Path="resources/Directory.Build.props" />
 		<File Path="resources/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ApiManager/">
+	<Folder Name="/cohesion/resources/ApiManager/">
 		<File Path="resources/ApiManager/Directory.Build.props" />
 		<File Path="resources/ApiManager/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ApiManager/Assimalign.Cohesion.ApiManager/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/ApiManager/Assimalign.Cohesion.ApiManager/src/">
+	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager/" />
+	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager/src/">
 		<Project Path="resources/ApiManager/Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
+	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
+	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
 		<Project Path="resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ConfigurationStore/">
+	<Folder Name="/cohesion/resources/ConfigurationStore/">
 		<File Path="resources/ConfigurationStore/Directory.Build.props" />
 		<File Path="resources/ConfigurationStore/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/">
+	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/">
 		<File Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/">
+	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/">
 		<Project Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/Assimalign.Cohesion.ConfigurationStore.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
+	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
 		<Project Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/">
+	<Folder Name="/cohesion/resources/Database/">
 		<File Path="resources/Database/Directory.Build.props" />
 		<File Path="resources/Database/Directory.Build.targets" />
 		<File Path="resources/Database/solution.ps1" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/src/Assimalign.Cohesion.Database.Blob.Catalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/tests/Assimalign.Cohesion.Database.Blob.Catalog.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Client/src/Assimalign.Cohesion.Database.Blob.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Client/tests/Assimalign.Cohesion.Database.Blob.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Replication/src/Assimalign.Cohesion.Database.Blob.Replication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Replication/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Replication/tests/Assimalign.Cohesion.Database.Blob.Replication.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Security/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Security/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Security/src/Assimalign.Cohesion.Database.Blob.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Security/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Security/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Security/tests/Assimalign.Cohesion.Database.Blob.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Blob.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Storage/src/Assimalign.Cohesion.Database.Blob.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob.Storage/tests/Assimalign.Cohesion.Database.Blob.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Cache/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache/tests/Assimalign.Cohesion.Database.Cache.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/src/Assimalign.Cohesion.Database.Cache.Catalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Catalog/tests/Assimalign.Cohesion.Database.Cache.Catalog.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Client/src/Assimalign.Cohesion.Database.Cache.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Client/tests/Assimalign.Cohesion.Database.Cache.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Language/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Language/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Language/src/Assimalign.Cohesion.Database.Cache.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Language/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Language/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Language/tests/Assimalign.Cohesion.Database.Cache.Language.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Storage/src/Assimalign.Cohesion.Database.Cache.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Cache.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Cache.Storage/tests/Assimalign.Cohesion.Database.Cache.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Client/src/Assimalign.Cohesion.Database.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Client/tests/Assimalign.Cohesion.Database.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents/src/Assimalign.Cohesion.Database.Documents.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents/tests/Assimalign.Cohesion.Database.Documents.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/src/Assimalign.Cohesion.Database.Documents.Catalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Catalog/tests/Assimalign.Cohesion.Database.Documents.Catalog.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Client/src/Assimalign.Cohesion.Database.Documents.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Client/tests/Assimalign.Cohesion.Database.Documents.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Language/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/Assimalign.Cohesion.Database.Documents.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/Assimalign.Cohesion.Database.Language.Oql.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Replication/src/Assimalign.Cohesion.Database.Documents.Replication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Replication/tests/Assimalign.Cohesion.Database.Documents.Replication.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Security/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Security/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Security/src/Assimalign.Cohesion.Database.Documents.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Security/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Security/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Security/tests/Assimalign.Cohesion.Database.Documents.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Documents.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Storage/src/Assimalign.Cohesion.Database.Documents.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Storage/tests/Assimalign.Cohesion.Database.Documents.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Embedded/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Embedded/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Embedded/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Embedded/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Embedded/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Embedded/src/Assimalign.Cohesion.Database.Embedded.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Embedded/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Embedded/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Embedded/tests/Assimalign.Cohesion.Database.Embedded.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Execution/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Execution/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Execution/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Execution/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Execution/src/Assimalign.Cohesion.Database.Execution.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Execution/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Execution/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Execution/tests/Assimalign.Cohesion.Database.Execution.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Governance/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Governance/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Governance/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Governance/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Governance/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Governance/src/Assimalign.Cohesion.Database.Governance.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/src/Assimalign.Cohesion.Database.Graph.Catalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/tests/Assimalign.Cohesion.Database.Graph.Catalog.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Client/src/Assimalign.Cohesion.Database.Graph.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Client/tests/Assimalign.Cohesion.Database.Graph.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Language/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/Assimalign.Cohesion.Database.Graph.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/Assimalign.Cohesion.Database.Graph.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Replication/src/Assimalign.Cohesion.Database.Graph.Replication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Replication/tests/Assimalign.Cohesion.Database.Graph.Replication.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Security/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Security/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Security/src/Assimalign.Cohesion.Database.Graph.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Security/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Security/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Security/tests/Assimalign.Cohesion.Database.Graph.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/src/Assimalign.Cohesion.Database.Graph.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/tests/Assimalign.Cohesion.Database.Graph.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Hosting/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Hosting/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Hosting/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/src/Assimalign.Cohesion.Database.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/Assimalign.Cohesion.Database.KeyValuePair.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/Assimalign.Cohesion.Database.KeyValuePair.Cataalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/Assimalign.Cohesion.Database.KeyValuePair.Catalog.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/Assimalign.Cohesion.Database.KeyValuePair.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/tests/Assimalign.Cohesion.Database.KeyValuePair.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/src/Assimalign.Cohesion.Database.KeyValuePair.Replication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Replication/tests/Assimalign.Cohesion.Database.KeyValuePair.Replication.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/src/Assimalign.Cohesion.Database.KeyValuePair.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/Assimalign.Cohesion.Database.KeyValuePair.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/Assimalign.Cohesion.Database.KeyValuePair.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Language/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Language/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Language/src/Assimalign.Cohesion.Database.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Language/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Language/tests/Assimalign.Cohesion.Database.Language.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Memory/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Memory/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Memory/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Memory/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Memory/src/Assimalign.Cohesion.Database.Memory.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Memory/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Memory/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Memory/tests/Assimalign.Cohesion.Database.Memory.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Replication/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Replication/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Replication/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Replication/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Replication/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Replication/src/Assimalign.Cohesion.Database.Replication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Security/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Security/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Security/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql/tests/Assimalign.Cohesion.Database.Sql.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/src/Assimalign.Cohesion.Database.Sql.Catalog.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Client/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Client/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Client/src/Assimalign.Cohesion.Database.Sql.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Language/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Language/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Language/src/Assimalign.Cohesion.Database.Sql.Language.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Language/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Language/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Language/tests/Assimalign.Cohesion.Database.Sql.Language.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Security/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Security/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Security/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Security/src/Assimalign.Cohesion.Database.Sql.Security.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Security/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Security/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Security/tests/Assimalign.Cohesion.Database.Sql.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/src/Assimalign.Cohesion.Database.Sql.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/Assimalign.Cohesion.Database.Sql.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Storage/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Storage/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Storage/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Storage/src/Assimalign.Cohesion.Database.Storage.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Storage/tests/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Storage/tests/Assimalign.Cohesion.Database.Storage.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Types/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Database/Assimalign.Cohesion.Database.Types/src/">
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EmailHub/">
+	<Folder Name="/cohesion/resources/EmailHub/">
 		<File Path="resources/EmailHub/Directory.Build.props" />
 		<File Path="resources/EmailHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EmailHub/Assimalign.Cohesion.EmailHub/">
+	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub/">
 		<File Path="resources/EmailHub/Assimalign.Cohesion.EmailHub/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EmailHub/Assimalign.Cohesion.EmailHub/src/">
+	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub/src/">
 		<Project Path="resources/EmailHub/Assimalign.Cohesion.EmailHub/src/Assimalign.Cohesion.EmailHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EmailHub/Assimalign.Cohesion.EmailHub/tests/">
+	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub/tests/">
 		<Project Path="resources/EmailHub/Assimalign.Cohesion.EmailHub/tests/Assimalign.Cohesion.EmailHub.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EventHub/">
+	<Folder Name="/cohesion/resources/EventHub/">
 		<File Path="resources/EventHub/Directory.Build.props" />
 		<File Path="resources/EventHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/EventHub/Assimalign.Cohesion.EventHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/EventHub/Assimalign.Cohesion.EventHub/src/">
+	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub/" />
+	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub/src/">
 		<Project Path="resources/EventHub/Assimalign.Cohesion.EventHub/src/Assimalign.Cohesion.EventHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/">
+	<Folder Name="/cohesion/resources/IdentityHub/">
 		<File Path="resources/IdentityHub/Directory.Build.props" />
 		<File Path="resources/IdentityHub/Directory.Build.targets" />
 		<File Path="resources/IdentityHub/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Design.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
 		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IoTHub/">
+	<Folder Name="/cohesion/resources/IoTHub/">
 		<File Path="resources/IoTHub/Directory.Build.props" />
 		<File Path="resources/IoTHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IoTHub/Assimalign.Cohesion.IoTHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/IoTHub/Assimalign.Cohesion.IoTHub/src/">
+	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub/" />
+	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub/src/">
 		<Project Path="resources/IoTHub/Assimalign.Cohesion.IoTHub/src/Assimalign.Cohesion.IoTHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
+	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/" />
+	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/LoadBalancer/">
+	<Folder Name="/cohesion/resources/LoadBalancer/">
 		<File Path="resources/LoadBalancer/Directory.Build.props" />
 		<File Path="resources/LoadBalancer/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
+	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
+	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
 		<Project Path="resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/LogSpace/">
+	<Folder Name="/cohesion/resources/LogSpace/">
 		<File Path="resources/LogSpace/Directory.Build.props" />
 		<File Path="resources/LogSpace/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/LogSpace/Assimalign.Cohesion.LogSpace/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/LogSpace/Assimalign.Cohesion.LogSpace/src/">
+	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace/" />
+	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace/src/">
 		<Project Path="resources/LogSpace/Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">
+	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
+	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">
 		<Project Path="resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/Assimalign.Cohesion.LogSpace.Telemetry.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MediaHub/">
+	<Folder Name="/cohesion/resources/MediaHub/">
 		<File Path="resources/MediaHub/Directory.Build.props" />
 		<File Path="resources/MediaHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MediaHub/Assimalign.Cohesion.MediaHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/MediaHub/Assimalign.Cohesion.MediaHub/src/">
+	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub/" />
+	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub/src/">
 		<Project Path="resources/MediaHub/Assimalign.Cohesion.MediaHub/src/Assimalign.Cohesion.MediaHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/">
+	<Folder Name="/cohesion/resources/MessageHub/">
 		<File Path="resources/MessageHub/Directory.Build.props" />
 		<File Path="resources/MessageHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/Assimalign.Cohesion.MessageHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/Assimalign.Cohesion.MessageHub/src/">
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub/" />
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub/src/">
 		<Project Path="resources/MessageHub/Assimalign.Cohesion.MessageHub/src/Assimalign.Cohesion.MessageHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/">
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/">
 		<File Path="resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/">
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/">
 		<Project Path="resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
 		<Project Path="resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/Assimalign.Cohesion.MessageHub.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NatGateway/">
+	<Folder Name="/cohesion/resources/NatGateway/">
 		<File Path="resources/NatGateway/Directory.Build.props" />
 		<File Path="resources/NatGateway/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NatGateway/Assimalign.Cohesion.NatGateway/">
+	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway/">
 		<File Path="resources/NatGateway/Assimalign.Cohesion.NatGateway/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NatGateway/Assimalign.Cohesion.NatGateway/src/">
+	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway/src/">
 		<Project Path="resources/NatGateway/Assimalign.Cohesion.NatGateway/src/Assimalign.Cohesion.NatGateway.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
+	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
 		<Project Path="resources/NatGateway/Assimalign.Cohesion.NatGateway/tests/Assimalign.Cohesion.NatGateway.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/">
+	<Folder Name="/cohesion/resources/NotificationHub/">
 		<File Path="resources/NotificationHub/Directory.Build.props" />
 		<File Path="resources/NotificationHub/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/src/">
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/" />
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/src/">
 		<Project Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub/src/Assimalign.Cohesion.NotificationHub.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/">
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/">
 		<File Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/">
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/">
 		<Project Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/Assimalign.Cohesion.NotificationHub.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/">
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/">
 		<Project Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/Assimalign.Cohesion.NotificationHub.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Rezolvr/">
+	<Folder Name="/cohesion/resources/Rezolvr/">
 		<File Path="resources/Rezolvr/Directory.Build.props" />
 		<File Path="resources/Rezolvr/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/">
+	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/">
 		<File Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/src/">
+	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/src/">
 		<Project Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr/src/Assimalign.Cohesion.Rezolvr.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
+	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
 		<Project Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/Assimalign.Cohesion.Rezolvr.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/">
+	<Folder Name="/cohesion/resources/Scheduler/">
 		<File Path="resources/Scheduler/Directory.Build.props" />
 		<File Path="resources/Scheduler/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler/">
 		<File Path="resources/Scheduler/Assimalign.Cohesion.Scheduler/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler/src/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler/src/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler/tests/Assimalign.Cohesion.Scheduler.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/">
 		<File Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/tests/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/tests/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/tests/Assimalign.Cohesion.Scheduler.Cron.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/">
 		<File Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/Assimalign.Cohesion.Scheduler.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/tests/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/tests/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/tests/Assimalign.Cohesion.Scheduler.Hosting.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/">
 		<File Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/tests/">
+	<Folder Name="/cohesion/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/tests/">
 		<Project Path="resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/tests/Assimalign.Cohesion.Scheduler.Timer.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/">
+	<Folder Name="/cohesion/resources/SecretStore/">
 		<File Path="resources/SecretStore/Directory.Build.props" />
 		<File Path="resources/SecretStore/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/Assimalign.Cohesion.SecretStore/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/Assimalign.Cohesion.SecretStore/src/">
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/" />
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/src/Assimalign.Cohesion.SecretStore.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/">
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/">
 		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/">
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/Assimalign.Cohesion.SecretStore.Client.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/tests/">
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/tests/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/tests/Assimalign.Cohesion.SecretStore.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/VpnGateway/">
+	<Folder Name="/cohesion/resources/VpnGateway/">
 		<File Path="resources/VpnGateway/Directory.Build.props" />
 		<File Path="resources/VpnGateway/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/">
+	<Folder Name="/cohesion/resources/Web/">
 		<File Path="resources/Web/Directory.Build.props" />
 		<File Path="resources/Web/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web/tests/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Api/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Api/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Api.Controllers/src/Assimalign.Cohesion.Web.Api.Controllers.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/tests/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api.Controllers/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Api.Controllers/tests/Assimalign.Cohesion.Web.Api.Controllers.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/src/Assimalign.Cohesion.Web.ApplicationModel.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/Assimalign.Cohesion.Web.ApplicationModel.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Authentication/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Authentication/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication/src/Assimalign.Cohesion.Web.Authentication.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Authorization/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Authorization/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authorization/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authorization/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authorization/src/Assimalign.Cohesion.Web.Authorization.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.CookiePolicy/src/Assimalign.Cohesion.Web.CookiePolicy.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Cors/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Cors/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Cors/src/Assimalign.Cohesion.Web.Cors.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Functions/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Functions/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Functions/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Functions/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Functions/src/Assimalign.Cohesion.Web.Functions.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Hosting/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Results/" />
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Results/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Results/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Results/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Results/src/Assimalign.Cohesion.Web.Results.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Routing/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Routing/docs/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/docs/DESIGN.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/resources/Web/Assimalign.Cohesion.Web.Routing/tests/">
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/tests/Assimalign.Cohesion.Web.Routing.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/">
+	<Folder Name="/cohesion/sdks/">
 		<File Path="sdks/Directory.Build.props" />
 		<File Path="sdks/Directory.Build.targets" />
 		<File Path="sdks/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.ApiManager/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.ApiManager/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/Assimalign.Cohesion.Sdk.ApiManager.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/Tasks/Assimalign.Cohesion.Sdk.ConfigurationStore.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Database/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Database/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Database/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Database/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.Database/Tasks/Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.EmailHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.EmailHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.EmailHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.EmailHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.EmailHub/Tasks/Assimalign.Cohesion.Sdk.EmailHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.EventHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.EventHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/Assimalign.Cohesion.Sdk.EventHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.IdentityHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IdentityHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/Assimalign.Cohesion.Sdk.IdentityHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.IoTHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.IoTHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IoTHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.IoTHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.IoTHub/Tasks/Assimalign.Cohesion.Sdk.IoTHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.LoadBalancer/Tasks/Assimalign.Cohesion.Sdk.LoadBalancer.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.LogSpace/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.LogSpace/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.LogSpace/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.LogSpace/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.LogSpace/Tasks/Assimalign.Cohesion.Sdk.LogSpace.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.MediaHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.MediaHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.MediaHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.MediaHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.MediaHub/Tasks/Assimalign.Cohesion.Sdk.MediaHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.MessageHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.MessageHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.MessageHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.MessageHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.MessageHub/Tasks/Assimalign.Cohesion.Sdk.MessageHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.NatGateway/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.NatGateway/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.NatGateway/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.NatGateway/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.NatGateway/Tasks/Assimalign.Cohesion.Sdk.NatGateway.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.NotificationHub/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.NotificationHub/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.NotificationHub/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.NotificationHub/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.NotificationHub/Tasks/Assimalign.Cohesion.Sdk.NotificationHub.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Rezolvr/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Rezolvr/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Rezolvr/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Rezolvr/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.Rezolvr/Tasks/Assimalign.Cohesion.Sdk.Rezolvr.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Scheduler/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Scheduler/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Scheduler/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Scheduler/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.Scheduler/Tasks/Assimalign.Cohesion.Sdk.Scheduler.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.SecretStore/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.SecretStore/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.SecretStore/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.SecretStore/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.SecretStore/Tasks/Assimalign.Cohesion.Sdk.SecretStore.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.VpnGateway/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.VpnGateway/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.VpnGateway/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.VpnGateway/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.VpnGateway/Tasks/Assimalign.Cohesion.Sdk.VpnGateway.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Web/" />
-	<Folder Name="/dotnetcadet-hardening-02/sdks/Assimalign.Cohesion.Sdk.Web/Tasks/">
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Web/" />
+	<Folder Name="/cohesion/sdks/Assimalign.Cohesion.Sdk.Web/Tasks/">
 		<Project Path="sdks/Assimalign.Cohesion.Sdk.Web/Tasks/Assimalign.Cohesion.Sdk.Web.Tasks.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/tooling/">
+	<Folder Name="/cohesion/tooling/">
 		<File Path="tooling/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/tooling/Cli/" />
-	<Folder Name="/dotnetcadet-hardening-02/tooling/Cli/src/" />
-	<Folder Name="/dotnetcadet-hardening-02/tooling/Cli/src/Assimalign.Cohesion.Cli/">
+	<Folder Name="/cohesion/tooling/Cli/" />
+	<Folder Name="/cohesion/tooling/Cli/src/" />
+	<Folder Name="/cohesion/tooling/Cli/src/Assimalign.Cohesion.Cli/">
 		<Project Path="tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/tooling/Cli/tests/" />
-	<Folder Name="/dotnetcadet-hardening-02/tooling/Cli/tests/Assimalign.Cohesion.Cli.Tests/">
+	<Folder Name="/cohesion/tooling/Cli/tests/" />
+	<Folder Name="/cohesion/tooling/Cli/tests/Assimalign.Cohesion.Cli.Tests/">
 		<Project Path="tooling/Cli/tests/Assimalign.Cohesion.Cli.Tests/Assimalign.Cohesion.Cli.Tests.csproj" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/tooling/scripts/">
+	<Folder Name="/cohesion/tooling/scripts/">
 		<File Path="tooling/scripts/Directory.Build.props" />
 		<File Path="tooling/scripts/Directory.Build.targets" />
 		<File Path="tooling/scripts/README.md" />
 	</Folder>
-	<Folder Name="/dotnetcadet-hardening-02/tooling/scripts/src/" />
-	<Folder Name="/dotnetcadet-hardening-02/tooling/scripts/src/Assimalign.Cohesion.DevScripts/">
+	<Folder Name="/cohesion/tooling/scripts/src/" />
+	<Folder Name="/cohesion/tooling/scripts/src/Assimalign.Cohesion.DevScripts/">
 		<Project Path="tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj" />
 	</Folder>
 </Solution>
