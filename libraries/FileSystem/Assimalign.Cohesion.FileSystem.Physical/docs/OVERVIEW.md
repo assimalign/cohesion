@@ -53,9 +53,9 @@ before delegating to `File.Copy` / `File.Move`.
 
 ## Test coverage
 
-64 tests including:
+66 tests including:
 
-- 32 contract tests from `FileSystemStandardTests`.
+- 34 contract tests from `FileSystemStandardTests`.
 - 32 provider-specific tests covering exception mapping for each OS error,
   options validation, read-only enforcement, enumeration filtering by
   attributes.
