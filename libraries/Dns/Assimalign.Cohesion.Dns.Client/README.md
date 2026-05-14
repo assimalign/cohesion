@@ -10,9 +10,11 @@ of the `Assimalign.Cohesion.Dns` contracts.
 |---------|--------|
 | `UdpDnsTransport` &mdash; RFC 1035 §4.2.1 UDP transport | Shipping |
 | `TcpDnsTransport` &mdash; RFC 1035 §4.2.2 length-prefix TCP transport, RFC 7766 connection reuse | Shipping |
+| `StubDnsClient` &mdash; one-shot non-recursive client over a single transport | Shipping |
 | `ForwardingDnsResolver` &mdash; cache-aware forwarding resolver, RFC 5452 spoof protection, RFC 5966 TC fallback, RFC 2308 negative caching | Shipping |
+| `IterativeDnsResolver` &mdash; iterative resolver from root hints with bailiwick + glue policy + QNAME minimization (RFC 9156) | Shipping |
 | `DotDnsTransport`, `DohDnsTransport`, `DoqDnsTransport` | Placeholder packages (see `Assimalign.Cohesion.Dns.Client.{Dot,Doh,Doq}`) |
-| Iterative resolver from root hints, referral chasing, bailiwick + glue policing, QNAME minimization | Deferred to a follow-up PR |
+| Out-of-bailiwick NS-name resolution + delegation caching + EDNS Cookies (RFC 7873) + 0x20 case randomization | Deferred to a follow-up PR |
 
 ## Transport contract
 
@@ -37,6 +39,70 @@ parsing live in `Assimalign.Cohesion.Dns`. This split keeps the
 transport implementation small and lets the resolver decide
 message-level concerns like EDNS payload size or DNSSEC bits without
 involving the network layer.
+
+## Iterative resolver
+
+`IterativeDnsResolver` walks the delegation chain from configured root hints,
+following NS referrals zone by zone until an authoritative server answers
+the question. No forwarder is involved; the resolver does the recursion
+itself.
+
+```csharp
+var resolver = new IterativeDnsResolver(new IterativeDnsResolverOptions
+{
+    // Defaults to DnsRootHints.Iana() (26 IPv4+IPv6 endpoints). Override for
+    // private DNS / split-horizon setups.
+    // RootEndpoints       = new List<IPEndPoint> { ... },
+    QueryTimeout            = TimeSpan.FromSeconds(15),
+    EnableQNameMinimization = true,   // RFC 9156
+});
+
+DnsMessage answer = await resolver.ResolveAsync(new DnsQuestion("example.com", DnsRecordType.A));
+```
+
+The resolver enforces:
+
+- **RFC 5452** transaction-id + question-echo validation on every response.
+- **Bailiwick policy** — NS records that delegate to a zone outside the
+  queried authority's bailiwick are rejected as spoofed referrals.
+- **In-bailiwick glue policy** — A/AAAA records in the additional section
+  are only trusted when their owner name is inside the delegated zone.
+  Out-of-bailiwick glue is discarded so a malicious authority cannot
+  poison an unrelated zone.
+- **QNAME minimization (RFC 9156)** when `EnableQNameMinimization = true`:
+  each step probes with only the labels the current authority needs to
+  know, hiding the rest of the QNAME until we reach an authority closer
+  to the leaf.
+- **RFC 5966 TC→TCP fallback** per step when `TcpTransportFactory` is set.
+- **Budget enforcement** — bounded referral depth (default 30) and
+  bounded total upstream exchanges (default 50) per resolve.
+
+> **PR-5 limitation:** if a referral arrives with no in-bailiwick glue,
+> the resolver currently surfaces `DnsErrorCode.Transport` rather than
+> recursing to resolve the out-of-bailiwick NS name. Well-glued
+> production zones (the IANA root + every TLD that matters) are
+> unaffected. Out-of-bailiwick NS resolution lands in a follow-up.
+
+## Stub client
+
+`StubDnsClient` is the simplest concrete `DnsClient`: one transport, one
+exchange per call, no cache, no recursion. Use it for testing fixtures,
+low-level debugging, or talking directly to a known authoritative server.
+
+```csharp
+using var udp = new UdpDnsTransport(new UdpDnsTransportOptions
+{
+    EndPoint = new IPEndPoint(IPAddress.Parse("8.8.8.8"), 53),
+});
+
+var stub = new StubDnsClient(new StubDnsClientOptions
+{
+    Transport = udp,
+    RecursionDesired = true,   // false when talking to an authoritative server directly
+});
+
+DnsMessage answer = await stub.QueryAsync(new DnsQuestion("example.com", DnsRecordType.A));
+```
 
 ## Forwarding resolver
 

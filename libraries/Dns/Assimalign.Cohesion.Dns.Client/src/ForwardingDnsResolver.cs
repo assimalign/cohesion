@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Dns.Internal;
@@ -179,111 +177,18 @@ public sealed class ForwardingDnsResolver : DnsResolver
         return Task.CompletedTask;
     }
 
-    private async Task<DnsMessage> ExchangeAsync(
+    private Task<DnsMessage> ExchangeAsync(
         DnsTransport transport,
         DnsQuestion question,
         CancellationTokenSource timeoutCts,
         CancellationToken externalToken)
     {
-        ushort id = (ushort)RandomNumberGenerator.GetInt32(0, 65_536);
-        DnsMessage query = BuildQuery(id, question);
-        byte[] requestBytes = SerializeQuery(query);
-
-        ReadOnlyMemory<byte> responseBytes;
-        try
-        {
-            responseBytes = await transport
-                .ExchangeAsync(requestBytes, timeoutCts.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !externalToken.IsCancellationRequested)
-        {
-            DnsException.ThrowTimeout($"{question.Name} {question.Type}");
-            throw; // unreachable
-        }
-
-        DnsMessage response;
-        try
-        {
-            response = DnsMessage.Parse(responseBytes.Span);
-        }
-        catch (DnsException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            DnsException.ThrowMalformed($"failed to parse response for {question.Name} {question.Type}", ex);
-            throw; // unreachable
-        }
-
-        ValidateResponse(response, query);
-        return response;
-    }
-
-    private DnsMessage BuildQuery(ushort id, DnsQuestion question)
-    {
-        bool useEdns = _options.EdnsPayloadSize > 0;
-        var header = new DnsHeader(
-            id,
-            DnsHeaderFlags.RecursionDesired,
-            DnsOpCode.Query,
-            DnsResponseCode.NoError,
-            questionCount: 1,
-            answerCount: 0,
-            authorityCount: 0,
-            additionalCount: useEdns ? (ushort)1 : (ushort)0);
-
-        IReadOnlyList<DnsRecord> additionals = useEdns
-            ? new DnsRecord[] { new DnsOptRecord(_options.EdnsPayloadSize) }
-            : Array.Empty<DnsRecord>();
-
-        return new DnsMessage(
-            header,
-            new[] { question },
-            Array.Empty<DnsRecord>(),
-            Array.Empty<DnsRecord>(),
-            additionals);
-    }
-
-    private static byte[] SerializeQuery(DnsMessage query)
-    {
-        // 1232 octets is the modern guidance for UDP-safe DNS messages (RFC 6891 §6.2.4 +
-        // dnsflagday.net). Queries are always small relative to that bound.
-        byte[] buffer = new byte[1232];
-        int written = query.WriteTo(buffer);
-        // Trim to actual length; the transport API accepts a ReadOnlyMemory of any size.
-        byte[] trimmed = new byte[written];
-        Buffer.BlockCopy(buffer, 0, trimmed, 0, written);
-        return trimmed;
-    }
-
-    private static void ValidateResponse(DnsMessage response, DnsMessage query)
-    {
-        if (response.Header.Id != query.Header.Id)
-        {
-            DnsException.ThrowSpoofed(
-                $"response transaction id 0x{response.Header.Id:X4} does not match query id 0x{query.Header.Id:X4}");
-        }
-        if ((response.Header.Flags & DnsHeaderFlags.Response) == 0)
-        {
-            DnsException.ThrowSpoofed("response message does not have the QR flag set");
-        }
-        if (response.Questions.Count != query.Questions.Count)
-        {
-            DnsException.ThrowSpoofed(
-                $"response question count {response.Questions.Count} does not echo query count {query.Questions.Count}");
-        }
-        for (int i = 0; i < query.Questions.Count; i++)
-        {
-            DnsQuestion rq = response.Questions[i];
-            DnsQuestion qq = query.Questions[i];
-            if (!rq.Name.Equals(qq.Name) || rq.Type != qq.Type || rq.Class != qq.Class)
-            {
-                DnsException.ThrowSpoofed(
-                    $"response question {i} ({rq}) does not echo query question ({qq})");
-            }
-        }
+        DnsMessage query = DnsQueryHelper.BuildQuery(
+            DnsQueryHelper.NewTransactionId(),
+            question,
+            recursionDesired: true,
+            ednsPayloadSize: _options.EdnsPayloadSize);
+        return DnsQueryHelper.ExchangeAsync(transport, query, timeoutCts, externalToken);
     }
 
     private static DnsMessage ThrowIfNonSuccess(DnsMessage response, DnsQuestion question)
