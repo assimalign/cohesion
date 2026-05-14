@@ -98,17 +98,24 @@ public class ScopedLoggerTests
         scope.Dispose(); // no throw
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Scope: disposed scope rejects Log")]
-    public void DisposedScope_LogThrows()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Scope: disposed scope silently drops Log")]
+    public void DisposedScope_LogSilentlyDrops()
     {
+        var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
-            .AddProvider(new RecordingProvider())
+            .AddProvider(provider)
             .Build();
         var scope = factory.Create("Cat").BeginScope(new LoggerEntry(LogLevel.Information, "Cat", "open"));
+        int countAtDispose = provider.Entries.Count;
         scope.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() =>
-            scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "after dispose")));
+        // ScopedLoggerBase.IsEnabled returns false after disposal, so the LoggerBase Log path
+        // short-circuits without dispatching to WriteCore. This is consistent with the rest of
+        // the pipeline which silently tolerates dead sinks (provider failures, filter throws).
+        scope.Log(new LoggerEntry(LogLevel.Information, "Cat", "after dispose"));
+
+        Assert.Equal(countAtDispose, provider.Entries.Count);
+        Assert.False(scope.IsEnabled(LogLevel.Information));
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - Scope: provider that throws on BeginScope is replaced with noop")]

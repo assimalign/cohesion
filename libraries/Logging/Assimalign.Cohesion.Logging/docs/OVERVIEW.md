@@ -50,8 +50,11 @@ own packages and depend on the foundation.
   `Critical`, `Event`, `None`).
 - `LogId` - generated `Ulid` wrapper with `Empty` / `New()` factories.
 - `ILogger` / `IScopedLogger` - writer contracts.
-- `ILoggerProvider` - sink factory.
+- `LoggerBase` / `ScopedLoggerBase` - abstract base classes that implement the boilerplate
+  with non-virtual hot paths so derived sinks pay one virtual dispatch instead of two.
+- `ILoggerProvider` / `LoggerProviderBase` - sink factory contract + abstract base class.
 - `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating.
+  `LoggerFactory.Create(string)` returns the concrete `LoggerBase` via covariant return.
 - `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.
 - `ILoggerEnricher` - attribute pipeline.
@@ -70,6 +73,8 @@ own packages and depend on the foundation.
 - `src/Internal/NoopScopedLogger.cs` - resilience helper.
 - `src/Internal/LoggerFilterRuleSelector.cs` - rule selection algorithm.
 - `src/LoggerEntry.cs`, `src/LoggerEntryBuilder.cs`, `src/LogLevel.cs` - event types.
+- `src/LoggerBase.cs`, `src/ScopedLoggerBase.cs`, `src/LoggerProviderBase.cs` - reusable
+  abstract base classes implementing the boilerplate with non-virtual hot paths.
 - `src/LoggerFactory.cs`, `src/LoggerFactoryBuilder.cs`, `src/LoggerFactoryOptions.cs` -
   factory plumbing.
 - `src/LoggerFilterRule.cs` - filter rule type.

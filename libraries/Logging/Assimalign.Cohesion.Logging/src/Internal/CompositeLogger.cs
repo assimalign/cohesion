@@ -14,9 +14,8 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// a single underlying logger are isolated: an exception from one sink never aborts fan-out to
 /// the others.
 /// </remarks>
-internal sealed class CompositeLogger : ILogger
+internal sealed class CompositeLogger : LoggerBase
 {
-    private readonly string _category;
     private readonly ILogger[] _underlying;
     private readonly IReadOnlyList<ILoggerEnricher> _enrichers;
     private readonly LogLevel[] _perProviderLevel;
@@ -28,15 +27,15 @@ internal sealed class CompositeLogger : ILogger
         IReadOnlyList<ILoggerEnricher> enrichers,
         LogLevel[] perProviderLevel,
         ILoggerFilter?[] perProviderFilter)
+        : base(category)
     {
-        _category = category;
         _underlying = underlying;
         _enrichers = enrichers;
         _perProviderLevel = perProviderLevel;
         _perProviderFilter = perProviderFilter;
     }
 
-    public bool IsEnabled(LogLevel level)
+    public override bool IsEnabled(LogLevel level)
     {
         if (level == LogLevel.None)
         {
@@ -54,10 +53,8 @@ internal sealed class CompositeLogger : ILogger
         return false;
     }
 
-    public void Log(ILoggerEntry entry)
+    protected override void WriteCore(ILoggerEntry entry)
     {
-        ArgumentNullException.ThrowIfNull(entry);
-
         if (entry.Level == LogLevel.None)
         {
             return;
@@ -99,14 +96,12 @@ internal sealed class CompositeLogger : ILogger
         }
     }
 
-    public IScopedLogger BeginScope(ILoggerEntry entry)
+    protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
     {
-        ArgumentNullException.ThrowIfNull(entry);
-
         var enriched = ApplyEnrichment(entry);
 
-        // Open the seed entry's scope on every underlying logger so providers maintaining scope
-        // state see a consistent parent.
+        // The composite does NOT emit the seed itself; each underlying provider's BeginScope
+        // handles seed emission for its own sink, so the seed appears exactly once per sink.
         var underlyingScopes = new IScopedLogger[_underlying.Length];
         for (int i = 0; i < _underlying.Length; i++)
         {
@@ -120,7 +115,7 @@ internal sealed class CompositeLogger : ILogger
             }
         }
 
-        return new ScopedCompositeLogger(this, enriched.Id, underlyingScopes);
+        return new ScopedCompositeLogger(this, Category, enriched.Id, underlyingScopes);
     }
 
     private ILoggerEntry ApplyEnrichment(ILoggerEntry entry)

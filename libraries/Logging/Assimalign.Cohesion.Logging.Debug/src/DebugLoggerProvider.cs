@@ -1,14 +1,13 @@
 using System;
 using System.Globalization;
 using System.Text;
-using System.Threading;
 using Assimalign.Cohesion.Logging.Debug.Internal;
 
 namespace Assimalign.Cohesion.Logging.Debug;
 
 /// <summary>
 /// <see cref="ILoggerProvider"/> that writes structured log entries through
-/// <see cref="Debug.WriteLine(string)"/> (or a caller-supplied writer).
+/// <see cref="System.Diagnostics.Debug.WriteLine(string)"/> (or a caller-supplied writer).
 /// </summary>
 /// <remarks>
 /// The provider only emits while a debugger is attached unless
@@ -16,10 +15,9 @@ namespace Assimalign.Cohesion.Logging.Debug;
 /// Output is line-oriented so it surfaces nicely in Visual Studio's Output window or any other
 /// <c>Debug</c> listener.
 /// </remarks>
-public sealed class DebugLoggerProvider : ILoggerProvider
+public sealed class DebugLoggerProvider : LoggerProviderBase
 {
     private readonly DebugLoggerOptions _options;
-    private int _disposed;
 
     /// <summary>
     /// Initializes a provider with default options.
@@ -40,30 +38,14 @@ public sealed class DebugLoggerProvider : ILoggerProvider
     }
 
     /// <inheritdoc />
-    public string Name => "Debug";
+    public override string Name => "Debug";
 
     /// <inheritdoc />
-    public ILogger Create(string category)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(category);
-
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            throw new ObjectDisposedException(nameof(DebugLoggerProvider));
-        }
-
-        return new DebugLogger(category, this);
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        Interlocked.Exchange(ref _disposed, 1);
-    }
+    protected override LoggerBase CreateCore(string category) => new DebugLogger(category, this);
 
     internal bool IsEnabledFor(LogLevel level)
     {
-        if (Volatile.Read(ref _disposed) != 0 || level == LogLevel.None)
+        if (IsDisposed || level == LogLevel.None)
         {
             return false;
         }

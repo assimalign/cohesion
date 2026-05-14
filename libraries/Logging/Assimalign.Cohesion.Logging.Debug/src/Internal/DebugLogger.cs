@@ -1,91 +1,54 @@
-using System;
-using System.Threading;
-
 namespace Assimalign.Cohesion.Logging.Debug.Internal;
 
 /// <summary>
 /// Per-category logger created by <see cref="DebugLoggerProvider"/>.
 /// </summary>
-internal sealed class DebugLogger : ILogger
+internal sealed class DebugLogger : LoggerBase
 {
-    private readonly string _category;
     private readonly DebugLoggerProvider _provider;
 
     public DebugLogger(string category, DebugLoggerProvider provider)
+        : base(category)
     {
-        _category = category;
         _provider = provider;
     }
 
-    public bool IsEnabled(LogLevel level) => _provider.IsEnabledFor(level);
+    public override bool IsEnabled(LogLevel level) => _provider.IsEnabledFor(level);
 
-    public void Log(ILoggerEntry entry)
+    protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
+
+    protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
     {
-        ArgumentNullException.ThrowIfNull(entry);
-
-        if (!IsEnabled(entry.Level))
-        {
-            return;
-        }
-
-        _provider.Write(entry);
-    }
-
-    public IScopedLogger BeginScope(ILoggerEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-
-        // Emit the seed so the developer sees scope-open events in the debug stream.
         if (IsEnabled(entry.Level))
         {
             _provider.Write(entry);
         }
 
-        return new DebugScopedLogger(entry.Id, _category, _provider);
+        return new DebugScopedLogger(Category, _provider, entry.Id);
     }
 
-    private sealed class DebugScopedLogger : IScopedLogger
+    private sealed class DebugScopedLogger : ScopedLoggerBase
     {
-        private readonly string _category;
         private readonly DebugLoggerProvider _provider;
-        private int _disposed;
 
-        public DebugScopedLogger(LogId parentId, string category, DebugLoggerProvider provider)
+        public DebugScopedLogger(string category, DebugLoggerProvider provider, LogId parentId)
+            : base(category, parentId)
         {
-            ParentId = parentId;
-            _category = category;
             _provider = provider;
         }
 
-        public LogId ParentId { get; }
+        public override bool IsEnabled(LogLevel level) => !IsDisposed && _provider.IsEnabledFor(level);
 
-        public bool IsEnabled(LogLevel level) => Volatile.Read(ref _disposed) == 0 && _provider.IsEnabledFor(level);
+        protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
 
-        public void Log(ILoggerEntry entry)
+        protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
         {
-            ArgumentNullException.ThrowIfNull(entry);
-            if (!IsEnabled(entry.Level))
-            {
-                return;
-            }
-            _provider.Write(entry);
-        }
-
-        public IScopedLogger BeginScope(ILoggerEntry entry)
-        {
-            ArgumentNullException.ThrowIfNull(entry);
-
             if (IsEnabled(entry.Level))
             {
                 _provider.Write(entry);
             }
 
-            return new DebugScopedLogger(entry.Id, _category, _provider);
-        }
-
-        public void Dispose()
-        {
-            Interlocked.Exchange(ref _disposed, 1);
+            return new DebugScopedLogger(Category, _provider, entry.Id);
         }
     }
 }

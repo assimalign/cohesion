@@ -13,11 +13,10 @@ namespace Assimalign.Cohesion.Logging.Console;
 /// The provider is thread-safe. Output is serialized through an internal lock so concurrent
 /// log entries do not interleave on the same writer.
 /// </remarks>
-public sealed class ConsoleLoggerProvider : ILoggerProvider
+public sealed class ConsoleLoggerProvider : LoggerProviderBase
 {
     private readonly ConsoleLoggerOptions _options;
     private readonly Lock _writeLock = new();
-    private int _disposed;
 
     /// <summary>
     /// Initializes a provider with default options.
@@ -38,33 +37,17 @@ public sealed class ConsoleLoggerProvider : ILoggerProvider
     }
 
     /// <inheritdoc />
-    public string Name => "Console";
-
-    internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+    public override string Name => "Console";
 
     /// <inheritdoc />
-    public ILogger Create(string category)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(category);
-
-        if (IsDisposed)
-        {
-            throw new ObjectDisposedException(nameof(ConsoleLoggerProvider));
-        }
-
-        return new ConsoleLogger(category, this);
-    }
+    protected override LoggerBase CreateCore(string category) => new ConsoleLogger(category, this);
 
     /// <inheritdoc />
-    public void Dispose()
+    protected override void DisposeCore()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
-        // Flush whatever writers the caller supplied; never close them - they may be shared with
-        // the rest of the host (System.Console.Out cannot be closed without breaking the process).
+        // Flush whatever writers the caller supplied; never close them - they may be shared
+        // with the rest of the host (System.Console.Out cannot be closed without breaking the
+        // process).
         lock (_writeLock)
         {
             try { _options.Output?.Flush(); } catch { }
