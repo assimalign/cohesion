@@ -118,17 +118,49 @@ the dedicated codes for the specific failure mode.
 
 ## Wire-format scope
 
-`DnsMessage` is currently a placeholder. PR 2 (Feature 03) will:
+`DnsMessage` exposes the full RFC 1035 §4 binary read/write surface:
 
-1. Add the binary read/write surface — `DnsMessage.Parse(ReadOnlySpan<byte>)`
-   and `DnsMessage.TryWriteTo(Span<byte>, out int written)`.
-2. Implement RFC 1035 §4 name compression on both sides.
-3. Add strongly-typed `DnsRecord` subclasses for A / AAAA / CNAME / MX /
-   TXT / NS / SOA / PTR / SRV / OPT.
-4. Build a golden-corpus test against well-known packets so any future
-   change has to round-trip the same bytes.
+1. `DnsMessage.Parse(ReadOnlySpan<byte>)` parses a complete message,
+   including the header, every question, and every record across all
+   four sections.
+2. `DnsMessage.WriteTo(Span<byte>)` / `TryWriteTo(Span<byte>, out int)`
+   serialize the message. Section counts are derived from the
+   collection sizes so callers don't have to keep the header in sync.
+3. RFC 1035 §4.1.4 name compression is applied on write (per-message
+   suffix table; pointers emitted when the offset fits in 14 bits)
+   and tolerated on read with pointer-chain depth, offset-direction,
+   and reassembled-length validation.
+4. The strongly-typed record family covers A / AAAA / CNAME / NS / PTR
+   / MX / TXT / SOA / SRV plus the EDNS OPT pseudo-record. Anything
+   else round-trips through `DnsUnknownRecord` per RFC 3597.
 
-PR 3 (Feature 04) adds EDNS OPT handling on top.
+### EDNS (RFC 6891)
+
+`DnsOptRecord` re-purposes the underlying record fields per
+RFC 6891 §6.1:
+
+| Record field | EDNS meaning |
+|--------------|--------------|
+| `Class` | UDP payload size advertised by the requestor |
+| `TTL` (high byte) | Extended RCODE high 8 bits |
+| `TTL` (mid byte) | EDNS version |
+| `TTL` (low 16 bits) | EDNS flag bits (`DnsEdnsFlags`) |
+| `RDATA` | Sequence of `DnsEdnsOption` |
+
+The option family follows the same closed-extension pattern as the
+record family: typed subclasses (`ClientSubnet`, `Cookie`,
+`ExtendedError`) for the common cases, `DnsEdnsUnknownOption` for
+forward compatibility per RFC 6891 §4.
+
+### Internal wire helpers
+
+`Internal/DnsWireReader` and `Internal/DnsWireWriter` are
+<see langword="ref struct"/> wrappers over a `ReadOnlySpan<byte>` /
+`Span<byte>` that centralize bounds-checking and big-endian
+conversion. `Internal/DnsNameDecoder` and `Internal/DnsNameEncoder`
+implement RFC 1035 §4.1.4 with a shared compression table on
+`DnsWireWriter` so consecutive name writes within one message
+deduplicate suffixes automatically.
 
 ## AOT posture
 

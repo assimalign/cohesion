@@ -29,14 +29,32 @@ DNSSEC validation, per-transport plugins if useful.
 
 ## Status
 
-Initial scaffolding. Ships:
+Contracts (PR 1) plus the complete wire format and EDNS layer (PR 2).
+Now ships:
 
-- `DnsException` + `DnsErrorCode` (Story `.02.03`, AOT-safe)
+- `DnsException` + `DnsErrorCode` (AOT-safe)
 - `DnsClient`, `DnsResolver`, `DnsAuthority`, `DnsZone`,
-  `DnsTransport` abstract classes (Story `.02.01`)
-- `DnsName`, `DnsQuestion`, `DnsRecord` value-type/data-shape stubs
-- Wire enums: `DnsRecordType`, `DnsClass`, `DnsOpCode`, `DnsResponseCode`
-- `DnsMessage` placeholder — wire-format implementation lands in PR 2
+  `DnsTransport` abstract classes
+- `DnsName`, `DnsQuestion`, `DnsHeader`, `DnsHeaderFlags` value types
+- `DnsMessage` with `Parse(ReadOnlySpan<byte>)` and
+  `WriteTo(Span<byte>)` — RFC 1035 §4 wire format including §4.1.4
+  name compression on both sides (pointer-chain depth + offset-
+  direction validation)
+- `DnsRecord` abstract base + the strongly-typed family:
+  `DnsARecord` / `DnsAaaaRecord` / `DnsCnameRecord` / `DnsNsRecord` /
+  `DnsPtrRecord` / `DnsMxRecord` / `DnsTxtRecord` / `DnsSoaRecord` /
+  `DnsSrvRecord` / `DnsOptRecord` / `DnsUnknownRecord` (RFC 3597
+  round-trip for unrecognised types)
+- EDNS OPT pseudo-record (RFC 6891) with the typed option family:
+  `DnsEdnsClientSubnetOption` (RFC 7871),
+  `DnsEdnsCookieOption` (RFC 7873),
+  `DnsEdnsExtendedErrorOption` (RFC 8914),
+  `DnsEdnsUnknownOption` for forward compatibility
+- Wire enums: `DnsRecordType`, `DnsClass`, `DnsOpCode`,
+  `DnsResponseCode`, `DnsEdnsFlags`, `DnsEdnsOptionCode`
+
+The concrete `DnsClient.Client` package &#8211; transports + recursive
+resolver &#8211; lands in PR 3.
 
 ## Public surface
 
@@ -56,17 +74,29 @@ Initial scaffolding. Ships:
 - `DnsAuthority` exposes `Zones` and `FindZone(name)` for authoritative
   servers, with the same lifecycle plumbing as `DnsClient`.
 - `DnsZone` carries `Origin`, `Serial`, `GetRecords`, `Contains`.
-- `DnsTransport.ExchangeAsync(endpoint, request, ct)` is the
-  network-layer plug point used by the resolver, again with shared
-  lifecycle.
+- `DnsTransport.ExchangeAsync(request, ct)` is the network-layer plug
+  point used by the resolver. One transport binds to one
+  `Endpoint` (set at construction), matching the
+  `Assimalign.Cohesion.Transports` family's `ClientTransport` shape so
+  PR 3 transports can adapt cleanly. Resolvers that need to fail over
+  hold a list of transports rather than a single transport with N
+  endpoints.
 
 ### Wire-level types
 - `DnsName` — RFC 1035 §2.3.3 case-insensitive name, validates
   label/total-length limits at construction.
 - `DnsQuestion(name, type, class = IN)` — readonly value type.
-- `DnsRecord(name, type, class, ttl, data)` — opaque RDATA today; the
-  typed record family lands in PR 2.
-- `DnsMessage(id, question)` — placeholder; wire format in PR 2.
+- `DnsHeader` — 12-octet header (RFC 1035 §4.1.1) with field-level
+  parse/write. Carries `Id`, `Flags`, `OpCode`, `ResponseCode`, and
+  the four section counts.
+- `DnsHeaderFlags` — `[Flags]` enum for QR / AA / TC / RD / RA / AD / CD.
+- `DnsMessage` — full DNS message with `Parse` + `WriteTo`. Section
+  counts are derived from the actual collection sizes on write, so
+  callers don't have to keep the header in sync.
+- `DnsRecord` — abstract base for every typed record. Subclasses
+  expose strongly-typed fields (e.g. `DnsARecord.Address`,
+  `DnsSoaRecord.Serial`). Unknown wire types parse as
+  `DnsUnknownRecord` preserving the opaque RDATA bytes per RFC 3597.
 
 ### Wire-level enums
 - `DnsRecordType` — A / AAAA / CNAME / MX / TXT / NS / SOA / PTR /
@@ -89,16 +119,22 @@ By design, this package owns contracts only. It does NOT:
 
 ## Test coverage
 
-- 32 tests in `Assimalign.Cohesion.Dns.Tests`:
+- 58 tests in `Assimalign.Cohesion.Dns.Tests`:
   - `DnsExceptionTests` — every `Throw*` helper + ordinal-stability theory.
   - `DnsNameTests` — validation, label extraction, case-insensitive
     equality, implicit conversions.
   - `DnsQuestionTests` — equality and ToString.
   - `DnsClientLifecycleTests` — Dispose idempotency,
     DisposeAsync fallback to DisposeCore, DisposeAsyncCore override
-    path, ThrowIfDisposed guard. Validates the lifecycle plumbing in
-    `DnsClient` that every derived client inherits.
-
-The contract-suite pattern used by FileSystem (provider-agnostic tests
-shared via `<Compile Include …>`) is not yet applicable here — that
-arrives in PR 2 once `DnsMessage` has a serializer to test against.
+    path, ThrowIfDisposed guard.
+  - `DnsHeaderTests` — header round-trip, OPCODE/RCODE bit packing,
+    DNSSEC AD/CD bits, under-sized buffer rejection.
+  - `DnsMessageTests` — query and answer round-trips for every
+    supported record type (A / AAAA / CNAME / NS / PTR / MX / TXT /
+    SOA / SRV), name-compression smoke test (size-bound on
+    serialized output), unknown-RR round-trip (RFC 3597), malformed-
+    name rejection.
+  - `DnsEdnsTests` — OPT round-trip with payload size + DO bit, ECS
+    option (IPv4 + IPv6), Cookie option (client-only + client+server),
+    Extended-DNS-Error option, unknown-option preservation, multi-
+    option ordering, extended-RCODE high byte, malformed ECS family.
