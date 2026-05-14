@@ -1,13 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Dns</RootNamespace>
+		<Description>Cohesion DNS foundation: root contracts for DNS clients, resolvers, authorities, transports, and the wire-format domain model. Concrete clients and authoritative servers live in sibling packages.</Description>
+	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="Http\**" />
-	  <EmbeddedResource Remove="Http\**" />
-	  <None Remove="Http\**" />
-	</ItemGroup>
-	<ItemGroup>
-		<Folder Include="Abstractions\" />
-	</ItemGroup>
-	<ItemGroup>
-	  <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>
