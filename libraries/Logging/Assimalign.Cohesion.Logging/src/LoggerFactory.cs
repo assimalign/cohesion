@@ -16,6 +16,7 @@ public sealed class LoggerFactory : ILoggerFactory
     private readonly LoggerFactoryOptions _options;
     private readonly ILoggerProvider[] _providersSnapshot;
     private readonly ILoggerEnricher[] _enrichersSnapshot;
+    private readonly LoggerFilterRule[] _rulesSnapshot;
     private int _disposed;
 
     /// <summary>
@@ -36,6 +37,9 @@ public sealed class LoggerFactory : ILoggerFactory
 
         _enrichersSnapshot = new ILoggerEnricher[options.Enrichers.Count];
         options.Enrichers.CopyTo(_enrichersSnapshot, 0);
+
+        _rulesSnapshot = new LoggerFilterRule[options.FilterRules.Count];
+        options.FilterRules.CopyTo(_rulesSnapshot, 0);
     }
 
     /// <inheritdoc />
@@ -73,18 +77,30 @@ public sealed class LoggerFactory : ILoggerFactory
 
     private CompositeLogger CreateComposite(string category)
     {
-        var underlying = new ILogger[_providersSnapshot.Length];
-        for (int i = 0; i < _providersSnapshot.Length; i++)
+        var providerCount = _providersSnapshot.Length;
+        var underlying = new ILogger[providerCount];
+        var perProviderLevel = new LogLevel[providerCount];
+        var perProviderFilter = new ILoggerFilter?[providerCount];
+
+        for (int i = 0; i < providerCount; i++)
         {
-            underlying[i] = _providersSnapshot[i].Create(category);
+            var provider = _providersSnapshot[i];
+            underlying[i] = provider.Create(category);
+
+            // Pre-resolve the winning rule per (provider type, category). Storing the resolved
+            // level + filter alongside the underlying logger keeps fan-out O(providers) at log
+            // time, with no per-entry rule lookup.
+            var rule = LoggerFilterRuleSelector.Select(_rulesSnapshot, provider.GetType(), category);
+            perProviderLevel[i] = rule?.Level ?? _options.MinimumLevel;
+            perProviderFilter[i] = rule?.Filter;
         }
 
         return new CompositeLogger(
             category: category,
             underlying: underlying,
             enrichers: _enrichersSnapshot,
-            minimumLevel: _options.MinimumLevel,
-            filter: _options.Filter);
+            perProviderLevel: perProviderLevel,
+            perProviderFilter: perProviderFilter);
     }
 
     private void ThrowIfDisposed()

@@ -6,9 +6,9 @@ namespace Assimalign.Cohesion.Logging;
 /// Fluent registration surface for <see cref="ILoggerFactory"/>.
 /// </summary>
 /// <remarks>
-/// Build the factory in three phases: register providers, declare minimum level + filters,
-/// register enrichers, then call <see cref="Build"/>. Builders are not thread-safe; treat them
-/// as scratch space scoped to a single setup routine.
+/// Build the factory in three phases: register providers, declare the minimum level and filter
+/// rules, register enrichers, then call <see cref="Build"/>. Builders are not thread-safe; treat
+/// them as scratch space scoped to a single setup routine.
 /// </remarks>
 public interface ILoggerFactoryBuilder
 {
@@ -21,29 +21,25 @@ public interface ILoggerFactoryBuilder
     ILoggerFactoryBuilder AddProvider(ILoggerProvider provider);
 
     /// <summary>
-    /// Sets the minimum log level honored by the factory. Entries below this level are dropped
-    /// before reaching any provider. Defaults to <see cref="LogLevel.Information"/>.
+    /// Sets the factory-wide minimum log level. Used as the fallback when no
+    /// <see cref="LoggerFilterRule"/> matches a (provider, category) pair. Defaults to
+    /// <see cref="LogLevel.Information"/>.
     /// </summary>
     ILoggerFactoryBuilder SetMinimumLevel(LogLevel level);
 
     /// <summary>
-    /// Adds a category-prefix filter rule. Rules registered through this overload are folded
-    /// into a single <see cref="CategoryLoggerFilter"/> at build time. The longest matching
-    /// prefix wins.
+    /// Adds a filter rule. Rules are evaluated per (provider, category) pair via the algorithm
+    /// documented on <see cref="LoggerFilterRule"/>.
     /// </summary>
-    /// <exception cref="ArgumentException"><paramref name="categoryPrefix"/> is null or empty.</exception>
-    ILoggerFactoryBuilder AddFilter(string categoryPrefix, LogLevel minimumLevel);
+    /// <exception cref="ArgumentNullException"><paramref name="rule"/> is <see langword="null"/>.</exception>
+    ILoggerFactoryBuilder AddRule(LoggerFilterRule rule);
 
     /// <summary>
-    /// Registers a fully custom <see cref="ILoggerFilter"/>. The filter receives every entry that
-    /// already passed the factory minimum level; entries it rejects do not reach any provider.
+    /// Convenience: adds a rule that requires the given minimum level for entries whose
+    /// category begins with <paramref name="categoryPrefix"/> (case-insensitive).
     /// </summary>
-    /// <remarks>
-    /// When this method is combined with <see cref="AddFilter(string, LogLevel)"/>, both filters
-    /// must accept the entry.
-    /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="filter"/> is <see langword="null"/>.</exception>
-    ILoggerFactoryBuilder UseFilter(ILoggerFilter filter);
+    /// <exception cref="ArgumentException"><paramref name="categoryPrefix"/> is null or empty.</exception>
+    ILoggerFactoryBuilder AddRule(string categoryPrefix, LogLevel minimumLevel);
 
     /// <summary>
     /// Registers an enricher. Enrichers run in registration order for every entry before fan-out.

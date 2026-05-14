@@ -7,10 +7,11 @@ namespace Assimalign.Cohesion.Logging;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The options expose mutable collections so callers can populate <see cref="Providers"/> and
-/// <see cref="Enrichers"/> directly (or through <see cref="LoggerFactoryBuilder"/>). After the
-/// factory is constructed the lists are read by reference; mutating them post-construction is
-/// not supported and may lead to undefined behavior.
+/// The options expose mutable collections so callers can populate <see cref="Providers"/>,
+/// <see cref="Enrichers"/>, and <see cref="FilterRules"/> directly (or through
+/// <see cref="LoggerFactoryBuilder"/>). After the factory is constructed the lists are read by
+/// reference; mutating them post-construction is not supported and may lead to undefined
+/// behavior.
 /// </para>
 /// </remarks>
 public sealed class LoggerFactoryOptions
@@ -21,12 +22,13 @@ public sealed class LoggerFactoryOptions
     /// <summary>Enrichers, in execution order. Add enricher instances directly.</summary>
     public IList<ILoggerEnricher> Enrichers { get; } = new List<ILoggerEnricher>();
 
-    /// <summary>Factory-wide minimum level. Defaults to <see cref="LogLevel.Information"/>.</summary>
-    public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
-
     /// <summary>
-    /// Optional per-entry filter. When non-null the filter sees every entry that already passed
-    /// <see cref="MinimumLevel"/>; entries the filter rejects do not reach any provider.
+    /// Filter rules consulted per (provider, category) pair. The factory resolves a single
+    /// winning rule per pair via <see cref="LoggerFilterRule"/>'s selection algorithm; when no
+    /// rule applies, <see cref="MinimumLevel"/> is used as the gate.
     /// </summary>
-    public ILoggerFilter? Filter { get; set; }
+    public IList<LoggerFilterRule> FilterRules { get; } = new List<LoggerFilterRule>();
+
+    /// <summary>Factory-wide minimum level. Used as the fallback when no <see cref="FilterRules"/> rule matches a (provider, category) pair. Defaults to <see cref="LogLevel.Information"/>.</summary>
+    public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
 }

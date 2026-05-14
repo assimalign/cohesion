@@ -3,13 +3,13 @@
 ## Summary
 
 Cohesion logging foundation. Defines the structured log event model, logger and provider
-contracts, factory composition (with category filtering, custom filters, and enrichment), and
-the scope lifecycle. Concrete sinks live in sibling packages.
+contracts, factory composition (with a per-provider rule-based filter pipeline and enrichment),
+and the scope lifecycle. Concrete sinks live in sibling packages.
 
 ## Status
 
 - Status: Stable foundation.
-- Production source files: 18.
+- Production source files: 19.
 - Project references: `Assimalign.Cohesion.Core` (for the `LogId` value type generator
   pipeline).
 - Package references: None.
@@ -19,11 +19,12 @@ the scope lifecycle. Concrete sinks live in sibling packages.
 
 - Define `ILoggerEntry` as the immutable structured log event consumed by every provider.
 - Define `ILogger`, `IScopedLogger`, `ILoggerProvider`, `ILoggerFactory`, and the builder.
-- Provide a thread-safe `LoggerFactory` that caches composite loggers per category, fans out
-  to every provider, applies an `ILoggerFilter` over the full entry, and runs registered
-  enrichers.
-- Document the scope and enrichment contracts so providers, hosts, and integration packages
-  honor them consistently.
+- Provide a thread-safe `LoggerFactory` that caches composite loggers per category. The
+  factory pre-resolves a single winning `LoggerFilterRule` per (provider, category) pair at
+  composite-construction time, then gates entries per provider on level + optional
+  `ILoggerFilter`.
+- Document the scope, filter, and enrichment contracts so providers, hosts, and integration
+  packages honor them consistently.
 
 ## Project Family
 
@@ -50,11 +51,12 @@ own packages and depend on the foundation.
 - `LogId` - generated `Ulid` wrapper with `Empty` / `New()` factories.
 - `ILogger` / `IScopedLogger` - writer contracts.
 - `ILoggerProvider` - sink factory.
-- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out.
+- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating.
 - `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.
 - `ILoggerEnricher` - attribute pipeline.
-- `ILoggerFilter` / `CategoryLoggerFilter` - per-entry gating surface.
+- `LoggerFilterRule` - one rule (provider type + category + level + custom filter, all
+  optional). `ILoggerFilter` is the custom filter shape.
 - `LoggerExtensions` - typed helpers (`LogTrace`, `LogInformation`, `LogError`, ...).
 
 ## Source Layout
@@ -63,13 +65,14 @@ own packages and depend on the foundation.
   `ILoggerEntry`, `ILoggerFactory`, `ILoggerProvider`, `ILoggerFactoryBuilder`,
   `ILoggerEnricher`, `ILoggerFilter`).
 - `src/Extensions/LoggerExtensions.cs` - ergonomic helpers.
-- `src/Filters/CategoryLoggerFilter.cs` - built-in category-prefix filter.
-- `src/Internal/CompositeLogger.cs` - per-category fan-out.
+- `src/Internal/CompositeLogger.cs` - per-category fan-out with per-provider rule gating.
 - `src/Internal/ScopedCompositeLogger.cs` - scope lifecycle.
 - `src/Internal/NoopScopedLogger.cs` - resilience helper.
+- `src/Internal/LoggerFilterRuleSelector.cs` - rule selection algorithm.
 - `src/LoggerEntry.cs`, `src/LoggerEntryBuilder.cs`, `src/LogLevel.cs` - event types.
 - `src/LoggerFactory.cs`, `src/LoggerFactoryBuilder.cs`, `src/LoggerFactoryOptions.cs` -
   factory plumbing.
+- `src/LoggerFilterRule.cs` - filter rule type.
 - `src/ValueTypes/LogId.cs` - LogId source-generation spec (the actual file is generated
   under `obj/CodeGeneration/`).
 - `src/Properties/AssemblyInfo.cs` - `InternalsVisibleTo` for tests.

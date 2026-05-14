@@ -7,44 +7,45 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// Fans out a single <see cref="ILoggerEntry"/> to every registered provider logger.
 /// </summary>
 /// <remarks>
-/// The composite owns the factory minimum-level decision, the optional <see cref="ILoggerFilter"/>
-/// gate, the enrichment pipeline (which runs in registration order; enrichers may add new
-/// attribute keys but cannot overwrite caller-supplied attributes), and fan-out to every
-/// registered provider with per-provider failure isolation: an exception from one sink never
-/// aborts fan-out to the others.
+/// The composite owns the per-provider rule resolution (one resolved
+/// <see cref="LoggerFilterRule"/> per registered provider for this category) and the
+/// enrichment pipeline. Each provider is gated independently: an entry can be accepted by
+/// provider A and rejected by provider B based on each provider's resolved rule. Failures from
+/// a single underlying logger are isolated: an exception from one sink never aborts fan-out to
+/// the others.
 /// </remarks>
 internal sealed class CompositeLogger : ILogger
 {
     private readonly string _category;
     private readonly ILogger[] _underlying;
     private readonly IReadOnlyList<ILoggerEnricher> _enrichers;
-    private readonly LogLevel _minimumLevel;
-    private readonly ILoggerFilter? _filter;
+    private readonly LogLevel[] _perProviderLevel;
+    private readonly ILoggerFilter?[] _perProviderFilter;
 
     public CompositeLogger(
         string category,
         ILogger[] underlying,
         IReadOnlyList<ILoggerEnricher> enrichers,
-        LogLevel minimumLevel,
-        ILoggerFilter? filter)
+        LogLevel[] perProviderLevel,
+        ILoggerFilter?[] perProviderFilter)
     {
         _category = category;
         _underlying = underlying;
         _enrichers = enrichers;
-        _minimumLevel = minimumLevel;
-        _filter = filter;
+        _perProviderLevel = perProviderLevel;
+        _perProviderFilter = perProviderFilter;
     }
 
     public bool IsEnabled(LogLevel level)
     {
-        if (level < _minimumLevel || level == LogLevel.None)
+        if (level == LogLevel.None)
         {
             return false;
         }
 
         for (int i = 0; i < _underlying.Length; i++)
         {
-            if (_underlying[i].IsEnabled(level))
+            if (level >= _perProviderLevel[i] && _underlying[i].IsEnabled(level))
             {
                 return true;
             }
@@ -57,32 +58,36 @@ internal sealed class CompositeLogger : ILogger
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        if (!IsEnabled(entry.Level))
+        if (entry.Level == LogLevel.None)
         {
             return;
         }
 
-        // Per-entry filter runs after the factory minimum so it can inspect category, level,
-        // attributes, and exception together. A throw here is non-fatal: we swallow and admit.
-        if (_filter is not null)
-        {
-            try
-            {
-                if (!_filter.ShouldLog(entry))
-                {
-                    return;
-                }
-            }
-            catch
-            {
-                // Bad filter cannot abort the pipeline.
-            }
-        }
-
+        // Enrich once for the whole fan-out so providers see identical attribute snapshots.
         var enriched = ApplyEnrichment(entry);
 
         for (int i = 0; i < _underlying.Length; i++)
         {
+            if (entry.Level < _perProviderLevel[i])
+            {
+                continue;
+            }
+
+            if (_perProviderFilter[i] is { } filter)
+            {
+                try
+                {
+                    if (!filter.ShouldLog(enriched))
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                    // Bad filter cannot abort the pipeline; treat the throw as admit.
+                }
+            }
+
             try
             {
                 _underlying[i].Log(enriched);
@@ -100,8 +105,8 @@ internal sealed class CompositeLogger : ILogger
 
         var enriched = ApplyEnrichment(entry);
 
-        // Open the seed entry's scope on the underlying loggers so providers that maintain scope
-        // state (e.g. a JSON collector building a nested object) see the same parent.
+        // Open the seed entry's scope on every underlying logger so providers maintaining scope
+        // state see a consistent parent.
         var underlyingScopes = new IScopedLogger[_underlying.Length];
         for (int i = 0; i < _underlying.Length; i++)
         {

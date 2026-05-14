@@ -39,39 +39,36 @@ public class CompositeLoggerTests
         Assert.Empty(provider.Entries);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: AddFilter raises minimum for matching category")]
-    public void Filter_RaisesMinimumForCategory()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: AddRule(prefix, level) overrides minimum for matching category")]
+    public void Rule_OverridesMinimumForCategory()
     {
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
-            .SetMinimumLevel(LogLevel.Trace)
-            .AddFilter("App.Network", LogLevel.Error)
+            .SetMinimumLevel(LogLevel.Error)
+            .AddRule("App.Network", LogLevel.Trace)
             .Build();
 
-        // Generic category - factory minimum (Trace) governs.
-        var generic = factory.Create("Generic");
-        generic.LogTrace("Generic", "passes floor");
+        // App.Network matches -> Trace OK.
+        var network = factory.Create("App.Network.Http");
+        network.LogTrace("App.Network.Http", "should fire");
         Assert.Single(provider.Entries);
 
-        // Network category - filter raises required level to Error+.
-        var network = factory.Create("App.Network.Http");
-        network.LogWarning("App.Network.Http", "below filter");
+        // Generic category falls back to the factory minimum (Error).
+        var generic = factory.Create("Generic");
+        generic.LogWarning("Generic", "below factory minimum");
         Assert.Single(provider.Entries); // count unchanged
-
-        network.LogError("App.Network.Http", "above filter");
-        Assert.Equal(2, provider.Entries.Count);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: longest filter prefix wins")]
-    public void Filter_LongestPrefixWins()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: longest category prefix wins")]
+    public void Rule_LongestPrefixWins()
     {
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
             .SetMinimumLevel(LogLevel.Trace)
-            .AddFilter("App", LogLevel.Error)
-            .AddFilter("App.Important", LogLevel.Trace)
+            .AddRule("App", LogLevel.Error)
+            .AddRule("App.Important", LogLevel.Trace)
             .Build();
 
         // App.Important.* allowed at Trace because the more specific rule wins.
@@ -79,18 +76,48 @@ public class CompositeLoggerTests
         Assert.Single(provider.Entries);
 
         // App.Other still gated by Error+.
-        factory.Create("App.Other").LogInformation("App.Other", "below Error filter");
+        factory.Create("App.Other").LogInformation("App.Other", "below Error rule");
         Assert.Single(provider.Entries); // count unchanged
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: UseFilter applies entry-level predicate")]
-    public void UseFilter_AppliesEntryLevelPredicate()
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: last rule wins among ties")]
+    public void Rule_LastWinsAmongTies()
     {
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
             .SetMinimumLevel(LogLevel.Trace)
-            .UseFilter(new AttributeKeyFilter("audit"))
+            // Two rules for the same category prefix; the second registered wins.
+            .AddRule("App", LogLevel.Error)
+            .AddRule("App", LogLevel.Trace)
+            .Build();
+
+        factory.Create("App.Anything").LogTrace("App.Anything", "should fire because last rule wins");
+        Assert.Single(provider.Entries);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: rules without category target every category in the candidate set")]
+    public void Rule_NoCategory_AppliesToAll()
+    {
+        var provider = new RecordingProvider();
+        using var factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Error) // would otherwise drop Trace
+            .AddRule(new LoggerFilterRule(level: LogLevel.Trace)) // global rule lowers gate to Trace
+            .Build();
+
+        factory.Create("Any.Category").LogTrace("Any.Category", "should fire");
+        Assert.Single(provider.Entries);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: rule custom filter further screens entries")]
+    public void Rule_Filter_FurtherScreens()
+    {
+        var provider = new RecordingProvider();
+        using var factory = new LoggerFactoryBuilder()
+            .AddProvider(provider)
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddRule(new LoggerFilterRule(filter: new AttributeKeyFilter("audit")))
             .Build();
 
         // Without the audit attribute - rejected.
@@ -105,18 +132,38 @@ public class CompositeLoggerTests
         Assert.Single(provider.Entries);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: throwing filter is treated as accept")]
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: throwing filter is treated as admit")]
     public void Filter_Throw_Admits()
     {
         var provider = new RecordingProvider();
         using var factory = new LoggerFactoryBuilder()
             .AddProvider(provider)
             .SetMinimumLevel(LogLevel.Trace)
-            .UseFilter(new ThrowingFilter())
+            .AddRule(new LoggerFilterRule(filter: new ThrowingFilter()))
             .Build();
 
         factory.Create("Cat").LogInformation("Cat", "should fire despite filter throw");
         Assert.Single(provider.Entries);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging] - Composite: provider-type-specific rule gates only that provider")]
+    public void Rule_PerProviderType()
+    {
+        var p1 = new RecordingProvider("p1");
+        // Different runtime type so the rule does NOT apply to p2.
+        var p2 = new AltRecordingProvider("p2");
+        using var factory = new LoggerFactoryBuilder()
+            .AddProvider(p1)
+            .AddProvider(p2)
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddRule(new LoggerFilterRule(providerType: typeof(RecordingProvider), level: LogLevel.Error))
+            .Build();
+
+        factory.Create("Cat").LogInformation("Cat", "info");
+
+        // p1 (RecordingProvider) gated to Error+; p2 (AltRecordingProvider) falls back to factory floor.
+        Assert.Empty(p1.Entries);
+        Assert.Single(p2.Entries);
     }
 
     [Fact(DisplayName = "Cohesion Test [Logging] - Composite: failure from one provider does not block others")]

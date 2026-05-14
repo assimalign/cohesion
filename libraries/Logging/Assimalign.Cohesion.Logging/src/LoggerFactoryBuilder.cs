@@ -16,7 +16,6 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
 {
     private readonly LoggerFactoryOptions _options = new();
     private readonly HashSet<string> _providerNames = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<KeyValuePair<string, LogLevel>> _categoryRules = new();
     private bool _built;
 
     /// <inheritdoc />
@@ -44,20 +43,20 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     }
 
     /// <inheritdoc />
-    public ILoggerFactoryBuilder AddFilter(string categoryPrefix, LogLevel minimumLevel)
+    public ILoggerFactoryBuilder AddRule(LoggerFilterRule rule)
     {
-        ArgumentException.ThrowIfNullOrEmpty(categoryPrefix);
+        ArgumentNullException.ThrowIfNull(rule);
         ThrowIfBuilt();
-        _categoryRules.Add(new KeyValuePair<string, LogLevel>(categoryPrefix, minimumLevel));
+        _options.FilterRules.Add(rule);
         return this;
     }
 
     /// <inheritdoc />
-    public ILoggerFactoryBuilder UseFilter(ILoggerFilter filter)
+    public ILoggerFactoryBuilder AddRule(string categoryPrefix, LogLevel minimumLevel)
     {
-        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentException.ThrowIfNullOrEmpty(categoryPrefix);
         ThrowIfBuilt();
-        _options.Filter = filter;
+        _options.FilterRules.Add(new LoggerFilterRule(category: categoryPrefix, level: minimumLevel));
         return this;
     }
 
@@ -75,18 +74,6 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     {
         ThrowIfBuilt();
         _built = true;
-
-        // Compose any AddFilter category rules into a CategoryLoggerFilter and combine with an
-        // explicitly supplied filter (if any). When both are present, the explicit filter wins
-        // first and the category rules act as a fallback.
-        if (_categoryRules.Count > 0)
-        {
-            var categoryFilter = new CategoryLoggerFilter(_categoryRules);
-            _options.Filter = _options.Filter is null
-                ? categoryFilter
-                : new CompositeLoggerFilter(_options.Filter, categoryFilter);
-        }
-
         return new LoggerFactory(_options);
     }
 
@@ -97,19 +84,5 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
             throw new InvalidOperationException(
                 "LoggerFactoryBuilder has already been used to build a factory; create a new builder.");
         }
-    }
-
-    private sealed class CompositeLoggerFilter : ILoggerFilter
-    {
-        private readonly ILoggerFilter _first;
-        private readonly ILoggerFilter _second;
-
-        public CompositeLoggerFilter(ILoggerFilter first, ILoggerFilter second)
-        {
-            _first = first;
-            _second = second;
-        }
-
-        public bool ShouldLog(ILoggerEntry entry) => _first.ShouldLog(entry) && _second.ShouldLog(entry);
     }
 }

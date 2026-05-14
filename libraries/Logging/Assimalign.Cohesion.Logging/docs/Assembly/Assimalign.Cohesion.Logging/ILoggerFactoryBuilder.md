@@ -8,15 +8,15 @@ publish the resulting (thread-safe) factory.
 | Method | Description |
 | --- | --- |
 | `AddProvider(ILoggerProvider provider)` | Registers a provider. Duplicate names throw `InvalidOperationException`. |
-| `SetMinimumLevel(LogLevel level)` | Factory-wide minimum level (the unconditional floor). Defaults to `Information`. |
-| `AddFilter(string categoryPrefix, LogLevel minimumLevel)` | Adds a category-prefix rule. Rules accumulate into a `CategoryLoggerFilter` at build time; the longest matching prefix wins. The filter can only raise the minimum, never lower the factory floor. |
-| `UseFilter(ILoggerFilter filter)` | Plugs in an arbitrary per-entry filter. When combined with `AddFilter`, both filters must accept the entry. |
+| `SetMinimumLevel(LogLevel level)` | Factory-wide minimum level. Used as the fallback when no `LoggerFilterRule` matches a (provider, category) pair. Defaults to `Information`. |
+| `AddRule(LoggerFilterRule rule)` | Adds a rule to the filter ruleset. Rules are evaluated per (provider, category) pair via the selection algorithm documented on `LoggerFilterRule`. |
+| `AddRule(string categoryPrefix, LogLevel minimumLevel)` | Convenience overload that constructs and adds a `LoggerFilterRule { Category = categoryPrefix, Level = minimumLevel }`. |
 | `AddEnricher(ILoggerEnricher enricher)` | Adds an enricher to the pipeline. Enrichers run in registration order. |
 | `Build()` | Materializes the factory. The builder is single-use; subsequent operations throw `InvalidOperationException`. |
 
 ## Exceptions
 
-- `ArgumentNullException` for null `provider`, `enricher`, or `filter`.
+- `ArgumentNullException` for null `provider`, `rule`, or `enricher`.
 - `ArgumentException` for an empty `categoryPrefix`.
 - `InvalidOperationException` for duplicate provider names or reuse after `Build`.
 

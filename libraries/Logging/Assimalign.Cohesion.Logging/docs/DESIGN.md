@@ -67,18 +67,37 @@ re-emits enriched copies.
 `LogLevel` ordering: `Trace < Debug < Information < Warning < Error < Critical < Event`,
 plus `None` (which always returns `false` from `IsEnabled`).
 
-Filtering happens in two stages:
+Filtering is rule-based and applied **per provider**. `LoggerFactoryOptions.FilterRules` is
+an ordered list of `LoggerFilterRule` instances. Each rule has four optional fields:
 
-1. **Factory minimum** (`LoggerFactoryOptions.MinimumLevel`, default `Information`). Applied
-   unconditionally before anything else; entries below the floor are dropped before the
-   filter sees them.
-2. **`ILoggerFilter`** (optional). Sees the full entry and decides per-entry. The fluent
-   `AddFilter(prefix, level)` helper accumulates rules into a `CategoryLoggerFilter`. Custom
-   logic plugs in through `UseFilter(myFilter)`. Both can coexist; the entry must pass both.
+- `ProviderType` - the provider type the rule targets, or `null` for "any provider that has
+  no type-specific rule."
+- `Category` - the category prefix the rule targets, or `null` for "any category in the
+  candidate set."
+- `Level` - the minimum log level required for the rule to admit an entry, or `null` for "no
+  level constraint."
+- `Filter` - an `ILoggerFilter` predicate that further screens entries already accepted by
+  the rule's `Level`, or `null` for "no extra filter."
 
-To express "category X logs at Trace while everything else logs at Warning", set
-`MinimumLevel = Trace` and add a filter that requires `entry.Level >= Warning` unless the
-category matches X.
+When the factory creates a composite logger for a category, it resolves ONE winning rule per
+registered provider using the following algorithm (see `LoggerFilterRule.md`):
+
+1. Rules with `ProviderType == provider.GetType()` win; if none, rules with `ProviderType ==
+   null` form the candidate set.
+2. Within the candidates, the rules whose `Category` is the longest matching prefix of the
+   category are kept.
+3. If no rule matched by category, rules with `Category == null` (within the same candidate
+   set) are kept.
+4. If exactly one rule remains, it wins.
+5. If multiple remain, the last one registered wins.
+6. If no rule applies at all, `LoggerFactoryOptions.MinimumLevel` is used as the gate.
+
+The resolved level and filter are stored alongside each underlying logger so fan-out at
+`Log()` time is O(providers): per provider, compare `entry.Level` to the resolved level,
+optionally consult the filter, then log. No per-entry rule lookup.
+
+A throwing filter is treated as admit; the composite swallows the exception so a bad filter
+cannot silently drop entries.
 
 ## Factory Lifecycle
 
@@ -156,18 +175,18 @@ Assimalign.Cohesion.Logging/
       ILoggerFilter.cs
     Extensions/
       LoggerExtensions.cs
-    Filters/
-      CategoryLoggerFilter.cs
     Internal/
       CompositeLogger.cs
       ScopedCompositeLogger.cs
       NoopScopedLogger.cs
+      LoggerFilterRuleSelector.cs
     LoggerEntry.cs
     LoggerEntryBuilder.cs
     LogLevel.cs
     LoggerFactory.cs
     LoggerFactoryBuilder.cs
     LoggerFactoryOptions.cs
+    LoggerFilterRule.cs
     ValueTypes/
       LogId.cs           (source-generator spec)
     Properties/
@@ -186,7 +205,10 @@ ILoggerFactory factory = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
     .AddProvider(new DebugLoggerProvider())
     .SetMinimumLevel(LogLevel.Information)
-    .AddFilter("App.Network", LogLevel.Debug) // Network category must be Debug+
+    .AddRule("App.Network", LogLevel.Debug) // Network category lowered to Debug+
+    .AddRule(new LoggerFilterRule(
+        providerType: typeof(DebugLoggerProvider),
+        level: LogLevel.Trace))     // The Debug sink only catches Trace+
     .AddEnricher(new ProcessEnricher())
     .Build();
 
@@ -199,7 +221,7 @@ scope.LogDebug("App.Network.Http", "response {Status}",
     attributes: new Dictionary<string, object?> { ["Status"] = 200 });
 ```
 
-## Example: custom filter
+## Example: custom filter via rule
 
 ```csharp
 internal sealed class AuditOnlyFilter : ILoggerFilter
@@ -209,6 +231,6 @@ internal sealed class AuditOnlyFilter : ILoggerFilter
 
 ILoggerFactory auditOnly = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
-    .UseFilter(new AuditOnlyFilter())
+    .AddRule(new LoggerFilterRule(filter: new AuditOnlyFilter()))
     .Build();
 ```
