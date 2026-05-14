@@ -23,7 +23,15 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     }
 
     public FileName Name => _fileInfo.Name;
-    public Size Size => _fileInfo.Length;
+    public Size Size
+    {
+        get
+        {
+            // Refresh so the reported length reflects subsequent writes through Open().
+            _fileInfo.Refresh();
+            return _fileInfo.Length;
+        }
+    }
     public PhysicalFileSystemDirectory Directory => _directory;
     IFileSystemDirectory IFileSystemFile.Directory => _directory;
     public IFileSystemEventToken Watch()

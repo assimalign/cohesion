@@ -36,10 +36,6 @@ public class IsolatedFileSystem : IFileSystem
     public IFileSystemDirectory CreateDirectory(FileSystemPath path)
     {
         CheckIfReadOnly(nameof(CreateDirectory));
-
-        _storage.CreateDirectory
-
-
         throw new NotImplementedException();
     }
 
@@ -91,7 +87,6 @@ public class IsolatedFileSystem : IFileSystem
 
     public IFileSystemFile GetFile(FileSystemPath path)
     {
-        _storage.get
         throw new NotImplementedException();
     }
 
@@ -119,7 +114,7 @@ public class IsolatedFileSystem : IFileSystem
     {
         if (IsReadOnly)
         {
-            ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
+            throw new InvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
         }
     }
 }

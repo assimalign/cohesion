@@ -540,14 +540,20 @@ public class PhysicalFileSystemTests
         try
         {
             Assert.True(fileSystem.IsReadOnly);
-            Assert.Throws<InvalidOperationException>(() => fileSystem.CreateDirectory("test"));
-            Assert.Throws<InvalidOperationException>(() => fileSystem.CreateFile("test.txt"));
-            Assert.Throws<InvalidOperationException>(() => fileSystem.DeleteDirectory("test"));
-            Assert.Throws<InvalidOperationException>(() => fileSystem.DeleteFile("test.txt"));
+            AssertReadOnly(() => fileSystem.CreateDirectory("test"));
+            AssertReadOnly(() => fileSystem.CreateFile("test.txt"));
+            AssertReadOnly(() => fileSystem.DeleteDirectory("test"));
+            AssertReadOnly(() => fileSystem.DeleteFile("test.txt"));
         }
         finally
         {
             Cleanup(root);
+        }
+
+        static void AssertReadOnly(Action action)
+        {
+            var exception = Assert.Throws<FileSystemException>(action);
+            Assert.Equal(FileSystemErrorCode.ReadOnly, exception.Code);
         }
     }
 

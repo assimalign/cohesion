@@ -205,20 +205,20 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
             var sourceEntry = NavigateToEntry(absoluteSource, manager);
             if (sourceEntry is null)
             {
-                ThrowHelper.ThrowPathNotFound(source);
+                FileSystemException.ThrowPathNotFound(source);
             }
 
             // Find the parent directory of the source
             var sourceParent = FindParentDirectory(absoluteSource, manager);
             if (sourceParent is null)
             {
-                ThrowHelper.ThrowPathNotFound(source);
+                FileSystemException.ThrowPathNotFound(source);
             }
 
             // Check destination doesn't already exist
             if (Exists(destination))
             {
-                ThrowHelper.ThrowFileOrDirectoryAlreadyExists(destination);
+                FileSystemException.ThrowPathAlreadyExist(destination);
             }
 
             if (sourceEntry is InMemoryFileSystemFile sourceFile)
@@ -294,7 +294,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                 }
                 else if (info is InMemoryFileSystemFile || isLast)
                 {
-                    ThrowHelper.ThrowFileOrDirectoryAlreadyExists(absolute);
+                    FileSystemException.ThrowPathAlreadyExist(absolute);
                 }
                 else
                 {
@@ -371,7 +371,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
                 }
                 else if (info is InMemoryFileSystemFile && isLast)
                 {
-                    ThrowHelper.ThrowFileOrDirectoryAlreadyExists(absolute);
+                    FileSystemException.ThrowPathAlreadyExist(absolute);
                 }
                 else
                 {
@@ -544,11 +544,11 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
                 if (result is not InMemoryFileSystemDirectory directory)
                 {
-                    ThrowHelper.ThrowPathNotFound(absolute);
+                    FileSystemException.ThrowPathNotFound(absolute);
                 }
                 else if (!directory.Lookup.TryGetValue(current, out var info))
                 {
-                    ThrowHelper.ThrowPathNotFound(absolute);
+                    FileSystemException.ThrowPathNotFound(absolute);
                 }
                 else
                 {
@@ -672,7 +672,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
 
             if (newUsed > _size.Length)
             {
-                ThrowHelper.ThrowNotEnoughSpace(new IOException("There is not enough space in the file system to complete this operation."));
+                FileSystemException.ThrowNotEnoughSpace(new IOException("There is not enough space in the file system to complete this operation."));
             }
 
             _spaceUsed = newUsed;
@@ -808,7 +808,7 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         {
             if (_isReadOnly)
             {
-                ThrowHelper.ThrowInvalidOperationException($"The operation {operation} is not allowed. FileSystem is read-only.");
+                FileSystemException.ThrowReadOnly(operation ?? string.Empty);
             }
         }
     }

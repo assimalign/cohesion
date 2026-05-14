@@ -113,8 +113,8 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
         var disposable = new RenameSubscriber<T>()
         {
             ChangeType = FileSystemEventType.Renamed,
-            State = state,
-            Callback = callback,
+            State = state!,
+            Callback = (Action<FileSystemRenameEvent<T>>)(object)callback,
             OnDispose = Subscriber => _subscribers.Remove(Subscriber)
         };
 

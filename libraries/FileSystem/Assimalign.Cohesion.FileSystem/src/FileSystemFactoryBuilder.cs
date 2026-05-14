@@ -1,76 +1,104 @@
-﻿using System;
-using System.Linq;
-using System.Collections.Concurrent;
+using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem;
 
-using Assimalign.Cohesion.Internal;
-
-public class FileSystemFactoryBuilder
+/// <summary>
+/// Fluent registration surface for <see cref="IFileSystemFactory"/>. Build the factory in a
+/// single thread, then publish the resulting (thread-safe) factory.
+/// </summary>
+/// <remarks>
+/// The builder is single-use: after <see cref="Build"/> returns, subsequent calls throw
+/// <see cref="InvalidOperationException"/>.
+/// </remarks>
+public sealed class FileSystemFactoryBuilder
 {
-    private readonly ConcurrentDictionary<string, IFileSystem> _fileSystems;
-
-    public FileSystemFactoryBuilder()
-    {
-        _fileSystems = new ConcurrentDictionary<string, IFileSystem>();
-    }
+    private readonly Dictionary<string, Func<IFileSystem>> _registrations =
+        new(StringComparer.OrdinalIgnoreCase);
+    private bool _built;
 
     /// <summary>
-    /// 
+    /// Registers an already-instantiated file system under <paramref name="name"/>.
     /// </summary>
-    /// <param name="name"></param>
-    /// <param name="fileSystem"></param>
-    /// <returns></returns>
+    /// <param name="name">Case-insensitive registration name. Required, non-empty, unique.</param>
+    /// <param name="fileSystem">The file system instance to register. Required.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="fileSystem"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A file system is already registered under <paramref name="name"/>, or the builder has already been used to <see cref="Build"/>.</exception>
     public FileSystemFactoryBuilder AddFileSystem(string name, IFileSystem fileSystem)
     {
-        _fileSystems.AddOrUpdate(name, (key) => fileSystem, (key, value) => fileSystem);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ThrowIfBuilt();
 
+        Register(name, () => fileSystem);
         return this;
     }
 
     /// <summary>
-    /// 
+    /// Registers a deferred factory under <paramref name="name"/>. The factory is invoked lazily
+    /// on first <see cref="IFileSystemFactory.Create(string)"/> access.
     /// </summary>
-    /// <typeparam name="TFileSystem"></typeparam>
-    /// <param name="func"></param>
-    /// <returns></returns>
-    public FileSystemFactoryBuilder AddFileSystem<TFileSystem>(Func<TFileSystem> func)
+    /// <param name="name">Case-insensitive registration name. Required, non-empty, unique.</param>
+    /// <param name="factory">Factory delegate that returns a new file system instance.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A file system is already registered under <paramref name="name"/>, or the builder has already been used to <see cref="Build"/>.</exception>
+    public FileSystemFactoryBuilder AddFileSystem<TFileSystem>(string name, Func<TFileSystem> factory)
         where TFileSystem : IFileSystem
     {
-        var name = typeof(TFileSystem).Name;
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(factory);
+        ThrowIfBuilt();
 
-        _fileSystems.AddOrUpdate(name, (key) => func.Invoke(), (key, value) => func.Invoke());
-
+        Register(name, () => factory.Invoke());
         return this;
     }
 
-
-    public IFileSystemFactory Build()
+    /// <summary>
+    /// Convenience overload that uses <c>typeof(TFileSystem).Name</c> as the registration name.
+    /// Preserves backward compatibility with provider extension methods that rely on the type
+    /// name convention.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A file system is already registered under the type's name, or the builder has already been used to <see cref="Build"/>.</exception>
+    public FileSystemFactoryBuilder AddFileSystem<TFileSystem>(Func<TFileSystem> factory)
+        where TFileSystem : IFileSystem
     {
-        return new FileSystemFactory(_fileSystems);
+        ArgumentNullException.ThrowIfNull(factory);
+        return AddFileSystem(typeof(TFileSystem).Name, factory);
     }
 
-    partial class FileSystemFactory : IFileSystemFactory
+    /// <summary>
+    /// Materializes the factory. The builder cannot be reused after this call.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The builder has already been used to <see cref="Build"/>.</exception>
+    public IFileSystemFactory Build()
     {
-        private readonly ConcurrentDictionary<string, IFileSystem> _fileSystems;
+        ThrowIfBuilt();
+        _built = true;
 
-        public FileSystemFactory(ConcurrentDictionary<string, IFileSystem> fileSystems)
+        var snapshot = new Dictionary<string, Func<IFileSystem>>(_registrations, StringComparer.OrdinalIgnoreCase);
+        return new FileSystemFactory(snapshot);
+    }
+
+    private void Register(string name, Func<IFileSystem> factory)
+    {
+        if (_registrations.ContainsKey(name))
         {
-            _fileSystems = fileSystems;
+            throw new InvalidOperationException(
+                $"A file system named '{name}' is already registered.");
         }
 
-        public IFileSystem Create(string name)
+        _registrations.Add(name, factory);
+    }
+
+    private void ThrowIfBuilt()
+    {
+        if (_built)
         {
-            return _fileSystems[name];
-        }
-
-        public IFileSystem Create<TFileSystem>() where TFileSystem : IFileSystem
-        {
-            var fileSystem = _fileSystems.Values.OfType<TFileSystem>().FirstOrDefault();
-
-            InvalidOperationException.ThrowIf(fileSystem is null, $"The file system of type '{typeof(TFileSystem).FullName}' is not registered.");
-
-            return fileSystem;
+            throw new InvalidOperationException(
+                "FileSystemFactoryBuilder has already been used to build a factory; create a new builder.");
         }
     }
 }
