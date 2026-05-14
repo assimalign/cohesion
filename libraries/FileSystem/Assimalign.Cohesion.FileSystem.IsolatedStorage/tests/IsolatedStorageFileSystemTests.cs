@@ -7,50 +7,50 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.FileSystem;
 
-namespace Assimalign.Cohesion.FileSystem.Isolated.Tests;
+namespace Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests;
 
 /// <summary>
 /// Provider-specific behavior that is NOT covered by the shared contract suite. Includes options
 /// validation, the read-only enforcement contract, the noop watch token, and the unsupported
 /// capabilities (Attributes / SetAttributes).
 /// </summary>
-public class IsolatedFileSystemTests
+public class IsolatedStorageFileSystemTests
 {
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Constructor: null options throws")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Constructor: null options throws")]
     public void Constructor_NullOptions_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new IsolatedFileSystem(null!));
+        Assert.Throws<ArgumentNullException>(() => new IsolatedStorageFileSystem(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Constructor: default options succeed")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Constructor: default options succeed")]
     public void Constructor_Default_Succeeds()
     {
-        IsolatedFileSystemTestFixture.ClearUserStoreForAssembly();
-        using var fs = new IsolatedFileSystem();
-        Assert.Equal(nameof(IsolatedFileSystem), fs.Name);
+        IsolatedStorageFileSystemTestFixture.ClearUserStoreForAssembly();
+        using var fs = new IsolatedStorageFileSystem();
+        Assert.Equal(nameof(IsolatedStorageFileSystem), fs.Name);
         Assert.False(fs.IsReadOnly);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Name: honors options.Name")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Name: honors options.Name")]
     public void Name_HonorsOption()
     {
-        IsolatedFileSystemTestFixture.ClearUserStoreForAssembly();
-        using var fs = new IsolatedFileSystem(new IsolatedFileSystemOptions { Name = "MyStore" });
+        IsolatedStorageFileSystemTestFixture.ClearUserStoreForAssembly();
+        using var fs = new IsolatedStorageFileSystem(new IsolatedStorageFileSystemOptions { Name = "MyStore" });
         Assert.Equal("MyStore", fs.Name);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - IsReadOnly: blocks every write operation")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - IsReadOnly: blocks every write operation")]
     public void IsReadOnly_BlocksWrites()
     {
         // Seed an entry through a writable view first so the read-only system has something to act on.
-        using (var seed = IsolatedFileSystemTestFixture.CreateFreshFileSystem())
+        using (var seed = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem())
         {
             seed.CreateFile("seed.txt");
             seed.CreateDirectory("seedDir");
         }
 
         // Re-open the same store in read-only mode (do NOT clear it first).
-        using var fs = new IsolatedFileSystem(new IsolatedFileSystemOptions { IsReadOnly = true });
+        using var fs = new IsolatedStorageFileSystem(new IsolatedStorageFileSystemOptions { IsReadOnly = true });
         Assert.True(fs.IsReadOnly);
 
         AssertReadOnly(() => fs.CreateDirectory("blocked"));
@@ -67,12 +67,12 @@ public class IsolatedFileSystemTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: polling disabled returns noop token")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling disabled returns noop token")]
     public void Watch_PollingDisabled_ReturnsNoopToken()
     {
         // Setting WatchPollInterval to InfiniteTimeSpan explicitly opts out of polling. The
         // returned token must accept registrations and dispose cleanly without ever firing.
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: System.Threading.Timeout.InfiniteTimeSpan);
 
         var token = fs.Watch(null);
@@ -88,10 +88,10 @@ public class IsolatedFileSystemTests
         reg4.Dispose();
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: polling fires OnCreate when file appears")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling fires OnCreate when file appears")]
     public async Task Watch_Polling_FiresOnCreate()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
 
         // Tokens are disposed by the file system on its own Dispose (it tracks owned timers).
@@ -109,10 +109,10 @@ public class IsolatedFileSystemTests
         Assert.Contains("/appeared.txt", createdPaths);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: polling fires OnDelete when file removed")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling fires OnDelete when file removed")]
     public async Task Watch_Polling_FiresOnDelete()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
         fs.CreateFile("doomed.txt");
 
@@ -128,10 +128,10 @@ public class IsolatedFileSystemTests
         Assert.Contains("/doomed.txt", deletedPaths);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: polling fires OnChange when file modified")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling fires OnChange when file modified")]
     public async Task Watch_Polling_FiresOnChange()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
         var file = fs.CreateFile("mutating.txt");
 
@@ -150,10 +150,10 @@ public class IsolatedFileSystemTests
         Assert.Contains("/mutating.txt", changedPaths);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: glob filter scopes events")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: glob filter scopes events")]
     public async Task Watch_Polling_HonorsGlobFilter()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
 
         // Only *.log entries should surface through the filtered token.
@@ -171,10 +171,10 @@ public class IsolatedFileSystemTests
         Assert.DoesNotContain("/audit.txt", createdPaths);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - File.Watch: polling tracks single file")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - File.Watch: polling tracks single file")]
     public async Task File_Watch_Polling_TracksSingleFile()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
         var file = fs.CreateFile("note.txt");
 
@@ -193,10 +193,10 @@ public class IsolatedFileSystemTests
         Assert.Contains("/note.txt", changedPaths);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: dispose stops the timer")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: dispose stops the timer")]
     public async Task Watch_Dispose_StopsTimer()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
 
         var token = fs.Watch(null);
@@ -217,10 +217,10 @@ public class IsolatedFileSystemTests
         reg.Dispose();
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Watch: rename registration accepted but never fires")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: rename registration accepted but never fires")]
     public async Task Watch_OnRename_NeverFires()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem(
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
         fs.CreateFile("before.txt");
 
@@ -249,28 +249,28 @@ public class IsolatedFileSystemTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Attributes: getter throws NotSupported")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Attributes: getter throws NotSupported")]
     public void Attributes_Get_Throws()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         var file = fs.CreateFile("attr.txt");
 
         Assert.Throws<NotSupportedException>(() => file.Attributes);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - SetAttributes throws NotSupported")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - SetAttributes throws NotSupported")]
     public void SetAttributes_Throws()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         var file = fs.CreateFile("attr.txt");
 
         Assert.Throws<NotSupportedException>(() => file.SetAttributes(FileAttributes.ReadOnly));
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Dispose: file system rejects use after dispose")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Dispose: file system rejects use after dispose")]
     public void UseAfterDispose_Throws()
     {
-        var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         fs.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => fs.CreateFile("after.txt"));
@@ -278,20 +278,20 @@ public class IsolatedFileSystemTests
         Assert.Throws<ObjectDisposedException>(() => fs.RootDirectory);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Dispose: idempotent")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Dispose: idempotent")]
     public void Dispose_Idempotent()
     {
-        var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         fs.Dispose();
         fs.Dispose(); // second call must not throw
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - RemoveStoreOnDispose: nukes backing store")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - RemoveStoreOnDispose: nukes backing store")]
     public void RemoveStoreOnDispose_ClearsStore()
     {
-        IsolatedFileSystemTestFixture.ClearUserStoreForAssembly();
+        IsolatedStorageFileSystemTestFixture.ClearUserStoreForAssembly();
 
-        using (var fs = new IsolatedFileSystem(new IsolatedFileSystemOptions { RemoveStoreOnDispose = true }))
+        using (var fs = new IsolatedStorageFileSystem(new IsolatedStorageFileSystemOptions { RemoveStoreOnDispose = true }))
         {
             fs.CreateFile("trace.txt");
             Assert.True(fs.Exists("trace.txt"));
@@ -302,61 +302,61 @@ public class IsolatedFileSystemTests
         Assert.Empty(store.GetFileNames("*"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Size: surfaces Quota / UsedSize / AvailableFreeSpace")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Size: surfaces Quota / UsedSize / AvailableFreeSpace")]
     public void Sizes_AreReported()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         Assert.True(fs.Size.Length > 0);
         Assert.True(fs.SpaceAvailable.Length >= 0);
         // SpaceUsed is implementation-defined (some stores return 0). Just verify it doesn't throw.
         _ = fs.SpaceUsed;
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - RootDirectory: name is '/'")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - RootDirectory: name is '/'")]
     public void Root_Name_IsSlash()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         Assert.Equal("/", fs.RootDirectory.Name.ToString());
         Assert.Null(fs.RootDirectory.Parent);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Factory: AddIsolatedFileSystem registers provider")]
-    public void Factory_AddIsolatedFileSystem_Registers()
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Factory: AddIsolatedStorageFileSystem registers provider")]
+    public void Factory_AddIsolatedStorageFileSystem_Registers()
     {
-        IsolatedFileSystemTestFixture.ClearUserStoreForAssembly();
+        IsolatedStorageFileSystemTestFixture.ClearUserStoreForAssembly();
 
         using var factory = new FileSystemFactoryBuilder()
-            .AddIsolatedFileSystem()
+            .AddIsolatedStorageFileSystem()
             .Build();
 
-        Assert.Contains("IsolatedFileSystem", factory.Names);
+        Assert.Contains("IsolatedStorageFileSystem", factory.Names);
 
-        var resolved = factory.Create("IsolatedFileSystem");
-        Assert.IsType<IsolatedFileSystem>(resolved);
+        var resolved = factory.Create("IsolatedStorageFileSystem");
+        Assert.IsType<IsolatedStorageFileSystem>(resolved);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Factory: AddIsolatedFileSystem(configure) passes options")]
-    public void Factory_AddIsolatedFileSystem_Configure_PassesOptions()
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Factory: AddIsolatedStorageFileSystem(configure) passes options")]
+    public void Factory_AddIsolatedStorageFileSystem_Configure_PassesOptions()
     {
-        IsolatedFileSystemTestFixture.ClearUserStoreForAssembly();
+        IsolatedStorageFileSystemTestFixture.ClearUserStoreForAssembly();
 
         using var factory = new FileSystemFactoryBuilder()
-            .AddIsolatedFileSystem(options =>
+            .AddIsolatedStorageFileSystem(options =>
             {
                 options.Name = "Configured";
                 options.IsReadOnly = true;
             })
             .Build();
 
-        var fs = factory.Create("IsolatedFileSystem");
+        var fs = factory.Create("IsolatedStorageFileSystem");
         Assert.Equal("Configured", fs.Name);
         Assert.True(fs.IsReadOnly);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IsolatedFileSystem] - Directory.GetFiles + GetDirectories list children")]
+    [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Directory.GetFiles + GetDirectories list children")]
     public void Directory_Children_AreListed()
     {
-        using var fs = IsolatedFileSystemTestFixture.CreateFreshFileSystem();
+        using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem();
         fs.CreateDirectory("root");
         fs.CreateDirectory("root/sub1");
         fs.CreateDirectory("root/sub2");

@@ -6,15 +6,15 @@ using System.Threading;
 namespace Assimalign.Cohesion.FileSystem;
 
 /// <summary>
-/// Configuration for an <see cref="IsolatedFileSystem"/>. Controls which
+/// Configuration for an <see cref="IsolatedStorageFileSystem"/>. Controls which
 /// <see cref="IsolatedStorageFile"/> store backs the file system, whether write operations are
 /// rejected, and how the provider reports its display name and ignored attributes.
 /// </summary>
-public class IsolatedFileSystemOptions
+public class IsolatedStorageFileSystemOptions
 {
     /// <summary>
     /// Display name reported through <see cref="IFileSystem.Name"/>. Defaults to
-    /// <c>"IsolatedFileSystem"</c> when unset.
+    /// <c>"IsolatedStorageFileSystem"</c> when unset.
     /// </summary>
     public string? Name { get; set; }
 

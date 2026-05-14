@@ -10,14 +10,14 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// <see cref="System.IO.FileSystemInfo"/> object, so subclasses cache the absolute
 /// <see cref="FileSystemPath"/> and look up timestamps on demand.
 /// </summary>
-internal abstract class IsolatedFileSystemInfo : IFileSystemInfo
+internal abstract class IsolatedStorageFileSystemInfo : IFileSystemInfo
 {
-    private readonly IsolatedFileSystem _fileSystem;
+    private readonly IsolatedStorageFileSystem _fileSystem;
     private readonly IsolatedStorageFile _storage;
     private readonly FileSystemPath _path;
 
-    protected IsolatedFileSystemInfo(
-        IsolatedFileSystem fileSystem,
+    protected IsolatedStorageFileSystemInfo(
+        IsolatedStorageFileSystem fileSystem,
         IsolatedStorageFile storage,
         FileSystemPath path)
     {
@@ -26,7 +26,7 @@ internal abstract class IsolatedFileSystemInfo : IFileSystemInfo
 
         _fileSystem = fileSystem;
         _storage = storage;
-        _path = IsolatedPathHelper.ToAbsolute(path);
+        _path = IsolatedStoragePathHelper.ToAbsolute(path);
     }
 
     /// <inheritdoc />
@@ -36,7 +36,7 @@ internal abstract class IsolatedFileSystemInfo : IFileSystemInfo
     /// The relative store-side path (no leading separator) used when calling into
     /// <see cref="IsolatedStorageFile"/> directly. The root maps to <see cref="string.Empty"/>.
     /// </summary>
-    protected string StorePath => IsolatedPathHelper.ToStorePath(_path);
+    protected string StorePath => IsolatedStoragePathHelper.ToStorePath(_path);
 
     /// <summary>
     /// The underlying <see cref="IsolatedStorageFile"/>. Subclasses use this to read timestamps
@@ -54,7 +54,7 @@ internal abstract class IsolatedFileSystemInfo : IFileSystemInfo
     public DateTime AccessedOn => SafeTime(() => _storage.GetLastAccessTime(StorePath).LocalDateTime);
 
     /// <inheritdoc />
-    public IsolatedFileSystem FileSystem => _fileSystem;
+    public IsolatedStorageFileSystem FileSystem => _fileSystem;
 
     IFileSystem IFileSystemInfo.FileSystem => FileSystem;
 
@@ -64,11 +64,11 @@ internal abstract class IsolatedFileSystemInfo : IFileSystemInfo
     /// deterministic across callers.
     /// </summary>
     public FileAttributes Attributes => throw new NotSupportedException(
-        "FileAttributes are not exposed by IsolatedStorageFile and are not supported by IsolatedFileSystem.");
+        "FileAttributes are not exposed by IsolatedStorageFile and are not supported by IsolatedStorageFileSystem.");
 
     /// <inheritdoc />
     public void SetAttributes(FileAttributes attributes) => throw new NotSupportedException(
-        "Setting FileAttributes is not supported by IsolatedFileSystem.");
+        "Setting FileAttributes is not supported by IsolatedStorageFileSystem.");
 
     /// <summary>
     /// Wraps a timestamp accessor so that a missing entry surfaces as

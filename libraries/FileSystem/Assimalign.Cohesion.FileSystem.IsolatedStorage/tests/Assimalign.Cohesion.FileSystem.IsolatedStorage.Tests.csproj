@@ -12,7 +12,7 @@
 		<CohesionPackageReference Include="xunit" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Isolated" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

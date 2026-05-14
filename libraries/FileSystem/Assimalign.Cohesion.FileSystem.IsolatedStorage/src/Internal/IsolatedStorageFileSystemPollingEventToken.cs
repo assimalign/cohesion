@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// callbacks are no-ops.
 /// </para>
 /// </remarks>
-internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToken, IDisposable
+internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEventToken, IDisposable
 {
     private readonly IsolatedStorageFile _storage;
     private readonly FileSystemPath _anchor;
@@ -42,7 +42,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
     private int _polling;
     private bool _disposed;
 
-    private IsolatedFileSystemPollingEventToken(
+    private IsolatedStorageFileSystemPollingEventToken(
         IsolatedStorageFile storage,
         FileSystemPath anchor,
         bool anchorIsFile,
@@ -61,7 +61,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
     /// Watches the directory tree rooted at <paramref name="directoryAnchor"/> with an optional
     /// <paramref name="glob"/> filter applied to each emitted event.
     /// </summary>
-    public static IsolatedFileSystemPollingEventToken ForDirectory(
+    public static IsolatedStorageFileSystemPollingEventToken ForDirectory(
         IsolatedStorageFile storage,
         FileSystemPath directoryAnchor,
         Glob? glob,
@@ -72,7 +72,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
     /// Watches a single file at <paramref name="fileAnchor"/>. Events fire only when the file
     /// itself changes (or is deleted); no other entries are observed.
     /// </summary>
-    public static IsolatedFileSystemPollingEventToken ForFile(
+    public static IsolatedStorageFileSystemPollingEventToken ForFile(
         IsolatedStorageFile storage,
         FileSystemPath fileAnchor,
         TimeSpan interval)
@@ -193,11 +193,11 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
             {
                 if (!previous.TryGetValue(path, out var prevSnap))
                 {
-                    Dispatch(ChangeType.Created, IsolatedPathHelper.FromStorePath(path));
+                    Dispatch(ChangeType.Created, IsolatedStoragePathHelper.FromStorePath(path));
                 }
                 else if (snap.Length != prevSnap.Length || snap.LastWriteUtc != prevSnap.LastWriteUtc)
                 {
-                    Dispatch(ChangeType.Changed, IsolatedPathHelper.FromStorePath(path));
+                    Dispatch(ChangeType.Changed, IsolatedStoragePathHelper.FromStorePath(path));
                 }
             }
 
@@ -205,7 +205,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
             {
                 if (!current.ContainsKey(path))
                 {
-                    Dispatch(ChangeType.Deleted, IsolatedPathHelper.FromStorePath(path));
+                    Dispatch(ChangeType.Deleted, IsolatedStoragePathHelper.FromStorePath(path));
                 }
             }
 
@@ -261,7 +261,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
 
         if (_anchorIsFile)
         {
-            string store = IsolatedPathHelper.ToStorePath(_anchor);
+            string store = IsolatedStoragePathHelper.ToStorePath(_anchor);
             if (!string.IsNullOrEmpty(store) && _storage.FileExists(store))
             {
                 snapshot[store] = ReadFileSnapshot(store);
@@ -269,7 +269,7 @@ internal sealed class IsolatedFileSystemPollingEventToken : IFileSystemEventToke
             return snapshot;
         }
 
-        string root = IsolatedPathHelper.ToStorePath(_anchor);
+        string root = IsolatedStoragePathHelper.ToStorePath(_anchor);
         WalkDirectory(root, snapshot);
         return snapshot;
     }
