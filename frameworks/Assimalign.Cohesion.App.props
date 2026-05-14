@@ -43,8 +43,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp.Transports" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Cache" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Cache.InMemory" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.CommandLine" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
@@ -75,15 +75,10 @@
 
         <!-- WIP / not yet building - uncomment as each library comes online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Dns.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Isolated" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" />
