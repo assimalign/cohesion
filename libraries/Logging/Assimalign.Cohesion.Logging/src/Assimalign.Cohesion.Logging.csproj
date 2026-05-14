@@ -14,10 +14,4 @@
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 	</ItemGroup>
-	<ItemGroup>
-		<None Include="..\README.md" Condition="Exists('..\README.md')">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>
 </Project>

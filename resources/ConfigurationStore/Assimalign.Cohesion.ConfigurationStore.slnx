@@ -1,20 +1,20 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/ConfigurationStore/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/">
-        <File Path="Assimalign.Cohesion.ConfigurationStore/README.md" />
-    </Folder>
-    <Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/">
-        <Project Path="Assimalign.Cohesion.ConfigurationStore/src/Assimalign.Cohesion.ConfigurationStore.csproj" />
-    </Folder>
-    <Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
-        <Project Path="Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/ConfigurationStore/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore/README.md" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore/src/Assimalign.Cohesion.ConfigurationStore.csproj" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
+	</Folder>
 </Solution>

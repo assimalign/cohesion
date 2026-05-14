@@ -8,6 +8,81 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.ApiManager/Tasks/Assimalign.Cohesion.Sdk.ApiManager.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ConfigurationStore/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.ConfigurationStore/Tasks/Assimalign.Cohesion.Sdk.ConfigurationStore.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Database/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Database/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.Database/Tasks/Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EmailHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EmailHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.EmailHub/Tasks/Assimalign.Cohesion.Sdk.EmailHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EventHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.EventHub/Tasks/Assimalign.Cohesion.Sdk.EventHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IdentityHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.IdentityHub/Tasks/Assimalign.Cohesion.Sdk.IdentityHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IoTHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IoTHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.IoTHub/Tasks/Assimalign.Cohesion.Sdk.IoTHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.LoadBalancer/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.LoadBalancer/Tasks/Assimalign.Cohesion.Sdk.LoadBalancer.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.LogSpace/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.LogSpace/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.LogSpace/Tasks/Assimalign.Cohesion.Sdk.LogSpace.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.MediaHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.MediaHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.MediaHub/Tasks/Assimalign.Cohesion.Sdk.MediaHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.MessageHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.MessageHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.MessageHub/Tasks/Assimalign.Cohesion.Sdk.MessageHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.NatGateway/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.NatGateway/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.NatGateway/Tasks/Assimalign.Cohesion.Sdk.NatGateway.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.NotificationHub/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.NotificationHub/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.NotificationHub/Tasks/Assimalign.Cohesion.Sdk.NotificationHub.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Rezolvr/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Rezolvr/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.Rezolvr/Tasks/Assimalign.Cohesion.Sdk.Rezolvr.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Scheduler/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Scheduler/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.Scheduler/Tasks/Assimalign.Cohesion.Sdk.Scheduler.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.SecretStore/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.SecretStore/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.SecretStore/Tasks/Assimalign.Cohesion.Sdk.SecretStore.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.VpnGateway/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.VpnGateway/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.VpnGateway/Tasks/Assimalign.Cohesion.Sdk.VpnGateway.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Web/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Web/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.Web/Tasks/Assimalign.Cohesion.Sdk.Web.Tasks.csproj" />
 	</Folder>
 </Solution>

@@ -1,0 +1,24 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/ObjectValidation/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/ObjectValidation/Assimalign.Cohesion.ObjectValidation/">
+		<File Path="Assimalign.Cohesion.ObjectValidation/README.md" />
+	</Folder>
+	<Folder Name="/ObjectValidation/Assimalign.Cohesion.ObjectValidation/docs/">
+		<File Path="Assimalign.Cohesion.ObjectValidation/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.ObjectValidation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/">
+		<Project Path="Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
+	</Folder>
+	<Folder Name="/ObjectValidation/Assimalign.Cohesion.ObjectValidation/tests/">
+		<Project Path="Assimalign.Cohesion.ObjectValidation/tests/Assimalign.Cohesion.ObjectValidation.Tests.csproj" />
+	</Folder>
+</Solution>

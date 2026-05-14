@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Logging.Debug.Internal;
+namespace Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
 /// Per-category logger created by <see cref="DebugLoggerProvider"/>.

@@ -1,0 +1,24 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Hosting/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting/">
+		<File Path="Assimalign.Cohesion.Hosting/README.md" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.Hosting/tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
+	</Folder>
+</Solution>

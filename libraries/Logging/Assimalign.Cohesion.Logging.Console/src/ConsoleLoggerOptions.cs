@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Logging.Console;
+namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// Configuration shape for <see cref="ConsoleLoggerProvider"/>.

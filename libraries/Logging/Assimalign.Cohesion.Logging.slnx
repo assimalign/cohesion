@@ -1,0 +1,76 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Logging/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/">
+		<File Path="Assimalign.Cohesion.Logging/README.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/docs/">
+		<File Path="Assimalign.Cohesion.Logging/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/docs/Assembly/" />
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/">
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILogger.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerEnricher.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerEntry.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerFactory.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerFactoryBuilder.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ILoggerFilter.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/IScopedLogger.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/Logger.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/LoggerExtensions.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/LoggerFilterRule.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/LoggerProvider.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/LogLevel.md" />
+		<File Path="Assimalign.Cohesion.Logging/docs/Assembly/Assimalign.Cohesion.Logging/ScopedLogger.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/src/">
+		<Project Path="Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging/tests/">
+		<Project Path="Assimalign.Cohesion.Logging/tests/Assimalign.Cohesion.Logging.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/">
+		<File Path="Assimalign.Cohesion.Logging.Console/README.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/docs/">
+		<File Path="Assimalign.Cohesion.Logging.Console/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Logging.Console/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/" />
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/">
+		<File Path="Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/ConsoleLoggerOptions.md" />
+		<File Path="Assimalign.Cohesion.Logging.Console/docs/Assembly/Assimalign.Cohesion.Logging.Console/ConsoleLoggerProvider.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/src/">
+		<Project Path="Assimalign.Cohesion.Logging.Console/src/Assimalign.Cohesion.Logging.Console.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Console/tests/">
+		<Project Path="Assimalign.Cohesion.Logging.Console/tests/Assimalign.Cohesion.Logging.Console.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/">
+		<File Path="Assimalign.Cohesion.Logging.Debug/README.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/docs/">
+		<File Path="Assimalign.Cohesion.Logging.Debug/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Logging.Debug/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/" />
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/">
+		<File Path="Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/DebugLoggerOptions.md" />
+		<File Path="Assimalign.Cohesion.Logging.Debug/docs/Assembly/Assimalign.Cohesion.Logging.Debug/DebugLoggerProvider.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/src/">
+		<Project Path="Assimalign.Cohesion.Logging.Debug/src/Assimalign.Cohesion.Logging.Debug.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/tests/">
+		<Project Path="Assimalign.Cohesion.Logging.Debug/tests/Assimalign.Cohesion.Logging.Debug.Tests.csproj" />
+	</Folder>
+</Solution>

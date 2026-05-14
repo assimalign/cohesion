@@ -1,6 +1,3 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
-	<!--<ItemGroup Condition="$(MSBuildProjectDirectory.EndsWith('src')) and $(MSBuildProjectFile) != 'Assimalign.Cohesion.Core.csproj'">
-		<Compile Include="..\..\Assimalign.Cohesion.Core\src\Internal\Shared\ThrowHelper.cs" Link="Internal\Shared\ThrowHelper.Core.cs" />
-	</ItemGroup>-->
 </Project>

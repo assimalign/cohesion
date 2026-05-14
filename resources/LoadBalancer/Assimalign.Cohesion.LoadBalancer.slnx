@@ -1,15 +1,15 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/LoadBalancer/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
-    <Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
-        <Project Path="Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/LoadBalancer/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
+	</Folder>
 </Solution>

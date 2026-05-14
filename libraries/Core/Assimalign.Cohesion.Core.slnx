@@ -1,0 +1,30 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Core/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Core/Assimalign.Cohesion.Core/">
+		<File Path="Assimalign.Cohesion.Core/README.md" />
+	</Folder>
+	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/">
+		<File Path="Assimalign.Cohesion.Core/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Core/docs/Overview.md" />
+	</Folder>
+	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
+	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />
+	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/">
+		<File Path="Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/Overview.md" />
+	</Folder>
+	<Folder Name="/Core/Assimalign.Cohesion.Core/src/">
+		<Project Path="Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
+	<Folder Name="/Core/Assimalign.Cohesion.Core/tests/">
+		<Project Path="Assimalign.Cohesion.Core/tests/Assimalign.Cohesion.Core.Tests.csproj" />
+	</Folder>
+</Solution>

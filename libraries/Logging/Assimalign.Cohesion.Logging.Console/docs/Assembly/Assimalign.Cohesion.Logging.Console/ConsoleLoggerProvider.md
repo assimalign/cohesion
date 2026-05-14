@@ -1,4 +1,4 @@
-# `Assimalign.Cohesion.Logging.Console.ConsoleLoggerProvider`
+# `Assimalign.Cohesion.Logging.ConsoleLoggerProvider`
 
 Console sink implementation of `Assimalign.Cohesion.Logging.ILoggerProvider`.
 

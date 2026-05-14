@@ -7,10 +7,4 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
-	<ItemGroup>
-		<None Include="..\README.md" Condition="Exists('..\README.md')">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>
 </Project>

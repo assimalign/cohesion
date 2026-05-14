@@ -1,19 +1,19 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/LogSpace/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/" />
-    <Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/src/">
-        <Project Path="Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
-    </Folder>
-    <Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
-    <Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">
-        <Project Path="Assimalign.Cohesion.LogSpace.Telemetry/src/Assimalign.Cohesion.LogSpace.Telemetry.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/LogSpace/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/" />
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/src/">
+		<Project Path="Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">
+		<Project Path="Assimalign.Cohesion.LogSpace.Telemetry/src/Assimalign.Cohesion.LogSpace.Telemetry.csproj" />
+	</Folder>
 </Solution>

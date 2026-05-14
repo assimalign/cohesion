@@ -1,19 +1,19 @@
 <Solution>
-    <Configurations>
-        <Platform Name="Any CPU" />
-        <Platform Name="x64" />
-        <Platform Name="x86" />
-    </Configurations>
-    <Folder Name="/ApiManager/">
-        <File Path="Directory.Build.props" />
-        <File Path="Directory.Build.targets" />
-    </Folder>
-    <Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/" />
-    <Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/src/">
-        <Project Path="Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
-    </Folder>
-    <Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
-    <Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
-        <Project Path="Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
-    </Folder>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/ApiManager/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/" />
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/src/">
+		<Project Path="Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
+	</Folder>
 </Solution>

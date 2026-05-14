@@ -1,15 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Logging.Console</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.Logging</RootNamespace>
 		<Description>Console sink for Cohesion logging. Writes structured log entries to System.Console with optional color and configurable formatting.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
-	</ItemGroup>
-	<ItemGroup>
-		<None Include="..\README.md" Condition="Exists('..\README.md')">
-			<Pack>true</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
 	</ItemGroup>
 </Project>

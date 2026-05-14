@@ -1,0 +1,24 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/ObjectPool/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+	</Folder>
+	<Folder Name="/ObjectPool/Assimalign.Cohesion.ObjectPool/">
+		<File Path="Assimalign.Cohesion.ObjectPool/README.md" />
+	</Folder>
+	<Folder Name="/ObjectPool/Assimalign.Cohesion.ObjectPool/docs/">
+		<File Path="Assimalign.Cohesion.ObjectPool/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.ObjectPool/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/ObjectPool/Assimalign.Cohesion.ObjectPool/src/">
+		<Project Path="Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
+	</Folder>
+	<Folder Name="/ObjectPool/Assimalign.Cohesion.ObjectPool/tests/">
+		<Project Path="Assimalign.Cohesion.ObjectPool/tests/Assimalign.Cohesion.ObjectPool.Tests.csproj" />
+	</Folder>
+</Solution>
