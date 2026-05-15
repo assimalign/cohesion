@@ -29,12 +29,30 @@ internal sealed class Http2Stream
     private readonly MemoryStream _headerBlock;
     private readonly MemoryStream _body;
 
-    public Http2Stream(int streamId)
+    /// <summary>
+    /// Send-side flow-control window — the number of DATA octets we
+    /// may transmit on this stream before the peer credits us with a
+    /// <c>WINDOW_UPDATE</c>. Initialised from the peer's advertised
+    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c>.
+    /// </summary>
+    public Http2FlowControlWindow SendWindow;
+
+    /// <summary>
+    /// Receive-side flow-control window — the number of DATA octets the
+    /// peer may transmit on this stream before we send a
+    /// <c>WINDOW_UPDATE</c>. Initialised from our local
+    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c>.
+    /// </summary>
+    public Http2FlowControlWindow ReceiveWindow;
+
+    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow)
     {
         StreamId = streamId;
         _headerBlock = new MemoryStream();
         _body = new MemoryStream();
         State = Http2StreamState.Idle;
+        SendWindow = new Http2FlowControlWindow(initialSendWindow);
+        ReceiveWindow = new Http2FlowControlWindow(initialReceiveWindow);
     }
 
     /// <summary>The stream identifier (RFC 9113 §5.1.1).</summary>
