@@ -50,7 +50,15 @@ internal static class Http1MessageReader
         }
 
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
-        byte[] bodyBytes = await ReadBodyAsync(stream, headers, cancellationToken).ConfigureAwait(false);
+        // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
+        // headers, rejecting ambiguous combinations and malformed Content-Length /
+        // chunked encodings.
+        Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(stream, headers, cancellationToken).ConfigureAwait(false);
+        byte[] bodyBytes = messageBody.Body;
+        // Trailers are parsed (and validated against the smuggling-vector header list)
+        // but not yet exposed on IHttpRequest — that wiring belongs to the .02
+        // field-section work.
+        _ = messageBody.Trailers;
         HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
         HttpCookieCollection cookies = ParseCookies(headers);
 
@@ -125,99 +133,6 @@ internal static class Http1MessageReader
             else
             {
                 headers[key] = value;
-            }
-        }
-    }
-
-    private static async ValueTask<byte[]> ReadBodyAsync(Stream stream, HttpHeaderCollection headers, CancellationToken cancellationToken)
-    {
-        if (HeaderContainsToken(headers, HttpHeaderKey.TransferEncoding, "chunked"))
-        {
-            return await ReadChunkedBodyAsync(stream, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (!headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue contentLengthValue) ||
-            !long.TryParse(contentLengthValue.Value, out long contentLength) ||
-            contentLength <= 0)
-        {
-            return Array.Empty<byte>();
-        }
-
-        byte[] body = new byte[contentLength];
-        int offset = 0;
-
-        while (offset < body.Length)
-        {
-            int bytesRead = await stream.ReadAsync(body.AsMemory(offset, body.Length - offset), cancellationToken).ConfigureAwait(false);
-
-            if (bytesRead == 0)
-            {
-                throw new EndOfStreamException("The connection closed before the request body was fully received.");
-            }
-
-            offset += bytesRead;
-        }
-
-        return body;
-    }
-
-    private static async ValueTask<byte[]> ReadChunkedBodyAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        using MemoryStream body = new();
-
-        while (true)
-        {
-            string? sizeLine = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
-
-            if (sizeLine is null)
-            {
-                throw new EndOfStreamException("The connection closed before the chunked request body was fully received.");
-            }
-
-            string sizeText = sizeLine.Split(';', 2)[0].Trim();
-            int size = Convert.ToInt32(sizeText, 16);
-
-            if (size == 0)
-            {
-                await ConsumeTrailingHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
-                return body.ToArray();
-            }
-
-            byte[] buffer = new byte[size];
-            int offset = 0;
-
-            while (offset < size)
-            {
-                int bytesRead = await stream.ReadAsync(buffer.AsMemory(offset, size - offset), cancellationToken).ConfigureAwait(false);
-
-                if (bytesRead == 0)
-                {
-                    throw new EndOfStreamException("The connection closed before the chunked request body was fully received.");
-                }
-
-                offset += bytesRead;
-            }
-
-            await body.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
-
-            string? line = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
-
-            if (line is null)
-            {
-                throw new EndOfStreamException("The connection closed before the chunk terminator was received.");
-            }
-        }
-    }
-
-    private static async ValueTask ConsumeTrailingHeadersAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        while (true)
-        {
-            string? line = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
-
-            if (line is null || line.Length == 0)
-            {
-                return;
             }
         }
     }

@@ -203,6 +203,213 @@ public class Http1TransportTests
         secondPath.ShouldBe("/two");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver Content-Length framed body intact")]
+    public async Task Http1_OnContentLengthBody_ShouldDeliverBodyIntact()
+    {
+        // RFC 9112 §6.2 — Content-Length is the second framing strategy.
+        const string bodyText = "hello world";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {bodyText.Length}\r\n\r\n{bodyText}");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        string body = await reader.ReadToEndAsync();
+        body.ShouldBe(bodyText);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should accept repeated Content-Length headers with the same value")]
+    public async Task Http1_OnRepeatedContentLengthSameValue_ShouldAcceptBody()
+    {
+        // RFC 9112 §6.3 — repeated Content-Length values are only rejected when they differ.
+        // Identical repeats may be folded into a single header by an intermediary, so a
+        // standards-compliant server treats them as one declaration.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject inconsistent Content-Length values")]
+    public async Task Http1_OnConflictingContentLength_ShouldThrow()
+    {
+        // RFC 9112 §6.3 — conflicting Content-Length values are a smuggling vector and MUST
+        // be rejected with a Bad Request response.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nhello!!");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject coexisting Content-Length and Transfer-Encoding")]
+    public async Task Http1_OnContentLengthAndTransferEncoding_ShouldThrow()
+    {
+        // RFC 9112 §6.3 — the canonical request-smuggling vector. A message that declares
+        // both framing strategies is ambiguous and MUST be rejected.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed Content-Length values")]
+    [InlineData("abc")]    // non-digit
+    [InlineData("-5")]     // negative
+    [InlineData("+5")]     // explicit sign
+    [InlineData("5.0")]    // decimal point
+    [InlineData("0x5")]    // hex
+    [InlineData("5 5")]    // embedded whitespace inside the value
+    [InlineData("")]       // empty
+    public async Task Http1_OnMalformedContentLength_ShouldThrow(string contentLength)
+    {
+        // RFC 9112 §6.3 — Content-Length MUST be one or more ASCII digits with no leading
+        // sign, decimal point, hex digits, or embedded whitespace.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {contentLength}\r\n\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject non-chunked Transfer-Encoding")]
+    public async Task Http1_OnNonChunkedTransferEncoding_ShouldThrow()
+    {
+        // RFC 9112 §7.4 — the final coding of Transfer-Encoding MUST be 'chunked' for an
+        // HTTP/1.1 request. gzip / deflate / compress are content codings and don't belong
+        // here; an unrecognized transfer coding is a hard failure.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: gzip\r\n\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reassemble chunked body across multiple chunks")]
+    public async Task Http1_OnChunkedBody_ShouldReassembleBody()
+    {
+        // RFC 9112 §7.1 — chunked transfer coding. Chunks are concatenated in order to
+        // reconstitute the body the peer intended to send.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + "7\r\n, world\r\n"
+            + "0\r\n\r\n");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello, world");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should strip chunk extensions from the assembled body")]
+    public async Task Http1_OnChunkedBodyWithExtensions_ShouldStripExtensions()
+    {
+        // RFC 9112 §7.1.1 — chunk-ext is optional and a recipient MAY ignore it. We strip
+        // and never surface it; the assembled body must contain only the chunk-data octets.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5;name=value;flag\r\nhello\r\n"
+            + "0\r\n\r\n");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should consume trailers without leaking into headers")]
+    public async Task Http1_OnChunkedBodyWithTrailers_ShouldNotLeakIntoHeaders()
+    {
+        // RFC 9112 §7.1.2 — trailers follow the last chunk and are terminated by an empty
+        // line. They MUST NOT appear in the field section delivered to the application as
+        // request headers. Surfacing trailers on IHttpRequest is part of the field-section
+        // work; for now the transport must at least consume and discard them cleanly.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + "0\r\nX-Trace-Id: trace-42\r\n\r\n");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
+        httpContext.Request.Headers.ContainsKey(new HttpHeaderKey("X-Trace-Id")).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject trailers that contain framing-related headers")]
+    public async Task Http1_OnChunkedBodyWithForbiddenTrailer_ShouldThrow()
+    {
+        // RFC 9112 §7.1.2 — Content-Length, Transfer-Encoding, and Host are forbidden as
+        // trailer fields. Letting them through would be a smuggling vector.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + "0\r\nContent-Length: 5\r\n\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed chunk sizes")]
+    [InlineData("xyz")]    // non-hex
+    [InlineData("-1")]     // signed
+    [InlineData(" 5")]     // leading whitespace
+    [InlineData("")]       // empty
+    public async Task Http1_OnMalformedChunkSize_ShouldThrow(string chunkSize)
+    {
+        // RFC 9112 §7.1 — chunk-size is 1*HEXDIG with no leading sign and no whitespace.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + $"{chunkSize}\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunked body that ends before the terminating zero chunk")]
+    public async Task Http1_OnChunkedBodyTruncatedBeforeFinalChunk_ShouldThrow()
+    {
+        // RFC 9112 §7.1 — a chunked body MUST end with a zero chunk. Truncation before the
+        // terminator is a half-message; the parser must surface that rather than treating
+        // it as success.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n");
+
+        await Should.ThrowAsync<EndOfStreamException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunk that ends before its declared size is reached")]
+    public async Task Http1_OnChunkTruncatedMidChunk_ShouldThrow()
+    {
+        // RFC 9112 §7.1 — chunk-data must contain chunk-size octets followed by CRLF.
+        // Truncating inside the data is an EOF, not a successful body.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "10\r\nshort");
+
+        await Should.ThrowAsync<EndOfStreamException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject Content-Length declarations exceeding the body size cap")]
+    public async Task Http1_OnContentLengthExceedingCap_ShouldThrow()
+    {
+        // DoS guard — a peer that claims Content-Length: 10 GB would otherwise force a
+        // 10 GB allocation. Cohesion caps the body at 100 MB and rejects oversize
+        // declarations before reading a single byte from the stream.
+        const long oversize = 200L * 1024 * 1024;
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {oversize}\r\n\r\n");
+
+        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+    }
+
+    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload)
+    {
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        return await ReadSingleContextAsync(httpConnectionContext);
+    }
+
     private static async Task<IHttpContext> ReadSingleContextAsync(IHttpConnectionContext context)
     {
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
