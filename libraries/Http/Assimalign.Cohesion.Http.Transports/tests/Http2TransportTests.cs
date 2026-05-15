@@ -461,6 +461,146 @@ public class Http2TransportTests
         Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on stream 0 with PROTOCOL_ERROR")]
+    public async Task Http2_OnHeadersOnStreamZero_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §5.1.1 — stream 0 is reserved for connection-control
+        // frames. HEADERS on stream 0 is a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headersOnStreamZero = Http2TestSettings.RawFrame(0x1, 0x4 /* END_HEADERS */, 0, Array.Empty<byte>());
+        await AssertGoAwayAsync(Combine(preface, settings, headersOnStreamZero), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on an even stream ID with PROTOCOL_ERROR")]
+    public async Task Http2_OnHeadersOnEvenStreamId_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §5.1.1 — client-initiated streams MUST use odd
+        // identifiers. Server-initiated (even) ids are only legal when
+        // produced by the server itself via PUSH_PROMISE, which Cohesion
+        // disables. An even client-initiated id is a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headersOnEvenId = Http2TestSettings.RawFrame(0x1, 0x4, 2, Array.Empty<byte>());
+        await AssertGoAwayAsync(Combine(preface, settings, headersOnEvenId), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on a stream id lower than the highest previously seen")]
+    public async Task Http2_OnHeadersOnDecreasingStreamId_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §5.1.1 — newly opened client streams MUST use a
+        // strictly higher id than every previously opened client stream.
+        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/three", "https", "api.test");
+        // Build a HEADERS frame on stream 1 (lower) — the connection has
+        // already seen stream 3, so opening stream 1 now is an ordering
+        // violation.
+        byte[] lowerIdHeaders = Http2TestSettings.RawFrame(0x1, 0x4 | 0x1 /* END_HEADERS + END_STREAM */, 1, Array.Empty<byte>());
+        await AssertGoAwayAsync(Combine(firstRequest, lowerIdHeaders), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject DATA on stream 0 with PROTOCOL_ERROR")]
+    public async Task Http2_OnDataOnStreamZero_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.1 — DATA frames MUST be associated with a non-zero
+        // stream.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] dataOnStreamZero = Http2TestSettings.RawFrame(0x0, 0, 0, new byte[] { 1, 2, 3 });
+        await AssertGoAwayAsync(Combine(preface, settings, dataOnStreamZero), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject DATA on an unknown/idle stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnDataOnIdleStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §5.1 — DATA on an idle stream (no HEADERS observed) is
+        // a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] dataOnIdle = Http2TestSettings.RawFrame(0x0, 0, 5, new byte[] { 1, 2, 3 });
+        await AssertGoAwayAsync(Combine(preface, settings, dataOnIdle), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject RST_STREAM on stream 0 with PROTOCOL_ERROR")]
+    public async Task Http2_OnRstStreamOnStreamZero_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.4 — RST_STREAM frames MUST be associated with a
+        // specific stream; stream 0 is illegal.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] rstOnStreamZero = Http2TestSettings.RawFrame(0x3, 0, 0, new byte[4]);
+        await AssertGoAwayAsync(Combine(preface, settings, rstOnStreamZero), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject RST_STREAM on an idle stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnRstStreamOnIdleStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.4 — RST_STREAM on a stream that has never been
+        // opened is a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] rstOnIdle = Http2TestSettings.RawFrame(0x3, 0, 7, new byte[4]);
+        await AssertGoAwayAsync(Combine(preface, settings, rstOnIdle), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reset a stream that receives DATA after END_STREAM")]
+    public async Task Http2_OnDataAfterEndStream_ShouldEmitRstStream()
+    {
+        // RFC 9113 §5.1 — DATA on a stream that has already had its remote
+        // half closed is a stream error (STREAM_CLOSED). The connection
+        // stays alive; the offending stream is reset.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Build a HEADERS+END_STREAM for stream 1 by reusing the factory
+        // (which produces a complete preface + SETTINGS + HEADERS bundle)
+        // and stripping the preface — we already have one above.
+        byte[] requestWithBody = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] requestWithoutPreface = new byte[requestWithBody.Length - Http2TestSettings.Preface().Length];
+        Array.Copy(requestWithBody, Http2TestSettings.Preface().Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+        // Now a DATA frame on the just-closed stream.
+        byte[] dataAfterClose = Http2TestSettings.RawFrame(0x0, 0, 1, new byte[] { 1, 2, 3 });
+
+        TestTransportConnectionContext transportContext = new(Combine(requestWithoutPreface, dataAfterClose));
+        // Inject our own preface + SETTINGS in front so the connection
+        // initialises cleanly.
+        transportContext = new(Combine(preface, settings, requestWithoutPreface, dataAfterClose));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Drive the receive loop. The first iteration produces the valid
+        // request. The second MoveNextAsync drives the loop past the
+        // DATA-after-END_STREAM frame — the state machine raises a stream
+        // error which the loop catches, emits a RST_STREAM, and continues.
+        // The pipe is finite, so the next ReadFrameAsync returns null and
+        // the loop yields break.
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext first = enumerator.Current;
+        first.Response.StatusCode = HttpStatusCode.Ok;
+        await httpConnectionContext.SendAsync(first);
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        byte[] output = await transportContext.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        bool foundRstStream = false;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 3) // RST_STREAM
+            {
+                foundRstStream = true;
+                payload.Length.ShouldBe(4);
+                uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload);
+                code.ShouldBe((uint)Http2ErrorCode.StreamClosed);
+            }
+        }
+
+        foundRstStream.ShouldBeTrue();
+    }
+
     private static byte[] Combine(params byte[][] buffers)
     {
         using MemoryStream stream = new();
