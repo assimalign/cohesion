@@ -50,4 +50,22 @@ public interface IHttpContext : IAsyncDisposable
     /// Gets the cancellation token that signals when the request has been aborted.
     /// </summary>
     CancellationToken RequestAborted { get; }
+
+    /// <summary>
+    /// Gets the protocol-upgrade feature for this exchange, or <see langword="null"/>
+    /// when the exchange is not a candidate for a connection transition.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A non-null value indicates that the request matches either the RFC 9110 §7.8
+    /// upgrade signal (<c>Connection: upgrade</c> + <c>Upgrade</c>) or the
+    /// RFC 9110 §9.3.6 <c>CONNECT</c> tunnel shape. Inspect
+    /// <see cref="IHttpProtocolUpgrade.Kind"/> to disambiguate.
+    /// </para>
+    /// <para>
+    /// Most exchanges are normal request/response and this property returns
+    /// <see langword="null"/>.
+    /// </para>
+    /// </remarks>
+    IHttpProtocolUpgrade? Upgrade { get; }
 }

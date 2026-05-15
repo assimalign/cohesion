@@ -50,15 +50,34 @@ internal static class Http1MessageReader
         }
 
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
-        // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
-        // headers, rejecting ambiguous combinations and malformed Content-Length /
-        // chunked encodings.
-        Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(stream, headers, cancellationToken).ConfigureAwait(false);
-        byte[] bodyBytes = messageBody.Body;
-        // Trailers are parsed (and validated against the smuggling-vector header list)
-        // but not yet exposed on IHttpRequest — that wiring belongs to the .02
-        // field-section work.
-        _ = messageBody.Trailers;
+
+        // RFC 9110 §7.8 / §9.3.6 — classify the transition signal BEFORE consuming any
+        // body bytes. CONNECT in particular MUST NOT consume octets past the request
+        // headers; the bytes that follow belong to the tunnel.
+        (HttpProtocolUpgradeKind upgradeKind, string? upgradeProtocol) = ClassifyUpgrade(method, target, headers);
+
+        byte[] bodyBytes;
+        if (upgradeKind == HttpProtocolUpgradeKind.Connect)
+        {
+            // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
+            // or Transfer-Encoding. Anything after the headers is tunnel traffic, so
+            // we hand the application an empty body and let the upgrade hand over the
+            // raw stream when AcceptAsync is invoked.
+            bodyBytes = Array.Empty<byte>();
+        }
+        else
+        {
+            // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
+            // headers, rejecting ambiguous combinations and malformed Content-Length /
+            // chunked encodings.
+            Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(stream, headers, cancellationToken).ConfigureAwait(false);
+            bodyBytes = messageBody.Body;
+            // Trailers are parsed (and validated against the smuggling-vector header list)
+            // but not yet exposed on IHttpRequest — that wiring belongs to the .02
+            // field-section work.
+            _ = messageBody.Trailers;
+        }
+
         HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
         HttpCookieCollection cookies = ParseCookies(headers);
 
@@ -94,7 +113,71 @@ internal static class Http1MessageReader
 
         bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
 
-        return new Http1Context(request, response, connectionInfo, cancellationToken, keepAlive);
+        return new Http1Context(
+            request,
+            response,
+            connectionInfo,
+            cancellationToken,
+            keepAlive,
+            stream,
+            upgradeKind,
+            upgradeProtocol);
+    }
+
+    /// <summary>
+    /// Classifies whether the current request is a candidate for a connection
+    /// transition (HTTP/1.1 protocol upgrade or CONNECT tunnel) per RFC 9110 §7.8
+    /// and §9.3.6.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CONNECT detection requires both the <c>CONNECT</c> method and the authority
+    /// request-target form (RFC 9112 §3.2.3); the request-target parser already
+    /// enforces this pairing, so the check here is defensive.
+    /// </para>
+    /// <para>
+    /// Upgrade detection requires <c>Connection: upgrade</c> (RFC 9110 §7.8.1 —
+    /// the Connection header is what makes Upgrade hop-by-hop and actionable;
+    /// presence of <c>Upgrade</c> alone is informational and is ignored). The
+    /// first protocol token in the <c>Upgrade</c> field is returned; further
+    /// tokens describe fallback preferences and are surfaced through the raw
+    /// header for the application to consult if needed.
+    /// </para>
+    /// </remarks>
+    private static (HttpProtocolUpgradeKind Kind, string? Protocol) ClassifyUpgrade(
+        HttpMethod method,
+        HttpRequestTarget target,
+        HttpHeaderCollection headers)
+    {
+        if (method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority)
+        {
+            return (HttpProtocolUpgradeKind.Connect, null);
+        }
+
+        if (!HeaderContainsToken(headers, HttpHeaderKey.Connection, "upgrade"))
+        {
+            return (HttpProtocolUpgradeKind.None, null);
+        }
+
+        if (!headers.TryGetValue(HttpHeaderKey.Upgrade, out HttpHeaderValue upgradeHeader))
+        {
+            // Connection: upgrade without an Upgrade header is a bare hop-by-hop
+            // signal with no protocol to negotiate — there is nothing to switch to.
+            return (HttpProtocolUpgradeKind.None, null);
+        }
+
+        // The Upgrade field is a comma-separated protocol list; the first token is
+        // the highest-priority protocol the client wants to switch to.
+        string raw = upgradeHeader.Value ?? string.Empty;
+        int comma = raw.IndexOf(',');
+        string firstProtocol = (comma < 0 ? raw : raw[..comma]).Trim();
+
+        if (firstProtocol.Length == 0)
+        {
+            return (HttpProtocolUpgradeKind.None, null);
+        }
+
+        return (HttpProtocolUpgradeKind.Upgrade, firstProtocol);
     }
 
     private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(Stream stream, CancellationToken cancellationToken)

@@ -32,6 +32,9 @@ public abstract class HttpContext : IHttpContext
     public abstract CancellationToken RequestAborted { get; }
 
     /// <inheritdoc />
+    public virtual IHttpProtocolUpgrade? Upgrade => null;
+
+    /// <inheritdoc />
     public abstract ValueTask DisposeAsync();
 
     IHttpRequest IHttpContext.Request => Request;
