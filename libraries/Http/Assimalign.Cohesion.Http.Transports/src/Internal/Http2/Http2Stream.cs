@@ -28,6 +28,11 @@ internal sealed class Http2Stream
 {
     private readonly MemoryStream _headerBlock;
     private readonly MemoryStream _body;
+    // RFC 9113 §5.4.2 — when the peer resets a stream (or we decide to
+    // reset it locally), the application MUST be able to learn that its
+    // request was abandoned. This token source backs IHttpContext's
+    // RequestAborted and is fired whenever the stream is reset.
+    private readonly CancellationTokenSource _abortedSource = new();
 
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
@@ -54,6 +59,13 @@ internal sealed class Http2Stream
         SendWindow = new Http2FlowControlWindow(initialSendWindow);
         ReceiveWindow = new Http2FlowControlWindow(initialReceiveWindow);
     }
+
+    /// <summary>
+    /// A token that fires when this stream is reset (locally or by the
+    /// peer). Wired into <see cref="IHttpContext.RequestAborted"/> so
+    /// the application can observe peer cancellation.
+    /// </summary>
+    public CancellationToken RequestAborted => _abortedSource.Token;
 
     /// <summary>The stream identifier (RFC 9113 §5.1.1).</summary>
     public int StreamId { get; }
@@ -222,8 +234,10 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Applies an inbound RST_STREAM — moves the stream to
-    /// <see cref="Http2StreamState.Closed"/> and marks both halves as
-    /// finalised so any downstream consumer terminates promptly.
+    /// <see cref="Http2StreamState.Closed"/>, marks both halves as
+    /// finalised, and fires <see cref="RequestAborted"/> so any
+    /// application code reading the request body or running the
+    /// handler observes the cancellation.
     /// </summary>
     /// <exception cref="Http2ConnectionException">
     /// RST_STREAM on an idle stream is a connection error
@@ -240,6 +254,7 @@ internal sealed class Http2Stream
 
         State = Http2StreamState.Closed;
         InputCompleted = true;
+        TryFireAbort();
     }
 
     /// <summary>
@@ -259,12 +274,28 @@ internal sealed class Http2Stream
     }
 
     /// <summary>
-    /// Marks the stream as closed because the server emitted a RST_STREAM.
+    /// Marks the stream as closed because the server emitted a RST_STREAM,
+    /// and fires <see cref="RequestAborted"/> so the application sees
+    /// the cancellation.
     /// </summary>
     public void SendReset()
     {
         State = Http2StreamState.Closed;
         InputCompleted = true;
+        TryFireAbort();
+    }
+
+    private void TryFireAbort()
+    {
+        try
+        {
+            _abortedSource.Cancel();
+        }
+        catch (System.ObjectDisposedException)
+        {
+            // The CTS may have been disposed already if a downstream
+            // consumer raced our reset. Idempotent.
+        }
     }
 
     /// <summary>
@@ -285,12 +316,21 @@ internal sealed class Http2Stream
         }
     }
 
-    public Http2Context CreateContext(HPackDecoder decoder, IHttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken requestAborted)
+    public Http2Context CreateContext(HPackDecoder decoder, IHttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken connectionAborted)
     {
         if (!IsRequestReady)
         {
             throw new InvalidOperationException("The HTTP/2 stream is not ready to create a request context.");
         }
+
+        // RFC 9113 §5.4.2 — RequestAborted fires when either the connection
+        // is being torn down (connectionAborted token) OR this specific
+        // stream is reset (our internal _abortedSource via RequestAborted).
+        // Link them so the application sees a single token that fires on
+        // either condition.
+        CancellationToken requestAborted = connectionAborted == default
+            ? RequestAborted
+            : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
 
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
         byte[] bodyBytes = _body.ToArray();
