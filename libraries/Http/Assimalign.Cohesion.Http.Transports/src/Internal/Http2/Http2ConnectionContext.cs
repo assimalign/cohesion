@@ -73,6 +73,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             {
                 completedContext = await ProcessFrameAsync(receivedFrame.Value, cancellationToken).ConfigureAwait(false);
             }
+            catch (Http2StreamException streamError)
+            {
+                // RFC 9113 §5.4.2 — a stream error is recoverable: emit a
+                // RST_STREAM carrying the error code and continue processing
+                // other streams on the same connection.
+                await EmitRstStreamAsync(streamError.StreamId, streamError.ErrorCode, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
             catch (Http2ConnectionException error)
             {
                 // RFC 9113 §6.8 — every connection-level failure MUST be
@@ -122,6 +130,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             _writeLock.Release();
         }
+
+        // RFC 9113 §5.1 — every server response ends with END_STREAM (either
+        // on a body-less HEADERS frame or on the trailing DATA frame). After
+        // a successful send the stream's local half is closed; if the peer
+        // already closed its half (the normal request/response case) the
+        // stream transitions to Closed.
+        http2Context.Stream.SendEndStream();
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -199,14 +214,77 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 await ProcessPingFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
             case Http2FrameType.RstStream:
-                _streams.Remove(receivedFrame.Frame.StreamId);
-                if (_continuationStreamId == receivedFrame.Frame.StreamId)
-                {
-                    _continuationStreamId = null;
-                }
+                ProcessRstStreamFrame(receivedFrame);
                 return null;
             default:
                 return null;
+        }
+    }
+
+    private void ProcessRstStreamFrame(ReceivedFrame receivedFrame)
+    {
+        // RFC 9113 §6.4 — RST_STREAM frames MUST be associated with a
+        // specific stream (stream 0 is illegal) and MUST carry a 4-octet
+        // error code payload.
+        if (receivedFrame.Frame.StreamId == 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "HTTP/2 RST_STREAM frame received on stream 0.");
+        }
+
+        if (_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        {
+            stream.ReceiveReset();
+            _streams.Remove(receivedFrame.Frame.StreamId);
+        }
+        else if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+        {
+            // RST_STREAM on an idle stream (one whose ID we have never
+            // observed an in-bound frame for) is a connection error per
+            // RFC 9113 §6.4.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 RST_STREAM received for idle stream {receivedFrame.Frame.StreamId}.");
+        }
+
+        if (_continuationStreamId == receivedFrame.Frame.StreamId)
+        {
+            _continuationStreamId = null;
+        }
+    }
+
+    /// <summary>
+    /// Validates a client-initiated stream identifier per RFC 9113 §5.1.1:
+    /// MUST be odd, MUST be non-zero, MUST be greater than every previously
+    /// observed client-initiated stream identifier. Violations are
+    /// connection-level PROTOCOL_ERROR.
+    /// </summary>
+    private void ValidateInboundStreamId(int streamId)
+    {
+        if (streamId == 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "HTTP/2 stream-bearing frame received on stream 0.");
+        }
+
+        if ((streamId & 1) == 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 client-initiated stream id {streamId} must be odd.");
+        }
+
+        // Re-using a stream id is legal if the stream is still tracked
+        // (continuation of HEADERS, body DATA, etc.). It is only an
+        // ordering violation when opening a NEW stream with a smaller id
+        // than the previously highest one.
+        if (streamId < _lastInboundStreamId && !_streams.ContainsKey(streamId))
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 stream id {streamId} is lower than the highest previously seen client-initiated stream id {_lastInboundStreamId}.");
         }
     }
 
@@ -291,14 +369,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         Http2Frame frame = receivedFrame.Frame;
+
+        // RFC 9113 §5.1.1 — client-initiated streams MUST use odd-numbered
+        // identifiers, and stream IDs MUST increase monotonically. The server
+        // never initiates a stream (PUSH_PROMISE is disabled), so we treat any
+        // even ID as a connection-level PROTOCOL_ERROR.
+        ValidateInboundStreamId(frame.StreamId);
+
         _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
         Http2Stream stream = GetOrCreateStream(frame.StreamId);
-        stream.AppendHeaders(receivedFrame.Payload, frame.HeadersEndHeaders);
 
-        if (frame.HeadersEndStream)
-        {
-            stream.CompleteInput();
-        }
+        // Hand the HEADERS frame to the state machine — it folds the payload
+        // into the accumulating header block AND updates the stream's
+        // lifecycle state (idle → open or idle → half-closed-remote).
+        stream.ReceiveHeaders(receivedFrame.Payload, frame.HeadersEndHeaders, frame.HeadersEndStream);
 
         if (!frame.HeadersEndHeaders)
         {
@@ -318,8 +402,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "The HTTP/2 CONTINUATION frame did not match the active header block stream.");
         }
 
-        Http2Stream stream = GetOrCreateStream(receivedFrame.Frame.StreamId);
-        stream.AppendHeaders(receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
+        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        {
+            // The leading HEADERS frame must have created the stream entry;
+            // an orphan CONTINUATION is a protocol error.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 CONTINUATION frame received on unknown stream {receivedFrame.Frame.StreamId}.");
+        }
+
+        stream.ReceiveContinuation(receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
 
         if (receivedFrame.Frame.HeadersEndHeaders)
         {
@@ -331,14 +423,38 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
     private Http2Context? ProcessDataFrame(ReceivedFrame receivedFrame)
     {
-        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        // RFC 9113 §6.1 — DATA frames MUST be associated with a stream;
+        // stream 0 is reserved for connection-level frames.
+        if (receivedFrame.Frame.StreamId == 0)
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
-                "The HTTP/2 DATA frame was received for an unknown stream.");
+                "HTTP/2 DATA frame received on stream 0.");
         }
 
-        stream.AppendBody(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
+        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        {
+            // Disambiguate idle vs. recently-closed streams (RFC 9113 §5.1):
+            //   - id > highest observed → truly idle stream, never opened
+            //     → connection error PROTOCOL_ERROR.
+            //   - id ≤ highest observed → previously opened stream we have
+            //     since retired (END_STREAM + END_STREAM, or RST_STREAM)
+            //     → stream error STREAM_CLOSED, reset the stream so the
+            //     peer learns it cannot continue using that id.
+            if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 DATA frame received on idle stream {receivedFrame.Frame.StreamId}.");
+            }
+
+            throw new Http2StreamException(
+                receivedFrame.Frame.StreamId,
+                Http2ErrorCode.StreamClosed,
+                $"HTTP/2 DATA frame received on closed stream {receivedFrame.Frame.StreamId}.");
+        }
+
+        stream.ReceiveData(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
         return TryCompleteStream(stream);
     }
 
@@ -536,6 +652,48 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         return new ReceivedFrame(frame, payloadSequence.IsEmpty ? Array.Empty<byte>() : payloadSequence.ToArray());
+    }
+
+    /// <summary>
+    /// Emits a <c>RST_STREAM</c> frame for <paramref name="streamId"/> with
+    /// <paramref name="errorCode"/> (RFC 9113 §6.4 / §5.4.2). Removes the
+    /// stream from our active map so subsequent frames on it surface as
+    /// "unknown stream" errors at the connection level.
+    /// </summary>
+    private async Task EmitRstStreamAsync(int streamId, Http2ErrorCode errorCode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Http2Frame rstStream = new();
+            rstStream.PrepareRstStream(streamId, errorCode);
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await Http2FrameWriter.WriteAsync(Stream, rstStream, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+        catch
+        {
+            // Best-effort: stream errors are recoverable, and if the wire
+            // is already in trouble the next connection-level read will
+            // surface that via GOAWAY.
+        }
+
+        if (_streams.TryGetValue(streamId, out Http2Stream? stream))
+        {
+            stream.SendReset();
+            _streams.Remove(streamId);
+        }
+
+        if (_continuationStreamId == streamId)
+        {
+            _continuationStreamId = null;
+        }
     }
 
     /// <summary>

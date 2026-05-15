@@ -9,6 +9,21 @@ using Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
+/// <summary>
+/// Server-side HTTP/2 stream — tracks the RFC 9113 §5.1 lifecycle state
+/// plus the accumulating header block and body bytes received from the
+/// peer.
+/// </summary>
+/// <remarks>
+/// <para>
+/// State transitions are explicit and enforced by the <c>Receive*</c> /
+/// <c>Send*</c> methods on this type. Any frame that is illegal in the
+/// current state surfaces as either a
+/// <see cref="Http2StreamException"/> (stream-level — RST_STREAM keeps
+/// the connection alive) or an <see cref="Http2ConnectionException"/>
+/// (connection-level — GOAWAY tears the connection down).
+/// </para>
+/// </remarks>
 internal sealed class Http2Stream
 {
     private readonly MemoryStream _headerBlock;
@@ -19,34 +34,86 @@ internal sealed class Http2Stream
         StreamId = streamId;
         _headerBlock = new MemoryStream();
         _body = new MemoryStream();
+        State = Http2StreamState.Idle;
     }
 
+    /// <summary>The stream identifier (RFC 9113 §5.1.1).</summary>
     public int StreamId { get; }
 
+    /// <summary>Current lifecycle state per RFC 9113 §5.1.</summary>
+    public Http2StreamState State { get; private set; }
+
+    /// <summary><see langword="true"/> once <c>END_HEADERS</c> has been observed across HEADERS/CONTINUATION.</summary>
     public bool HeadersCompleted { get; private set; }
 
+    /// <summary><see langword="true"/> once the request side has been closed (END_STREAM from the peer or RST_STREAM).</summary>
     public bool InputCompleted { get; private set; }
 
-    public bool IsRequestReady => HeadersCompleted && InputCompleted;
+    /// <summary>The stream is ready to materialise as an <c>IHttpContext</c> once both halves are present.</summary>
+    public bool IsRequestReady => HeadersCompleted && InputCompleted && State != Http2StreamState.Closed;
 
-    public void AppendHeaders(ReadOnlySpan<byte> payload, bool endHeaders)
+    /// <summary>
+    /// Whether the stream has reached the terminal <see cref="Http2StreamState.Closed"/>
+    /// state.
+    /// </summary>
+    public bool IsClosed => State == Http2StreamState.Closed;
+
+    /// <summary>
+    /// Folds an inbound HEADERS / CONTINUATION payload into the accumulating header
+    /// block, applies the RFC 9113 §5.1 state transition driven by HEADERS, and
+    /// returns when the header block has been fully assembled.
+    /// </summary>
+    /// <param name="payload">The decoded payload bytes (no padding / no priority data).</param>
+    /// <param name="endHeaders">Whether the inbound frame carried the END_HEADERS flag.</param>
+    /// <param name="endStream">
+    /// Whether the inbound frame carried the END_STREAM flag. Only meaningful on
+    /// the leading HEADERS frame; CONTINUATION frames do not carry END_STREAM.
+    /// </param>
+    /// <exception cref="Http2ConnectionException">
+    /// Thrown when HEADERS is received on a stream that is in a state where
+    /// HEADERS is illegal (e.g. <see cref="Http2StreamState.Closed"/> after a
+    /// reset that was not initiated by the peer).
+    /// </exception>
+    public void ReceiveHeaders(ReadOnlySpan<byte> payload, bool endHeaders, bool endStream)
     {
-        if (!payload.IsEmpty)
+        // RFC 9113 §5.1 — HEADERS is legal in:
+        //   - Idle: opens the stream (→ Open or → HalfClosedRemote if END_STREAM)
+        //   - Open / HalfClosedLocal: continuation of the request (trailers)
+        // Anything else is a connection error per RFC 9113 §5.1 (PROTOCOL_ERROR
+        // for an unexpected HEADERS on a closed stream, STREAM_CLOSED for one
+        // on a stream we already saw END_STREAM for).
+        switch (State)
         {
-            _headerBlock.Write(payload);
+            case Http2StreamState.Idle:
+                State = endStream ? Http2StreamState.HalfClosedRemote : Http2StreamState.Open;
+                break;
+            case Http2StreamState.Open:
+            case Http2StreamState.HalfClosedLocal:
+                // Trailers — the peer is wrapping up its half. END_STREAM
+                // must be set on a trailing HEADERS frame (RFC 9113 §8.1).
+                if (!endStream)
+                {
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.ProtocolError,
+                        $"HTTP/2 trailing HEADERS on stream {StreamId} must carry END_STREAM.");
+                }
+
+                State = State == Http2StreamState.Open
+                    ? Http2StreamState.HalfClosedRemote
+                    : Http2StreamState.Closed;
+                break;
+            case Http2StreamState.HalfClosedRemote:
+            case Http2StreamState.Closed:
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.StreamClosed,
+                    $"HTTP/2 HEADERS frame received on stream {StreamId} in state {State}; the peer has already closed its half.");
         }
+
+        AppendHeaderBytes(payload);
 
         if (endHeaders)
         {
             HeadersCompleted = true;
-        }
-    }
-
-    public void AppendBody(ReadOnlySpan<byte> payload, bool endStream)
-    {
-        if (!payload.IsEmpty)
-        {
-            _body.Write(payload);
         }
 
         if (endStream)
@@ -55,9 +122,149 @@ internal sealed class Http2Stream
         }
     }
 
+    /// <summary>
+    /// Folds an inbound CONTINUATION payload into the accumulating header block.
+    /// CONTINUATION cannot change stream state — it only continues a header block
+    /// that an earlier HEADERS frame opened (RFC 9113 §6.10).
+    /// </summary>
+    /// <exception cref="Http2ConnectionException">
+    /// Thrown when CONTINUATION is received on a stream that is not currently in
+    /// a state that expects continuation frames.
+    /// </exception>
+    public void ReceiveContinuation(ReadOnlySpan<byte> payload, bool endHeaders)
+    {
+        // CONTINUATION is only legal mid-header-block on a stream that has
+        // already received its leading HEADERS frame. The connection-level
+        // continuation tracking guards the cross-stream rule; here we just
+        // assert that the stream itself is in a sane state.
+        if (State == Http2StreamState.Idle || State == Http2StreamState.Closed)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 CONTINUATION frame received on stream {StreamId} in state {State}.");
+        }
+
+        AppendHeaderBytes(payload);
+
+        if (endHeaders)
+        {
+            HeadersCompleted = true;
+        }
+    }
+
+    /// <summary>
+    /// Folds an inbound DATA payload into the accumulating body and applies the
+    /// END_STREAM transition.
+    /// </summary>
+    /// <exception cref="Http2StreamException">
+    /// Thrown when DATA is received on a stream that has already had its remote
+    /// half closed (STREAM_CLOSED — RFC 9113 §5.1).
+    /// </exception>
+    /// <exception cref="Http2ConnectionException">
+    /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
+    /// (no HEADERS yet) — that is a PROTOCOL_ERROR connection-level fault.
+    /// </exception>
+    public void ReceiveData(ReadOnlySpan<byte> payload, bool endStream)
+    {
+        switch (State)
+        {
+            case Http2StreamState.Idle:
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 DATA frame received on stream {StreamId} before HEADERS.");
+            case Http2StreamState.Open:
+                if (endStream)
+                {
+                    State = Http2StreamState.HalfClosedRemote;
+                    InputCompleted = true;
+                }
+                break;
+            case Http2StreamState.HalfClosedLocal:
+                if (endStream)
+                {
+                    State = Http2StreamState.Closed;
+                    InputCompleted = true;
+                }
+                break;
+            case Http2StreamState.HalfClosedRemote:
+            case Http2StreamState.Closed:
+                // The peer is forbidden from sending DATA after it sent
+                // END_STREAM or after we reset the stream.
+                throw new Http2StreamException(
+                    StreamId,
+                    Http2ErrorCode.StreamClosed,
+                    $"HTTP/2 DATA frame received on stream {StreamId} in state {State}.");
+        }
+
+        if (!payload.IsEmpty)
+        {
+            _body.Write(payload);
+        }
+    }
+
+    /// <summary>
+    /// Applies an inbound RST_STREAM — moves the stream to
+    /// <see cref="Http2StreamState.Closed"/> and marks both halves as
+    /// finalised so any downstream consumer terminates promptly.
+    /// </summary>
+    /// <exception cref="Http2ConnectionException">
+    /// RST_STREAM on an idle stream is a connection error
+    /// (RFC 9113 §6.4).
+    /// </exception>
+    public void ReceiveReset()
+    {
+        if (State == Http2StreamState.Idle)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 RST_STREAM received on idle stream {StreamId}.");
+        }
+
+        State = Http2StreamState.Closed;
+        InputCompleted = true;
+    }
+
+    /// <summary>
+    /// Marks the stream's local half as closed because the server is about
+    /// to send a frame carrying END_STREAM (the typical case is the response
+    /// body's terminating DATA frame, or a header-only response).
+    /// </summary>
+    public void SendEndStream()
+    {
+        State = State switch
+        {
+            Http2StreamState.Open => Http2StreamState.HalfClosedLocal,
+            Http2StreamState.HalfClosedRemote => Http2StreamState.Closed,
+            // Idempotent / no-op for already-closed states.
+            _ => State,
+        };
+    }
+
+    /// <summary>
+    /// Marks the stream as closed because the server emitted a RST_STREAM.
+    /// </summary>
+    public void SendReset()
+    {
+        State = Http2StreamState.Closed;
+        InputCompleted = true;
+    }
+
+    /// <summary>
+    /// Marks the request side as complete without consuming additional bytes.
+    /// Used when an inbound HEADERS frame carries END_STREAM (a request with
+    /// no body).
+    /// </summary>
     public void CompleteInput()
     {
         InputCompleted = true;
+    }
+
+    private void AppendHeaderBytes(ReadOnlySpan<byte> payload)
+    {
+        if (!payload.IsEmpty)
+        {
+            _headerBlock.Write(payload);
+        }
     }
 
     public Http2Context CreateContext(HPackDecoder decoder, IHttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken requestAborted)
@@ -141,5 +348,4 @@ internal sealed class Http2Stream
 
         return cookies;
     }
-
 }
