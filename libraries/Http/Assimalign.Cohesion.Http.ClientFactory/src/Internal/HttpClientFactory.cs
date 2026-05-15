@@ -4,9 +4,8 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Http.Internal;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Lifecycle-managed implementation of <see cref="IHttpClientFactory"/>.
@@ -26,7 +25,7 @@ namespace Assimalign.Cohesion.Http;
 /// freely <c>using</c>-dispose the clients they receive without exhausting ephemeral ports
 /// (each disposal touches only the lightweight wrapping
 /// <see cref="LifetimeTrackingHttpMessageHandler"/>, not the shared
-/// <see cref="System.Net.Http.SocketsHttpHandler"/>), while periodic rotation refreshes
+/// <see cref="SocketsHttpHandler"/>), while periodic rotation refreshes
 /// DNS resolution and TLS session state so failover behaviour is bounded by
 /// <see cref="HttpClientFactoryOptions.DefaultHandlerLifetime"/> rather than process
 /// uptime.
@@ -243,76 +242,4 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
     }
 }
 
-/// <summary>
-/// State for the currently-active rotation slot of a named client. Holds the shared inner
-/// handler, its expiration timestamp, and weak references to the per-client wrapping
-/// handlers so the cleanup pass can decide when the inner handler is safe to dispose.
-/// </summary>
-internal sealed class ActiveHandlerEntry
-{
-    private readonly object _wrapperLock = new();
-    private readonly List<WeakReference<LifetimeTrackingHttpMessageHandler>> _wrappers = new();
 
-    public ActiveHandlerEntry(HttpMessageHandler handler, DateTimeOffset expiresAtUtc)
-    {
-        Handler = handler;
-        ExpiresAtUtc = expiresAtUtc;
-    }
-
-    public HttpMessageHandler Handler { get; }
-    public DateTimeOffset ExpiresAtUtc { get; }
-
-    public void RegisterWrapper(LifetimeTrackingHttpMessageHandler wrapper)
-    {
-        lock (_wrapperLock)
-        {
-            _wrappers.Add(new WeakReference<LifetimeTrackingHttpMessageHandler>(wrapper));
-        }
-    }
-
-    public IReadOnlyList<WeakReference<LifetimeTrackingHttpMessageHandler>> GetWrapperRefs()
-    {
-        lock (_wrapperLock)
-        {
-            return _wrappers.ToArray();
-        }
-    }
-}
-
-/// <summary>
-/// State for an expired-but-not-yet-disposed inner handler. Disposed by
-/// <see cref="HttpClientFactory.CleanupExpired"/> once every wrapping
-/// <see cref="LifetimeTrackingHttpMessageHandler"/> has been GC'd &#8211; which means
-/// every <see cref="HttpClient"/> built on this handler has been collected.
-/// </summary>
-internal sealed class ExpiredHandlerEntry
-{
-    private readonly IReadOnlyList<WeakReference<LifetimeTrackingHttpMessageHandler>> _wrapperRefs;
-
-    public ExpiredHandlerEntry(
-        HttpMessageHandler innerHandler,
-        IReadOnlyList<WeakReference<LifetimeTrackingHttpMessageHandler>> wrapperRefs)
-    {
-        InnerHandler = innerHandler;
-        _wrapperRefs = wrapperRefs;
-    }
-
-    public HttpMessageHandler InnerHandler { get; }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when at least one wrapping handler is still
-    /// reachable. Used by the cleanup pass to decide whether the inner handler is safe
-    /// to dispose.
-    /// </summary>
-    public bool HasLiveWrappers()
-    {
-        foreach (WeakReference<LifetimeTrackingHttpMessageHandler> reference in _wrapperRefs)
-        {
-            if (reference.TryGetTarget(out _))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-}

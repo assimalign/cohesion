@@ -2,6 +2,8 @@ using System;
 
 namespace Assimalign.Cohesion.Http;
 
+using Assimalign.Cohesion.Http.Internal;
+
 /// <summary>
 /// Fluent builder for <see cref="HttpClientFactory"/>. Registers named clients and
 /// factory-wide settings and produces an <see cref="IHttpClientFactory"/> when

@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-
+using Assimalign.Cohesion.Http.Internal;
 using Shouldly;
 
 using Xunit;
@@ -12,7 +12,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Http.ClientFactory.Tests;
 
 /// <summary>
-/// Lifecycle tests for <see cref="Assimalign.Cohesion.Http.HttpClientFactory"/>. Covers the
+/// Lifecycle tests for <see cref="Internal.HttpClientFactory"/>. Covers the
 /// three substory acceptance areas:
 /// </summary>
 /// <list type="bullet">
