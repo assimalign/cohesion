@@ -663,6 +663,121 @@ public class Http2TransportTests
         httpContext.Request.Path.Value.ShouldBe("/");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should accept inbound GOAWAY without faulting the connection")]
+    public async Task Http2_OnInboundGoAway_ShouldNotFaultConnection()
+    {
+        // RFC 9113 §6.8 — a peer's GOAWAY is a unidirectional close signal;
+        // the connection MUST continue to process in-flight streams. We
+        // verify that a request preceding GOAWAY still produces a yieldable
+        // context.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+
+        // GOAWAY payload: 4-byte last-stream-id + 4-byte error code.
+        // last-stream-id = 1, error code = 0 (NO_ERROR).
+        byte[] goAwayPayload = new byte[] { 0, 0, 0, 1, 0, 0, 0, 0 };
+        byte[] goAway = Http2TestSettings.RawFrame(0x7, 0, 0, goAwayPayload);
+
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
+        Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+
+        TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface, goAway));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // The request landed even though GOAWAY arrived afterwards.
+        httpContext.Request.Path.Value.ShouldBe("/");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject GOAWAY on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnGoAwayOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.8 — GOAWAY MUST be sent on stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] goAwayPayload = new byte[] { 0, 0, 0, 1, 0, 0, 0, 0 };
+        byte[] goAwayOnStream1 = Http2TestSettings.RawFrame(0x7, 0, 1, goAwayPayload);
+        await AssertGoAwayAsync(Combine(preface, settings, goAwayOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should fire RequestAborted when peer resets the stream")]
+    public async Task Http2_OnRstStream_ShouldFireRequestAbortedOnApplicationContext()
+    {
+        // RFC 9113 §5.4.2 — RST_STREAM aborts the application's view of the
+        // request. The Http2Stream's RequestAborted token surfaces this so
+        // handler code (e.g. a long-running ReadAsync on the body) can wake
+        // up and bail.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+
+        // HEADERS WITHOUT END_STREAM so the stream stays open after the
+        // request lands and is eligible for reset.
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "POST", "/upload", "https", "api.test");
+        byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
+        Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+        // Clear END_STREAM on the HEADERS frame so the stream remains open.
+        for (int i = 0; i < requestWithoutPreface.Length;)
+        {
+            int payloadLength = (requestWithoutPreface[i] << 16) | (requestWithoutPreface[i + 1] << 8) | requestWithoutPreface[i + 2];
+            byte type = requestWithoutPreface[i + 3];
+            if (type == 0x1) // HEADERS
+            {
+                requestWithoutPreface[i + 4] &= unchecked((byte)~0x1);
+            }
+
+            i += 9 + payloadLength;
+        }
+
+        // Hmm — without END_STREAM the stream's IsRequestReady is false
+        // so the context is never yielded. We need at least a body byte
+        // with END_STREAM, OR to keep END_STREAM on the original frame
+        // and send RST_STREAM as a follow-up. Use the END_STREAM path:
+        // the stream is briefly in HalfClosedRemote when we yield, then
+        // RST_STREAM closes it.
+        Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+
+        // RST_STREAM(CANCEL) on stream 1.
+        byte[] rstStreamPayload = new byte[] { 0, 0, 0, 0x8 }; // CANCEL
+        byte[] rstStream = Http2TestSettings.RawFrame(0x3, 0, 1, rstStreamPayload);
+
+        TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface, rstStream));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext httpContext = enumerator.Current;
+
+        // The application sees the request before RST_STREAM is processed
+        // because the receive loop yields immediately after HEADERS+END_STREAM.
+        // Pump the enumerator so the RST_STREAM frame is consumed; once it
+        // is, the stream's RequestAborted should fire.
+        Task pump = enumerator.MoveNextAsync().AsTask();
+
+        // Give the receive loop a moment to process RST_STREAM. The token
+        // should fire because Http2Stream.ReceiveReset() triggers it.
+        for (int i = 0; i < 100 && !httpContext.RequestAborted.IsCancellationRequested; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        httpContext.RequestAborted.IsCancellationRequested.ShouldBeTrue();
+
+        // Make sure the pumped MoveNext completes (it should return false
+        // because the connection's input is finite).
+        await pump;
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryConsume should drain to zero and refuse underflow")]
     public void Http2_FlowControlWindow_TryConsume_RefusesUnderflow()
     {

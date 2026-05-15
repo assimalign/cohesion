@@ -44,6 +44,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private bool _receivedClientSettings;
     private int _lastInboundStreamId;
     private int _gracefulCloseStarted;
+    // RFC 9113 §6.8 — after the peer sends GOAWAY, the server MUST NOT
+    // process new streams with id higher than the GOAWAY's last-stream-id.
+    // -1 means no GOAWAY received yet; int.MaxValue would mean "accept
+    // everything" (also "no GOAWAY"). We use null-int via sentinel to
+    // keep the field a plain int.
+    private int _peerLastStreamId = -1;
 
     public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
         : base(transportContext, isSecure)
@@ -165,6 +171,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // already closed its half (the normal request/response case) the
         // stream transitions to Closed.
         http2Context.Stream.SendEndStream();
+
+        // Cleanup: once the stream is fully Closed (both halves done), drop
+        // it from the active map so the per-connection memory footprint
+        // stays bounded over many requests. Streams that ended up in
+        // HalfClosedLocal (server done, peer still sending) stay until the
+        // peer sends END_STREAM or RST_STREAM.
+        if (http2Context.Stream.State == Http2StreamState.Closed)
+        {
+            _streams.Remove(http2Context.StreamId);
+        }
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -247,9 +263,34 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             case Http2FrameType.WindowUpdate:
                 ProcessWindowUpdateFrame(receivedFrame);
                 return null;
+            case Http2FrameType.GoAway:
+                ProcessGoAwayFrame(receivedFrame);
+                return null;
             default:
                 return null;
         }
+    }
+
+    private void ProcessGoAwayFrame(ReceivedFrame receivedFrame)
+    {
+        // RFC 9113 §6.8 — GOAWAY frames MUST be on stream 0 and carry at
+        // least 8 octets of payload (4-byte last-stream-id + 4-byte error
+        // code; additional debug data is permitted but ignored here).
+        if (receivedFrame.Frame.StreamId != 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 GOAWAY received on stream {receivedFrame.Frame.StreamId}; GOAWAY MUST use stream 0.");
+        }
+
+        // The frame reader has already parsed last-stream-id + error code
+        // into the frame's GoAway* properties (see Http2FrameReader and
+        // Http2Frame.GoAway). RFC §6.8 says last-stream-id may decrease
+        // across multiple GOAWAYs only for tighter shutdowns, never
+        // expand. We accept whatever the peer sent without re-validating
+        // because we treat GOAWAY as a unidirectional close signal — the
+        // peer is telling us "don't open new streams beyond X."
+        _peerLastStreamId = receivedFrame.Frame.GoAwayLastStreamId;
     }
 
     private void ProcessWindowUpdateFrame(ReceivedFrame receivedFrame)
@@ -516,6 +557,33 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // even ID as a connection-level PROTOCOL_ERROR.
         ValidateInboundStreamId(frame.StreamId);
 
+        bool openingNewStream = !_streams.ContainsKey(frame.StreamId);
+        if (openingNewStream)
+        {
+            // RFC 9113 §6.8 — after we've initiated a graceful close, refuse
+            // new streams with RST_STREAM(REFUSED_STREAM). The peer can
+            // safely retry these on a fresh connection (RFC §8.1.4).
+            if (_gracefulCloseStarted == 1)
+            {
+                throw new Http2StreamException(
+                    frame.StreamId,
+                    Http2ErrorCode.RefusedStream,
+                    $"HTTP/2 stream {frame.StreamId} refused: server is closing the connection.");
+            }
+
+            // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
+            // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
+            // local settings; new streams beyond the cap are refused so
+            // the client can back off.
+            if (_streams.Count >= _localSettings.MaxConcurrentStreams)
+            {
+                throw new Http2StreamException(
+                    frame.StreamId,
+                    Http2ErrorCode.RefusedStream,
+                    $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached.");
+            }
+        }
+
         _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
         Http2Stream stream = GetOrCreateStream(frame.StreamId);
 
@@ -651,7 +719,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return null;
         }
 
-        _streams.Remove(stream.StreamId);
+        // RFC 9113 §5.1 — keep the stream in our active map until BOTH
+        // halves are closed. After yielding, the stream is in
+        // HalfClosedRemote: the peer has finished sending, but the server
+        // hasn't sent its response yet. A subsequent RST_STREAM from the
+        // peer needs to find the stream so it can fire RequestAborted on
+        // the application's IHttpContext.
         return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CancellationToken.None);
     }
 
