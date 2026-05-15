@@ -18,17 +18,24 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
     private readonly HPackDecoder _headerDecoder;
     private readonly Dictionary<int, Http2Stream> _streams;
+    // RFC 9113 §6.5 — local settings are what we (the server) advertised
+    // to the peer; remote settings are what the peer advertised to us.
+    // Inbound frame parsing is bounded by the local cap; outbound frame
+    // writing is bounded by the remote cap.
+    private readonly Http2ConnectionSettings _localSettings;
+    private readonly Http2ConnectionSettings _remoteSettings;
     private int? _continuationStreamId;
     private bool _initialized;
     private bool _receivedClientSettings;
-    private uint _maxFrameSize;
+    private int _lastInboundStreamId;
 
     public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
         : base(transportContext, isSecure)
     {
         _headerDecoder = new HPackDecoder();
         _streams = new Dictionary<int, Http2Stream>();
-        _maxFrameSize = 16_384;
+        _localSettings = BuildLocalSettings();
+        _remoteSettings = new Http2ConnectionSettings();
     }
 
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -37,14 +44,35 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            ReceivedFrame? receivedFrame = await ReadFrameAsync(Stream, _maxFrameSize, cancellationToken).ConfigureAwait(false);
+            ReceivedFrame? receivedFrame;
+            try
+            {
+                receivedFrame = await ReadFrameAsync(Stream, _localSettings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Http2ConnectionException error)
+            {
+                await EmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
 
             if (receivedFrame is null)
             {
                 yield break;
             }
 
-            Http2Context? completedContext = await ProcessFrameAsync(receivedFrame.Value, cancellationToken).ConfigureAwait(false);
+            Http2Context? completedContext;
+            try
+            {
+                completedContext = await ProcessFrameAsync(receivedFrame.Value, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Http2ConnectionException error)
+            {
+                // RFC 9113 §6.8 — every connection-level failure MUST be
+                // signalled to the peer with a GOAWAY carrying the offending
+                // error code, before the underlying transport is torn down.
+                await EmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
+                throw;
+            }
 
             if (completedContext is not null)
             {
@@ -77,16 +105,28 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
+        // RFC 9113 §3.4 — the connection preface MUST appear before any
+        // other client data. A mismatch is a connection error with code
+        // PROTOCOL_ERROR.
         byte[] preface = await ReadExactOrThrowAsync(Stream, ClientPreface.Length, cancellationToken).ConfigureAwait(false);
 
         if (!preface.AsSpan().SequenceEqual(ClientPreface))
         {
-            throw new InvalidDataException("The HTTP/2 connection preface is invalid.");
+            await EmitGoAwayAsync(Http2ErrorCode.ProtocolError, cancellationToken).ConfigureAwait(false);
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "The HTTP/2 connection preface did not match the expected sequence.");
         }
 
+        // RFC 9113 §3.4 + §6.5 — immediately after sending or receiving
+        // the preface, both peers send a SETTINGS frame (possibly empty)
+        // as the first connection frame. We advertise the parameters
+        // built from our local defaults instead of an empty payload so
+        // the peer sees what we actually want.
+        byte[] settingsPayload = EncodeLocalSettings();
         Http2Frame settingsFrame = new();
         settingsFrame.PrepareSettings(Http2SettingsFrameFlags.None);
-        await Http2FrameWriter.WriteAsync(Stream, settingsFrame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+        await Http2FrameWriter.WriteAsync(Stream, settingsFrame, settingsPayload, cancellationToken).ConfigureAwait(false);
         await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         _initialized = true;
@@ -94,9 +134,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
     private async Task<Http2Context?> ProcessFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
+        // RFC 9113 §3.4 — the first frame the client sends after the
+        // preface MUST be SETTINGS. Anything else is a PROTOCOL_ERROR.
+        if (!_receivedClientSettings && receivedFrame.Frame.Type != Http2FrameType.Settings)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"Expected the HTTP/2 client SETTINGS frame as the first frame after the preface, but received '{receivedFrame.Frame.Type}'.");
+        }
+
         if (_continuationStreamId.HasValue && receivedFrame.Frame.Type != Http2FrameType.Continuation)
         {
-            throw new InvalidDataException("Expected an HTTP/2 CONTINUATION frame before receiving another frame type.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "Expected an HTTP/2 CONTINUATION frame before receiving another frame type.");
         }
 
         switch (receivedFrame.Frame.Type)
@@ -127,22 +178,57 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
     private async Task ProcessSettingsFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
+        // RFC 9113 §6.5.1 — SETTINGS frames MUST be sent on stream 0.
         if (receivedFrame.Frame.StreamId != 0)
         {
-            throw new InvalidDataException("The HTTP/2 SETTINGS frame must be sent on stream 0.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"SETTINGS frame received on stream {receivedFrame.Frame.StreamId}; SETTINGS frames MUST use stream 0.");
         }
 
         if (receivedFrame.Frame.SettingsAck)
         {
+            // RFC 9113 §6.5 — an ACK frame MUST have an empty payload. A
+            // non-empty payload is a connection error with code
+            // FRAME_SIZE_ERROR.
+            if (receivedFrame.Payload.Length != 0)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.FrameSizeError,
+                    $"SETTINGS ACK frame must have an empty payload, but received {receivedFrame.Payload.Length} octets.");
+            }
+
             return;
         }
 
-        foreach (Http2PeerSetting setting in Http2FrameReader.ReadSettings(new ReadOnlySequence<byte>(receivedFrame.Payload)))
+        // RFC 9113 §6.5.1 — a non-ACK SETTINGS frame's payload must be a
+        // multiple of 6 octets (each setting is 16-bit identifier + 32-bit
+        // value). A non-multiple is a FRAME_SIZE_ERROR.
+        if (receivedFrame.Payload.Length % Http2FrameReader.SettingSize != 0)
         {
-            if (setting.Parameter == Http2SettingsParameter.SETTINGS_MAX_FRAME_SIZE)
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"SETTINGS frame payload of {receivedFrame.Payload.Length} octets is not a multiple of {Http2FrameReader.SettingSize}.");
+        }
+
+        // Validate every parameter before applying any. RFC 9113 §6.5.2
+        // — an invalid value is a connection error with the per-parameter
+        // code listed in the spec (PROTOCOL_ERROR or FLOW_CONTROL_ERROR).
+        System.Collections.Generic.IList<Http2PeerSetting> settings =
+            Http2FrameReader.ReadSettings(new ReadOnlySequence<byte>(receivedFrame.Payload));
+
+        foreach (Http2PeerSetting setting in settings)
+        {
+            (Http2ErrorCode errorCode, string? message) = Http2ConnectionSettings.Validate(setting);
+            if (errorCode != Http2ErrorCode.NoError)
             {
-                _maxFrameSize = setting.Value;
+                throw new Http2ConnectionException(errorCode, message ?? $"Invalid HTTP/2 SETTINGS value for {setting.Parameter}.");
             }
+        }
+
+        foreach (Http2PeerSetting setting in settings)
+        {
+            _remoteSettings.Apply(setting);
         }
 
         _receivedClientSettings = true;
@@ -157,10 +243,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
     {
         if (!_receivedClientSettings)
         {
-            throw new InvalidDataException("The HTTP/2 client SETTINGS frame must be received before HEADERS.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "The HTTP/2 client SETTINGS frame must be received before HEADERS.");
         }
 
         Http2Frame frame = receivedFrame.Frame;
+        _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
         Http2Stream stream = GetOrCreateStream(frame.StreamId);
         stream.AppendHeaders(receivedFrame.Payload, frame.HeadersEndHeaders);
 
@@ -182,7 +271,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
     {
         if (_continuationStreamId is null || _continuationStreamId.Value != receivedFrame.Frame.StreamId)
         {
-            throw new InvalidDataException("The HTTP/2 CONTINUATION frame did not match the active header block stream.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "The HTTP/2 CONTINUATION frame did not match the active header block stream.");
         }
 
         Http2Stream stream = GetOrCreateStream(receivedFrame.Frame.StreamId);
@@ -200,7 +291,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
     {
         if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
         {
-            throw new InvalidDataException("The HTTP/2 DATA frame was received for an unknown stream.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "The HTTP/2 DATA frame was received for an unknown stream.");
         }
 
         stream.AppendBody(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
@@ -250,7 +343,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         do
         {
             int remaining = headerBlock.Length - offset;
-            int chunkLength = remaining > 0 ? Math.Min((int)_maxFrameSize, remaining) : 0;
+            int chunkLength = remaining > 0 ? Math.Min((int)_remoteSettings.MaxFrameSize, remaining) : 0;
             Http2Frame frame = new();
 
             if (firstFrame)
@@ -289,7 +382,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
         while (offset < bodyBytes.Length)
         {
-            int chunkLength = Math.Min((int)_maxFrameSize, bodyBytes.Length - offset);
+            int chunkLength = Math.Min((int)_remoteSettings.MaxFrameSize, bodyBytes.Length - offset);
             Http2Frame frame = new();
             frame.PrepareData(streamId);
 
@@ -362,6 +455,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         }
 
         int payloadLength = (header[0] << 16) | (header[1] << 8) | header[2];
+
+        // RFC 9113 §4.2 — a frame whose length exceeds the receiver's
+        // advertised MAX_FRAME_SIZE is a connection error with code
+        // FRAME_SIZE_ERROR.
+        if (payloadLength > maxFrameSize)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 frame payload length {payloadLength} exceeded the advertised maximum {maxFrameSize}.");
+        }
+
         byte[] buffer = new byte[Http2FrameReader.HeaderLength + payloadLength];
         Buffer.BlockCopy(header, 0, buffer, 0, header.Length);
 
@@ -376,10 +480,89 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
         if (!Http2FrameReader.TryReadFrame(ref sequence, frame, maxFrameSize, out ReadOnlySequence<byte> payloadSequence))
         {
-            throw new InvalidDataException("The HTTP/2 frame could not be parsed from the buffered payload.");
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                "The HTTP/2 frame could not be parsed from the buffered payload.");
         }
 
         return new ReceivedFrame(frame, payloadSequence.IsEmpty ? Array.Empty<byte>() : payloadSequence.ToArray());
+    }
+
+    /// <summary>
+    /// Emits a <c>GOAWAY</c> frame on stream 0 carrying
+    /// <paramref name="errorCode"/> and the highest stream ID we have
+    /// observed so far (RFC 9113 §6.8). The receive loop then propagates
+    /// the exception so the listener can tear the connection down.
+    /// </summary>
+    private async Task EmitGoAwayAsync(Http2ErrorCode errorCode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Http2Frame goAway = new();
+            goAway.PrepareGoAway(_lastInboundStreamId, errorCode);
+            await Http2FrameWriter.WriteAsync(Stream, goAway, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort: if the wire is already dead we can't deliver
+            // the GOAWAY. The connection error will still surface to the
+            // listener through the original exception.
+        }
+    }
+
+    /// <summary>
+    /// Builds the explicit server-side initial <see cref="Http2ConnectionSettings"/>
+    /// we advertise to peers. The defaults mostly track the RFC 9113
+    /// initial values except for ENABLE_PUSH (0 — Cohesion does not
+    /// implement server push) and MAX_HEADER_LIST_SIZE (a 16 KB DoS
+    /// guard instead of "unlimited").
+    /// </summary>
+    private static Http2ConnectionSettings BuildLocalSettings()
+    {
+        return new Http2ConnectionSettings
+        {
+            HeaderTableSize = Http2ConnectionSettings.InitialHeaderTableSize,
+            EnablePush = 0,
+            MaxConcurrentStreams = 100,
+            InitialWindowSize = Http2ConnectionSettings.InitialInitialWindowSize,
+            MaxFrameSize = Http2ConnectionSettings.InitialMaxFrameSize,
+            MaxHeaderListSize = 16_384,
+            EnableConnectProtocol = 0,
+        };
+    }
+
+    /// <summary>
+    /// Serialises <see cref="_localSettings"/> as a SETTINGS-frame
+    /// payload (6 octets per parameter; identifier first, then value;
+    /// both big-endian per RFC 9113 §6.5.1).
+    /// </summary>
+    private byte[] EncodeLocalSettings()
+    {
+        // Six parameters that change from the spec's initial values OR are
+        // explicit choices we want the peer to see. We emit all of them
+        // every time so the peer never has to guess our intent.
+        (Http2SettingsParameter Parameter, uint Value)[] entries =
+        {
+            (Http2SettingsParameter.SETTINGS_HEADER_TABLE_SIZE, _localSettings.HeaderTableSize),
+            (Http2SettingsParameter.SETTINGS_ENABLE_PUSH, _localSettings.EnablePush),
+            (Http2SettingsParameter.SETTINGS_MAX_CONCURRENT_STREAMS, _localSettings.MaxConcurrentStreams),
+            (Http2SettingsParameter.SETTINGS_INITIAL_WINDOW_SIZE, _localSettings.InitialWindowSize),
+            (Http2SettingsParameter.SETTINGS_MAX_FRAME_SIZE, _localSettings.MaxFrameSize),
+            (Http2SettingsParameter.SETTINGS_MAX_HEADER_LIST_SIZE, _localSettings.MaxHeaderListSize),
+        };
+
+        byte[] payload = new byte[entries.Length * Http2FrameReader.SettingSize];
+        Span<byte> span = payload;
+
+        for (int index = 0; index < entries.Length; index++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(span, (ushort)entries[index].Parameter);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(span.Slice(2), entries[index].Value);
+            span = span.Slice(Http2FrameReader.SettingSize);
+        }
+
+        return payload;
     }
 
     private readonly struct ReceivedFrame

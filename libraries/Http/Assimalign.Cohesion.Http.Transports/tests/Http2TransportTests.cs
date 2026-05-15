@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http.Transports.Internal.Http2;
 using Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 using Assimalign.Cohesion.Transports;
 
@@ -176,6 +177,198 @@ public class Http2TransportTests
         observedPaths.Count.ShouldBe(2);
         observedPaths[0].ShouldBe("/one");
         observedPaths[1].ShouldBe("/two");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should advertise explicit server SETTINGS after the preface")]
+    public async Task Http2_OnInitialization_ShouldEmitExplicitServerSettings()
+    {
+        // RFC 9113 §3.4 — the server's first frame after the preface MUST be a
+        // SETTINGS frame. We advertise our local defaults so the peer never has
+        // to guess; the most important one is ENABLE_PUSH=0 because the server
+        // does not implement push.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+        httpContext.Response.StatusCode = HttpStatusCode.Ok;
+        await httpConnectionContext.SendAsync(httpContext);
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(await transportContext.ReadOutputAsync());
+
+        // First frame must be the server SETTINGS (frame type 0x4).
+        frames.Count.ShouldBeGreaterThanOrEqualTo(1);
+        frames[0].FrameType.ShouldBe(4);
+        (frames[0].Payload.Length % 6).ShouldBe(0);
+
+        Dictionary<Http2TestSettings.Parameter, uint> declared = Http2TestSettings.ReadSettings(frames[0].Payload);
+        declared[Http2TestSettings.Parameter.EnablePush].ShouldBe(0u);
+        declared[Http2TestSettings.Parameter.HeaderTableSize].ShouldBe(4096u);
+        declared[Http2TestSettings.Parameter.MaxFrameSize].ShouldBe(16384u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject an invalid connection preface with PROTOCOL_ERROR")]
+    public async Task Http2_OnInvalidPreface_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §3.4 — a preface mismatch is a connection error and MUST
+        // surface to the peer as GOAWAY(PROTOCOL_ERROR) before the transport
+        // is torn down.
+        byte[] payload = Encoding.ASCII.GetBytes("NOT THE PRI * PREFACE\r\n\r\n");
+        await AssertGoAwayAsync(payload, Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
+    public async Task Http2_OnFirstClientFrameNotSettings_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §3.4 — the first client frame after the preface MUST be a
+        // SETTINGS frame. Any other frame type is a PROTOCOL_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] pingFrame = Http2TestSettings.RawFrame(frameType: 0x6, flags: 0, streamId: 0, payload: new byte[8]);
+        await AssertGoAwayAsync(Combine(preface, pingFrame), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject SETTINGS on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnSettingsOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.5.1 — SETTINGS frames MUST be sent on stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settingsOnStream1 = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 1, payload: Array.Empty<byte>());
+        await AssertGoAwayAsync(Combine(preface, settingsOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a SETTINGS ACK that carries a payload with FRAME_SIZE_ERROR")]
+    public async Task Http2_OnSettingsAckWithPayload_ShouldGoAwayFrameSizeError()
+    {
+        // RFC 9113 §6.5 — an ACK SETTINGS frame MUST have an empty payload.
+        // Receiving an ACK with any payload is a FRAME_SIZE_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] ackWithPayload = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0x1, streamId: 0, payload: new byte[6]);
+        await AssertGoAwayAsync(Combine(preface, ackWithPayload), Http2ErrorCode.FrameSizeError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject SETTINGS payload not a multiple of 6 with FRAME_SIZE_ERROR")]
+    public async Task Http2_OnSettingsPayloadNotMultipleOfSix_ShouldGoAwayFrameSizeError()
+    {
+        // RFC 9113 §6.5.1 — each setting is 6 octets (16-bit id + 32-bit value).
+        // A non-multiple-of-six payload is a FRAME_SIZE_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: new byte[5]);
+        await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.FrameSizeError);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject MAX_FRAME_SIZE outside [2^14, 2^24-1] with PROTOCOL_ERROR")]
+    [InlineData(16_383u)]      // one below minimum (2^14 = 16384)
+    [InlineData(16_777_216u)]  // one above maximum (2^24 - 1 = 16777215)
+    [InlineData(0u)]
+    [InlineData(uint.MaxValue)]
+    public async Task Http2_OnInvalidMaxFrameSize_ShouldGoAwayProtocolError(uint value)
+    {
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] payload = Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.MaxFrameSize, value));
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
+        await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject INITIAL_WINDOW_SIZE above 2^31-1 with FLOW_CONTROL_ERROR")]
+    public async Task Http2_OnInvalidInitialWindowSize_ShouldGoAwayFlowControlError()
+    {
+        // RFC 9113 §6.5.2 — a value greater than 2^31-1 is a FLOW_CONTROL_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] payload = Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.InitialWindowSize, (uint)int.MaxValue + 1u));
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
+        await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.FlowControlError);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject ENABLE_PUSH not in {0,1} with PROTOCOL_ERROR")]
+    [InlineData(2u)]
+    [InlineData(uint.MaxValue)]
+    public async Task Http2_OnInvalidEnablePush_ShouldGoAwayProtocolError(uint value)
+    {
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] payload = Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.EnablePush, value));
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
+        await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject ENABLE_CONNECT_PROTOCOL not in {0,1} with PROTOCOL_ERROR")]
+    [InlineData(2u)]
+    [InlineData(uint.MaxValue)]
+    public async Task Http2_OnInvalidEnableConnectProtocol_ShouldGoAwayProtocolError(uint value)
+    {
+        // RFC 8441 §3 — the value MUST be 0 or 1.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] payload = Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.EnableConnectProtocol, value));
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
+        await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should silently ignore unknown SETTINGS parameters")]
+    public async Task Http2_OnUnknownSettingsParameter_ShouldIgnore()
+    {
+        // RFC 9113 §6.5.2 — an endpoint MUST ignore unknown setting identifiers
+        // so future-defined parameters do not break a compliant endpoint.
+        const ushort unknownParameter = 0xFEED;
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] payload = Http2TestSettings.SettingsPayloadRaw((unknownParameter, 1234u));
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: payload);
+        // Follow with a valid request so we can confirm the connection continued.
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
+        Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+
+        TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Path.Value.ShouldBe("/");
+    }
+
+    /// <summary>
+    /// Drives the receive loop on a server with the supplied bytes and asserts
+    /// that the output stream contains a GOAWAY frame whose error code matches
+    /// <paramref name="expectedErrorCode"/>. The receive loop is expected to
+    /// throw <see cref="Http2ConnectionException"/> carrying the same code.
+    /// </summary>
+    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode)
+    {
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        Exception? captured = null;
+        try
+        {
+            await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+            {
+                // Should not yield — these payloads are all malformed.
+            }
+        }
+        catch (Exception error)
+        {
+            captured = error;
+        }
+
+        captured.ShouldNotBeNull();
+        captured.ShouldBeOfType<Http2ConnectionException>();
+        ((Http2ConnectionException)captured!).ErrorCode.ShouldBe(expectedErrorCode);
+
+        // The peer must have observed a GOAWAY frame on the wire carrying the
+        // same error code as the exception.
+        byte[] output = await transportContext.ReadOutputAsync();
+        Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
     }
 
     private static byte[] Combine(params byte[][] buffers)
