@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Transports.Internal.Http2;
+using Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
 using Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 using Assimalign.Cohesion.Transports;
 
@@ -969,6 +970,33 @@ public class Http2TransportTests
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Headers[HttpHeaderKey.Cookie].Value.ShouldBe("a=1; b=2");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: HPackHuffmanDecoder should decode RFC 7541 §C.4 example strings")]
+    // RFC 7541 §C.4.2 — `cache-control: no-cache`
+    [InlineData(new byte[] { 0xa8, 0xeb, 0x10, 0x64, 0x9c, 0xbf }, "no-cache")]
+    // RFC 7541 §C.4.1 — `:authority: www.example.com`
+    [InlineData(new byte[] { 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff }, "www.example.com")]
+    // RFC 7541 §C.4.3 — `custom-key`
+    [InlineData(new byte[] { 0x25, 0xa8, 0x49, 0xe9, 0x5b, 0xa9, 0x7d, 0x7f }, "custom-key")]
+    // RFC 7541 §C.4.3 — `custom-value`
+    [InlineData(new byte[] { 0x25, 0xa8, 0x49, 0xe9, 0x5b, 0xb8, 0xe8, 0xb4, 0xbf }, "custom-value")]
+    public void Http2_HPackHuffmanDecoder_ShouldDecodeRfcExamples(byte[] encoded, string expected)
+    {
+        // RFC 7541 Appendix C gives canonical Huffman examples; these
+        // verify the decoder + table against the spec's exact wire bytes.
+        byte[] decoded = HPackHuffmanDecoder.Decode(encoded);
+        Encoding.ASCII.GetString(decoded).ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: HPackHuffmanDecoder should reject embedded EOS")]
+    public void Http2_HPackHuffmanDecoder_ShouldRejectEmbeddedEos()
+    {
+        // RFC 7541 §5.2 — the EOS symbol (30 bits of 1) MUST NOT appear in
+        // a decoded sequence; encountering it is a decoding error.
+        // 30 ones + 2 ones padding packs to four 0xff octets.
+        byte[] encoded = { 0xff, 0xff, 0xff, 0xff };
+        Should.Throw<HPackDecodingException>(() => HPackHuffmanDecoder.Decode(encoded));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryConsume should drain to zero and refuse underflow")]

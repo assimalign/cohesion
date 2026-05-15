@@ -139,16 +139,10 @@ internal sealed class HPackDecoder
         }
 
         // RFC 7541 §5.2 — the high bit ("H") of the first octet indicates
-        // whether the string is Huffman-encoded. We do not yet support
-        // Huffman decoding; the wire-fidelity of the table (RFC 7541
-        // Appendix B) needs an authoritative cross-check before we ship
-        // it, so this PR rejects Huffman strings cleanly while the
-        // field-section validation work below lands.
-        if ((headerBlock[index] & 0x80) != 0)
-        {
-            throw new HPackDecodingException("Huffman encoded HPACK strings are not yet supported.");
-        }
-
+        // whether the string is Huffman-encoded. The remaining 7 bits
+        // (extended with continuation octets when ≥ 127) encode the
+        // length in octets on the wire.
+        bool huffmanEncoded = (headerBlock[index] & 0x80) != 0;
         int length = DecodeInteger(headerBlock, ref index, 7);
 
         if (index + length > headerBlock.Length)
@@ -156,9 +150,12 @@ internal sealed class HPackDecoder
             throw new HPackDecodingException("The HPACK string literal length exceeded the available payload.");
         }
 
-        ReadOnlySpan<byte> value = headerBlock.Slice(index, length);
+        ReadOnlySpan<byte> raw = headerBlock.Slice(index, length);
         index += length;
-        return value.ToArray();
+
+        return huffmanEncoded
+            ? HPackHuffmanDecoder.Decode(raw)
+            : raw.ToArray();
     }
 
     private static int DecodeInteger(ReadOnlySpan<byte> buffer, ref int index, int prefixLength)
