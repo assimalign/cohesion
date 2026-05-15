@@ -9,4 +9,7 @@ internal static class ThrowHelper
 
     public static void InvalidHttpMethod(string method) =>
         throw new HttpInvalidMethodException($"The provided method is invalid: '{method}'.");
+
+    public static void InvalidHttpRequestTarget(string message) =>
+        throw new HttpInvalidRequestTargetException(message);
 }

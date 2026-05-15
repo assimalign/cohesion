@@ -57,9 +57,10 @@ public class Http1TransportTests
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse absolute-form request targets")]
     public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
     {
-        // Arrange
+        // RFC 9112 §3.2.2 — absolute-form, used when a proxy forwards a request.
+        // The authority component of the target supersedes any Host header.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
-            "GET http://api.test/widgets?id=42 HTTP/1.1\r\nHost: api.test\r\n\r\n");
+            "GET https://upstream.example.com:8443/widgets?id=42 HTTP/1.1\r\nHost: lying-host-header.test\r\n\r\n");
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
@@ -72,8 +73,80 @@ public class Http1TransportTests
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         // Assert
+        httpContext.Request.Method.ShouldBe(HttpMethod.Get);
         httpContext.Request.Path.Value.ShouldBe("/widgets");
         httpContext.Request.Query["id"].Value.ShouldBe("42");
+        // Authority component of the target wins over the Host header per RFC 9112 §3.2.2.
+        httpContext.Request.Host.Value.ShouldBe("upstream.example.com:8443");
+        httpContext.Request.Scheme.ShouldBe(HttpScheme.Https);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse authority-form CONNECT targets")]
+    public async Task Http1_OnAuthorityFormConnectRequest_ShouldExtractHostAndPort()
+    {
+        // RFC 9112 §3.2.3 — authority-form, reserved for CONNECT.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "CONNECT origin.example.com:443 HTTP/1.1\r\nHost: origin.example.com:443\r\n\r\n");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
+        httpContext.Request.Host.Value.ShouldBe("origin.example.com:443");
+        httpContext.Request.Path.ShouldBe(HttpPath.Root);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse asterisk-form OPTIONS targets")]
+    public async Task Http1_OnAsteriskFormOptionsRequest_ShouldExposeAsteriskPath()
+    {
+        // RFC 9112 §3.2.4 — asterisk-form, reserved for OPTIONS *.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "OPTIONS * HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Act
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Assert
+        httpContext.Request.Method.ShouldBe(HttpMethod.Options);
+        httpContext.Request.Path.Value.ShouldBe("*");
+        // Asterisk-form has no authority on the target; Host header is the fallback.
+        httpContext.Request.Host.Value.ShouldBe("api.test");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed request-targets")]
+    [InlineData("CONNECT /path HTTP/1.1\r\nHost: api.test\r\n\r\n")]          // CONNECT requires authority-form
+    [InlineData("GET * HTTP/1.1\r\nHost: api.test\r\n\r\n")]                  // asterisk-form is OPTIONS-only
+    [InlineData("GET example.com:80 HTTP/1.1\r\nHost: api.test\r\n\r\n")]     // authority-form on non-CONNECT
+    [InlineData("GET  HTTP/1.1\r\nHost: api.test\r\n\r\n")]                   // empty target (collapses to 2 parts after Split)
+    [InlineData("GET ftp://example.com/p HTTP/1.1\r\nHost: api.test\r\n\r\n")] // unsupported scheme
+    public async Task Http1_OnMalformedRequestTarget_ShouldThrow(string payloadText)
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(payloadText);
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await Should.ThrowAsync<InvalidDataException>(
+            async () => await ReadSingleContextAsync(httpConnectionContext));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver URL encoded request body intact to the application layer")]
