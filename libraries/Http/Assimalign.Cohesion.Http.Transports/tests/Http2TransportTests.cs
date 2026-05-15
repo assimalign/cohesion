@@ -95,6 +95,107 @@ public class Http2TransportTests
         secondPath.ShouldBe("/two");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should emit a graceful GOAWAY on connection disposal")]
+    public async Task Http2_OnDispose_ShouldEmitGracefulGoAway()
+    {
+        // RFC 9113 §6.8 — a server initiating an orderly connection close MUST
+        // emit a GOAWAY frame carrying NO_ERROR before tearing down the wire.
+        // This fixes #686: without the graceful close, Http2Connection.Dispose
+        // can race the underlying socket's send task and lose buffered bytes.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+
+        await using (IHttpConnection httpConnection = await listener.AcceptOrListenAsync())
+        {
+            IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
+            IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+            httpContext.Response.StatusCode = HttpStatusCode.Ok;
+            await httpConnectionContext.SendAsync(httpContext);
+        }
+
+        // Read the full output of the connection — the last frame should be a
+        // GOAWAY(NO_ERROR) carrying the highest observed inbound stream ID.
+        byte[] output = await transportContext.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+        (long FrameType, byte[] Payload) goAway = frames[frames.Count - 1];
+
+        goAway.FrameType.ShouldBe(7L); // GOAWAY frame type
+        goAway.Payload.Length.ShouldBe(8);
+        // Last 4 octets carry the error code; NO_ERROR = 0x0.
+        uint errorCode = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(goAway.Payload.AsSpan(4, 4));
+        errorCode.ShouldBe(0u);
+        // First 4 octets carry the last-stream-id; we processed stream 1.
+        uint lastStreamId = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(goAway.Payload.AsSpan(0, 4));
+        lastStreamId.ShouldBe(1u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should serialize concurrent SendAsync writes without frame interleaving")]
+    public async Task Http2_OnConcurrentSendAsync_ShouldNotInterleaveFrames()
+    {
+        // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave on
+        // the wire. PR #686 added a per-connection write semaphore so two
+        // SendAsync calls cannot tear each other's HEADERS+DATA sequence even
+        // when invoked from racing tasks. This test confirms each DATA frame
+        // carries a contiguous response body (no split / interleave).
+        byte[] firstRequest = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
+        byte[] secondRequest = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] secondRequestWithoutPreface = new byte[secondRequest.Length - 24];
+        Array.Copy(secondRequest, 24, secondRequestWithoutPreface, 0, secondRequestWithoutPreface.Length);
+        byte[] combined = Combine(firstRequest, secondRequestWithoutPreface);
+
+        TestTransportConnectionContext transportContext = new(combined);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext firstContext = enumerator.Current;
+        const string firstBody = "AAAAAAAAAAAAAAAA";
+        firstContext.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes(firstBody));
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext secondContext = enumerator.Current;
+        const string secondBody = "BBBBBBBBBBBBBBBB";
+        secondContext.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes(secondBody));
+
+        // Drive both SendAsync calls concurrently. Without the write lock, the
+        // resulting DATA frame payloads could be split / interleaved across
+        // the two streams; with the lock each stream's HEADERS+DATA sequence
+        // is atomic.
+        Task firstSend = httpConnectionContext.SendAsync(firstContext).AsTask();
+        Task secondSend = httpConnectionContext.SendAsync(secondContext).AsTask();
+        await Task.WhenAll(firstSend, secondSend);
+
+        // Drain the wire output exactly once and inspect every DATA frame.
+        byte[] output = await transportContext.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        List<string> dataPayloads = new();
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 0) // DATA
+            {
+                dataPayloads.Add(Encoding.ASCII.GetString(payload));
+            }
+        }
+
+        // Exactly two DATA frames, each carrying its full response body
+        // contiguously. Interleaving would split the body across multiple
+        // DATA payloads or mix the two bodies into a single payload.
+        dataPayloads.Count.ShouldBe(2);
+        dataPayloads.ShouldContain(firstBody);
+        dataPayloads.ShouldContain(secondBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should keep a localhost connection open for sequential requests")]
     public async Task Http2_OnSequentialLocalhostRequests_ShouldKeepConnectionOpen()
     {
@@ -106,15 +207,12 @@ public class Http2TransportTests
         int port = GetAvailablePort();
         List<string> observedPaths = new();
 
-        // Synchronizes the server task's connection teardown with the client side.
-        // Without this, the server breaks out of the receive loop as soon as it has
-        // dispatched both responses; the resulting `await using IHttpConnection`
-        // disposal closes the H2 connection and can race the client's final frame
-        // read on slow runners (predominantly macOS), surfacing as
-        // "response ended prematurely". The signal lets the test code release the
-        // server only after both response bodies have been fully consumed.
-        TaskCompletionSource clientFinishedReading = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
+        // No client-side handshake to gate teardown — #686 fixed the race where
+        // Http2Connection.DisposeAsync could close the socket before the send
+        // task had moved the response bytes from the pipe to the wire. With the
+        // graceful close in place, the server task can `break` out of its
+        // receive loop the moment SendAsync returns and the test still passes
+        // deterministically.
         await using HttpConnectionListener listener = HttpConnectionListener.Create(options =>
         {
             options.UseHttp2(transport =>
@@ -147,11 +245,6 @@ public class Http2TransportTests
 
                 if (observedPaths.Count >= 2)
                 {
-                    // Hold the receive loop open until the client confirms both
-                    // responses were fully read. This blocks the `await using
-                    // IHttpConnection` disposal until the H2 conversation has
-                    // wound down on the client side.
-                    await clientFinishedReading.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                     break;
                 }
             }
@@ -166,9 +259,6 @@ public class Http2TransportTests
         string firstBody = await SendHttp2RequestAsync(client, new Uri($"http://127.0.0.1:{port}/one"), cancellationToken);
         string secondBody = await SendHttp2RequestAsync(client, new Uri($"http://127.0.0.1:{port}/two"), cancellationToken);
 
-        // Both response bodies fully consumed — release the server task so it can
-        // tear down the connection cleanly.
-        clientFinishedReading.SetResult();
         await serverTask;
 
         // Assert
