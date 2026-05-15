@@ -22,6 +22,7 @@ jobs:
             "Assimalign.Cohesion.Http",
             "Assimalign.Cohesion.Http.Sessions",
             "Assimalign.Cohesion.Http.Forms",
+            "Assimalign.Cohesion.Http.ClientFactory",
             "Assimalign.Cohesion.Http.Transports"
           ]
     steps:
