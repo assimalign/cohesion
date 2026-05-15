@@ -25,16 +25,14 @@ public class HttpContextExtensionsTests
         };
         TestHttpContext context = new(
             HttpVersion.Http20,
-            new HttpSession("session-id"),
             request,
             response);
 
         // Act
-        context.Deconstruct(out HttpVersion version, out IHttpSession session, out HttpRequest actualRequest, out HttpResponse actualResponse);
+        context.Deconstruct(out HttpVersion version, out HttpRequest actualRequest, out HttpResponse actualResponse);
 
         // Assert
         version.ShouldBe(HttpVersion.Http20);
-        session.Id.ShouldBe("session-id");
         actualRequest.ShouldBeSameAs(request);
         actualResponse.ShouldBeSameAs(response);
     }
@@ -47,16 +45,14 @@ public class HttpContextExtensionsTests
         TestHttpResponse response = new();
         IHttpContext context = new TestHttpContext(
             HttpVersion.Http11,
-            new HttpSession("session-id"),
             request,
             response);
 
         // Act
-        context.Deconstruct(out HttpVersion version, out IHttpSession session, out IHttpRequest actualRequest, out IHttpResponse actualResponse);
+        context.Deconstruct(out HttpVersion version, out IHttpRequest actualRequest, out IHttpResponse actualResponse);
 
         // Assert
         version.ShouldBe(HttpVersion.Http11);
-        session.ShouldBeOfType<HttpSession>();
         actualRequest.ShouldBeSameAs(request);
         actualResponse.ShouldBeSameAs(response);
     }

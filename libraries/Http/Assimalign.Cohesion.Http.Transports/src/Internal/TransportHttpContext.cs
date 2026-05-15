@@ -14,7 +14,6 @@ internal abstract class TransportHttpContext : HttpContext
         CancellationToken requestAborted)
     {
         Version = version;
-        Session = new HttpSession();
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo;
@@ -23,8 +22,6 @@ internal abstract class TransportHttpContext : HttpContext
     }
 
     public override HttpVersion Version { get; }
-
-    public override HttpSession Session { get; }
 
     public override HttpRequest Request { get; }
 

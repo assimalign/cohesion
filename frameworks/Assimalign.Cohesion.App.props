@@ -98,6 +98,8 @@
 
         <!-- Move from App when ready:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Transports" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />

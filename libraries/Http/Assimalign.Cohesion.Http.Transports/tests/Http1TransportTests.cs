@@ -76,10 +76,12 @@ public class Http1TransportTests
         httpContext.Request.Query["id"].Value.ShouldBe("42");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse form values from a URL encoded request body")]
-    public async Task Http1_OnUrlEncodedPost_ShouldParseFormValues()
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver URL encoded request body intact to the application layer")]
+    public async Task Http1_OnUrlEncodedPost_ShouldDeliverBodyIntact()
     {
-        // Arrange
+        // Form parsing is an application-layer concern (Assimalign.Cohesion.Http.Forms);
+        // the transport's job is to deliver the body bytes faithfully. This test verifies
+        // the urlencoded payload reaches the application untouched.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /submit HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 14\r\n\r\nname=alice&x=1");
         TestTransportConnectionContext transportContext = new(payload);
@@ -95,8 +97,10 @@ public class Http1TransportTests
 
         // Assert
         httpContext.Request.Method.ShouldBe(HttpMethod.Post);
-        httpContext.Request.Form["name"].Value.ShouldBe("alice");
-        httpContext.Request.Form["x"].Value.ShouldBe("1");
+        httpContext.Request.Headers[HttpHeaderKey.ContentType].Value.ShouldBe("application/x-www-form-urlencoded");
+        using System.IO.StreamReader reader = new(httpContext.Request.Body);
+        string body = await reader.ReadToEndAsync();
+        body.ShouldBe("name=alice&x=1");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should yield pipelined requests in order")]

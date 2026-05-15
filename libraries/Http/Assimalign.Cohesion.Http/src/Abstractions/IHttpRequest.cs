@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Http;
@@ -6,6 +6,13 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents the request data exposed during an HTTP exchange.
 /// </summary>
+/// <remarks>
+/// The protocol core exposes only wire-level data &#8211; method, target, scheme, host,
+/// query, headers, cookies, and the raw <see cref="Body"/> stream. Parsed-form access
+/// lives in <c>Assimalign.Cohesion.Http.Forms</c> as an extension method that reads
+/// the body and caches the result; the protocol core does not require any
+/// form-body parser to be wired up.
+/// </remarks>
 public interface IHttpRequest
 {
     /// <summary>
@@ -42,11 +49,6 @@ public interface IHttpRequest
     /// Gets the request cookies.
     /// </summary>
     IHttpCookieCollection Cookies { get; }
-
-    /// <summary>
-    /// Gets the parsed form values and uploaded files.
-    /// </summary>
-    IHttpFormCollection Form { get; }
 
     /// <summary>
     /// Gets the body of the request.

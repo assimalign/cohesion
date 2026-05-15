@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Description>HTTP form-body parsing model for the Cohesion HTTP family. Layered on top of Assimalign.Cohesion.Http; defines IHttpFormCollection and IHttpFormFile so server-side consumers can opt into form parsing. Protocol-only consumers (clients, proxies, edge caches) should not reference this package.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

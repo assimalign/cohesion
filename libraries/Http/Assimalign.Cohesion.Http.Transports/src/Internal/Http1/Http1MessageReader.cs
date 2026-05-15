@@ -44,7 +44,6 @@ internal static class Http1MessageReader
         byte[] bodyBytes = await ReadBodyAsync(stream, headers, cancellationToken).ConfigureAwait(false);
         HttpQueryCollection queryCollection = ParseQuery(requestLineParts[1], out HttpPath path);
         HttpCookieCollection cookies = ParseCookies(headers);
-        HttpFormCollection form = ParseForm(headers, bodyBytes);
         HttpHost host = headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
             ? new HttpHost(hostValue.Value)
             : HttpHost.Empty;
@@ -57,7 +56,6 @@ internal static class Http1MessageReader
             queryCollection,
             headers,
             cookies,
-            form,
             new MemoryStream(bodyBytes, writable: false),
             new ClaimsPrincipal(new ClaimsIdentity()));
         Http1Response response = new();
@@ -264,28 +262,6 @@ internal static class Http1MessageReader
         }
 
         return cookies;
-    }
-
-    private static HttpFormCollection ParseForm(HttpHeaderCollection headers, byte[] bodyBytes)
-    {
-        HttpFormCollection form = new();
-
-        if (bodyBytes.Length == 0 ||
-            !headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue contentType) ||
-            !contentType.Value.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
-        {
-            return form;
-        }
-
-        string payload = Encoding.UTF8.GetString(bodyBytes);
-        HttpQueryCollection formValues = new HttpQuery(payload).Parse();
-
-        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in formValues)
-        {
-            form.Add(pair.Key.Value, pair.Value);
-        }
-
-        return form;
     }
 
     private static bool HeaderContainsToken(HttpHeaderCollection headers, HttpHeaderKey key, string expected)

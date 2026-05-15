@@ -23,8 +23,6 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
-    public override IHttpFormCollection Form { get; } = new HttpFormCollection();
-
     public override Stream Body { get; set; } = Stream.Null;
 
     public override ClaimsPrincipal ClaimsPrincipal { get; set; } = new(new ClaimsIdentity());
@@ -45,14 +43,12 @@ internal sealed class TestHttpContext : HttpContext
 {
     public TestHttpContext(
         HttpVersion version,
-        HttpSession session,
         TestHttpRequest request,
         TestHttpResponse response,
         IHttpConnectionInfo? connectionInfo = null,
         CancellationToken requestAborted = default)
     {
         Version = version;
-        Session = session;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo ?? HttpConnectionInfo.Empty;
@@ -61,8 +57,6 @@ internal sealed class TestHttpContext : HttpContext
     }
 
     public override HttpVersion Version { get; }
-
-    public override HttpSession Session { get; }
 
     public override TestHttpRequest Request { get; }
 
