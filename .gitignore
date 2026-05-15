@@ -4,8 +4,9 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
 # AI & Note generation
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
 *.obsidian
-*.claude
 .linqpad
 .dotnet-cli-home
 .codex-temp
@@ -13,7 +14,6 @@
 
 # Extensions & Local Tooling
 
-CLAUDE.md
 .nuke/temp
 
 scripts/**/*.txt
