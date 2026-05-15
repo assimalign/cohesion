@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
-using Assimalign.Cohesion.Internal;
+
+using Assimalign.Cohesion.Http.Internal;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -173,7 +174,7 @@ public readonly struct HttpRequestTarget : IEquatable<HttpRequestTarget>
     {
         if (!TryParse(raw, method, out HttpRequestTarget result, out string? error))
         {
-            ThrowHelper.InvalidHttpRequestTarget(error ?? "Malformed request-target.");
+            throw new HttpInvalidRequestTargetException(error ?? "Malformed request-target.");
         }
         return result;
     }

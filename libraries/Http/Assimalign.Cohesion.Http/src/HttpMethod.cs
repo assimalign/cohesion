@@ -3,9 +3,9 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Http.Internal;
 
-using Assimalign.Cohesion.Internal;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Represents an HTTP method token.
@@ -31,7 +31,7 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
 
         if (value.AsSpan().ContainsAnyExcept(AllowedCharacters))
         {
-            ThrowHelper.InvalidHttpMethod(value);
+            throw new HttpInvalidMethodException($"The provided method is invalid: '{value}'.");
         }
 
         Value = value.ToUpperInvariant();

@@ -2,10 +2,9 @@ using System;
 using System.Buffers;
 using System.Diagnostics;
 
-namespace Assimalign.Cohesion.Http;
-
 using Assimalign.Cohesion.Http.Internal;
-using Assimalign.Cohesion.Internal;
+
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Represents an HTTP request path.
@@ -34,12 +33,12 @@ public readonly struct HttpPath : IEquatable<HttpPath>
 
         if (value.AsSpan().ContainsAny(InvalidCharacters))
         {
-            ThrowHelper.InvalidHttpPath($"The following path contains invalid characters: '{value}'.");
+            throw new HttpInvalidPathException($"The following path contains invalid characters: '{value}'.");
         }
 
         if (value[0] is not ('/' or '*'))
         {
-            ThrowHelper.InvalidHttpPath($"The following path is invalid: '{value}'. Paths must begin with '/' or '*'.");
+            throw new HttpInvalidPathException($"The following path is invalid: '{value}'. Paths must begin with '/' or '*'.");
         }
 
         Value = value;
