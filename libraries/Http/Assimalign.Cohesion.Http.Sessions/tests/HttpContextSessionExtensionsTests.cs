@@ -86,6 +86,7 @@ public class HttpContextSessionExtensionsTests
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public CancellationToken RequestAborted => CancellationToken.None;
+        public IHttpProtocolUpgrade? Upgrade => null;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
