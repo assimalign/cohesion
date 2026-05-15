@@ -28,10 +28,10 @@
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): README-->
-	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md') and $([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\..\README.md')) != ''">
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
-	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md') and $([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\..\README.md')) != ''">
 		<None Include="..\README.md">
 			<Pack>true</Pack>
 			<PackagePath>\</PackagePath>
