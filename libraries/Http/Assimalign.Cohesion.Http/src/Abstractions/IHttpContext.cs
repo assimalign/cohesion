@@ -7,17 +7,23 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents the request and response state for a single HTTP exchange.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The protocol core deliberately exposes only wire-level concerns &#8211;
+/// <see cref="Request"/>, <see cref="Response"/>, <see cref="ConnectionInfo"/>,
+/// <see cref="Items"/>. Application-layer concepts such as sessions, authenticated
+/// principals, or parsed form bodies layer on top via extension methods in dedicated
+/// packages (<c>Assimalign.Cohesion.Http.Sessions</c>,
+/// <c>Assimalign.Cohesion.Http.Forms</c>, &#8230;) that read and write through
+/// <see cref="Items"/>.
+/// </para>
+/// </remarks>
 public interface IHttpContext : IAsyncDisposable
 {
     /// <summary>
     /// Gets the HTTP version for the current exchange.
     /// </summary>
     HttpVersion Version { get; }
-
-    /// <summary>
-    /// Gets the session associated with the current exchange.
-    /// </summary>
-    IHttpSession Session { get; }
 
     /// <summary>
     /// Gets the current request.
@@ -35,7 +41,8 @@ public interface IHttpContext : IAsyncDisposable
     IHttpConnectionInfo ConnectionInfo { get; }
 
     /// <summary>
-    /// Gets a bag of items shared for the lifetime of the exchange.
+    /// Gets a bag of items shared for the lifetime of the exchange. Higher-layer features
+    /// (sessions, identity, parsed forms) attach state here via extension methods.
     /// </summary>
     IDictionary<string, object?> Items { get; }
 

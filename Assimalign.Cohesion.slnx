@@ -790,6 +790,24 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/Assimalign.Cohesion.Http.ClientFactory.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Sessions/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Sessions/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Sessions/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Sessions/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Sessions/tests/Assimalign.Cohesion.Http.Sessions.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forms/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Transports/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Transports/DESIGN_SUGGESTION.md" />
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Transports/README.md" />

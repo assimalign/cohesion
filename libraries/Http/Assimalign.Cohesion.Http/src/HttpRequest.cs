@@ -30,9 +30,6 @@ public abstract class HttpRequest : IHttpRequest
     public abstract IHttpCookieCollection Cookies { get; }
 
     /// <inheritdoc />
-    public abstract IHttpFormCollection Form { get; }
-
-    /// <inheritdoc />
     public abstract Stream Body { get; set; }
 
     /// <inheritdoc />

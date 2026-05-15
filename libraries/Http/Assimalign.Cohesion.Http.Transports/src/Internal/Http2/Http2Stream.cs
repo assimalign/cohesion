@@ -71,7 +71,6 @@ internal sealed class Http2Stream
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         HttpCookieCollection cookies = ParseCookies(decodedHeaders.Headers);
-        HttpFormCollection form = ParseForm(decodedHeaders.Headers, bodyBytes);
         HttpHost host = !string.IsNullOrWhiteSpace(decodedHeaders.Authority)
             ? new HttpHost(decodedHeaders.Authority)
             : decodedHeaders.Headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
@@ -89,7 +88,6 @@ internal sealed class Http2Stream
             query,
             decodedHeaders.Headers,
             cookies,
-            form,
             new MemoryStream(bodyBytes, writable: false),
             new ClaimsPrincipal(new ClaimsIdentity()));
 
@@ -144,24 +142,4 @@ internal sealed class Http2Stream
         return cookies;
     }
 
-    private static HttpFormCollection ParseForm(HttpHeaderCollection headers, byte[] bodyBytes)
-    {
-        HttpFormCollection form = new();
-
-        if (bodyBytes.Length == 0 ||
-            !headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue contentType) ||
-            !contentType.Value.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
-        {
-            return form;
-        }
-
-        HttpQueryCollection values = new HttpQuery(Encoding.UTF8.GetString(bodyBytes)).Parse();
-
-        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in values)
-        {
-            form.Add(pair.Key.Value, pair.Value);
-        }
-
-        return form;
-    }
 }

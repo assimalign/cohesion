@@ -67,7 +67,6 @@ internal static class Http3HeaderCodec
 
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
         HttpCookieCollection cookies = ParseCookies(headers);
-        HttpFormCollection form = ParseForm(headers, bodyBytes);
         HttpHost host = !string.IsNullOrWhiteSpace(authority)
             ? new HttpHost(authority)
             : headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
@@ -85,7 +84,6 @@ internal static class Http3HeaderCodec
             query,
             headers,
             cookies,
-            form,
             new MemoryStream(bodyBytes, writable: false),
             new ClaimsPrincipal(new ClaimsIdentity()));
     }
@@ -248,24 +246,4 @@ internal static class Http3HeaderCodec
         return cookies;
     }
 
-    private static HttpFormCollection ParseForm(HttpHeaderCollection headers, byte[] bodyBytes)
-    {
-        HttpFormCollection form = new();
-
-        if (bodyBytes.Length == 0 ||
-            !headers.TryGetValue(HttpHeaderKey.ContentType, out HttpHeaderValue contentType) ||
-            !contentType.Value.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
-        {
-            return form;
-        }
-
-        HttpQueryCollection values = new HttpQuery(Encoding.UTF8.GetString(bodyBytes)).Parse();
-
-        foreach (KeyValuePair<HttpQueryKey, HttpQueryValue> pair in values)
-        {
-            form.Add(pair.Key.Value, pair.Value);
-        }
-
-        return form;
-    }
 }

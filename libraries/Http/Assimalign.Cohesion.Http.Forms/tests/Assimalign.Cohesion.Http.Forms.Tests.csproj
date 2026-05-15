@@ -4,13 +4,11 @@
 		<ImplicitUsings>disable</ImplicitUsings>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ClientFactory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
 		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-	</ItemGroup>
-	<ItemGroup>
-		<Using Include="Xunit" />
 	</ItemGroup>
 </Project>

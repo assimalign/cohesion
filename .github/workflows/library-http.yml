@@ -20,6 +20,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             "Assimalign.Cohesion.Http",
+            "Assimalign.Cohesion.Http.Sessions",
+            "Assimalign.Cohesion.Http.Forms",
             "Assimalign.Cohesion.Http.Transports"
           ]
     steps:

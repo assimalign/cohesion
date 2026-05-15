@@ -13,10 +13,9 @@ internal sealed class Http1Request : TransportHttpRequest
         IHttpQueryCollection query,
         IHttpHeaderCollection headers,
         IHttpCookieCollection cookies,
-        IHttpFormCollection form,
         Stream body,
         ClaimsPrincipal claimsPrincipal)
-        : base(host, path, method, scheme, query, headers, cookies, form, body, claimsPrincipal)
+        : base(host, path, method, scheme, query, headers, cookies, body, claimsPrincipal)
     {
     }
 }

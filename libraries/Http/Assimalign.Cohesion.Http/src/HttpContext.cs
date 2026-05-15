@@ -12,9 +12,6 @@ public abstract class HttpContext : IHttpContext
     /// <inheritdoc />
     public abstract HttpVersion Version { get; }
 
-    /// <inheritdoc />
-    public abstract HttpSession Session { get; }
-
     /// <summary>
     /// Gets the strongly typed request for the current exchange.
     /// </summary>
@@ -40,7 +37,4 @@ public abstract class HttpContext : IHttpContext
     IHttpRequest IHttpContext.Request => Request;
 
     IHttpResponse IHttpContext.Response => Response;
-
-    IHttpSession IHttpContext.Session => Session;
-        
 }

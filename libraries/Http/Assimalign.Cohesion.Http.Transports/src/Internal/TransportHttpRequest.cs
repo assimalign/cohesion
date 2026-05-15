@@ -13,7 +13,6 @@ internal abstract class TransportHttpRequest : HttpRequest
         IHttpQueryCollection query,
         IHttpHeaderCollection headers,
         IHttpCookieCollection cookies,
-        IHttpFormCollection form,
         Stream body,
         ClaimsPrincipal claimsPrincipal)
     {
@@ -24,7 +23,6 @@ internal abstract class TransportHttpRequest : HttpRequest
         Query = query;
         Headers = headers;
         Cookies = cookies;
-        Form = form;
         Body = body;
         ClaimsPrincipal = claimsPrincipal;
     }
@@ -42,8 +40,6 @@ internal abstract class TransportHttpRequest : HttpRequest
     public override IHttpHeaderCollection Headers { get; }
 
     public override IHttpCookieCollection Cookies { get; }
-
-    public override IHttpFormCollection Form { get; }
 
     public override Stream Body { get; set; }
 
