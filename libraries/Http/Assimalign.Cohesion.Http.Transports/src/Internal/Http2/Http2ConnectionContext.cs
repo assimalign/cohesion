@@ -725,7 +725,21 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // hasn't sent its response yet. A subsequent RST_STREAM from the
         // peer needs to find the stream so it can fire RequestAborted on
         // the application's IHttpContext.
-        return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CancellationToken.None);
+        try
+        {
+            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CancellationToken.None);
+        }
+        catch (HPack.HPackDecodingException error)
+        {
+            // RFC 9113 §8.2 / §8.3 — malformed field sections (illegal
+            // pseudo-header order, forbidden connection-specific
+            // fields, etc.) are connection-level PROTOCOL_ERRORs. Wrap
+            // the HPack-level exception so the receive loop emits
+            // GOAWAY before tearing down.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 HEADERS frame contained a malformed field section: {error.Message}");
+        }
     }
 
     private Http2Stream GetOrCreateStream(int streamId)

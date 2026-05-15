@@ -219,6 +219,36 @@ internal static class HttpProtocolPayloadFactory
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Builds a HEADERS frame for <paramref name="streamId"/> containing the
+    /// supplied <paramref name="fields"/> encoded as HPACK literal-with-no-
+    /// indexing entries (RFC 7541 §6.2.2). The caller controls every byte —
+    /// including field order, name casing, and pseudo-header presence —
+    /// which is what field-section validation tests need.
+    /// </summary>
+    public static byte[] CreateHttp2HeadersFrame(int streamId, byte flags, params (string Name, string Value)[] fields)
+    {
+        using MemoryStream payload = new();
+        foreach ((string name, string value) in fields)
+        {
+            WriteHttp2PassthroughLiteralHeader(payload, name, value);
+        }
+
+        using MemoryStream output = new();
+        WriteHttp2Frame(output, streamId, 0x1 /* HEADERS */, flags, payload.ToArray());
+        return output.ToArray();
+    }
+
+    private static void WriteHttp2PassthroughLiteralHeader(Stream stream, string name, string value)
+    {
+        // HPACK §6.2.2 literal header field without indexing: 4-bit prefix,
+        // top nibble 0000, then length-prefixed name and value as 7-bit
+        // prefixed strings with no Huffman encoding (H=0).
+        WritePrefixedInteger(stream, 0, 4, 0x00);
+        WritePrefixedString(stream, name, 7, 0x00);
+        WritePrefixedString(stream, value, 7, 0x00);
+    }
+
     private static void WriteHttp2Frame(Stream stream, int streamId, byte type, byte flags, byte[] payload)
     {
         byte[] header =
