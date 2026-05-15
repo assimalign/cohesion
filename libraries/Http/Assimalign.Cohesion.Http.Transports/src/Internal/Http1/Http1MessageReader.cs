@@ -40,19 +40,43 @@ internal static class Http1MessageReader
             throw new InvalidDataException($"The HTTP version '{requestLineParts[2]}' is not supported by the HTTP/1.1 transport.");
         }
 
+        HttpMethod method = HttpMethod.GetCanonicalizedValue(requestLineParts[0]);
+        // RFC 9112 §3.2 — parse the request-target into one of the four canonical forms
+        // (origin / absolute / authority / asterisk) with method/form pairing enforcement.
+        if (!HttpRequestTarget.TryParse(requestLineParts[1], method, out HttpRequestTarget target, out string? targetError))
+        {
+            throw new InvalidDataException(
+                $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {targetError}");
+        }
+
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
         byte[] bodyBytes = await ReadBodyAsync(stream, headers, cancellationToken).ConfigureAwait(false);
-        HttpQueryCollection queryCollection = ParseQuery(requestLineParts[1], out HttpPath path);
+        HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
         HttpCookieCollection cookies = ParseCookies(headers);
-        HttpHost host = headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
-            ? new HttpHost(hostValue.Value)
-            : HttpHost.Empty;
+
+        // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
+        //   - absolute-form  → authority component of the target supersedes any Host header
+        //   - authority-form → the target itself IS the authority (CONNECT)
+        //   - origin-form / asterisk → fall back to the Host header
+        HttpHost host = target.Form switch
+        {
+            HttpRequestTargetForm.Absolute => target.Host,
+            HttpRequestTargetForm.Authority => target.Host,
+            _ => headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
+                ? new HttpHost(hostValue.Value)
+                : HttpHost.Empty,
+        };
+
+        // Scheme follows the same precedence: absolute-form carries it on the wire.
+        HttpScheme requestScheme = target.Form == HttpRequestTargetForm.Absolute
+            ? target.Scheme
+            : scheme;
 
         Http1Request request = new(
             host,
-            path,
-            HttpMethod.GetCanonicalizedValue(requestLineParts[0]),
-            scheme,
+            target.Path,
+            method,
+            requestScheme,
             queryCollection,
             headers,
             cookies,
@@ -196,38 +220,6 @@ internal static class Http1MessageReader
                 return;
             }
         }
-    }
-
-    private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)
-    {
-        ArgumentNullException.ThrowIfNull(requestTarget);
-
-        if (requestTarget.Length > 0 && requestTarget[0] is '/' or '*')
-        {
-            return ParseOriginFormQuery(requestTarget, out path);
-        }
-
-        if (Uri.TryCreate(requestTarget, UriKind.Absolute, out Uri? uri))
-        {
-            path = HttpPath.FromUriComponent(uri.AbsolutePath);
-            return new HttpQuery(uri.Query).Parse();
-        }
-
-        return ParseOriginFormQuery(requestTarget, out path);
-    }
-
-    private static HttpQueryCollection ParseOriginFormQuery(string requestTarget, out HttpPath path)
-    {
-        int queryIndex = requestTarget.IndexOf('?');
-
-        if (queryIndex >= 0)
-        {
-            path = HttpPath.FromUriComponent(requestTarget[..queryIndex]);
-            return new HttpQuery(requestTarget[(queryIndex + 1)..]).Parse();
-        }
-
-        path = HttpPath.FromUriComponent(requestTarget);
-        return new HttpQueryCollection();
     }
 
     private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)

@@ -31,6 +31,13 @@ public enum HttpErrorCode
     InvalidPath,
 
     /// <summary>
+    /// A request contained a malformed request-target (RFC 9112 &#167; 3.2). Includes
+    /// targets that do not match any of the four canonical forms (origin / absolute /
+    /// authority / asterisk) and targets that violate the method/form pairing rules.
+    /// </summary>
+    InvalidRequestTarget,
+
+    /// <summary>
     /// A request or response contained an invalid header.
     /// </summary>
     InvalidHeader,
