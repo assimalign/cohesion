@@ -1,7 +1,7 @@
 <Project>
     <UsingTask
 		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
-		AssemblyFile="$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\$(TargetFrameworkForBuild)\Assimalign.Cohesion.Build.Tasks.dll"
+		AssemblyFile="$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\$(TargetFramework)\Assimalign.Cohesion.Build.Tasks.dll"
 		Runtime="NET" />
 
 	<PropertyGroup>

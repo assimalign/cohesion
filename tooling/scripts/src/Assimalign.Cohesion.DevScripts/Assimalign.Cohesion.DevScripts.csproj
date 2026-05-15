@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<Version>0.0.1</Version>
-		<TargetFramework>$(TargetFrameworkForScripts)</TargetFramework>
 		<AssemblyName>Assimalign.Cohesion.DevScripts</AssemblyName>
 		<LangVersion>latest</LangVersion>
 		<OutDir>$([System.Environment]::GetFolderPath(SpecialFolder.MyDocuments))\PowerShell\Modules\$(AssemblyName)\$(Version)</OutDir>
@@ -146,4 +145,3 @@
 		<WriteLinesToFile File="$(OutDir)\$(AssemblyName).psd1" Overwrite="true" Lines="$(CohesionModuleManifest)" />
 	</Target>
 </Project>
-

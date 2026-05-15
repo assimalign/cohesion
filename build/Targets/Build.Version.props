@@ -1,5 +1,18 @@
 <Project>
+    <Target Name="TestMessage" BeforeTargets="Build">
+        <Message Text="Framework Version: $(TargetFrameworkVersion)" Importance="High" />
+    </Target>
     <PropertyGroup>
-        <CohesionVersion>10.0.0</CohesionVersion> <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
+        <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
+        <CohesionMajorVersion>$([System.Version]::Parse('$(TargetFramework.TrimStart('net'))').Major)</CohesionMajorVersion>
+        <CohesionMinorVersion>0</CohesionMinorVersion>
+        <CohesionPatchVersion>0</CohesionPatchVersion>
+        <CohesionVersion>$(CohesionMajorVersion).$(CohesionMinorVersion).$(CohesionPatchVersion)</CohesionVersion>
     </PropertyGroup>
+
+    <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+		<Version Condition="'$(Version)' == ''">$(CohesionVersion)</Version>
+		<PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>
+		<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">$(CohesionOutputPathForLibraries)</PackageOutputPath>
+	</PropertyGroup>
 </Project>

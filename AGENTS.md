@@ -38,10 +38,8 @@ pwsh installer/scripts/Install-Local.ps1
 ```
 
 ### Output Directories
-
 - `_out/packages/` for packaged library outputs
 - `_out/dotnet/sdk/` for SDK and build output
-- `_out/code-generation/` for generated code artifacts
 
 ### Repository Structure
 

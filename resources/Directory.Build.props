@@ -11,10 +11,7 @@
 					/src
 					/test
 					-->
-					<PropertyGroup>
-		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
-		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
-		<RollForward>LatestPatch</RollForward>
+	<PropertyGroup>
 		<!-- AOT-->
 		<IsAotCompatible>true</IsAotCompatible>
 		<!-- <StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols> -->
@@ -27,14 +24,11 @@
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-		
-		<!-- <SignAssembly>true</SignAssembly>
-		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): README-->
-	<!-- <PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
+	<PropertyGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 	<ItemGroup Condition="$(IsSourceProject) and Exists('$(MSBuildProjectDirectory)\..\README.md')">
@@ -42,7 +36,8 @@
 			<Pack>true</Pack>
 			<PackagePath>\</PackagePath>
 		</None>
-	</ItemGroup> -->
+	</ItemGroup>
+
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): License File -->

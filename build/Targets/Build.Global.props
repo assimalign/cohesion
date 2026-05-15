@@ -17,22 +17,12 @@
         <_CohesionIntermediateOutputPath Condition=" '$(PlatformName)' == 'AnyCPU' ">$(MSBuildProjectDirectory)\obj$(IntermediateOutputPath)$(Configuration)\</_CohesionIntermediateOutputPath>
         <_CohesionIntermediateOutputPath Condition=" '$(PlatformName)' != 'AnyCPU' ">$(MSBuildProjectDirectory)\obj$(IntermediateOutputPath)$(PlatformName)\$(Configuration)\</_CohesionIntermediateOutputPath>
     </PropertyGroup>
-	<PropertyGroup>
-        <_CohesionBuild>true</_CohesionBuild>
-    </PropertyGroup>
-
 
     <!-- Language specific Configuration -->
 	<PropertyGroup>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-	</PropertyGroup>
-
-	<PropertyGroup Condition="'$(IsPackable)' != 'false'">
-		<Version Condition="'$(Version)' == ''">$(CohesionVersion)</Version>
-		<PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)</PackageVersion>
-		<PackageOutputPath Condition="'$(PackageOutputPath)' == ''">$(CohesionOutputPathForLibraries)</PackageOutputPath>
 	</PropertyGroup>
 
 	<!-- Cohesion Build Properties -->

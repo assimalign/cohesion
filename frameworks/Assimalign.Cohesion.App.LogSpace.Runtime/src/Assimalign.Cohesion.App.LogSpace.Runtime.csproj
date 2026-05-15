@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 		<AssemblyName>Assimalign.Cohesion.App.LogSpace</AssemblyName>
 

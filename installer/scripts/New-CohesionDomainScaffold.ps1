@@ -126,7 +126,7 @@ $DomainTargetsTemplate = @'
 $RuntimeCsprojTemplate = @'
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 		<AssemblyName>Assimalign.Cohesion.App.{NAME}</AssemblyName>
 
@@ -157,7 +157,7 @@ $RuntimeCsprojTemplate = @'
 $RefsCsprojTemplate = @'
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
 
 		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>

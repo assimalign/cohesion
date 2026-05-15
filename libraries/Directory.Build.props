@@ -1,20 +1,17 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
-	<PropertyGroup>
-		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
-		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
-	</PropertyGroup>
 	<!-- #region Frameworks Specific Props
 			All projects should follow the same directory pattern
 			/ Service 
 				/ Library
 					/src
 					/test
-					-->
+	-->
 	<PropertyGroup>
-		<TargetFrameworks>$(TargetFrameworkForLibraries)</TargetFrameworks>
-		<TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
-		<RollForward>LatestPatch</RollForward>
+		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
+		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
+	</PropertyGroup>
+	<PropertyGroup>
 		<!-- AOT-->
 		<IsAotCompatible>true</IsAotCompatible>
 		<!-- <StripSymbols Condition="$(MSBuildProjectDirectory.EndsWith('src'))">false</StripSymbols> -->
@@ -22,14 +19,12 @@
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): General Props -->
+
 	<PropertyGroup Condition="'$(Configuration)' == 'Release' and $(IsSourceProject)">
 		<PackageVersion>$(CohesionVersion)</PackageVersion>
 		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-
-		<!-- <SignAssembly>true</SignAssembly>
-		<AssemblyOriginatorKeyFile>..\sharedkey.snk</AssemblyOriginatorKeyFile> -->
 	</PropertyGroup>
 	<!-- #endregion -->
 
@@ -43,6 +38,7 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
+	
 	<!-- #endregion -->
 
 	<!-- #region Packaging (Nuget): License File -->

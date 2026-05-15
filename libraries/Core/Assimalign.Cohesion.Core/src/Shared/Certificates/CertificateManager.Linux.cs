@@ -4,11 +4,6 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Security;
 
-internal class LinuxCertificateManager : Cohesion.Security.
+internal class LinuxCertificateManager : CertificateManager
 {
-
-    public CertificateManager()
-    {
-        
-    }
 }

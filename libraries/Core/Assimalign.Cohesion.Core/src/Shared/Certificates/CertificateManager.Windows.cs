@@ -4,6 +4,6 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Security;
 
-internal sealed class WindowsCertificateManager : Cohesion.Security.
+internal sealed class WindowsCertificateManager : CertificateManager
 {
 }
