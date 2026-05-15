@@ -31,6 +31,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // the connection, regardless of whether it originated from a
     // SendAsync, a SETTINGS/PING ACK, a GOAWAY, or graceful shutdown.
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    // RFC 9113 §5.2 — every HTTP/2 endpoint maintains two connection-level
+    // flow-control windows (independent of the per-stream windows). The
+    // send window caps outbound DATA across all streams combined; the
+    // receive window caps inbound DATA likewise. Both default to 65535
+    // octets per RFC 9113 §6.5.2 and are NOT affected by
+    // SETTINGS_INITIAL_WINDOW_SIZE.
+    private Http2FlowControlWindow _connectionSendWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
+    private Http2FlowControlWindow _connectionReceiveWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
     private int? _continuationStreamId;
     private bool _initialized;
     private bool _receivedClientSettings;
@@ -88,6 +96,26 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 // error code, before the underlying transport is torn down.
                 await EmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
                 throw;
+            }
+
+            // RFC 9113 §6.9 — DATA frames consume credit from both the
+            // connection-level and stream-level receive windows. Emit a
+            // pair of WINDOW_UPDATE frames here to credit the bytes back
+            // to the peer as soon as we have consumed them, keeping the
+            // pipeline flowing for long-running request bodies.
+            if (receivedFrame.Value.Frame.Type == Http2FrameType.Data
+                && receivedFrame.Value.Frame.PayloadLength > 0)
+            {
+                int dataLength = receivedFrame.Value.Frame.PayloadLength;
+                _connectionReceiveWindow.TryReplenish(dataLength);
+                await EmitWindowUpdateAsync(0, dataLength, cancellationToken).ConfigureAwait(false);
+
+                int streamId = receivedFrame.Value.Frame.StreamId;
+                if (_streams.TryGetValue(streamId, out Http2Stream? stream))
+                {
+                    stream.ReceiveWindow.TryReplenish(dataLength);
+                    await EmitWindowUpdateAsync(streamId, dataLength, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             if (completedContext is not null)
@@ -216,8 +244,87 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             case Http2FrameType.RstStream:
                 ProcessRstStreamFrame(receivedFrame);
                 return null;
+            case Http2FrameType.WindowUpdate:
+                ProcessWindowUpdateFrame(receivedFrame);
+                return null;
             default:
                 return null;
+        }
+    }
+
+    private void ProcessWindowUpdateFrame(ReceivedFrame receivedFrame)
+    {
+        // RFC 9113 §6.9 — WINDOW_UPDATE has a fixed 4-octet payload (the
+        // 31-bit increment plus a reserved bit). Anything else is a
+        // FRAME_SIZE_ERROR connection-level fault. We inspect the frame's
+        // declared total payload length (not `receivedFrame.Payload`,
+        // which strips the parsed extended header and is empty for a
+        // valid WINDOW_UPDATE).
+        if (receivedFrame.Frame.PayloadLength != 4)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 WINDOW_UPDATE frame payload must be 4 octets; got {receivedFrame.Frame.PayloadLength}.");
+        }
+
+        int increment = receivedFrame.Frame.WindowUpdateSizeIncrement;
+
+        // RFC 9113 §6.9 — an increment of 0 is a protocol error:
+        // connection-level when delivered on stream 0, stream-level
+        // when delivered on a specific stream.
+        if (increment == 0)
+        {
+            if (receivedFrame.Frame.StreamId == 0)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    "HTTP/2 WINDOW_UPDATE on stream 0 with increment 0.");
+            }
+
+            throw new Http2StreamException(
+                receivedFrame.Frame.StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 WINDOW_UPDATE on stream {receivedFrame.Frame.StreamId} with increment 0.");
+        }
+
+        if (receivedFrame.Frame.StreamId == 0)
+        {
+            // Connection-level credit. Overflow → FLOW_CONTROL_ERROR
+            // connection-level (RFC 9113 §6.9.1).
+            if (!_connectionSendWindow.TryReplenish(increment))
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.FlowControlError,
+                    $"HTTP/2 connection-level send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
+            }
+
+            return;
+        }
+
+        // Stream-level credit. Overflow → FLOW_CONTROL_ERROR
+        // stream-level (RFC 9113 §6.9.1). If the stream is unknown we
+        // disambiguate the same way as DATA / RST_STREAM: id > highest
+        // observed is "idle" (connection error); id ≤ highest is
+        // "recently closed" (silently ignore — the peer is racing our
+        // RST_STREAM or our END_STREAM acknowledgement, RFC 9113 §5.1).
+        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        {
+            if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 WINDOW_UPDATE on idle stream {receivedFrame.Frame.StreamId}.");
+            }
+
+            return;
+        }
+
+        if (!stream.SendWindow.TryReplenish(increment))
+        {
+            throw new Http2StreamException(
+                receivedFrame.Frame.StreamId,
+                Http2ErrorCode.FlowControlError,
+                $"HTTP/2 stream {receivedFrame.Frame.StreamId} send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
         }
     }
 
@@ -338,9 +445,42 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
         }
 
+        // Snapshot the prior INITIAL_WINDOW_SIZE so we can compute the
+        // delta to retroactively apply to existing streams' send windows
+        // (RFC 9113 §6.9.2). Connection-level windows are NOT adjusted —
+        // they have a fixed initial value of 65535 and only change via
+        // WINDOW_UPDATE.
+        uint priorInitialWindowSize = _remoteSettings.InitialWindowSize;
+
         foreach (Http2PeerSetting setting in settings)
         {
             _remoteSettings.Apply(setting);
+        }
+
+        // RFC 9113 §6.9.2 — when the peer changes SETTINGS_INITIAL_WINDOW_SIZE
+        // we adjust every existing stream's send window by the delta. The
+        // adjustment can drive the window negative; only when it would
+        // exceed 2^31-1 is it a FLOW_CONTROL_ERROR.
+        if (_remoteSettings.InitialWindowSize != priorInitialWindowSize)
+        {
+            long delta = (long)_remoteSettings.InitialWindowSize - priorInitialWindowSize;
+            if (delta < int.MinValue || delta > int.MaxValue)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.FlowControlError,
+                    $"SETTINGS_INITIAL_WINDOW_SIZE delta {delta} is outside the legal range.");
+            }
+
+            int signedDelta = (int)delta;
+            foreach (Http2Stream existingStream in _streams.Values)
+            {
+                if (!existingStream.SendWindow.TryAdjustInitialWindow(signedDelta))
+                {
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.FlowControlError,
+                        $"SETTINGS_INITIAL_WINDOW_SIZE change pushed stream {existingStream.StreamId} send window above {Http2FlowControlWindow.MaxValue}.");
+                }
+            }
         }
 
         _receivedClientSettings = true;
@@ -432,6 +572,19 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "HTTP/2 DATA frame received on stream 0.");
         }
 
+        // RFC 9113 §5.2.2 — DATA frame's *full payload length* (including
+        // padding) counts against the connection's receive window. We
+        // consume it before we even know which stream it belongs to so a
+        // misbehaving peer cannot exhaust the connection window by sending
+        // DATA on rapidly-closed streams.
+        int dataPayloadLength = receivedFrame.Frame.PayloadLength;
+        if (dataPayloadLength > 0 && !_connectionReceiveWindow.TryConsume(dataPayloadLength))
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FlowControlError,
+                $"HTTP/2 DATA frame of {dataPayloadLength} octets exceeded the connection-level receive window.");
+        }
+
         if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
         {
             // Disambiguate idle vs. recently-closed streams (RFC 9113 §5.1):
@@ -452,6 +605,18 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 receivedFrame.Frame.StreamId,
                 Http2ErrorCode.StreamClosed,
                 $"HTTP/2 DATA frame received on closed stream {receivedFrame.Frame.StreamId}.");
+        }
+
+        // RFC 9113 §5.2.2 — the same DATA frame also counts against the
+        // stream's receive window. Exhaustion is a stream error per §6.9.1
+        // unless the peer was lied to about the initial window — we treat
+        // it conservatively as FLOW_CONTROL_ERROR at the stream level.
+        if (dataPayloadLength > 0 && !stream.ReceiveWindow.TryConsume(dataPayloadLength))
+        {
+            throw new Http2StreamException(
+                receivedFrame.Frame.StreamId,
+                Http2ErrorCode.FlowControlError,
+                $"HTTP/2 DATA frame of {dataPayloadLength} octets exceeded the stream {receivedFrame.Frame.StreamId} receive window.");
         }
 
         stream.ReceiveData(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
@@ -494,7 +659,15 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     {
         if (!_streams.TryGetValue(streamId, out Http2Stream? stream))
         {
-            stream = new Http2Stream(streamId);
+            // RFC 9113 §6.9.2 — new streams inherit their initial windows
+            // from the peer-advertised SETTINGS_INITIAL_WINDOW_SIZE on the
+            // send side and our locally-advertised value on the receive
+            // side. Subsequent SETTINGS frames adjust existing windows by
+            // delta; new streams always pick up the current snapshot.
+            stream = new Http2Stream(
+                streamId,
+                initialSendWindow: _remoteSettings.InitialWindowSize,
+                initialReceiveWindow: _localSettings.InitialWindowSize);
             _streams.Add(streamId, stream);
         }
 
@@ -652,6 +825,40 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         return new ReceivedFrame(frame, payloadSequence.IsEmpty ? Array.Empty<byte>() : payloadSequence.ToArray());
+    }
+
+    /// <summary>
+    /// Emits a <c>WINDOW_UPDATE</c> frame for <paramref name="streamId"/>
+    /// (stream 0 for connection-level credit) crediting
+    /// <paramref name="increment"/> octets back to the peer (RFC 9113 §6.9).
+    /// </summary>
+    private async Task EmitWindowUpdateAsync(int streamId, int increment, CancellationToken cancellationToken)
+    {
+        if (increment <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Http2Frame frame = new();
+            frame.PrepareWindowUpdate(streamId, increment);
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+        catch
+        {
+            // Best-effort: if the wire is already down, the connection-level
+            // teardown path will surface the error.
+        }
     }
 
     /// <summary>

@@ -14,8 +14,17 @@ internal sealed class TestTransportConnectionContext : ITransportConnectionConte
 
     public TestTransportConnectionContext(byte[] input, EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null)
     {
-        Pipe inputPipe = new();
-        Pipe outputPipe = new();
+        // Pipes default to pauseWriterThreshold = 64 KB, which blocks the
+        // synchronous prime write below for any input larger than that.
+        // Tests for flow-control / large-frame scenarios need bigger
+        // buffers; disable the threshold so all test payloads land
+        // immediately.
+        PipeOptions pipeOptions = new(
+            pauseWriterThreshold: 0,
+            resumeWriterThreshold: 0,
+            useSynchronizationContext: false);
+        Pipe inputPipe = new(pipeOptions);
+        Pipe outputPipe = new(pipeOptions);
 
         inputPipe.Writer.WriteAsync(input).GetAwaiter().GetResult();
         inputPipe.Writer.Complete();

@@ -31,7 +31,11 @@ internal static class Http2FrameReader
 
         if (payloadLength > maxFrameSize)
         {
-            throw new InvalidDataException($"The HTTP/2 frame payload length '{payloadLength}' exceeded the negotiated maximum '{maxFrameSize}'.");
+            // RFC 9113 §4.2 — defense in depth (the connection-context's
+            // ReadFrameAsync performs the same check first).
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 frame payload length {payloadLength} exceeded the negotiated maximum {maxFrameSize}.");
         }
 
         long frameLength = HeaderLength + payloadLength;
@@ -92,7 +96,13 @@ internal static class Http2FrameReader
 
         if (extendedHeaderLength > frame.PayloadLength)
         {
-            throw new InvalidDataException($"The HTTP/2 frame '{frame.Type}' did not contain the expected payload fields.");
+            // RFC 9113 §4.2 — frames that arrive with a payload too short
+            // to carry their mandatory fixed fields are a connection-level
+            // FRAME_SIZE_ERROR. Surface it as a typed connection error so
+            // the receive loop can emit GOAWAY before tearing down.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 {frame.Type} frame payload length {frame.PayloadLength} is too short for its required fixed fields.");
         }
 
         ReadOnlySpan<byte> extendedHeaders = AsSpan(readableBuffer.Slice(HeaderLength, extendedHeaderLength));

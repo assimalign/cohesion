@@ -601,6 +601,116 @@ public class Http2TransportTests
         foundRstStream.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE with increment 0 on stream 0 with PROTOCOL_ERROR")]
+    public async Task Http2_OnWindowUpdateConnectionZeroIncrement_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.9 — a WINDOW_UPDATE on stream 0 with an increment of
+        // 0 is a connection-level protocol error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] windowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, new byte[4]); // 31-bit increment = 0
+        await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE with wrong payload length")]
+    public async Task Http2_OnWindowUpdateWrongPayloadLength_ShouldGoAwayFrameSizeError()
+    {
+        // RFC 9113 §6.9 — WINDOW_UPDATE MUST carry exactly 4 octets of payload.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] windowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, new byte[3]);
+        await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.FrameSizeError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE that overflows the connection send window")]
+    public async Task Http2_OnWindowUpdateOverflowingConnectionWindow_ShouldGoAwayFlowControlError()
+    {
+        // RFC 9113 §6.9.1 — a WINDOW_UPDATE that would push the window past
+        // 2^31-1 is a FLOW_CONTROL_ERROR. Start with the default window of
+        // 65535 and credit 2^31-1 to push over the limit.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Big-endian 31-bit increment = int.MaxValue (= 0x7FFFFFFF).
+        byte[] hugeIncrement = new byte[] { 0x7F, 0xFF, 0xFF, 0xFF };
+        byte[] windowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, hugeIncrement);
+        await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.FlowControlError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should accept a valid WINDOW_UPDATE on stream 0")]
+    public async Task Http2_OnValidWindowUpdate_ShouldAcceptWithoutError()
+    {
+        // Sanity check that the happy path through ProcessWindowUpdateFrame
+        // does not produce a GOAWAY / RST_STREAM. A standard request follows
+        // the WINDOW_UPDATE so we can confirm the connection survives.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Increment = 1024, big-endian.
+        byte[] increment = new byte[] { 0, 0, 4, 0 };
+        byte[] windowUpdate = Http2TestSettings.RawFrame(0x8, 0, 0, increment);
+        byte[] request = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        byte[] requestWithoutPreface = new byte[request.Length - preface.Length];
+        Array.Copy(request, preface.Length, requestWithoutPreface, 0, requestWithoutPreface.Length);
+
+        TestTransportConnectionContext transportContext = new(Combine(preface, settings, windowUpdate, requestWithoutPreface));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Path.Value.ShouldBe("/");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryConsume should drain to zero and refuse underflow")]
+    public void Http2_FlowControlWindow_TryConsume_RefusesUnderflow()
+    {
+        Http2FlowControlWindow window = new(100);
+
+        window.TryConsume(40).ShouldBeTrue();
+        window.Available.ShouldBe(60L);
+        window.TryConsume(60).ShouldBeTrue();
+        window.Available.ShouldBe(0L);
+        // Drained — any additional consume refuses.
+        window.TryConsume(1).ShouldBeFalse();
+        window.Available.ShouldBe(0L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryReplenish should refuse 0 increments and overflow")]
+    public void Http2_FlowControlWindow_TryReplenish_RefusesZeroAndOverflow()
+    {
+        Http2FlowControlWindow window = new(65_535);
+
+        // RFC 9113 §6.9 — a 0 increment is a protocol error; the helper
+        // surfaces it as a refused replenish.
+        window.TryReplenish(0).ShouldBeFalse();
+        window.Available.ShouldBe(65_535L);
+
+        // Replenishing up to the cap is allowed; pushing past 2^31-1 is
+        // not (FLOW_CONTROL_ERROR per §6.9.1).
+        window.TryReplenish(int.MaxValue - 65_535).ShouldBeTrue();
+        window.Available.ShouldBe((long)int.MaxValue);
+        window.TryReplenish(1).ShouldBeFalse();
+        window.Available.ShouldBe((long)int.MaxValue);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryAdjustInitialWindow should allow negative windows")]
+    public void Http2_FlowControlWindow_TryAdjustInitialWindow_AllowsNegative()
+    {
+        // RFC 9113 §6.9.2 — a SETTINGS_INITIAL_WINDOW_SIZE reduction can
+        // drive an existing stream's send window negative. The helper
+        // allows that; only overflow above 2^31-1 is rejected.
+        Http2FlowControlWindow window = new(100);
+        window.TryAdjustInitialWindow(-150).ShouldBeTrue();
+        window.Available.ShouldBe(-50L);
+
+        // Overflow rejection.
+        Http2FlowControlWindow large = new(int.MaxValue - 5);
+        large.TryAdjustInitialWindow(10).ShouldBeFalse();
+        large.Available.ShouldBe((long)int.MaxValue - 5);
+    }
+
     private static byte[] Combine(params byte[][] buffers)
     {
         using MemoryStream stream = new();
