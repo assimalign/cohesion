@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
-internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
+internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
 {
     private static readonly byte[] ClientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
@@ -24,10 +24,18 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
     // writing is bounded by the remote cap.
     private readonly Http2ConnectionSettings _localSettings;
     private readonly Http2ConnectionSettings _remoteSettings;
+    // RFC 9113 §4.1 + §6.8 — a single TCP connection multiplexes many
+    // logical streams. Frames from concurrent senders MUST NOT interleave
+    // on the wire, or the peer's parser will see a corrupted frame
+    // sequence. This semaphore serializes every outbound frame write on
+    // the connection, regardless of whether it originated from a
+    // SendAsync, a SETTINGS/PING ACK, a GOAWAY, or graceful shutdown.
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private int? _continuationStreamId;
     private bool _initialized;
     private bool _receivedClientSettings;
     private int _lastInboundStreamId;
+    private int _gracefulCloseStarted;
 
     public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
         : base(transportContext, isSecure)
@@ -93,9 +101,27 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, http2Context.Response.Cookies, bodyBytes.Length);
 
-        await WriteHeaderBlockAsync(http2Context.StreamId, headerBlock, endStream: bodyBytes.Length == 0, cancellationToken).ConfigureAwait(false);
-        await WriteBodyAsync(http2Context.StreamId, bodyBytes, cancellationToken).ConfigureAwait(false);
-        await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave.
+        // The whole HEADERS [+ CONTINUATION...] [+ DATA...] sequence MUST be
+        // emitted contiguously on the wire. Hold the connection write lock
+        // for the duration so concurrent SendAsync calls and receive-loop
+        // ACK frames cannot tear the frame sequence.
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await WriteHeaderBlockAsync(http2Context.StreamId, headerBlock, endStream: bodyBytes.Length == 0, cancellationToken).ConfigureAwait(false);
+            await WriteBodyAsync(http2Context.StreamId, bodyBytes, cancellationToken).ConfigureAwait(false);
+            // RFC 9113 §6.8 / #686 — the caller MUST observe a guarantee that
+            // the response bytes have been handed off to the transport pipe
+            // before SendAsync returns. Flush the pipe writer here so the
+            // bytes are durably committed to the send-side of the underlying
+            // transport before the lock is released.
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -126,8 +152,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         byte[] settingsPayload = EncodeLocalSettings();
         Http2Frame settingsFrame = new();
         settingsFrame.PrepareSettings(Http2SettingsFrameFlags.None);
-        await Http2FrameWriter.WriteAsync(Stream, settingsFrame, settingsPayload, cancellationToken).ConfigureAwait(false);
-        await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Http2FrameWriter.WriteAsync(Stream, settingsFrame, settingsPayload, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
 
         _initialized = true;
     }
@@ -235,8 +269,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
         Http2Frame acknowledgement = new();
         acknowledgement.PrepareSettings(Http2SettingsFrameFlags.Acknowledge);
-        await Http2FrameWriter.WriteAsync(Stream, acknowledgement, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
-        await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Http2FrameWriter.WriteAsync(Stream, acknowledgement, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private Http2Context? ProcessHeadersFrame(ReceivedFrame receivedFrame)
@@ -309,8 +351,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
 
         Http2Frame acknowledgement = new();
         acknowledgement.PreparePing(Http2PingFrameFlags.Acknowledge);
-        await Http2FrameWriter.WriteAsync(Stream, acknowledgement, receivedFrame.Payload, cancellationToken).ConfigureAwait(false);
-        await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Http2FrameWriter.WriteAsync(Stream, acknowledgement, receivedFrame.Payload, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     private Http2Context? TryCompleteStream(Http2Stream stream)
@@ -500,8 +550,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         {
             Http2Frame goAway = new();
             goAway.PrepareGoAway(_lastInboundStreamId, errorCode);
-            await Http2FrameWriter.WriteAsync(Stream, goAway, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
-            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await Http2FrameWriter.WriteAsync(Stream, goAway, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
         }
         catch
         {
@@ -563,6 +621,83 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext
         }
 
         return payload;
+    }
+
+    /// <summary>
+    /// Performs an RFC 9113 §6.8 graceful close: emits a <c>GOAWAY</c>
+    /// frame carrying <see cref="Http2ErrorCode.NoError"/>, then signals
+    /// the transport's send pipeline that no further bytes will be
+    /// written. The transport's send task reads the remaining bytes,
+    /// performs its final <c>Socket.SendAsync</c> (which waits for the
+    /// kernel to accept the bytes), then exits — at which point the
+    /// underlying socket is torn down through the transport's own
+    /// teardown path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Closes the gap identified by #686: previously, <see cref="Http2Connection.DisposeAsync"/>
+    /// invoked <c>ITransportConnection.DisposeAsync</c> directly, which
+    /// aborts the socket immediately and can race the send task's
+    /// in-flight <c>Socket.SendAsync</c>. Completing the pipe writer
+    /// here lets the send task drain naturally; the caller then waits
+    /// for the connection state to transition out of <c>Open</c> before
+    /// declaring the close complete.
+    /// </para>
+    /// <para>
+    /// Idempotent — repeated invocations after the first are no-ops.
+    /// </para>
+    /// </remarks>
+    public async ValueTask GracefulCloseAsync(CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _gracefulCloseStarted, 1) == 1)
+        {
+            return;
+        }
+
+        // EnsureInitializedAsync may not have run if the receive loop was
+        // never started. Skip GOAWAY in that case; the peer has not seen
+        // any HTTP/2 traffic from us yet, so closing the underlying socket
+        // is enough.
+        if (!_initialized)
+        {
+            await CompleteOutputAsync().ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            await EmitGoAwayAsync(Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await CompleteOutputAsync().ConfigureAwait(false);
+        }
+    }
+
+    private ValueTask CompleteOutputAsync()
+    {
+        try
+        {
+            // RFC 9113 §6.8 — completing the pipe writer signals the
+            // transport's send loop that no further bytes will be queued.
+            // The send loop processes its remaining backlog (one final
+            // Socket.SendAsync, which waits for the kernel to ACK) and
+            // then exits — closing the socket cleanly.
+            return Pipe.Output.CompleteAsync();
+        }
+        catch
+        {
+            // The writer may already be completed if a teardown ran
+            // concurrently. Idempotent.
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await GracefulCloseAsync().ConfigureAwait(false);
+        _writeLock.Dispose();
     }
 
     private readonly struct ReceivedFrame
