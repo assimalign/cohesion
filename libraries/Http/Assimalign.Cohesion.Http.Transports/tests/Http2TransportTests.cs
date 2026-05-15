@@ -105,6 +105,15 @@ public class Http2TransportTests
         int port = GetAvailablePort();
         List<string> observedPaths = new();
 
+        // Synchronizes the server task's connection teardown with the client side.
+        // Without this, the server breaks out of the receive loop as soon as it has
+        // dispatched both responses; the resulting `await using IHttpConnection`
+        // disposal closes the H2 connection and can race the client's final frame
+        // read on slow runners (predominantly macOS), surfacing as
+        // "response ended prematurely". The signal lets the test code release the
+        // server only after both response bodies have been fully consumed.
+        TaskCompletionSource clientFinishedReading = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         await using HttpConnectionListener listener = HttpConnectionListener.Create(options =>
         {
             options.UseHttp2(transport =>
@@ -120,17 +129,28 @@ public class Http2TransportTests
 
             await foreach (IHttpContext context in connectionContext.ReceiveAsync(cancellationToken))
             {
-                observedPaths.Add(context.Request.Path.Value);
-
-                byte[] body = Encoding.UTF8.GetBytes(context.Request.Path.Value);
-                context.Response.StatusCode = HttpStatusCode.Ok;
-                context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
-                await context.Response.Body.WriteAsync(body, 0, body.Length, cancellationToken);
-                await connectionContext.SendAsync(context, cancellationToken);
-                await context.DisposeAsync();
-
-                if (observedPaths.Count == 2)
+                try
                 {
+                    observedPaths.Add(context.Request.Path.Value);
+
+                    byte[] body = Encoding.UTF8.GetBytes(context.Request.Path.Value);
+                    context.Response.StatusCode = HttpStatusCode.Ok;
+                    context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+                    await context.Response.Body.WriteAsync(body, 0, body.Length, cancellationToken);
+                    await connectionContext.SendAsync(context, cancellationToken);
+                }
+                finally
+                {
+                    await context.DisposeAsync();
+                }
+
+                if (observedPaths.Count >= 2)
+                {
+                    // Hold the receive loop open until the client confirms both
+                    // responses were fully read. This blocks the `await using
+                    // IHttpConnection` disposal until the H2 conversation has
+                    // wound down on the client side.
+                    await clientFinishedReading.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                     break;
                 }
             }
@@ -145,6 +165,9 @@ public class Http2TransportTests
         string firstBody = await SendHttp2RequestAsync(client, new Uri($"http://127.0.0.1:{port}/one"), cancellationToken);
         string secondBody = await SendHttp2RequestAsync(client, new Uri($"http://127.0.0.1:{port}/two"), cancellationToken);
 
+        // Both response bodies fully consumed — release the server task so it can
+        // tear down the connection cleanly.
+        clientFinishedReading.SetResult();
         await serverTask;
 
         // Assert

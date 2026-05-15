@@ -1,1 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Description>Lifecycle-managed HttpClient factory for the Cohesion HTTP family. Wraps System.Net.Http.HttpClient with named-client configuration and periodic handler rotation to mitigate the socket-exhaustion / stale-DNS trade-off that plagues naive HttpClient lifetime management.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Assimalign.Cohesion.Http.ClientFactory.Tests" />
+	</ItemGroup>
+</Project>
