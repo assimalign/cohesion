@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,8 +106,7 @@ internal static class Http1MessageReader
             queryCollection,
             headers,
             cookies,
-            new MemoryStream(bodyBytes, writable: false),
-            new ClaimsPrincipal(new ClaimsIdentity()));
+            new MemoryStream(bodyBytes, writable: false));
         Http1Response response = new();
 
         bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");

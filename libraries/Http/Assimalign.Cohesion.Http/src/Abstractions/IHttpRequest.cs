@@ -1,5 +1,4 @@
 using System.IO;
-using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -8,10 +7,11 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// The protocol core exposes only wire-level data &#8211; method, target, scheme, host,
-/// query, headers, cookies, and the raw <see cref="Body"/> stream. Parsed-form access
-/// lives in <c>Assimalign.Cohesion.Http.Forms</c> as an extension method that reads
-/// the body and caches the result; the protocol core does not require any
-/// form-body parser to be wired up.
+/// query, headers, cookies, and the raw <see cref="Body"/> stream. Identity-aware
+/// state (e.g. <c>ClaimsPrincipal</c>) and parsed-form access live in higher-layer
+/// packages (<c>Assimalign.Cohesion.Web.Authentication</c>, <c>Assimalign.Cohesion.Http.Forms</c>)
+/// and are surfaced as extension members or features on
+/// <see cref="IHttpContext"/>.
 /// </remarks>
 public interface IHttpRequest
 {
@@ -51,12 +51,12 @@ public interface IHttpRequest
     IHttpCookieCollection Cookies { get; }
 
     /// <summary>
+    /// Get's the context associated with the request.
+    /// </summary>
+    IHttpContext HttpContext { get; }
+
+    /// <summary>
     /// Gets the body of the request.
     /// </summary>
     Stream Body { get; }
-
-    /// <summary>
-    /// Gets the authenticated principal associated with the request.
-    /// </summary>
-    ClaimsPrincipal ClaimsPrincipal { get; }
 }

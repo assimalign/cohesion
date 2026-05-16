@@ -139,3 +139,19 @@ public static class InvalidOperationExceptionExtensions
         }
     }
 }
+
+public static class ArgumentOutOfRangeExceptionExtensions
+{
+    extension(ArgumentOutOfRangeException exception)
+    {
+        public static void ThrowIf(
+            [DoesNotReturnIf(true)] bool condition,
+            [CallerArgumentExpression(nameof(condition))] string? message = null)
+        {
+            if (condition)
+            {
+                throw new ArgumentOutOfRangeException(message);
+            }
+        }
+    }
+}

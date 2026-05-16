@@ -12,71 +12,157 @@ namespace Assimalign.Cohesion.Http.Sessions.Tests;
 public class HttpContextSessionExtensionsTests
 {
     [Fact]
-    public void GetSession_BeforeSetSession_ShouldReturnNull()
+    public void Session_BeforeSet_ShouldReturnNull()
     {
         IHttpContext context = new BareHttpContext();
 
-        IHttpSession? session = context.GetSession();
+        IHttpSession? session = context.Session;
 
         session.ShouldBeNull();
     }
 
     [Fact]
-    public void SetSession_ThenGetSession_ShouldReturnInstalledSession()
+    public void Session_BeforeSet_ShouldNotInstallFeatureOnRead()
+    {
+        // The getter must remain side-effect-free: reading Session on a context
+        // that has never seen session middleware should leave the feature
+        // collection untouched so callers can still test for the presence of an
+        // IHttpSessionFeature later.
+        IHttpContext context = new BareHttpContext();
+
+        _ = context.Session;
+
+        context.Features.Get<IHttpSessionFeature>().ShouldBeNull();
+    }
+
+    [Fact]
+    public void Session_Set_ShouldRoundTripViaGetter()
     {
         IHttpContext context = new BareHttpContext();
         IHttpSession installed = new HttpSession("session-id");
 
-        context.SetSession(installed);
+        context.Session = installed;
 
-        context.GetSession().ShouldBeSameAs(installed);
+        context.Session.ShouldBeSameAs(installed);
     }
 
     [Fact]
-    public void RequireSession_BeforeSetSession_ShouldThrow()
-    {
-        IHttpContext context = new BareHttpContext();
-
-        Should.Throw<InvalidOperationException>(() => context.RequireSession());
-    }
-
-    [Fact]
-    public void RequireSession_AfterSetSession_ShouldReturnInstance()
+    public void Session_Set_ShouldInstallSessionFeature()
     {
         IHttpContext context = new BareHttpContext();
         IHttpSession installed = new HttpSession("session-id");
-        context.SetSession(installed);
 
-        IHttpSession resolved = context.RequireSession();
+        context.Session = installed;
+
+        IHttpSessionFeature? feature = context.Features.Get<IHttpSessionFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Session.ShouldBeSameAs(installed);
+    }
+
+    [Fact]
+    public void Session_SetTwice_ShouldReuseFeatureInstance()
+    {
+        // Subsequent assignments mutate the existing IHttpSessionFeature
+        // rather than churning a new one into the collection. This matters for
+        // observers that captured the feature reference earlier in the pipeline.
+        IHttpContext context = new BareHttpContext();
+        context.Session = new HttpSession("first");
+        IHttpSessionFeature firstFeature = context.Features.Get<IHttpSessionFeature>()!;
+
+        IHttpSession second = new HttpSession("second");
+        context.Session = second;
+        IHttpSessionFeature secondFeature = context.Features.Get<IHttpSessionFeature>()!;
+
+        secondFeature.ShouldBeSameAs(firstFeature);
+        secondFeature.Session.ShouldBeSameAs(second);
+    }
+
+    [Fact]
+    public void Session_SetNull_ShouldThrow()
+    {
+        IHttpContext context = new BareHttpContext();
+
+        Should.Throw<ArgumentNullException>(() => context.Session = null!);
+    }
+
+    [Fact]
+    public void Session_GetOnNullContext_ShouldThrow()
+    {
+        IHttpContext context = null!;
+
+        Should.Throw<ArgumentNullException>(() => _ = context.Session);
+    }
+
+    [Fact]
+    public void Session_SetOnNullContext_ShouldThrow()
+    {
+        IHttpContext context = null!;
+        IHttpSession session = new HttpSession("session-id");
+
+        Should.Throw<ArgumentNullException>(() => context.Session = session);
+    }
+
+    [Fact]
+    public void Session_PreInstalledFeature_ShouldBeObservedByGetter()
+    {
+        // Middleware that installs the feature directly (rather than via the
+        // Session setter) must still be visible through context.Session.
+        IHttpContext context = new BareHttpContext();
+        IHttpSession session = new HttpSession("preinstalled");
+        context.Features.Set<IHttpSessionFeature>(new TestSessionFeature(session));
+
+        IHttpSession? observed = context.Session;
+
+        observed.ShouldBeSameAs(session);
+    }
+
+    [Fact]
+    public void RequireSession_BeforeSet_ShouldThrow()
+    {
+        IHttpContext context = new BareHttpContext();
+
+        Should.Throw<InvalidOperationException>(() => _ = context.RequireSession);
+    }
+
+    [Fact]
+    public void RequireSession_AfterSet_ShouldReturnInstance()
+    {
+        IHttpContext context = new BareHttpContext();
+        IHttpSession installed = new HttpSession("session-id");
+        context.Session = installed;
+
+        IHttpSession resolved = context.RequireSession;
 
         resolved.ShouldBeSameAs(installed);
     }
 
     [Fact]
-    public void SetSession_Twice_ShouldOverwrite()
-    {
-        IHttpContext context = new BareHttpContext();
-        IHttpSession first = new HttpSession("first");
-        IHttpSession second = new HttpSession("second");
-
-        context.SetSession(first);
-        context.SetSession(second);
-
-        context.GetSession().ShouldBeSameAs(second);
-    }
-
-    [Fact]
-    public void GetSession_NullContext_ShouldThrow()
+    public void RequireSession_OnNullContext_ShouldThrow()
     {
         IHttpContext context = null!;
 
-        Should.Throw<ArgumentNullException>(() => context.GetSession());
+        Should.Throw<ArgumentNullException>(() => _ = context.RequireSession);
     }
 
     /// <summary>
-    /// Bare-bones <see cref="IHttpContext"/> stub so the extension methods can be exercised
-    /// without pulling the full transport stack. Only the <see cref="IHttpContext.Items"/>
-    /// dictionary backs the session storage; everything else is unused for these tests.
+    /// Test-local <see cref="IHttpSessionFeature"/> stand-in. Used to verify
+    /// that the extension getter consults the feature collection rather than
+    /// only recognizing the package's internal default implementation.
+    /// </summary>
+    private sealed class TestSessionFeature : IHttpSessionFeature
+    {
+        public TestSessionFeature(IHttpSession session)
+        {
+            Session = session;
+        }
+
+        public IHttpSession Session { get; set; }
+    }
+
+    /// <summary>
+    /// Bare-bones <see cref="IHttpContext"/> stub. Only
+    /// <see cref="IHttpContext.Features"/> is exercised; the rest of the surface
+    /// is stubbed to satisfy the interface contract.
     /// </summary>
     private sealed class BareHttpContext : IHttpContext
     {
@@ -84,9 +170,10 @@ public class HttpContextSessionExtensionsTests
         public IHttpRequest Request => null!;
         public IHttpResponse Response => null!;
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
+        public IHttpProtocolUpgrade? Upgrade => null;
+        public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public CancellationToken RequestAborted => CancellationToken.None;
-        public IHttpProtocolUpgrade? Upgrade => null;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

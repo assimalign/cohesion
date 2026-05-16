@@ -10,7 +10,7 @@ internal sealed class Http1Context : TransportHttpContext
     public Http1Context(
         Http1Request request,
         Http1Response response,
-        IHttpConnectionInfo connectionInfo,
+        HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         bool keepAlive,
         Stream? transportStream = null,
