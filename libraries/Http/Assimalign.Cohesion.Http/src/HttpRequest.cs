@@ -47,9 +47,13 @@ public abstract class HttpRequest : IHttpRequest
     public abstract HttpCookieCollection Cookies { get; }
 
     /// <inheritdoc />
+    public abstract HttpContext HttpContext { get; }
+
+    /// <inheritdoc />
     public abstract Stream Body { get; set; }
 
     IHttpQueryCollection IHttpRequest.Query => Query;
     IHttpHeaderCollection IHttpRequest.Headers => Headers;
     IHttpCookieCollection IHttpRequest.Cookies => Cookies;
+    IHttpContext IHttpRequest.HttpContext => HttpContext;
 }

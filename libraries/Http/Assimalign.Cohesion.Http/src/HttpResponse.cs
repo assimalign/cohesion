@@ -31,10 +31,14 @@ public abstract class HttpResponse : IHttpResponse
     /// </summary>
     public abstract HttpCookieCollection Cookies { get; }
 
+
+    /// <inheritdoc />
+    public abstract HttpContext HttpContext { get; }
+
     /// <inheritdoc />
     public abstract Stream Body { get; set; }
 
     IHttpHeaderCollection IHttpResponse.Headers => Headers;
-
     IHttpCookieCollection IHttpResponse.Cookies => Cookies;
+    IHttpContext IHttpResponse.HttpContext => HttpContext;
 }

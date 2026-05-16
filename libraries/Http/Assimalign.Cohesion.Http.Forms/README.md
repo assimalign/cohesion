@@ -17,6 +17,11 @@ cache, the DNS-over-HTTPS transport) has no use for it. Keeping the
 form model out of the core lets the core stay small and AOT-friendly
 while making form support an explicit opt-in.
 
+The familiar property-style `request.Form` access (on `IHttpRequest`)
+and the lazy `context.ReadFormAsync()` parse entry point (on `IHttpContext`)
+are restored here through a .NET 10 extension property + extension method,
+both backed by an `IHttpFormFeature` stored in `IHttpContext.Features`.
+
 ## Surface
 
 | Type | Role |
@@ -27,16 +32,18 @@ while making form support an explicit opt-in.
 | `HttpFormCollection` | Default in-memory implementation |
 | `HttpFormFile` | Default in-memory file implementation |
 | `HttpFormFileCollection` | Default in-memory file collection |
-| `HttpRequestFormExtensions` | `GetForm()` / `SetForm()` / `ReadFormAsync()` extensions on `IHttpRequest` |
+| `IHttpFormFeature` | Per-exchange parsed-form state stored in `IHttpContext.Features` |
+| `HttpFormFeature` | Default in-memory feature implementation (internal; constructed via `Form` setter / `ReadFormAsync`) |
+| `HttpContextFormExtensions` | `request.Form` extension property on `IHttpRequest` + `context.ReadFormAsync(...)` extension method on `IHttpContext` |
 
 ## Usage
 
 ```csharp
 using Assimalign.Cohesion.Http;
 
-// Once form parsing is wired up, callers ask the request for the
-// parsed form directly:
-IHttpFormCollection form = await request.ReadFormAsync(cancellationToken);
+// Once form parsing is wired up, callers ask the context for the parsed
+// form directly:
+IHttpFormCollection form = await context.ReadFormAsync(cancellationToken);
 
 string? user = form["user"];
 foreach (IHttpFormFile file in form.Files)
@@ -44,7 +51,37 @@ foreach (IHttpFormFile file in form.Files)
     using Stream stream = file.OpenReadStream();
     // ...
 }
+
+// Pre-attach a parsed collection (e.g. from a test fixture or a custom
+// middleware that does its own body buffering) directly on the request:
+HttpFormCollection prebuilt = new();
+prebuilt.Add("name", "cohesion");
+context.Request.Form = prebuilt;
+
+// Subsequent reads see the same instance:
+IHttpFormCollection same = await context.ReadFormAsync();    // returns prebuilt
+IHttpFormCollection alsoSame = context.Request.Form!;        // returns prebuilt
 ```
+
+## Why `request.Form` reaches through to the context
+
+The `Form` extension property hangs off `IHttpRequest` so call sites read
+naturally (`context.Request.Form` mirrors the wire-level intuition that a
+form is request-side state). Storage, however, is the strongly-typed
+`IHttpContext.Features` collection &mdash; the same place sessions and
+authentication features live &mdash; reached through the
+`IHttpRequest.HttpContext` back-reference. That keeps a single
+type-keyed extensibility seam for all higher-layer features without
+duplicating it onto every wire-level type.
+
+## Implementing a custom feature
+
+`HttpFormFeature` is internal. Middleware that needs richer form-handling
+behaviour (streaming uploads, alternate buffering strategies, in-process
+caching) should implement `IHttpFormFeature` directly and attach it via
+`context.Features.Set<IHttpFormFeature>(...)`. The `context.Form` getter
+and `context.ReadFormAsync(...)` extension method consult the feature
+collection for any implementation, not just the package's default.
 
 ## Status
 
@@ -55,4 +92,4 @@ per-version message readers and was removed together with the dead
 `IHttpRequest.Form` property when the protocol/web boundary moved.
 Until the parser lands, `ReadFormAsync` returns an empty collection
 when nothing has been pre-attached; consumers that already have a
-parsed collection can install it via `SetForm`.
+parsed collection can install it via `context.Form = ...`.

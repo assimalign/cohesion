@@ -23,6 +23,11 @@ public interface IHttpResponse
     IHttpCookieCollection Cookies { get; }
 
     /// <summary>
+    /// Get's the context associated with the response.
+    /// </summary>
+    IHttpContext HttpContext { get; }
+
+    /// <summary>
     /// Gets or sets the response body stream.
     /// </summary>
     Stream Body { get; set; }

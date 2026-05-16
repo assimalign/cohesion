@@ -11,13 +11,14 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The protocol core deliberately exposes only wire-level concerns &#8211;
 /// <see cref="Request"/>, <see cref="Response"/>, <see cref="ConnectionInfo"/>,
-/// <see cref="Features"/>, <see cref="Items"/>. Application-layer concepts such as
-/// sessions, authenticated principals, or parsed form bodies layer on top via
-/// extension methods in dedicated packages
+/// <see cref="Features"/>, <see cref="Items"/>. Application-layer concepts such
+/// as sessions, authenticated principals, and parsed form bodies layer on top
+/// via extension members in dedicated packages
 /// (<c>Assimalign.Cohesion.Http.Sessions</c>, <c>Assimalign.Cohesion.Http.Forms</c>,
-/// <c>Assimalign.Cohesion.Web.Authentication</c>, &#8230;). Strongly-typed,
-/// type-keyed state goes through <see cref="Features"/>; loosely-typed, name-keyed
-/// state goes through <see cref="Items"/>.
+/// <c>Assimalign.Cohesion.Web.Authentication</c>, &#8230;) that attach
+/// strongly-typed features to <see cref="Features"/>. <see cref="Items"/>
+/// remains available for genuinely loose, name-keyed ad-hoc bookkeeping that
+/// doesn't warrant a full feature contract.
 /// </para>
 /// </remarks>
 public interface IHttpContext : IAsyncDisposable
@@ -69,10 +70,11 @@ public interface IHttpContext : IAsyncDisposable
     IHttpFeatureCollection Features { get; }
 
     /// <summary>
-    /// Gets a bag of items shared for the lifetime of the exchange. Loosely-typed,
-    /// name-keyed state &mdash; sessions, parsed forms, ad-hoc per-request data &mdash;
-    /// attaches here through extension methods. Strongly-typed, type-keyed state
-    /// belongs in <see cref="Features"/> instead.
+    /// Gets a bag of items shared for the lifetime of the exchange.
+    /// Loosely-typed, name-keyed state &mdash; per-request bookkeeping that
+    /// crosses middleware boundaries but doesn't warrant a full feature
+    /// contract &mdash; attaches here. Strongly-typed, type-keyed state belongs
+    /// in <see cref="Features"/> instead.
     /// </summary>
     IDictionary<string, object?> Items { get; }
 

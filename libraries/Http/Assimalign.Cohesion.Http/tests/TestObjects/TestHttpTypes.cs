@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Http.Tests.TestObjects;
 
 internal sealed class TestHttpRequest : HttpRequest
 {
+    private HttpContext? _httpContext;
+
     public override HttpHost Host { get; set; } = HttpHost.Empty;
 
     public override HttpPath Path { get; set; } = HttpPath.Root;
@@ -22,18 +24,40 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
+    public override HttpContext HttpContext => _httpContext
+        ?? throw new InvalidOperationException(
+            "The HttpContext back-reference has not been attached. Construct the TestHttpRequest through a TestHttpContext.");
+
     public override Stream Body { get; set; } = Stream.Null;
+
+    internal void AttachContext(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _httpContext ??= context;
+    }
 }
 
 internal sealed class TestHttpResponse : HttpResponse
 {
+    private HttpContext? _httpContext;
+
     public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
 
     public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
     public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
+    public override HttpContext HttpContext => _httpContext
+        ?? throw new InvalidOperationException(
+            "The HttpContext back-reference has not been attached. Construct the TestHttpResponse through a TestHttpContext.");
+
     public override Stream Body { get; set; } = new MemoryStream();
+
+    internal void AttachContext(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _httpContext ??= context;
+    }
 }
 
 internal sealed class TestHttpContext : HttpContext
@@ -52,6 +76,10 @@ internal sealed class TestHttpContext : HttpContext
         Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(StringComparer.Ordinal);
         RequestAborted = requestAborted;
+
+        // Wire the back-references so request.HttpContext / response.HttpContext resolve to this context.
+        request.AttachContext(this);
+        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }

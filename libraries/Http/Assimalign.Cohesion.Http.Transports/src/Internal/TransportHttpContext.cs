@@ -8,8 +8,8 @@ internal abstract class TransportHttpContext : HttpContext
 {
     protected TransportHttpContext(
         HttpVersion version,
-        HttpRequest request,
-        HttpResponse response,
+        TransportHttpRequest request,
+        TransportHttpResponse response,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted)
     {
@@ -20,6 +20,14 @@ internal abstract class TransportHttpContext : HttpContext
         Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
         RequestAborted = requestAborted;
+
+        // Wire the back-references last so the request and response can resolve
+        // their owning context from this point forward. Construction order in
+        // the transports is request -> response -> context, so the
+        // HttpContext back-reference can only be installed after the context
+        // itself exists.
+        request.AttachContext(this);
+        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }

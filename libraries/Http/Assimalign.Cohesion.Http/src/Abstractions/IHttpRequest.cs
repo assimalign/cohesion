@@ -51,6 +51,11 @@ public interface IHttpRequest
     IHttpCookieCollection Cookies { get; }
 
     /// <summary>
+    /// Get's the context associated with the request.
+    /// </summary>
+    IHttpContext HttpContext { get; }
+
+    /// <summary>
     /// Gets the body of the request.
     /// </summary>
     Stream Body { get; }
