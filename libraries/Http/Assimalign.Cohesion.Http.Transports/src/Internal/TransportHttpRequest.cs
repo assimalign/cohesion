@@ -1,5 +1,4 @@
 using System.IO;
-using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal;
 
@@ -10,11 +9,10 @@ internal abstract class TransportHttpRequest : HttpRequest
         HttpPath path,
         HttpMethod method,
         HttpScheme scheme,
-        IHttpQueryCollection query,
-        IHttpHeaderCollection headers,
-        IHttpCookieCollection cookies,
-        Stream body,
-        ClaimsPrincipal claimsPrincipal)
+        HttpQueryCollection query,
+        HttpHeaderCollection headers,
+        HttpCookieCollection cookies,
+        Stream body)
     {
         Host = host;
         Path = path;
@@ -24,7 +22,6 @@ internal abstract class TransportHttpRequest : HttpRequest
         Headers = headers;
         Cookies = cookies;
         Body = body;
-        ClaimsPrincipal = claimsPrincipal;
     }
 
     public override HttpHost Host { get; set; }
@@ -35,13 +32,11 @@ internal abstract class TransportHttpRequest : HttpRequest
 
     public override HttpScheme Scheme { get; set; }
 
-    public override IHttpQueryCollection Query { get; }
+    public override HttpQueryCollection Query { get; }
 
-    public override IHttpHeaderCollection Headers { get; }
+    public override HttpHeaderCollection Headers { get; }
 
-    public override IHttpCookieCollection Cookies { get; }
+    public override HttpCookieCollection Cookies { get; }
 
     public override Stream Body { get; set; }
-
-    public override ClaimsPrincipal ClaimsPrincipal { get; set; }
 }

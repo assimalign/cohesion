@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Claims;
 using System.Text;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
@@ -84,13 +83,12 @@ internal static class Http3HeaderCodec
             query,
             headers,
             cookies,
-            new MemoryStream(bodyBytes, writable: false),
-            new ClaimsPrincipal(new ClaimsIdentity()));
+            new MemoryStream(bodyBytes, writable: false));
     }
 
     public static byte[] EncodeResponseHeaders(Http3Context context, byte[] bodyBytes)
     {
-        HttpHeaderCollection headers = (HttpHeaderCollection)context.Response.Headers;
+        HttpHeaderCollection headers = context.Response.Headers;
 
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
         {

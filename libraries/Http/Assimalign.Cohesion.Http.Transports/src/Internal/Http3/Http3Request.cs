@@ -1,5 +1,4 @@
 using System.IO;
-using System.Security.Claims;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
@@ -10,12 +9,11 @@ internal sealed class Http3Request : TransportHttpRequest
         HttpPath path,
         HttpMethod method,
         HttpScheme scheme,
-        IHttpQueryCollection query,
-        IHttpHeaderCollection headers,
-        IHttpCookieCollection cookies,
-        Stream body,
-        ClaimsPrincipal claimsPrincipal)
-        : base(host, path, method, scheme, query, headers, cookies, body, claimsPrincipal)
+        HttpQueryCollection query,
+        HttpHeaderCollection headers,
+        HttpCookieCollection cookies,
+        Stream body)
+        : base(host, path, method, scheme, query, headers, cookies, body)
     {
     }
 }

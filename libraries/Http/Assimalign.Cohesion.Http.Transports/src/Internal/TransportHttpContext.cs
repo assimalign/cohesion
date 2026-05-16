@@ -10,15 +10,16 @@ internal abstract class TransportHttpContext : HttpContext
         HttpVersion version,
         HttpRequest request,
         HttpResponse response,
-        IHttpConnectionInfo connectionInfo,
+        HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted)
     {
         Version = version;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo;
-        RequestAborted = requestAborted;
+        Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
+        RequestAborted = requestAborted;
     }
 
     public override HttpVersion Version { get; }
@@ -27,7 +28,9 @@ internal abstract class TransportHttpContext : HttpContext
 
     public override HttpResponse Response { get; }
 
-    public override IHttpConnectionInfo ConnectionInfo { get; }
+    public override HttpConnectionInfo ConnectionInfo { get; }
+
+    public override HttpFeatureCollection Features { get; }
 
     public override IDictionary<string, object?> Items { get; }
 

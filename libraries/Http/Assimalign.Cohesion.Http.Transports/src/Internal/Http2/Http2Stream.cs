@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Claims;
 using System.Text;
 using System.Threading;
 
@@ -316,7 +315,7 @@ internal sealed class Http2Stream
         }
     }
 
-    public Http2Context CreateContext(HPackDecoder decoder, IHttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken connectionAborted)
+    public Http2Context CreateContext(HPackDecoder decoder, HttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken connectionAborted)
     {
         if (!IsRequestReady)
         {
@@ -353,8 +352,7 @@ internal sealed class Http2Stream
             query,
             decodedHeaders.Headers,
             cookies,
-            new MemoryStream(bodyBytes, writable: false),
-            new ClaimsPrincipal(new ClaimsIdentity()));
+            new MemoryStream(bodyBytes, writable: false));
 
         return new Http2Context(this, request, new Http2Response(), connectionInfo, requestAborted);
     }

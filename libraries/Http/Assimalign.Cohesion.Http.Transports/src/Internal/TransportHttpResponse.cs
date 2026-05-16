@@ -14,9 +14,9 @@ internal abstract class TransportHttpResponse : HttpResponse
 
     public override HttpStatusCode StatusCode { get; set; }
 
-    public override IHttpHeaderCollection Headers { get; }
+    public override HttpHeaderCollection Headers { get; }
 
-    public override IHttpCookieCollection Cookies { get; }
+    public override HttpCookieCollection Cookies { get; }
 
     public override Stream Body { get; set; }
 }

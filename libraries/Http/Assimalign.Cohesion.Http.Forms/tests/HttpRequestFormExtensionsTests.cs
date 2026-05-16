@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -95,6 +94,5 @@ public class HttpRequestFormExtensionsTests
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
         public IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
         public Stream Body => Stream.Null;
-        public ClaimsPrincipal ClaimsPrincipal { get; } = new(new ClaimsIdentity());
     }
 }

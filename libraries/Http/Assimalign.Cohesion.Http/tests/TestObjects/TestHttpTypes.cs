@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,24 +16,22 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override HttpScheme Scheme { get; set; } = HttpScheme.Http;
 
-    public override IHttpQueryCollection Query { get; } = new HttpQueryCollection();
+    public override HttpQueryCollection Query { get; } = new HttpQueryCollection();
 
-    public override IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+    public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
+    public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
     public override Stream Body { get; set; } = Stream.Null;
-
-    public override ClaimsPrincipal ClaimsPrincipal { get; set; } = new(new ClaimsIdentity());
 }
 
 internal sealed class TestHttpResponse : HttpResponse
 {
     public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
 
-    public override IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+    public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
+    public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
     public override Stream Body { get; set; } = new MemoryStream();
 }
@@ -45,15 +42,16 @@ internal sealed class TestHttpContext : HttpContext
         HttpVersion version,
         TestHttpRequest request,
         TestHttpResponse response,
-        IHttpConnectionInfo? connectionInfo = null,
+        HttpConnectionInfo? connectionInfo = null,
         CancellationToken requestAborted = default)
     {
         Version = version;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo ?? HttpConnectionInfo.Empty;
-        RequestAborted = requestAborted;
+        Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(StringComparer.Ordinal);
+        RequestAborted = requestAborted;
     }
 
     public override HttpVersion Version { get; }
@@ -62,7 +60,9 @@ internal sealed class TestHttpContext : HttpContext
 
     public override TestHttpResponse Response { get; }
 
-    public override IHttpConnectionInfo ConnectionInfo { get; }
+    public override HttpConnectionInfo ConnectionInfo { get; }
+
+    public override HttpFeatureCollection Features { get; }
 
     public override IDictionary<string, object?> Items { get; }
 

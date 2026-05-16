@@ -71,7 +71,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         }
 
         Http1Response response = (Http1Response)_context.Response;
-        HttpHeaderCollection headers = (HttpHeaderCollection)response.Headers;
+        HttpHeaderCollection headers = response.Headers;
 
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include
         // Content-Length or Transfer-Encoding; the tunnel carries opaque octets.

@@ -10,7 +10,7 @@ internal static class Http1MessageWriter
     public static async ValueTask WriteResponseAsync(Stream stream, Http1Context context, CancellationToken cancellationToken)
     {
         byte[] bodyBytes = await ReadBodyAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
-        HttpHeaderCollection headers = (HttpHeaderCollection)context.Response.Headers;
+        HttpHeaderCollection headers = context.Response.Headers;
 
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
         {

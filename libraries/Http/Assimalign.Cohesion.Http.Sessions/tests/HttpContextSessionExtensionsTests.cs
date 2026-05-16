@@ -84,9 +84,10 @@ public class HttpContextSessionExtensionsTests
         public IHttpRequest Request => null!;
         public IHttpResponse Response => null!;
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
+        public IHttpProtocolUpgrade? Upgrade => null;
+        public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public CancellationToken RequestAborted => CancellationToken.None;
-        public IHttpProtocolUpgrade? Upgrade => null;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

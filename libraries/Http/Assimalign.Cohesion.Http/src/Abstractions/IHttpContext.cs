@@ -11,11 +11,13 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The protocol core deliberately exposes only wire-level concerns &#8211;
 /// <see cref="Request"/>, <see cref="Response"/>, <see cref="ConnectionInfo"/>,
-/// <see cref="Items"/>. Application-layer concepts such as sessions, authenticated
-/// principals, or parsed form bodies layer on top via extension methods in dedicated
-/// packages (<c>Assimalign.Cohesion.Http.Sessions</c>,
-/// <c>Assimalign.Cohesion.Http.Forms</c>, &#8230;) that read and write through
-/// <see cref="Items"/>.
+/// <see cref="Features"/>, <see cref="Items"/>. Application-layer concepts such as
+/// sessions, authenticated principals, or parsed form bodies layer on top via
+/// extension methods in dedicated packages
+/// (<c>Assimalign.Cohesion.Http.Sessions</c>, <c>Assimalign.Cohesion.Http.Forms</c>,
+/// <c>Assimalign.Cohesion.Web.Authentication</c>, &#8230;). Strongly-typed,
+/// type-keyed state goes through <see cref="Features"/>; loosely-typed, name-keyed
+/// state goes through <see cref="Items"/>.
 /// </para>
 /// </remarks>
 public interface IHttpContext : IAsyncDisposable
@@ -41,17 +43,6 @@ public interface IHttpContext : IAsyncDisposable
     IHttpConnectionInfo ConnectionInfo { get; }
 
     /// <summary>
-    /// Gets a bag of items shared for the lifetime of the exchange. Higher-layer features
-    /// (sessions, identity, parsed forms) attach state here via extension methods.
-    /// </summary>
-    IDictionary<string, object?> Items { get; }
-
-    /// <summary>
-    /// Gets the cancellation token that signals when the request has been aborted.
-    /// </summary>
-    CancellationToken RequestAborted { get; }
-
-    /// <summary>
     /// Gets the protocol-upgrade feature for this exchange, or <see langword="null"/>
     /// when the exchange is not a candidate for a connection transition.
     /// </summary>
@@ -68,4 +59,25 @@ public interface IHttpContext : IAsyncDisposable
     /// </para>
     /// </remarks>
     IHttpProtocolUpgrade? Upgrade { get; }
+
+    /// <summary>
+    /// Gets the per-exchange feature collection. Higher-layer packages
+    /// (authentication, sessions, etc.) attach strongly-typed features
+    /// here rather than relying on the loosely-typed <see cref="Items"/>
+    /// dictionary.
+    /// </summary>
+    IHttpFeatureCollection Features { get; }
+
+    /// <summary>
+    /// Gets a bag of items shared for the lifetime of the exchange. Loosely-typed,
+    /// name-keyed state &mdash; sessions, parsed forms, ad-hoc per-request data &mdash;
+    /// attaches here through extension methods. Strongly-typed, type-keyed state
+    /// belongs in <see cref="Features"/> instead.
+    /// </summary>
+    IDictionary<string, object?> Items { get; }
+
+    /// <summary>
+    /// Gets the cancellation token that signals when the request has been aborted.
+    /// </summary>
+    CancellationToken RequestAborted { get; }
 }
