@@ -5,21 +5,20 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Provides a mutable cookie collection.
+/// Provides a mutable in-memory cookie collection. Used as the parsed
+/// snapshot on the request side and as a general-purpose collection for
+/// callers building cookies outside an HTTP exchange (tests, factories,
+/// middleware that does its own buffering).
 /// </summary>
+/// <remarks>
+/// This collection is pure storage &#8211; mutations are not propagated to
+/// any header collection. Response-side cookie state that drains into
+/// <c>Set-Cookie</c> headers uses an internal sync-aware collection owned by
+/// the response cookie feature.
+/// </remarks>
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
     private readonly List<HttpCookie> _cookies = new();
-    private readonly IHttpHeaderCollection _headers;
-
-    internal HttpCookieCollection(IHttpHeaderCollection headers)
-    {
-        // Pass the reference to the header collection so that cookies can be removed from the
-        // collection when the caller removes the corresponding header. This is necessary to keep
-        // the cookie collection and the header collection in sync.
-        ArgumentNullException.ThrowIfNull(headers);
-        _headers = headers;
-    }
 
     /// <inheritdoc />
     public int Count => _cookies.Count;
@@ -35,10 +34,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
     }
 
     /// <inheritdoc />
-    public void Clear()
-    {
-        _cookies.Clear();
-    }
+    public void Clear() => _cookies.Clear();
 
     /// <inheritdoc />
     public bool Contains(HttpCookie item)
@@ -48,16 +44,10 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
     }
 
     /// <inheritdoc />
-    public void CopyTo(HttpCookie[] array, int arrayIndex)
-    {
-        _cookies.CopyTo(array, arrayIndex);
-    }
+    public void CopyTo(HttpCookie[] array, int arrayIndex) => _cookies.CopyTo(array, arrayIndex);
 
     /// <inheritdoc />
-    public IEnumerator<HttpCookie> GetEnumerator()
-    {
-        return _cookies.GetEnumerator();
-    }
+    public IEnumerator<HttpCookie> GetEnumerator() => _cookies.GetEnumerator();
 
     /// <inheritdoc />
     public bool Remove(HttpCookie item)
@@ -66,8 +56,5 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         return _cookies.Remove(item);
     }
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

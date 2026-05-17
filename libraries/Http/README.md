@@ -1,0 +1,9 @@
+I need you to fix the the HttpFeatureCollection and wire up the new interface modifications. Then I want you to pull out the Cookies dependency in the Http Transport Layer. There has to be a way for the transport to not need to know about the Cookie Feature since Cookies are headers. Also I pulled out the protocol upgrade to another library as it's own feature. Go ahead and update the transport layer as well with pulling out that dependency.
+
+I made these changes because I want to back up a little bit. Now that we have some meat to the the HTTP implementations and I am now able to do some partial wiring of the HTTP libraries with the actual application layer under the Web resource folder I've had some design changes I would like to implement. I've added an interface called `IHttpFeature` and have updated the `IHttpFeatureCollection` to be an `IEnumerable<IHttpFeature>`.
+
+My reasoning for this is based on my main concern of keeping separation and the dependency tree clean and modular. I wanted to create a pure web application abstraction that didn't have all the dependencies such as DependencyInjection, Logging, Configuration, etc.
+
+Right now keeping the interface with name only, but this is the root contract for all HTTP features. Http Features represents
+specific Http related capabilities that can be attached to the HttpContext. They are used to extend the functionality of the HTTP pipeline and provide additional services or information related to the HTTP request and response. Features are separate from actual application services that would be implemented in the Web Hosting library, and are designed to be used by middleware and other components in the HTTP pipeline.Examples of features include authentication, session management, cookies, connection lifetime management, etc.
+

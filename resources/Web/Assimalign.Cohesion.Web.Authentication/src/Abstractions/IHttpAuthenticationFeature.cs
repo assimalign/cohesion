@@ -1,5 +1,7 @@
 using System.Security.Claims;
 
+using Assimalign.Cohesion.Http;
+
 namespace Assimalign.Cohesion.Web.Authentication;
 
 /// <summary>
@@ -25,7 +27,7 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// <c>ClaimsPrincipal</c> dependency.
 /// </para>
 /// </remarks>
-public interface IHttpAuthenticationFeature
+public interface IHttpAuthenticationFeature : IHttpFeature
 {
     /// <summary>
     /// Gets or sets the principal authenticated for this exchange.

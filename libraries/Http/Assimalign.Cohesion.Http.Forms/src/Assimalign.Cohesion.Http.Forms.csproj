@@ -8,4 +8,13 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- WIP: ASP.NET Core port in progress; the in-flight parser files reference
+		     types (StringValues, etc.) that the Cohesion stack doesn't yet expose.
+		     Excluded from the build until the port lands; their content is preserved
+		     in-tree as a checkpoint. -->
+		<Compile Remove="FormReader.cs" />
+		<Compile Remove="KeyValueAccumulator.cs" />
+		<Compile Remove="HttpFormOptions.cs" />
+	</ItemGroup>
 </Project>

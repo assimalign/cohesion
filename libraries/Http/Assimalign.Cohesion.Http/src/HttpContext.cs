@@ -43,9 +43,6 @@ public abstract class HttpContext : IHttpContext
     public abstract HttpFeatureCollection Features { get; }
 
     /// <inheritdoc />
-    public virtual IHttpProtocolUpgrade? Upgrade => null;
-    
-    /// <inheritdoc />
     public abstract IDictionary<string, object?> Items { get; }
 
     /// <inheritdoc />

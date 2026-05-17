@@ -41,15 +41,12 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             throw new System.InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
         }
 
-        // RFC 9110 §7.8 / §9.3.6 — once a protocol upgrade or CONNECT tunnel has been
-        // accepted, the upgrade implementation has already written the response and
-        // surrendered the stream to the application. Writing again would corrupt the
-        // tunnel with a stale HTTP response.
-        if (http1Context.ResponseFinalized)
-        {
-            return ValueTask.CompletedTask;
-        }
-
+        // NOTE: the suppress-response-on-upgrade behaviour previously gated by
+        // http1Context.ResponseFinalized is being moved to the
+        // Assimalign.Cohesion.Http.ProtocolUpgrade package and needs a transport
+        // <-> ProtocolUpgrade bridge to re-attach. Until that bridge lands, the
+        // transport always writes the response normally. CONNECT body framing is
+        // still honoured at request-parse time so request decoding stays correct.
         return Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken);
     }
 }

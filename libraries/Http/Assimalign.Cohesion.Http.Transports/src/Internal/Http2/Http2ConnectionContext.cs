@@ -141,8 +141,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
-        IHttpResponseCookieFeature? cookieFeature = http2Context.Features.Get<IHttpResponseCookieFeature>();
-        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, cookieFeature?.Cookies, bodyBytes.Length);
+        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
 
         // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave.
         // The whole HEADERS [+ CONTINUATION...] [+ DATA...] sequence MUST be

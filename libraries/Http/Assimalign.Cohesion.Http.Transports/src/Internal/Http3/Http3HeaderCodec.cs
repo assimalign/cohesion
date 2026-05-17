@@ -100,18 +100,22 @@ internal static class Http3HeaderCodec
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
-        }
-
-        IHttpResponseCookieFeature? cookieFeature = context.Features.Get<IHttpResponseCookieFeature>();
-        if (cookieFeature is not null)
-        {
-            // RFC 6265 §3 — each Set-Cookie value MUST be emitted as a
-            // separate field line; combining cookies into a single value is
-            // forbidden, hence one literal-header write per cookie.
-            foreach (HttpCookie cookie in cookieFeature.Cookies)
+            // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
+            // value; combining cookies into a single comma-folded value is
+            // forbidden.
+            if (header.Key == HttpHeaderKey.SetCookie)
             {
-                WriteLiteralHeader(buffer, "set-cookie", cookie.ToString());
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        WriteLiteralHeader(buffer, "set-cookie", value);
+                    }
+                }
+            }
+            else
+            {
+                WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
             }
         }
 

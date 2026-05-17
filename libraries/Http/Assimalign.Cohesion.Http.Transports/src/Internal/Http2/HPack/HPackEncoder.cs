@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
 
 internal static partial class HPackEncoder
 {
-    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, IHttpCookieCollection? cookies, int bodyLength)
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers, int bodyLength)
     {
         if (!headers.ContainsKey(HttpHeaderKey.ContentLength))
         {
@@ -22,17 +22,22 @@ internal static partial class HPackEncoder
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
-        }
-
-        if (cookies is not null)
-        {
-            // RFC 6265 §3 — Set-Cookie values are emitted as separate field
-            // lines; no comma folding. Caller passes null when no cookie
-            // feature is attached.
-            foreach (HttpCookie cookie in cookies)
+            // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
+            // value; combining cookies into a single comma-folded value is
+            // forbidden.
+            if (header.Key == HttpHeaderKey.SetCookie)
             {
-                WriteHeader(buffer, "set-cookie", cookie.ToString());
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        WriteHeader(buffer, "set-cookie", value);
+                    }
+                }
+            }
+            else
+            {
+                WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
             }
         }
 

@@ -147,6 +147,7 @@ public class HttpRequestCookieExtensionsTests
             Cookies = cookies;
         }
 
+        public string Name => nameof(TestRequestCookieFeature);
         public IHttpCookieCollection Cookies { get; }
     }
 
@@ -167,7 +168,6 @@ public class HttpRequestCookieExtensionsTests
         public IHttpRequest Request { get; }
         public IHttpResponse Response { get; }
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
-        public IHttpProtocolUpgrade? Upgrade => null;
         public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public CancellationToken RequestAborted => CancellationToken.None;

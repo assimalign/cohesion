@@ -93,7 +93,7 @@ public static class HttpCookieExtensions
     /// </summary>
     private static HttpCookieCollection ParseRequestCookies(IHttpHeaderCollection headers)
     {
-        HttpCookieCollection cookies = new(headers);
+        HttpCookieCollection cookies = new();
 
         if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
         {

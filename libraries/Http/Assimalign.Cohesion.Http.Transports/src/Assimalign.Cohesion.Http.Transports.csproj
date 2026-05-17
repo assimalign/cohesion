@@ -4,7 +4,6 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
 	</ItemGroup>
 	<ItemGroup>

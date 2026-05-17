@@ -26,20 +26,22 @@ internal static class Http1MessageWriter
 
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            await WriteAsciiAsync(stream, $"{header.Key}: {header.Value}\r\n", cancellationToken).ConfigureAwait(false);
-        }
-
-        // RFC 6265 §3 — each Set-Cookie value MUST be emitted on its own line;
-        // it cannot be folded into a single comma-separated header. Response
-        // cookies live in IHttpResponseCookieFeature when the Cookies
-        // extension is in use; absence of the feature means no cookies were
-        // queued, in which case there is nothing to emit.
-        IHttpResponseCookieFeature? cookieFeature = context.Features.Get<IHttpResponseCookieFeature>();
-        if (cookieFeature is not null)
-        {
-            foreach (HttpCookie cookie in cookieFeature.Cookies)
+            // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
+            // value; combining cookies into a single comma-separated value is
+            // forbidden. Every other header is comma-folded as usual.
+            if (header.Key == HttpHeaderKey.SetCookie)
             {
-                await WriteAsciiAsync(stream, $"{HttpHeaderKey.SetCookie}: {cookie}\r\n", cancellationToken).ConfigureAwait(false);
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        await WriteAsciiAsync(stream, $"{header.Key}: {value}\r\n", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            else
+            {
+                await WriteAsciiAsync(stream, $"{header.Key}: {header.Value}\r\n", cancellationToken).ConfigureAwait(false);
             }
         }
 
