@@ -65,7 +65,6 @@ internal static class Http3HeaderCodec
         }
 
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
-        HttpCookieCollection cookies = ParseCookies(headers);
         HttpHost host = !string.IsNullOrWhiteSpace(authority)
             ? new HttpHost(authority)
             : headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
@@ -82,7 +81,6 @@ internal static class Http3HeaderCodec
             scheme,
             query,
             headers,
-            cookies,
             new MemoryStream(bodyBytes, writable: false));
     }
 
@@ -105,9 +103,16 @@ internal static class Http3HeaderCodec
             WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
         }
 
-        foreach (HttpCookie cookie in context.Response.Cookies)
+        IHttpResponseCookieFeature? cookieFeature = context.Features.Get<IHttpResponseCookieFeature>();
+        if (cookieFeature is not null)
         {
-            WriteLiteralHeader(buffer, "set-cookie", cookie.ToString());
+            // RFC 6265 §3 — each Set-Cookie value MUST be emitted as a
+            // separate field line; combining cookies into a single value is
+            // forbidden, hence one literal-header write per cookie.
+            foreach (HttpCookie cookie in cookieFeature.Cookies)
+            {
+                WriteLiteralHeader(buffer, "set-cookie", cookie.ToString());
+            }
         }
 
         return buffer.ToArray();
@@ -208,40 +213,6 @@ internal static class Http3HeaderCodec
 
         path = HttpPath.FromUriComponent(requestTarget);
         return new HttpQueryCollection();
-    }
-
-    private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)
-    {
-        HttpCookieCollection cookies = new();
-
-        if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
-        {
-            return cookies;
-        }
-
-        foreach (string? headerValue in cookieHeader)
-        {
-            if (string.IsNullOrWhiteSpace(headerValue))
-            {
-                continue;
-            }
-
-            string[] segments = headerValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string segment in segments)
-            {
-                string[] parts = segment.Split('=', 2);
-                string name = parts[0].Trim();
-                string value = parts.Length == 2 ? parts[1].Trim() : string.Empty;
-
-                if (name.Length > 0)
-                {
-                    cookies.Add(new HttpCookie(name, value));
-                }
-            }
-        }
-
-        return cookies;
     }
 
 }

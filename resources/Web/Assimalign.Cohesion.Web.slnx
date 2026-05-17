@@ -37,9 +37,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.Web.ApplicationModel/tests/Assimalign.Cohesion.Web.ApplicationModel.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/">
+		<File Path="Assimalign.Cohesion.Web.Authentication/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/docs/">
+		<File Path="Assimalign.Cohesion.Web.Authentication/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/src/">
 		<Project Path="Assimalign.Cohesion.Web.Authentication/src/Assimalign.Cohesion.Web.Authentication.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Authentication/tests/Assimalign.Cohesion.Web.Authentication.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/src/">
@@ -52,6 +60,10 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Cors/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Cors/src/">
 		<Project Path="Assimalign.Cohesion.Web.Cors/src/Assimalign.Cohesion.Web.Cors.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Forms/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Forms/src/">
+		<Project Path="Assimalign.Cohesion.Web.Forms/src/Assimalign.Cohesion.Web.Forms.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Functions/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Functions/src/">

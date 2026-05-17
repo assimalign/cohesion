@@ -78,7 +78,6 @@ internal static class Http1MessageReader
         }
 
         HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
-        HttpCookieCollection cookies = ParseCookies(headers);
 
         // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
         //   - absolute-form  → authority component of the target supersedes any Host header
@@ -105,7 +104,6 @@ internal static class Http1MessageReader
             requestScheme,
             queryCollection,
             headers,
-            cookies,
             new MemoryStream(bodyBytes, writable: false));
         Http1Response response = new();
 
@@ -216,40 +214,6 @@ internal static class Http1MessageReader
                 headers[key] = value;
             }
         }
-    }
-
-    private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)
-    {
-        HttpCookieCollection cookies = new();
-
-        if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
-        {
-            return cookies;
-        }
-
-        foreach (string? headerValue in cookieHeader)
-        {
-            if (string.IsNullOrWhiteSpace(headerValue))
-            {
-                continue;
-            }
-
-            string[] segments = headerValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string segment in segments)
-            {
-                string[] parts = segment.Split('=', 2);
-                string name = parts[0].Trim();
-                string value = parts.Length == 2 ? parts[1].Trim() : string.Empty;
-
-                if (name.Length > 0)
-                {
-                    cookies.Add(new HttpCookie(name, value));
-                }
-            }
-        }
-
-        return cookies;
     }
 
     private static bool HeaderContainsToken(HttpHeaderCollection headers, HttpHeaderKey key, string expected)

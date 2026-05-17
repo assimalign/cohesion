@@ -2,7 +2,6 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<ImplicitUsings>disable</ImplicitUsings>
 		<Description>HTTP session abstraction for the Cohesion HTTP family. Layered on top of Assimalign.Cohesion.Http; carries per-exchange application state through the HTTP context Items bag. Optional — protocol-only consumers (clients, proxies, edge caches) should not reference this package.</Description>
 	</PropertyGroup>
 	<ItemGroup>

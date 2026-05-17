@@ -22,8 +22,6 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
-
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(
             "The HttpContext back-reference has not been attached. Construct the TestHttpRequest through a TestHttpContext.");
@@ -44,8 +42,6 @@ internal sealed class TestHttpResponse : HttpResponse
     public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
 
     public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-
-    public override HttpCookieCollection Cookies { get; } = new HttpCookieCollection();
 
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(

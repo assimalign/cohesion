@@ -29,9 +29,18 @@ internal static class Http1MessageWriter
             await WriteAsciiAsync(stream, $"{header.Key}: {header.Value}\r\n", cancellationToken).ConfigureAwait(false);
         }
 
-        foreach (HttpCookie cookie in context.Response.Cookies)
+        // RFC 6265 §3 — each Set-Cookie value MUST be emitted on its own line;
+        // it cannot be folded into a single comma-separated header. Response
+        // cookies live in IHttpResponseCookieFeature when the Cookies
+        // extension is in use; absence of the feature means no cookies were
+        // queued, in which case there is nothing to emit.
+        IHttpResponseCookieFeature? cookieFeature = context.Features.Get<IHttpResponseCookieFeature>();
+        if (cookieFeature is not null)
         {
-            await WriteAsciiAsync(stream, $"{HttpHeaderKey.SetCookie}: {cookie}\r\n", cancellationToken).ConfigureAwait(false);
+            foreach (HttpCookie cookie in cookieFeature.Cookies)
+            {
+                await WriteAsciiAsync(stream, $"{HttpHeaderKey.SetCookie}: {cookie}\r\n", cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);

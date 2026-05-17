@@ -14,7 +14,6 @@ internal abstract class TransportHttpRequest : HttpRequest
         HttpScheme scheme,
         HttpQueryCollection query,
         HttpHeaderCollection headers,
-        HttpCookieCollection cookies,
         Stream body)
     {
         Host = host;
@@ -23,7 +22,6 @@ internal abstract class TransportHttpRequest : HttpRequest
         Scheme = scheme;
         Query = query;
         Headers = headers;
-        Cookies = cookies;
         Body = body;
     }
 
@@ -38,8 +36,6 @@ internal abstract class TransportHttpRequest : HttpRequest
     public override HttpQueryCollection Query { get; }
 
     public override HttpHeaderCollection Headers { get; }
-
-    public override HttpCookieCollection Cookies { get; }
 
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(

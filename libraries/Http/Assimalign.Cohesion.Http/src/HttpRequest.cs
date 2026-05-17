@@ -7,14 +7,13 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Collection-typed members (<see cref="Query"/>, <see cref="Headers"/>,
-/// <see cref="Cookies"/>) are declared with the concrete collection types so
-/// transport implementations and derived classes can program against the
-/// concrete surface directly &#8211; without re-casting from the interface
-/// at every call site. The corresponding members on <see cref="IHttpRequest"/>
-/// are implemented explicitly and delegate to these properties so external
-/// consumers programming against the interface still see only the interface
-/// contract.
+/// Collection-typed members (<see cref="Query"/>, <see cref="Headers"/>) are
+/// declared with the concrete collection types so transport implementations
+/// and derived classes can program against the concrete surface directly
+/// &#8211; without re-casting from the interface at every call site. The
+/// corresponding members on <see cref="IHttpRequest"/> are implemented
+/// explicitly and delegate to these properties so external consumers
+/// programming against the interface still see only the interface contract.
 /// </para>
 /// </remarks>
 public abstract class HttpRequest : IHttpRequest
@@ -41,11 +40,6 @@ public abstract class HttpRequest : IHttpRequest
     /// </summary>
     public abstract HttpHeaderCollection Headers { get; }
 
-    /// <summary>
-    /// Gets the request cookies.
-    /// </summary>
-    public abstract HttpCookieCollection Cookies { get; }
-
     /// <inheritdoc />
     public abstract HttpContext HttpContext { get; }
 
@@ -54,6 +48,5 @@ public abstract class HttpRequest : IHttpRequest
 
     IHttpQueryCollection IHttpRequest.Query => Query;
     IHttpHeaderCollection IHttpRequest.Headers => Headers;
-    IHttpCookieCollection IHttpRequest.Cookies => Cookies;
     IHttpContext IHttpRequest.HttpContext => HttpContext;
 }

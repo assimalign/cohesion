@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public static class HttpContextFormExtensions
 {
+    private static HttpFormCollection EmptyCollection = new HttpFormCollection();
+
     extension(IHttpRequest request)
     {
         /// <summary>
@@ -47,66 +49,21 @@ public static class HttpContextFormExtensions
         /// to clear an installed feature, call
         /// <c>request.HttpContext.Features.Set&lt;IHttpFormFeature&gt;(null)</c>.
         /// </exception>
-        public IHttpFormCollection? Form
+        public IHttpFormCollection Form
         {
             get
             {
                 ArgumentNullException.ThrowIfNull(request);
-                return request.HttpContext.Features.Get<IHttpFormFeature>()?.Form;
-            }
-            set
-            {
-                ArgumentNullException.ThrowIfNull(request);
-                ArgumentNullException.ThrowIfNull(value);
-
+                
                 IHttpFormFeature? feature = request.HttpContext.Features.Get<IHttpFormFeature>();
-                if (feature is null)
+
+                // If no feature was added then we return an empty collection.
+                if (feature is null || feature.Form is null)
                 {
-                    request.HttpContext.Features.Set<IHttpFormFeature>(new HttpFormFeature { Form = value });
+                    return EmptyCollection;
                 }
-                else
-                {
-                    feature.Form = value;
-                }
+                return feature.Form;
             }
         }
-    }
-
-    /// <summary>
-    /// Returns the parsed form collection for the current exchange, parsing
-    /// the request body and caching the result on first call. Subsequent calls
-    /// (and reads through <see cref="Form"/>) return the cached collection.
-    /// </summary>
-    /// <param name="context">The HTTP context.</param>
-    /// <param name="cancellationToken">A token to observe while waiting.</param>
-    /// <returns>The parsed form collection.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    /// <exception cref="OperationCanceledException">
-    /// <paramref name="cancellationToken"/> was cancelled.
-    /// </exception>
-    /// <remarks>
-    /// <para>
-    /// PR-1 scaffold: when no <see cref="IHttpFormFeature"/> is installed, an
-    /// empty <see cref="HttpFormCollection"/> is produced and cached. A
-    /// follow-up PR ports the multipart / urlencoded parser into this package;
-    /// until then, callers that already have parsed form data should attach it
-    /// via <see cref="Form"/>.
-    /// </para>
-    /// </remarks>
-    public static Task<IHttpFormCollection> ReadFormAsync(
-        this IHttpContext context,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        IHttpFormFeature? feature = context.Features.Get<IHttpFormFeature>();
-        if (feature is null)
-        {
-            feature = new HttpFormFeature();
-            context.Features.Set<IHttpFormFeature>(feature);
-        }
-
-        return feature.ReadFormAsync(cancellationToken);
     }
 }

@@ -7,11 +7,13 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// The protocol core exposes only wire-level data &#8211; method, target, scheme, host,
-/// query, headers, cookies, and the raw <see cref="Body"/> stream. Identity-aware
-/// state (e.g. <c>ClaimsPrincipal</c>) and parsed-form access live in higher-layer
-/// packages (<c>Assimalign.Cohesion.Web.Authentication</c>, <c>Assimalign.Cohesion.Http.Forms</c>)
-/// and are surfaced as extension members or features on
-/// <see cref="IHttpContext"/>.
+/// query, headers, and the raw <see cref="Body"/> stream. Identity-aware state
+/// (e.g. <c>ClaimsPrincipal</c>), parsed-form access, and typed cookie collections
+/// live in higher-layer packages (<c>Assimalign.Cohesion.Web.Authentication</c>,
+/// <c>Assimalign.Cohesion.Http.Forms</c>,
+/// <c>Assimalign.Cohesion.Http.Cookies</c>) and are surfaced as extension members or
+/// features on <see cref="IHttpContext"/>. The raw <c>Cookie</c> header remains
+/// accessible through <see cref="Headers"/>.
 /// </remarks>
 public interface IHttpRequest
 {
@@ -44,11 +46,6 @@ public interface IHttpRequest
     /// Gets the request headers.
     /// </summary>
     IHttpHeaderCollection Headers { get; }
-
-    /// <summary>
-    /// Gets the request cookies.
-    /// </summary>
-    IHttpCookieCollection Cookies { get; }
 
     /// <summary>
     /// Get's the context associated with the request.

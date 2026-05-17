@@ -9,11 +9,6 @@ namespace Assimalign.Cohesion.Web;
 public interface IWebApplicationServer
 {
     /// <summary>
-    /// The name of the server.
-    /// </summary>
-    //string Name { get; }
-
-    /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>

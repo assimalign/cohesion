@@ -17,7 +17,31 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public class HttpFeatureCollection : IHttpFeatureCollection
 {
-    private sealed class KeyComparer : IEqualityComparer<KeyValuePair<Type, object>>
+    private sealed class TypeKeyAlternativeLookup : IAlternateEqualityComparer<string, Type>
+    {
+        public TypeKeyAlternativeLookup()
+        {
+            
+        }
+
+
+        public Type Create(string alternate)
+        {
+            throw new NotImplementedException();
+        }
+        public bool Equals(string alternate, Type other)
+        {
+            throw new NotImplementedException();
+        }
+
+        public int GetHashCode(string alternate)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+
+    private sealed class TypeKeyComparer : IEqualityComparer<KeyValuePair<Type, object>>
     {
         public bool Equals(KeyValuePair<Type, object> x, KeyValuePair<Type, object> y)
         {
@@ -44,30 +68,27 @@ public class HttpFeatureCollection : IHttpFeatureCollection
     //    }
     //}
 
-    private static readonly KeyComparer FeatureKeyComparer = new KeyComparer();
+    private static readonly TypeKeyComparer FeatureKeyComparer = new TypeKeyComparer();
 
     private readonly IHttpFeatureCollection? _defaults;
     private readonly int _initialCapacity;
-    private IDictionary<Type, object>? _features;
+    private Dictionary<string, object>? _features;
+    private Dictionary<string, object>.AlternateLookup<ReadOnlySpan<char>> _lookup;
     private volatile int _version;
 
-    
 
-    public HttpFeatureCollection()
-    {
-        
-    }
-
+    public HttpFeatureCollection() { }
     public HttpFeatureCollection(int initialCapacity)
     {
         ArgumentOutOfRangeException.ThrowIf(initialCapacity < 0, "Initial capacity must be a non-negative integer.");
         _initialCapacity = initialCapacity;
     }
-
     public HttpFeatureCollection(IHttpFeatureCollection defaults)
     {
         _defaults = defaults;
     }
+
+
 
     public virtual int Version
     {
@@ -77,90 +98,124 @@ public class HttpFeatureCollection : IHttpFeatureCollection
         }
     }
 
-    public bool IsReadOnly => false;
+    //public object? this[Type key]
+    //{
+    //    get
+    //    {
+    //        ArgumentNullException.ThrowIfNull(key, "key");
+    //        if (_features is null || !_features.TryGetValue(key, out var value))
+    //        {
+    //            return _lookup?[key.Name];
+    //        }
+    //        return value;
+    //    }
+    //    set
+    //    {
+    //        ArgumentNullException.ThrowIfNull(key, "key");
+    //        if (value == null)
+    //        {
+    //            if (_features is not null && _features.Remove(key))
+    //            {
+    //                _version++;
+    //            }
+    //            return;
+    //        }
+    //        if (_features is null)
+    //        {
+    //            _features = new Dictionary<string, object>(_initialCapacity);
+    //            _lookup = _features.GetAlternateLookup<ReadOnlySpan<char>>();
+    //        }
+    //        _features[key.Name] = value;
+    //        _version++;
+    //    }
+    //}
 
-    public object? this[Type key]
+
+    public IHttpFeature? Get(string name)
     {
-        get
-        {
-            ArgumentNullException.ThrowIfNull(key, "key");
-            if (_features is null || !_features.TryGetValue(key, out var value))
-            {
-                return _defaults?[key];
-            }
-            return value;
-        }
-        set
-        {
-            ArgumentNullException.ThrowIfNull(key, "key");
-            if (value == null)
-            {
-                if (_features is not null && _features.Remove(key))
-                {
-                    _version++;
-                }
-                return;
-            }
-            if (_features is null)
-            {
-                _features = new Dictionary<Type, object>(_initialCapacity);
-            }
-            _features[key] = value;
-            _version++;
-        }
+        throw new NotImplementedException();
     }
 
+    public void Set(IHttpFeature? feature)
+    {
+        throw new NotImplementedException();
+    }
 
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
     }
 
-    public IEnumerator<KeyValuePair<Type, object>> GetEnumerator()
+    public IEnumerator<IHttpFeature> GetEnumerator()
     {
-        if (_features != null)
+        if (_features is not null)
         {
-            foreach (KeyValuePair<Type, object> feature in _features)
+            foreach (IHttpFeature feature in _features.Values)
             {
                 yield return feature;
             }
         }
-        if (_defaults == null)
+        if (_defaults is null)
         {
             yield break;
         }
-        IEnumerable<KeyValuePair<Type, object>> enumerable;
-        if (_features != null)
+        IEnumerable<IHttpFeature> enumerable;
+        if (_features is not null)
         {
-            enumerable = _defaults.Except<KeyValuePair<Type, object>>(_features, FeatureKeyComparer);
+            enumerable = _defaults.Except<IHttpFeature>(_features.Values, EqualityComparer<object>.Default);
         }
         else
         {
-            IEnumerable<KeyValuePair<Type, object>> defaults = _defaults;
+            IEnumerable<IHttpFeature> defaults = _defaults;
             enumerable = defaults;
         }
-        foreach (KeyValuePair<Type, object> item in enumerable)
+
+        foreach (IHttpFeature item in enumerable)
         {
             yield return item;
         }
     }
 
-    public TFeature? Get<TFeature>()
-    {
-        if (typeof(TFeature).IsValueType)
-        {
-            object? obj = this[typeof(TFeature)];
-            if (obj == null && Nullable.GetUnderlyingType(typeof(TFeature)) == null)
-            {
-                throw new InvalidOperationException($"{typeof(TFeature).FullName} does not exist in the feature collection and because it is a struct the method can't return null. Use 'featureCollection[typeof({typeof(TFeature).FullName})] is not null' to check if the feature exists.");
-            }
-            return (TFeature?)obj;
-        }
-        return (TFeature?)this[typeof(TFeature)];
-    }
+    //public IEnumerator<KeyValuePair<Type, object>> GetEnumerator()
+    //{
+    //    if (_features != null)
+    //    {
+    //        foreach (KeyValuePair<Type, object> feature in _features)
+    //        {
+    //            yield return feature;
+    //        }
+    //    }
+    //    if (_defaults == null)
+    //    {
+    //        yield break;
+    //    }
+    //    IEnumerable<KeyValuePair<Type, object>> enumerable;
+    //    if (_features != null)
+    //    {
+    //        enumerable = _defaults.Except<KeyValuePair<Type, object>>(_features, FeatureKeyComparer);
+    //    }
+    //    else
+    //    {
+    //        IEnumerable<KeyValuePair<Type, object>> defaults = _defaults;
+    //        enumerable = defaults;
+    //    }
+    //    foreach (KeyValuePair<Type, object> item in enumerable)
+    //    {
+    //        yield return item;
+    //    }
+    //}
 
-    public void Set<TFeature>(TFeature? instance)
-    {
-        this[typeof(TFeature)] = instance;
-    }
+    //public TFeature? Get<TFeature>()
+    //{
+    //    if (typeof(TFeature).IsValueType)
+    //    {
+    //        object? obj = this[typeof(TFeature)];
+    //        if (obj == null && Nullable.GetUnderlyingType(typeof(TFeature)) == null)
+    //        {
+    //            throw new InvalidOperationException($"{typeof(TFeature).FullName} does not exist in the feature collection and because it is a struct the method can't return null. Use 'featureCollection[typeof({typeof(TFeature).FullName})] is not null' to check if the feature exists.");
+    //        }
+    //        return (TFeature?)obj;
+    //    }
+    //    return (TFeature?)this[typeof(TFeature)];
+    //}
 }

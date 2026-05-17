@@ -10,6 +10,16 @@ namespace Assimalign.Cohesion.Http;
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
     private readonly List<HttpCookie> _cookies = new();
+    private readonly IHttpHeaderCollection _headers;
+
+    internal HttpCookieCollection(IHttpHeaderCollection headers)
+    {
+        // Pass the reference to the header collection so that cookies can be removed from the
+        // collection when the caller removes the corresponding header. This is necessary to keep
+        // the cookie collection and the header collection in sync.
+        ArgumentNullException.ThrowIfNull(headers);
+        _headers = headers;
+    }
 
     /// <inheritdoc />
     public int Count => _cookies.Count;

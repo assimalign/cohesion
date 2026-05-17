@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -21,7 +22,7 @@ namespace Assimalign.Cohesion.Http;
 /// scratch state with no formal contract.
 /// </para>
 /// </remarks>
-public interface IHttpFeatureCollection : IEnumerable<KeyValuePair<Type, object>>
+public interface IHttpFeatureCollection : IEnumerable<IHttpFeature>
 {
     /// <summary>
     /// The current version of the collection. Incremented on every mutation.
@@ -29,26 +30,19 @@ public interface IHttpFeatureCollection : IEnumerable<KeyValuePair<Type, object>
     int Version { get; }
 
     /// <summary>
-    /// Gets or sets a service instance by its type.
+    /// 
     /// </summary>
-    /// <param name="key">The service type to retrieve or register.</param>
+    /// <param name="name"></param>
     /// <returns></returns>
-    object? this[Type key] { get; set; }
-
-    /// <summary>
-    /// Returns the feature registered under <typeparamref name="TFeature"/>,
-    /// or <see langword="null"/> when no implementation has been attached.
-    /// </summary>
-    /// <typeparam name="TFeature">The feature contract interface.</typeparam>
-    TFeature? Get<TFeature>();
+    IHttpFeature? Get(string name);
 
     /// <summary>
     /// Attaches <paramref name="feature"/> as the implementation for
-    /// <typeparamref name="TFeature"/>. Replaces any previously registered
+    /// <see cref="IHttpFeature"/>. Replaces any previously registered
     /// implementation of the same type. Pass <see langword="null"/> to
     /// remove an existing registration.
     /// </summary>
     /// <typeparam name="TFeature">The feature contract interface.</typeparam>
     /// <param name="feature">The implementation to register, or <see langword="null"/> to clear.</param>
-    void Set<TFeature>(TFeature? feature);
+    void Set(IHttpFeature? feature);
 }

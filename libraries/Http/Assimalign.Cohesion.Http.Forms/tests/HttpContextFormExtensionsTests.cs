@@ -243,7 +243,6 @@ public class HttpContextFormExtensionsTests
         public HttpScheme Scheme => HttpScheme.Http;
         public IHttpQueryCollection Query { get; } = new HttpQueryCollection();
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
         public IHttpContext HttpContext { get; }
         public System.IO.Stream Body => System.IO.Stream.Null;
     }
@@ -260,7 +259,6 @@ public class HttpContextFormExtensionsTests
 
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
         public IHttpContext HttpContext { get; }
         public System.IO.Stream Body { get; set; } = System.IO.Stream.Null;
     }

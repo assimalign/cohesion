@@ -3,10 +3,8 @@ using System;
 
 namespace Assimalign.Cohesion.Web;
 
-using Assimalign.Cohesion.Logging;
-using Assimalign.Cohesion.Configuration;
-using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Hosting;
+using Http;
+
 
 /// <summary>
 /// 
@@ -14,19 +12,12 @@ using Assimalign.Cohesion.Hosting;
 public interface IWebApplicationBuilder 
 {
     /// <summary>
-    /// 
+    /// Adds a feature to be used within the HttpContext Feature Collection. <see cref="IHttpContext.Features"/>
     /// </summary>
-    IHostEnvironment Environment { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    IServiceProviderBuilder Services { get; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    IConfigurationManager Configuration { get; }
+    /// <typeparam name="TFeature"></typeparam>
+    /// <param name="feature"></param>
+    /// <returns></returns>
+    IWebApplicationBuilder AddFeature<TFeature>(TFeature feature);
 
     /// <summary>
     /// 

@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Http;
 /// <c>context.Features.Set&lt;IHttpSessionFeature&gt;(...)</c>.
 /// </para>
 /// </remarks>
-public interface IHttpSessionFeature
+public interface IHttpSessionFeature : IHttpFeature
 {
     /// <summary>
     /// Gets or sets the session attached to the current exchange. Never

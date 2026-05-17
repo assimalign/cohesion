@@ -11,15 +11,12 @@ internal abstract class TransportHttpResponse : HttpResponse
     {
         StatusCode = HttpStatusCode.Ok;
         Headers = new HttpHeaderCollection();
-        Cookies = new HttpCookieCollection();
         Body = new MemoryStream();
     }
 
     public override HttpStatusCode StatusCode { get; set; }
 
     public override HttpHeaderCollection Headers { get; }
-
-    public override HttpCookieCollection Cookies { get; }
 
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(

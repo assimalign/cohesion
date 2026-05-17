@@ -7,11 +7,13 @@
 	<Folder Name="/FileSystem/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/">
 		<File Path="Assimalign.Cohesion.FileSystem/README.md" />
 	</Folder>
 	<Folder Name="/FileSystem/Assimalign.Cohesion.FileSystem/docs/">
+		<File Path="Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md" />
 		<File Path="Assimalign.Cohesion.FileSystem/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.FileSystem/docs/OVERVIEW.md" />
 	</Folder>

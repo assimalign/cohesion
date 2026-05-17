@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<Description>HTTP cookie model and per-exchange cookie state for the Cohesion HTTP family. Layered on top of Assimalign.Cohesion.Http; defines IHttpCookieCollection, HttpCookie, and the IHttpRequestCookieFeature / IHttpResponseCookieFeature pair so server-side consumers can opt into cookie parsing and emission. Protocol-only consumers (clients, proxies, edge caches) should not reference this package.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

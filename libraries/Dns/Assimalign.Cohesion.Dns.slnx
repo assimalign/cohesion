@@ -7,9 +7,15 @@
 	<Folder Name="/Dns/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns/">
 		<File Path="Assimalign.Cohesion.Dns/README.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns/docs/">
+		<File Path="Assimalign.Cohesion.Dns/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Dns/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.Dns/docs/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns/src/">
 		<Project Path="Assimalign.Cohesion.Dns/src/Assimalign.Cohesion.Dns.csproj" />
@@ -26,16 +32,10 @@
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client/tests/">
 		<Project Path="Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/">
-		<File Path="Assimalign.Cohesion.Dns.Client.Dot/README.md" />
-		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/OVERVIEW.md" />
-		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/REQUIREMENTS.md" />
-	</Folder>
-	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
-		<Project Path="Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
-	</Folder>
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doh/">
 		<File Path="Assimalign.Cohesion.Dns.Client.Doh/README.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/">
 		<File Path="Assimalign.Cohesion.Dns.Client.Doh/docs/OVERVIEW.md" />
 		<File Path="Assimalign.Cohesion.Dns.Client.Doh/docs/REQUIREMENTS.md" />
 	</Folder>
@@ -44,10 +44,22 @@
 	</Folder>
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doq/">
 		<File Path="Assimalign.Cohesion.Dns.Client.Doq/README.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/">
 		<File Path="Assimalign.Cohesion.Dns.Client.Doq/docs/OVERVIEW.md" />
 		<File Path="Assimalign.Cohesion.Dns.Client.Doq/docs/REQUIREMENTS.md" />
 	</Folder>
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Doq/src/">
 		<Project Path="Assimalign.Cohesion.Dns.Client.Doq/src/Assimalign.Cohesion.Dns.Client.Doq.csproj" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/">
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/README.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/">
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/OVERVIEW.md" />
+		<File Path="Assimalign.Cohesion.Dns.Client.Dot/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
+		<Project Path="Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
 	</Folder>
 </Solution>

@@ -8,7 +8,6 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
-		<File Path="VersionExtensions.cs" />
 	</Folder>
 	<Folder Name="/Core/Assimalign.Cohesion.Core/">
 		<File Path="Assimalign.Cohesion.Core/README.md" />

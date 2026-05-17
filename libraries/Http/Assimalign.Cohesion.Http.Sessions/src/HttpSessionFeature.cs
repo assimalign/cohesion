@@ -13,6 +13,8 @@ internal sealed class HttpSessionFeature : IHttpSessionFeature
         ArgumentNullException.ThrowIfNull(session);
         Session = session;
     }
+    public string Name => nameof(HttpSession);
 
     public IHttpSession Session { get; set; }
+
 }

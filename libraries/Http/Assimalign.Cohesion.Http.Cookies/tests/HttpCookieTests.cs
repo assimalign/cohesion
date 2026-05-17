@@ -4,7 +4,7 @@ using Shouldly;
 
 using Xunit;
 
-namespace Assimalign.Cohesion.Http.Tests;
+namespace Assimalign.Cohesion.Http.Cookies.Tests;
 
 public class HttpCookieTests
 {

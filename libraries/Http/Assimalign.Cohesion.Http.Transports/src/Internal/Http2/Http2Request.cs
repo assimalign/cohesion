@@ -11,9 +11,8 @@ internal sealed class Http2Request : TransportHttpRequest
         HttpScheme scheme,
         HttpQueryCollection query,
         HttpHeaderCollection headers,
-        HttpCookieCollection cookies,
         Stream body)
-        : base(host, path, method, scheme, query, headers, cookies, body)
+        : base(host, path, method, scheme, query, headers, body)
     {
     }
 }
