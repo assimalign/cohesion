@@ -135,19 +135,11 @@ public class Http1TransportTests
     [InlineData("GET example.com:80 HTTP/1.1\r\nHost: api.test\r\n\r\n")]     // authority-form on non-CONNECT
     [InlineData("GET  HTTP/1.1\r\nHost: api.test\r\n\r\n")]                   // empty target (collapses to 2 parts after Split)
     [InlineData("GET ftp://example.com/p HTTP/1.1\r\nHost: api.test\r\n\r\n")] // unsupported scheme
-    public async Task Http1_OnMalformedRequestTarget_ShouldThrow(string payloadText)
+    public async Task Http1_OnMalformedRequestTarget_ShouldDropConnection(string payloadText)
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(payloadText);
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
-        HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
 
-        await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
-
-        await Should.ThrowAsync<InvalidDataException>(
-            async () => await ReadSingleContextAsync(httpConnectionContext));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver URL encoded request body intact to the application layer")]
@@ -240,7 +232,7 @@ public class Http1TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nhello!!");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject coexisting Content-Length and Transfer-Encoding")]
@@ -251,7 +243,7 @@ public class Http1TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed Content-Length values")]
@@ -269,7 +261,7 @@ public class Http1TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {contentLength}\r\n\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject non-chunked Transfer-Encoding")]
@@ -281,7 +273,7 @@ public class Http1TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: gzip\r\n\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reassemble chunked body across multiple chunks")]
@@ -343,7 +335,7 @@ public class Http1TransportTests
             + "5\r\nhello\r\n"
             + "0\r\nContent-Length: 5\r\n\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed chunk sizes")]
@@ -358,7 +350,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + $"{chunkSize}\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunked body that ends before the terminating zero chunk")]
@@ -371,7 +363,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "5\r\nhello\r\n");
 
-        await Should.ThrowAsync<EndOfStreamException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunk that ends before its declared size is reached")]
@@ -383,7 +375,7 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "10\r\nshort");
 
-        await Should.ThrowAsync<EndOfStreamException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject Content-Length declarations exceeding the body size cap")]
@@ -396,7 +388,111 @@ public class Http1TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {oversize}\r\n\r\n");
 
-        await Should.ThrowAsync<InvalidDataException>(async () => await ReceiveFirstContextAsync(payload));
+        await AssertConnectionDroppedAsync(payload);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should drop a connection that closes mid-request-line and keep the listener accepting")]
+    public async Task Http1_OnTruncatedRequestLine_ShouldDropConnectionAndContinueListening()
+    {
+        // The host-crash repro: a client opens a connection, writes a
+        // partial request line (e.g. a TLS ClientHello shipped to a
+        // plain-HTTP listener, or a regular client that aborts), then
+        // the socket closes. The HTTP/1.1 reader hits EndOfStream
+        // mid-line and used to propagate the exception out of
+        // `ReceiveAsync`, crashing the application. The fix scopes the
+        // failure to the offending connection: its request stream
+        // ends silently, but the listener stays alive for the next
+        // peer.
+
+        // Bad: a CR but no LF, then EOF — exactly the read loop in
+        // Http1MessageReader.ReadLineAsync that surfaces as
+        // EndOfStreamException.
+        byte[] truncated = System.Text.Encoding.ASCII.GetBytes("GET /\r");
+
+        // Good: a well-formed follow-up request on a second connection.
+        byte[] healthy = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /healthy HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        TestTransportConnectionContext badContext = new(truncated);
+        TestSingleStreamTransportConnection badConn = new(badContext, TransportProtocol.Tcp);
+        TestTransportConnectionContext goodContext = new(healthy);
+        TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
+
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(
+            HttpProtocol.Http11,
+            new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { badConn, goodConn }));
+
+        await using HttpConnectionListener listener = new(options);
+
+        // First connection: malformed. ReceiveAsync yields nothing and
+        // exits cleanly. The exception is absorbed inside the receive
+        // loop, never reaching the application.
+        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext ctx1 = await conn1.OpenAsync();
+        await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
+        {
+            (await enum1.MoveNextAsync()).ShouldBeFalse();
+        }
+        await conn1.DisposeAsync();
+
+        // Second connection: well-formed. Listener is alive; the request
+        // parses normally and the application sees a valid context.
+        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext ctx2 = await conn2.OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Get);
+        httpContext.Request.Path.Value.ShouldBe("/healthy");
+        httpContext.Request.Host.Value.ShouldBe("api.test");
+
+        await conn2.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should drop a connection that opens with TLS handshake bytes and keep the listener accepting")]
+    public async Task Http1_OnTlsHandshakeBytesOverPlainHttp_ShouldDropConnectionAndContinueListening()
+    {
+        // Realistic foot-gun: a client points its HTTPS scheme at a
+        // plain-HTTP listener and starts a TLS handshake. The first
+        // bytes the listener sees are the TLS record header
+        // (0x16 = handshake, 0x03 0x01 = version, then length and
+        // payload). None of that forms a CRLF-terminated HTTP request
+        // line, so ReadLineAsync would read until the client gave up
+        // and closed — yielding EndOfStreamException. The receive loop
+        // absorbs it; the listener serves the next, sane client.
+
+        byte[] tlsClientHelloPrefix = new byte[] { 0x16, 0x03, 0x01, 0x00, 0x70 };
+
+        byte[] healthy = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /healthy HTTP/1.1\r\nHost: api.test\r\n\r\n");
+
+        TestTransportConnectionContext badContext = new(tlsClientHelloPrefix);
+        TestSingleStreamTransportConnection badConn = new(badContext, TransportProtocol.Tcp);
+        TestTransportConnectionContext goodContext = new(healthy);
+        TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
+
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(
+            HttpProtocol.Http11,
+            new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { badConn, goodConn }));
+
+        await using HttpConnectionListener listener = new(options);
+
+        IHttpConnection conn1 = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext ctx1 = await conn1.OpenAsync();
+        await using (IAsyncEnumerator<IHttpContext> enum1 = ctx1.ReceiveAsync().GetAsyncEnumerator())
+        {
+            (await enum1.MoveNextAsync()).ShouldBeFalse();
+        }
+        await conn1.DisposeAsync();
+
+        IHttpConnection conn2 = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext ctx2 = await conn2.OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(ctx2);
+
+        httpContext.Request.Path.Value.ShouldBe("/healthy");
+
+        await conn2.DisposeAsync();
     }
 
     // ------------------------------------------------------------------------
@@ -431,5 +527,28 @@ public class Http1TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    /// <summary>
+    /// Asserts that a wire-level failure on a single connection results in
+    /// the receive enumerable yielding no context. The behaviour the
+    /// transport now guarantees: wire-level errors (truncated request
+    /// lines, malformed headers, framing violations, transport I/O
+    /// failures) drop the offending connection silently rather than
+    /// throwing out of <c>ReceiveAsync</c>, so a single bad client cannot
+    /// crash the listener.
+    /// </summary>
+    private static async Task AssertConnectionDroppedAsync(byte[] payload)
+    {
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new ITransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 }

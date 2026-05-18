@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
 
-public interface IWebServer
+public interface IWebApplicationServer
 {
     /// <summary>
     /// 

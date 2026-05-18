@@ -16,48 +16,48 @@ CancellationToken cancellationToken = cancellationTokenSource.Token;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder();
 
+AppContext.Sw
 AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
-builder.ServerManager.UseServer(serviceProvider =>
-{
-    IHttpConnectionListener listener = serviceProvider.GetRequiredService<IHttpConnectionListener>();
-    IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
-
-    return new WebServer(pipeline, listener);
-});
-builder.ServerManager.ConfigureServer(options =>
-{
-    options.UseHttp1(transport =>
+builder.ServerManager
+    .UseServer(serviceProvider =>
     {
-        transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
-        Console.WriteLine($"Listening On: {transport.EndPoint}");
-        transport.Use((connection, context, next, token) =>
+        IHttpConnectionListener listener = serviceProvider.GetRequiredService<IHttpConnectionListener>();
+        IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
+
+        return new WebApplicationServer(pipeline, listener);
+    })
+    .ConfigureServer(options =>
+    {
+        options.UseHttp1(transport =>
         {
+            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
+            Console.WriteLine($"Listening On: {transport.EndPoint}");
+            transport.Use((connection, context, next, token) =>
+            {
             
 
-            return next.Invoke(connection, context, token);
+                return next.Invoke(connection, context, token);
+            });
+        });
+        options.UseHttp2(transport =>
+        {
+            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8082);
         });
     });
-    options.UseHttp2(transport =>
-    {
-        transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8082);
-    });
-});
 
 
+builder.AddRouting();
 
 WebApplication app = builder.Build();
 
 app.UseRouting();
-
-
-
-app.Use((context, next) =>
+app.MapGet("/test", (context) =>
 {
     Console.WriteLine("Received request: " + context.Request.Path);
 
-    return next.Invoke(context);
 
+    return Task.CompletedTask;
 });
 
 await app.RunAsync();

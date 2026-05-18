@@ -32,13 +32,13 @@ public sealed class WebServerManager
     /// </summary>
     /// <param name="server"></param>
     /// <returns></returns>
-    public WebServerManager UseServer(IWebServer server)
+    public WebServerManager UseServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
         var service = new WebApplicationServer(server);
 
-        _builder.Services.AddSingleton<IWebServer>(service);
+        _builder.Services.AddSingleton<IWebApplicationServer>(service);
         _builder.Services.AddSingleton<IHostService>(service);
 
         return this;
@@ -49,13 +49,13 @@ public sealed class WebServerManager
     /// </summary>
     /// <param name="factory"></param>
     /// <returns></returns>
-    public WebServerManager UseServer(Func<IServiceProvider, IWebServer> factory)
+    public WebServerManager UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
         Func<IServiceProvider, WebApplicationServer> factory2 = serviceProvider =>
         {
-            IWebServer server = factory.Invoke(serviceProvider);
+            IWebApplicationServer server = factory.Invoke(serviceProvider);
 
             ArgumentNullException.ThrowIfNull(server);
 
@@ -63,7 +63,7 @@ public sealed class WebServerManager
         };
 
 
-        _builder.Services.AddSingleton<IWebServer>(factory2);
+        _builder.Services.AddSingleton<IWebApplicationServer>(factory2);
         _builder.Services.AddSingleton<IHostService>(factory2);
 
         return this;

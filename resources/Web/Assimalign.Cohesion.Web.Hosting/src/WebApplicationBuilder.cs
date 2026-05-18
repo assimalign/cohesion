@@ -65,7 +65,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         WebApplication app = new WebApplication(_context, _options);
 
-        Services.AddSingleton<WebServer>();
+        Services.AddSingleton<WebApplicationServer>();
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
         Services.AddSingleton<ILoggerFactory>(Logging.Build());
@@ -74,7 +74,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         {
             return serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
         });
-        
 
         return app;
     }
@@ -106,13 +105,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     //    return this;
     //}
 
-    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
-    {
-        Services.AddSingleton<IHttpFeature>(feature);
-        return this;
-    }
+    
 
-    IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebServer server)
+    IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
         ServerManager.UseServer(server);
@@ -129,6 +124,20 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         // The user is override the default pipeline, so we need to register the provided 
         // pipeline as the implementation of IWebApplicationPipeline
         Services.AddSingleton<IWebApplicationPipeline>(pipeline);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
+    {
+        return ((IWebApplicationBuilder)this).AddFeature(_ => feature);
+    }
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature<TFeature>(TFeature feature)
+    {
+        return ((IWebApplicationBuilder)this).AddFeature((IHttpFeature)feature);
+    }
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(Func<IWebApplicationContext, IHttpFeature> configure)
+    {
+        Services.AddSingleton<IHttpFeature>(configure.Invoke(_context));
         return this;
     }
 }

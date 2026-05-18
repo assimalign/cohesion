@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
 
-public sealed class WebServer : IWebServer
+public sealed class WebApplicationServer : IWebApplicationServer
 {
     private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
@@ -18,7 +18,7 @@ public sealed class WebServer : IWebServer
     private readonly IHttpConnectionListener _listener;
 
 
-    public WebServer(IWebApplicationPipeline pipeline, IHttpConnectionListener listener)
+    public WebApplicationServer(IWebApplicationPipeline pipeline, IHttpConnectionListener listener)
     {
         _pipeline = pipeline;
         _listener = listener;

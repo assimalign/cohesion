@@ -31,6 +31,12 @@ public static class WebApplicationExtensions
     }
 
 
+    extension(IWebApplicationBuilder builder)
+    {
+        
+    }
+
+
     //extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
     //{
     //    /// <summary>

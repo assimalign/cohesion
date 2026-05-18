@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 	</PropertyGroup>
@@ -7,5 +7,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Forms" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
 	</ItemGroup>
 </Project>

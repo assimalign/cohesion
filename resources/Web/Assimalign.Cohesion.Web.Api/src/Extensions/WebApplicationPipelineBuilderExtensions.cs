@@ -26,21 +26,21 @@ public static class WebApplicationPipelineBuilderExtensions
             ArgumentNullException.ThrowIfNull(middleware);
             IWebApplicationContext context = builder.Context;
 
-            IServiceProvider? serviceProvider = context.ServiceProvider;
+            IHttpFeatureCollection? features = context.Features;
 
-            if (serviceProvider is null)
+            if (features is null)
             {
-                throw new InvalidOperationException("No Service Provider was registered");
+                throw new InvalidOperationException("No HTTP Features are available.");
             }
 
-            IRouterBuilder? routerBuilder = serviceProvider.GetService(typeof(IRouterBuilder)) as IRouterBuilder;
+            IRouterFeature? feature = features.Get<IRouterFeature>();
 
-            if (routerBuilder is null)
+            if (feature is null ||  feature.Builder is null)
             {
-                throw new InvalidOperationException("No router builder was provided");
+                throw new InvalidOperationException("No router builder was not registered");
             }
 
-            routerBuilder.Map(new Route(method, pattern, new RouterRouteHandler(middleware)));
+            feature.Builder.Map(new Route(method, pattern, new RouterRouteHandler(middleware)));
 
             return builder;
 

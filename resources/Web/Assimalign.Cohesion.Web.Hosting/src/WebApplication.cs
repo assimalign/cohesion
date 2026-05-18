@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
@@ -25,6 +26,23 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         _context = context;
         _options = options;
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
+
+        Init();
+    }
+
+
+    // TODO: Need to create an API that allows feature registration on HttpContext creation from the transport layer
+    private void Init()
+    {
+        Use((context, next) =>
+        {
+            var features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
+            foreach (var feature in features)
+            {
+                context.Features.Set(feature);
+            }
+            return next.Invoke(context);
+        });
     }
 
     public override WebApplicationContext Context => _context;
