@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Net;
 using System.Text;
 using System.Threading;
-using Assimalign.Cohesion.Configuration.Json;
 using Assimalign.Cohesion.Web.Routing;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.DependencyInjection;
 
 using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 CancellationToken cancellationToken = cancellationTokenSource.Token;
@@ -18,15 +18,22 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder();
 
 AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
+builder.ServerManager.UseServer(serviceProvider =>
+{
+    IHttpConnectionListener listener = serviceProvider.GetRequiredService<IHttpConnectionListener>();
+    IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
 
+    return new WebServer(pipeline, listener);
+});
 builder.ServerManager.ConfigureServer(options =>
 {
     options.UseHttp1(transport =>
     {
         transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
+        Console.WriteLine($"Listening On: {transport.EndPoint}");
         transport.Use((connection, context, next, token) =>
         {
-            Console.WriteLine($"Listening On: {context.LocalEndPoint}");
+            
 
             return next.Invoke(connection, context, token);
         });
@@ -44,12 +51,6 @@ WebApplication app = builder.Build();
 app.UseRouting();
 
 
-app.MapGet("/test", context =>
-{
-
-
-    return Task.CompletedTask;
-});
 
 app.Use((context, next) =>
 {

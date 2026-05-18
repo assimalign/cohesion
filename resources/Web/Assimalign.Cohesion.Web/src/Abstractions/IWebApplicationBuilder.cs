@@ -1,7 +1,4 @@
-﻿
-using System;
-
-namespace Assimalign.Cohesion.Web;
+﻿namespace Assimalign.Cohesion.Web;
 
 using Http;
 
@@ -17,6 +14,20 @@ public interface IWebApplicationBuilder
     /// <param name="feature"></param>
     /// <returns></returns>
     IWebApplicationBuilder AddFeature(IHttpFeature feature);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="server"></param>
+    /// <returns></returns>
+    IWebApplicationBuilder AddServer(IWebServer server);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="pipeline"></param>
+    /// <returns></returns>
+    IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline);
 
     /// <summary>
     /// 

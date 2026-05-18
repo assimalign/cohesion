@@ -26,7 +26,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Configuration = new ConfigurationManager();
         Logging = new LoggerFactoryBuilder();
         Services = new ServiceProviderBuilder();
-        ServerManager = new WebApplicationServerManager(this);
+        ServerManager = new WebServerManager(this);
 
         _options = options;
         _context = new WebApplicationContext(Services);
@@ -40,7 +40,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <summary>
     /// 
     /// </summary>
-    public WebApplicationServerManager ServerManager { get; } 
+    public WebServerManager ServerManager { get; } 
 
     /// <summary>
     /// 
@@ -65,11 +65,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         WebApplication app = new WebApplication(_context, _options);
 
-        Services.AddSingleton<WebApplicationServer>();
-        Services.AddSingleton<IHostService>(serviceProvider =>
-        {
-            return serviceProvider.GetRequiredService <Internal.WebApplicationServer>();
-        });
+        Services.AddSingleton<WebServer>();
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
         Services.AddSingleton<ILoggerFactory>(Logging.Build());
@@ -113,6 +109,26 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
     {
         Services.AddSingleton<IHttpFeature>(feature);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebServer server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        ServerManager.UseServer(server);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddPipeline(IWebApplicationPipeline pipeline)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
+
+        // Remove the default pipeline builder and replace it with the provided pipeline
+        Services.RemoveAll<IWebApplicationPipelineBuilder>();
+
+        // The user is override the default pipeline, so we need to register the provided 
+        // pipeline as the implementation of IWebApplicationPipeline
+        Services.AddSingleton<IWebApplicationPipeline>(pipeline);
         return this;
     }
 }

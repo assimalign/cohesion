@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
-internal class WebApplicationServer : IWebApplicationServer, IHostService
+internal class WebApplicationServer : IWebServer, IHostService
 {
-    private readonly IWebApplicationServer _server;
+    private readonly IWebServer _server;
 
-    internal WebApplicationServer(IWebApplicationServer server)
+    internal WebApplicationServer(IWebServer server)
     {
         _server = server;
     }
