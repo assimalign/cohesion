@@ -26,7 +26,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Configuration = new ConfigurationManager();
         Logging = new LoggerFactoryBuilder();
         Services = new ServiceProviderBuilder();
-        ServerManager = new WebServerManager(this);
+        ServerManager = new WebApplicationServerBuilder(this);
 
         _options = options;
         _context = new WebApplicationContext(Services);
@@ -40,7 +40,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <summary>
     /// 
     /// </summary>
-    public WebServerManager ServerManager { get; } 
+    public WebApplicationServerBuilder ServerManager { get; } 
 
     /// <summary>
     /// 

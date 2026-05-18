@@ -11,12 +11,12 @@ using Assimalign.Cohesion.Http.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
-public sealed class WebServerManager
+public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
     private readonly HttpConnectionListenerOptions _options;
 
-    internal WebServerManager(WebApplicationBuilder builder)
+    internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
         _options = new HttpConnectionListenerOptions();
@@ -32,7 +32,7 @@ public sealed class WebServerManager
     /// </summary>
     /// <param name="server"></param>
     /// <returns></returns>
-    public WebServerManager UseServer(IWebApplicationServer server)
+    public WebApplicationServerBuilder UseServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
@@ -49,7 +49,7 @@ public sealed class WebServerManager
     /// </summary>
     /// <param name="factory"></param>
     /// <returns></returns>
-    public WebServerManager UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
+    public WebApplicationServerBuilder UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -74,7 +74,7 @@ public sealed class WebServerManager
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public WebServerManager ConfigureServer(Action<WebServerOptions> configure)
+    public WebApplicationServerBuilder ConfigureServer(Action<WebServerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
