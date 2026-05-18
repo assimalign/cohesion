@@ -18,10 +18,16 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
-    private readonly List<HttpCookie> _cookies = new();
+    private readonly IHttpHeaderCollection _headers;
+
+    public HttpCookieCollection(IHttpHeaderCollection headers)
+    {
+        _headers = ArgumentNullException.ThrowIfNull<IHttpHeaderCollection>(headers);
+    }
+
 
     /// <inheritdoc />
-    public int Count => _cookies.Count;
+    public int Count;
 
     /// <inheritdoc />
     public bool IsReadOnly => false;

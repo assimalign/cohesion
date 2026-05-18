@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
-public struct KeyValueAccumulator
+internal struct KeyValueAccumulator
 {
     private Dictionary<string, List<string>> _accumulator;
     private Dictionary<string, List<string>> _expandingAccumulator;

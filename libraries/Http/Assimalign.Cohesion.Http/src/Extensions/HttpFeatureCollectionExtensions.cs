@@ -37,33 +37,34 @@ public static class HttpFeatureCollectionExtensions
             ArgumentNullException.ThrowIfNull(features);
             return features.OfType<TFeature>().FirstOrDefault();
         }
-    }
 
-    /// <summary>
-    /// Registers <paramref name="feature"/> using its <see cref="IHttpFeature.Name"/>
-    /// as the slot. Pass <see langword="null"/> to remove the currently-installed
-    /// feature that implements <typeparamref name="TFeature"/>; this preserves
-    /// the semantic of the pre-IHttpFeature <c>Set&lt;T&gt;(null)</c> shape so
-    /// callers don't need to know the impl's name to remove it.
-    /// </summary>
-    /// <typeparam name="TFeature">The feature contract being registered.</typeparam>
-    /// <param name="features">The feature collection.</param>
-    /// <param name="feature">The implementation, or <see langword="null"/> to remove.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="features"/> is <see langword="null"/>.</exception>
-    public static void Set<TFeature>(this IHttpFeatureCollection features, TFeature? feature) where TFeature : class, IHttpFeature
-    {
-        ArgumentNullException.ThrowIfNull(features);
 
-        if (feature is null)
+        /// <summary>
+        /// Registers <paramref name="feature"/> using its <see cref="IHttpFeature.Name"/>
+        /// as the slot. Pass <see langword="null"/> to remove the currently-installed
+        /// feature that implements <typeparamref name="TFeature"/>; this preserves
+        /// the semantic of the pre-IHttpFeature <c>Set&lt;T&gt;(null)</c> shape so
+        /// callers don't need to know the impl's name to remove it.
+        /// </summary>
+        /// <typeparam name="TFeature">The feature contract being registered.</typeparam>
+        /// <param name="features">The feature collection.</param>
+        /// <param name="feature">The implementation, or <see langword="null"/> to remove.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="features"/> is <see langword="null"/>.</exception>
+        public void Set<TFeature>(TFeature? feature) where TFeature : class, IHttpFeature
         {
-            TFeature? existing = features.OfType<TFeature>().FirstOrDefault();
-            if (existing is not null)
-            {
-                features.Remove(existing.Name);
-            }
-            return;
-        }
+            ArgumentNullException.ThrowIfNull(features);
 
-        features.Set(feature);
+            if (feature is null)
+            {
+                TFeature? existing = features.OfType<TFeature>().FirstOrDefault();
+                if (existing is not null)
+                {
+                    features.Remove(existing.Name);
+                }
+                return;
+            }
+
+            features.Set(feature);
+        }
     }
 }

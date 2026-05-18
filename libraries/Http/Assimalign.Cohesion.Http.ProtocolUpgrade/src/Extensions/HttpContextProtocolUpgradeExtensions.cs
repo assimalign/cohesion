@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 public static class HttpContextProtocolUpgradeExtensions
 {
-    extension(IHttpRequest request)
+    extension(IHttpContext context)
     {
         /// <summary>
         /// Gets the protocol-upgrade feature for this exchange, or
@@ -34,12 +34,22 @@ public static class HttpContextProtocolUpgradeExtensions
         /// transports until the bridge lands.
         /// </para>
         /// </remarks>
-        public IHttpProtocolUpgrade? Upgrade
+        public IHttpProtocolUpgrade Upgrade
         {
             get
             {
-                ArgumentNullException.ThrowIfNull(request);
-                return request.HttpContext.Features.Get<IHttpProtocolUpgradeFeature>()?.Upgrade;
+                ArgumentNullException.ThrowIfNull(context);
+
+                IHttpFeatureCollection features = context.Features;
+                IHttpProtocolUpgradeFeature? feature = context.Features.Get<IHttpProtocolUpgradeFeature>();
+
+                if (feature is null)
+                {
+                    feature = new HttpProtocolUpgradeFeature();
+                    features.Set<IHttpProtocolUpgradeFeature>(feature);
+                }
+
+                return feature.Upgrade;
             }
         }
     }

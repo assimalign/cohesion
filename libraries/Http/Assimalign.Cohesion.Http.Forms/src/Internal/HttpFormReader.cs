@@ -7,13 +7,12 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
-
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Used to read an 'application/x-www-form-urlencoded' form.
 /// </summary>
-public class FormReader : IDisposable
+internal class HttpFormReader : IDisposable
 {
     /// <summary>
     /// Gets the default value for <see cref="ValueCountLimit"/>.
@@ -46,20 +45,20 @@ public class FormReader : IDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="FormReader"/>.
+    /// Initializes a new instance of <see cref="HttpFormReader"/>.
     /// </summary>
     /// <param name="data">The data to read.</param>
-    public FormReader(string data)
+    public HttpFormReader(string data)
         : this(data, ArrayPool<char>.Shared)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="FormReader"/>.
+    /// Initializes a new instance of <see cref="HttpFormReader"/>.
     /// </summary>
     /// <param name="data">The data to read.</param>
     /// <param name="charPool">The <see cref="ArrayPool{T}"/> to use.</param>
-    public FormReader(string data, ArrayPool<char> charPool)
+    public HttpFormReader(string data, ArrayPool<char> charPool)
     {
         ArgumentNullException.ThrowIfNull(data);
 
@@ -69,31 +68,31 @@ public class FormReader : IDisposable
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="FormReader"/>.
+    /// Initializes a new instance of <see cref="HttpFormReader"/>.
     /// </summary>
     /// <param name="stream">The <see cref="Stream"/> to read. Assumes a utf-8 encoded stream.</param>
-    public FormReader(Stream stream)
+    public HttpFormReader(Stream stream)
         : this(stream, Encoding.UTF8, ArrayPool<char>.Shared)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="FormReader"/>.
+    /// Initializes a new instance of <see cref="HttpFormReader"/>.
     /// </summary>
     /// <param name="stream">The <see cref="Stream"/> to read.</param>
     /// <param name="encoding">The character encoding to use.</param>
-    public FormReader(Stream stream, Encoding encoding)
+    public HttpFormReader(Stream stream, Encoding encoding)
         : this(stream, encoding, ArrayPool<char>.Shared)
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of <see cref="FormReader"/>.
+    /// Initializes a new instance of <see cref="HttpFormReader"/>.
     /// </summary>
     /// <param name="stream">The <see cref="Stream"/> to read.</param>
     /// <param name="encoding">The character encoding to use.</param>
     /// <param name="charPool">The <see cref="ArrayPool{T}"/> to use.</param>
-    public FormReader(Stream stream, Encoding encoding, ArrayPool<char> charPool)
+    public HttpFormReader(Stream stream, Encoding encoding, ArrayPool<char> charPool)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(encoding);
@@ -282,7 +281,7 @@ public class FormReader : IDisposable
     /// Parses text from an HTTP form body.
     /// </summary>
     /// <returns>The collection containing the parsed HTTP form body.</returns>
-    public Dictionary<string, StringValues> ReadForm()
+    public Dictionary<string, List<string>> ReadForm()
     {
         var accumulator = new KeyValueAccumulator();
         while (!_endOfStream)
@@ -298,7 +297,7 @@ public class FormReader : IDisposable
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/>.</param>
     /// <returns>The collection containing the parsed HTTP form body.</returns>
-    public async Task<Dictionary<string, StringValues>> ReadFormAsync(CancellationToken cancellationToken = new CancellationToken())
+    public async Task<Dictionary<string, List<string>>> ReadFormAsync(CancellationToken cancellationToken = new CancellationToken())
     {
         var accumulator = new KeyValueAccumulator();
         while (!_endOfStream)

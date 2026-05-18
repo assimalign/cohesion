@@ -1,36 +1,31 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Assimalign.Cohesion.Web;
+﻿namespace Assimalign.Cohesion.Web;
 
 using Assimalign.Cohesion.Http;
 
 public static class WebApplicationExtensions
 {
-    extension(IWebApplicationBuilder builder)
-    {
-        public IWebApplicationBuilder AddHttpFormFeature()
-        {
-
-
-            return builder;
-        }
-    }
-
-
     extension(IWebApplicationPipelineBuilder builder)
     {
-        public IWebApplicationPipelineBuilder UseHttpForms()
+        public IWebApplicationPipelineBuilder UseForms()
         {
-
-
-            builder.Use(async (context, next) =>
+            return builder.Use(async (context, next) =>
             {
-                IHttpFormFeature feature = context.Features.Get<IHttpFormFeature>();
-            });
+                // Get the request from the context
+                IHttpRequest request = context.Request;
 
-            return builder;
+                // Get the feature 
+                IHttpFeatureCollection features = context.Features;
+                IHttpFormFeature? feature = features.Get<IHttpFormFeature>();
+
+                if (feature is null)
+                {
+                    feature = new HttpFormFeature(request);
+                    features.Set<IHttpFormFeature>(feature);
+                }
+
+                await feature.ReadFormAsync();
+                await next.Invoke(context);
+            });
         }
     }
 }

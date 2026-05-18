@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Http;
 /// metadata.
 /// </para>
 /// </remarks>
-internal sealed class HttpProtocolUpgrade : IHttpProtocolUpgrade
+public sealed class HttpProtocolUpgrade : IHttpProtocolUpgrade
 {
     private static readonly HttpHeaderKey[] ForbiddenResponseHeaders =
     {

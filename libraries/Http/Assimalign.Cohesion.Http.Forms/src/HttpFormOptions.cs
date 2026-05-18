@@ -4,6 +4,8 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Http;
 
+using Assimalign.Cohesion.Http.Internal;
+
 public class HttpFormOptions
 {
     internal static readonly HttpFormOptions Default = new HttpFormOptions();
@@ -58,21 +60,21 @@ public class HttpFormOptions
     /// Forms that exceed this limit will throw an <see cref="InvalidDataException"/> when parsed.
     /// Defaults to 1024.
     /// </summary>
-    public int ValueCountLimit { get; set; } = FormReader.DefaultValueCountLimit;
+    public int ValueCountLimit { get; set; } = HttpFormReader.DefaultValueCountLimit;
 
     /// <summary>
     /// A limit on the length of individual keys. Forms containing keys that exceed this limit will
     /// throw an <see cref="InvalidDataException"/> when parsed.
     /// Defaults to 2,048 bytes, which is approximately 2KB.
     /// </summary>
-    public int KeyLengthLimit { get; set; } = FormReader.DefaultKeyLengthLimit;
+    public int KeyLengthLimit { get; set; } = HttpFormReader.DefaultKeyLengthLimit;
 
     /// <summary>
     /// A limit on the length of individual form values. Forms containing values that exceed this
     /// limit will throw an <see cref="InvalidDataException"/> when parsed.
     /// Defaults to 4,194,304 bytes, which is approximately 4MB.
     /// </summary>
-    public int ValueLengthLimit { get; set; } = FormReader.DefaultValueLengthLimit;
+    public int ValueLengthLimit { get; set; } = HttpFormReader.DefaultValueLengthLimit;
 
     /// <summary>
     /// A limit for the length of the boundary identifier. Forms with boundaries that exceed this
@@ -87,14 +89,14 @@ public class HttpFormOptions
     /// when parsed.
     /// Defaults to 16.
     /// </summary>
-    public int MultipartHeadersCountLimit { get; set; } = MultipartReader.DefaultHeadersCountLimit;
+    public int MultipartHeadersCountLimit { get; set; } = HttpMultipartFormReader.DefaultHeadersCountLimit;
 
     /// <summary>
     /// A limit for the total length of the header keys and values in each multipart section.
     /// Form sections that exceed this limit will throw an <see cref="InvalidDataException"/> when parsed.
     /// Defaults to 16,384 bytes, which is approximately 16KB.
     /// </summary>
-    public int MultipartHeadersLengthLimit { get; set; } = MultipartReader.DefaultHeadersLengthLimit;
+    public int MultipartHeadersLengthLimit { get; set; } = HttpMultipartFormReader.DefaultHeadersLengthLimit;
 
     /// <summary>
     /// A limit for the length of each multipart body. Forms sections that exceed this limit will throw an

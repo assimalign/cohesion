@@ -114,7 +114,7 @@
 	<Folder Name="/cohesion/extensions/VisualStudio/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/Assimalign.Cohesion/">
-		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" />
+		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" Id="4390ca1a-38cd-4650-87ed-e8cb11b4280d" />
 	</Folder>
 	<Folder Name="/cohesion/frameworks/">
 		<File Path="frameworks/Assimalign.Cohesion.App.props" />
@@ -798,6 +798,7 @@
 	<Folder Name="/cohesion/libraries/Http/">
 		<File Path="libraries/Http/Directory.Build.props" />
 		<File Path="libraries/Http/Directory.Build.targets" />
+		<File Path="libraries/Http/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http/README.md" />
@@ -840,6 +841,10 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Identity/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Identity/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/">
