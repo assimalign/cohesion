@@ -1,65 +1,30 @@
-﻿using System;
+﻿using Assimalign.Cohesion.Hosting;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Web.Internal;
-
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 internal class WebApplicationServer : IWebApplicationServer, IHostService
 {
-    private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+    private readonly IWebApplicationServer _server;
 
-    private readonly IWebApplicationPipeline _pipeline;
-    private readonly IHttpConnectionListener _listener;
-
-
-    public WebApplicationServer(IWebApplicationPipeline pipeline, IHttpConnectionListener listener)
+    internal WebApplicationServer(IWebApplicationServer server)
     {
-        _pipeline = pipeline;
-        _listener = listener;
+        _server = server;
     }
 
     public ServiceId Id { get; } = ServiceId.New();
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        ThreadPool.UnsafeQueueUserWorkItem(async state =>
-        {
-            using var cancellationTokenSource = (CancellationTokenSource)state!;
-
-            CancellationToken token = cancellationTokenSource.Token;
-
-            while (!token.IsCancellationRequested)
-            {
-                IHttpConnection httpConnection = await _listener.AcceptOrListenAsync(token);
-                IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync(token);
-
-                await foreach (IHttpContext httpContext in httpConnectionContext.ReceiveAsync().WithCancellation(token))
-                {
-                    // Process the received context
-                    await _pipeline.InvokeAsync(httpContext, token).ConfigureAwait(false);
-
-                    await httpConnectionContext.SendAsync(httpContext).ConfigureAwait(false);
-
-                    await httpContext.DisposeAsync().ConfigureAwait(false);
-                }
-            }
-
-        }, _cancellationTokenSource);
-
-        return Task.CompletedTask;
+        return _server.StartAsync(cancellationToken);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        _cancellationTokenSource.Cancel();
-
-        return Task.CompletedTask;
+        return _server.StopAsync(cancellationToken);
     }
 }

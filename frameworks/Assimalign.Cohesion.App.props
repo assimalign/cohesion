@@ -95,6 +95,7 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
 
         <!-- Move from App when ready:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />

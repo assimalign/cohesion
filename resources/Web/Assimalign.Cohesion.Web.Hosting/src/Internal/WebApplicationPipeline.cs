@@ -1,11 +1,9 @@
-﻿using Assimalign.Cohesion.Http;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
+
+using Assimalign.Cohesion.Http;
 
 internal class WebApplicationPipeline : IWebApplicationPipeline
 {

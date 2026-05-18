@@ -35,7 +35,7 @@ public sealed class WebApplicationServerManager
     {
         ArgumentNullException.ThrowIfNull(server);
 
-        _builder.Services.AddSingleton<IWebApplicationServer>(new WebApplicationServerWrapper(server));
+        _builder.Services.AddSingleton<IWebApplicationServer>(new WebApplicationServer(server));
 
         return this;
     }
@@ -55,7 +55,7 @@ public sealed class WebApplicationServerManager
 
             ArgumentNullException.ThrowIfNull(server);
 
-            return new WebApplicationServerWrapper(server);
+            return new WebApplicationServer(server);
         });
 
         return this;

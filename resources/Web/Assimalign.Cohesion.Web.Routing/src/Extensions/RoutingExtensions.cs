@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 public static class RoutingExtensions
 {
-    extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
+    extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
         /// Adds routing to the current web application pipeline.

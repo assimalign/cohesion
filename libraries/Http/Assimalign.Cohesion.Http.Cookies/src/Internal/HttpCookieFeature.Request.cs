@@ -3,21 +3,20 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Default <see cref="IHttpRequestCookieFeature"/> implementation. Holds the
-/// pre-parsed cookie collection produced by
-/// <see cref="HttpCookieExtensions.Cookies"/> on first read. The extension
-/// hands the feature an already-parsed snapshot, so this type does not
-/// perform any wire-format work itself &#8211; that keeps the parsing rules
-/// in a single place (the extension) and lets custom feature implementations
-/// supply alternative cookie sources (signed cookies, encrypted cookies,
-/// &#8230;) without re-implementing the wire grammar.
+/// Default <see cref="IHttpRequestCookieFeature"/> implementation. The
+/// underlying <see cref="Cookies"/> collection is the sync-aware
+/// <see cref="HttpCookieCollection"/> bound to
+/// <see cref="HttpHeaderKey.Cookie"/>; it parses the incoming
+/// <c>Cookie</c> header on construction and writes mutations back to
+/// the same header so any middleware that inspects
+/// <c>request.Headers[Cookie]</c> sees a consistent view.
 /// </summary>
 internal sealed class HttpRequestCookieFeature : IHttpRequestCookieFeature
 {
-    public HttpRequestCookieFeature(IHttpCookieCollection cookies)
+    public HttpRequestCookieFeature(IHttpHeaderCollection headers)
     {
-        ArgumentNullException.ThrowIfNull(cookies);
-        Cookies = cookies;
+        ArgumentNullException.ThrowIfNull(headers);
+        Cookies = new HttpCookieCollection(headers, HttpHeaderKey.Cookie);
     }
 
     public string Name => nameof(HttpRequestCookieFeature);

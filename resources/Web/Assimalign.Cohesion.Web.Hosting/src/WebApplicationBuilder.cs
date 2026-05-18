@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Web.Internal;
+using Assimalign.Cohesion.Http;
 
 public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 {
@@ -24,6 +24,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
         Environment = new HostEnvironment(options.Environment!);
         Configuration = new ConfigurationManager();
+        Logging = new LoggerFactoryBuilder();
         Services = new ServiceProviderBuilder();
         ServerManager = new WebApplicationServerManager(this);
 
@@ -54,6 +55,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <summary>
     /// 
     /// </summary>
+    public LoggerFactoryBuilder Logging { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
     /// <returns></returns>
     public WebApplication Build()
     {
@@ -62,11 +68,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Services.AddSingleton<WebApplicationServer>();
         Services.AddSingleton<IHostService>(serviceProvider =>
         {
-            return serviceProvider.GetRequiredService<WebApplicationServer>();
+            return serviceProvider.GetRequiredService <Internal.WebApplicationServer>();
         });
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
-        Services.AddSingleton<IConfiguration>(Configuration);
+        Services.AddSingleton<ILoggerFactory>(Logging.Build());
         Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
         Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
         {
@@ -85,22 +91,28 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         return Build();
     }
-    IWebApplicationBuilder IWebApplicationBuilder.UseServer(IWebApplicationServer server)
-    {
-        ServerManager.UseServer(server);
-        return this;
-    }
-    IHostBuilder IHostBuilder.AddHostedService(IHostService service)
-    {
-        ArgumentNullException.ThrowIfNull(service);
+    //IWebApplicationBuilder IWebApplicationBuilder.UseServer(IWebApplicationServer server)
+    //{
+    //    ServerManager.UseServer(server);
+    //    return this;
+    //}
+    //IHostBuilder IHostBuilder.AddHostedService(IHostService service)
+    //{
+    //    ArgumentNullException.ThrowIfNull(service);
 
-        Services.AddSingleton(service);
+    //    Services.AddSingleton(service);
 
-        return this;
-    }
-    IHostBuilder IHostBuilder.AddHostedService(Func<IHostContext, IHostService> configure)
+    //    return this;
+    //}
+    //IHostBuilder IHostBuilder.AddHostedService(Func<IHostContext, IHostService> configure)
+    //{
+    //    Services.AddSingleton(_ => configure.Invoke(_context));
+    //    return this;
+    //}
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
     {
-        Services.AddSingleton(_ => configure.Invoke(_context));
+        Services.AddSingleton<IHttpFeature>(feature);
         return this;
     }
 }

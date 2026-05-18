@@ -37,8 +37,6 @@ builder.ServerManager.ConfigureServer(options =>
     });
 });
 
-builder.AddRouting();
-
 
 
 WebApplication app = builder.Build();

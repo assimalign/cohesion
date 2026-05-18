@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,12 +11,12 @@ public interface IWebApplicationServer
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StartAsync(CancellationToken cancellationToken);
+    Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StopAsync(CancellationToken cancellationToken);
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

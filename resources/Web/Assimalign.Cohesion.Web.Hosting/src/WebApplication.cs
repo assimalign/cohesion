@@ -10,7 +10,6 @@ namespace Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
@@ -29,6 +28,17 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     public override WebApplicationContext Context => _context;
+
+    public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
+    {
+        ArgumentNullException.ThrowIfNull(middleware);
+        Func<IHttpContext, WebApplicationMiddleware, Task> middleware2 = middleware;
+        ((IWebApplicationPipelineBuilder)this).Use((WebApplicationMiddleware next) => (IHttpContext context) =>
+        {
+            return middleware2.Invoke(context, next);
+        });
+        return this;
+    }
     IWebApplicationContext IWebApplication.Context => Context;
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
@@ -87,6 +97,4 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
         return new WebApplicationBuilder(options);
     }
-
-    
 }
