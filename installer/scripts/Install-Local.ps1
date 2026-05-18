@@ -67,58 +67,12 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
 
-# Resolve the Cohesion version the same way MSBuild does, so the script can
-# never drift from whatever the build is actually producing.
-#
-# Build.TargetFramework.props is the single source of truth for the *major*
-# version: bumping <TargetFramework> there (e.g. net10.0 -> net11.0)
-# automatically bumps every package this script produces. The minor and patch
-# components live in Build.Version.props (literal integers, usually 0).
-#
-# We can't read <CohesionVersion> directly out of Build.Version.props because
-# its body is an MSBuild expression ($(CohesionMajorVersion)…) that PowerShell's
-# XML reader returns verbatim — we'd end up with a literal "$(...)" string
-# rather than a resolved version. Instead we read the inputs and assemble the
-# version the same way the props file does.
-function Get-XmlPropertyValue {
-    param(
-        [Parameter(Mandatory)] [string]$Path,
-        [Parameter(Mandatory)] [string]$Property
-    )
-    $match = Select-Xml -LiteralPath $Path -XPath "/Project/PropertyGroup/$Property" | Select-Object -First 1
-    if (-not $match) { throw "Could not find <$Property> in '$Path'." }
-    return $match.Node.InnerText.Trim()
-}
-
-$tfmPropsPath     = Join-Path $repoRoot 'build\Targets\Build.TargetFramework.props'
-$versionPropsPath = Join-Path $repoRoot 'build\Targets\Build.Version.props'
-
-$targetFramework = Get-XmlPropertyValue -Path $tfmPropsPath     -Property 'TargetFramework'
-$cohesionMinor   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionMinorVersion'
-$cohesionPatch   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionPatchVersion'
-
-# Minor/Patch must be literal integers; if either ever becomes an MSBuild
-# expression we'd silently produce a junk version, so fail loud instead.
-foreach ($p in @(
-    @{ Name = 'CohesionMinorVersion'; Value = $cohesionMinor },
-    @{ Name = 'CohesionPatchVersion'; Value = $cohesionPatch }
-)) {
-    if ($p.Value -notmatch '^\d+$') {
-        throw "<$($p.Name)> in '$versionPropsPath' must be a literal integer, got '$($p.Value)'."
-    }
-}
-
-# Mirror build/Targets/Build.Version.props:
-#   CohesionMajorVersion = [System.Version]::Parse(TargetFramework.TrimStart('net')).Major
-#   CohesionVersion      = Major.Minor.Patch
-$tfmTrimmed = $targetFramework -replace '^net',''
-try {
-    $tfmVersion = [Version]$tfmTrimmed
-}
-catch {
-    throw "Could not parse TargetFramework '$targetFramework' as a version: $_"
-}
-$cohesionVersion = "{0}.{1}.{2}" -f $tfmVersion.Major, $cohesionMinor, $cohesionPatch
+# Resolve the Cohesion version. Delegated to a shared helper so the GitHub
+# Actions workflow (.github/workflows/framework.yml) and this script can never
+# drift on what they think the package version is. See Get-CohesionVersion.ps1
+# for the derivation details — Build.TargetFramework.props remains the single
+# source of truth for the major version.
+$cohesionVersion = & (Join-Path $PSScriptRoot 'Get-CohesionVersion.ps1') -RepoRoot $repoRoot
 
 if (-not $Rids -or $Rids.Count -eq 0) {
     $Rids = @((& dotnet --info | Select-String -Pattern '^\s*RID:\s*(\S+)').Matches.Groups[1].Value)

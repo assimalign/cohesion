@@ -80,13 +80,17 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Read CohesionVersion from Build.Version.props
+      - name: Resolve CohesionVersion
         id: read-version
         shell: pwsh
+        # Shared with installer/scripts/Install-Local.ps1 — single derivation,
+        # so the version this job exports can't drift from whatever the local
+        # packer produces. Bumping <TargetFramework> in
+        # build/Targets/Build.TargetFramework.props is the one-line edit that
+        # drives the major version of every package.
         run: |
-          [xml]$v = Get-Content build/Targets/Build.Version.props
-          $ver = $v.Project.PropertyGroup.CohesionVersion.Trim()
-          if (-not $ver) { throw "Could not read CohesionVersion from Build.Version.props" }
+          $ver = & ./installer/scripts/Get-CohesionVersion.ps1
+          if (-not $ver) { throw "Get-CohesionVersion.ps1 produced no output." }
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "CohesionVersion = $ver"
 
