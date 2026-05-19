@@ -323,9 +323,15 @@
 	<Folder Name="/libraries/Dns/">
 		<File Path="Dns/Directory.Build.props" />
 		<File Path="Dns/Directory.Build.targets" />
+		<File Path="Dns/README.md" />
 	</Folder>
 	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns/">
 		<File Path="Dns/Assimalign.Cohesion.Dns/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns/docs/">
+		<File Path="Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md" />
+		<File Path="Dns/Assimalign.Cohesion.Dns/docs/OVERVIEW.md" />
+		<File Path="Dns/Assimalign.Cohesion.Dns/docs/PROVENANCE.md" />
 	</Folder>
 	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns/src/">
 		<Project Path="Dns/Assimalign.Cohesion.Dns/src/Assimalign.Cohesion.Dns.csproj" />
@@ -342,14 +348,46 @@
 	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client/tests/">
 		<Project Path="Dns/Assimalign.Cohesion.Dns.Client/tests/Assimalign.Cohesion.Dns.Client.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doh/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/OVERVIEW.md" />
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doh/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doh/src/">
+		<Project Path="Dns/Assimalign.Cohesion.Dns.Client.Doh/src/Assimalign.Cohesion.Dns.Client.Doh.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doq/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/OVERVIEW.md" />
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Doq/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Doq/src/">
+		<Project Path="Dns/Assimalign.Cohesion.Dns.Client.Doq/src/Assimalign.Cohesion.Dns.Client.Doq.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Dot/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/">
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/OVERVIEW.md" />
+		<File Path="Dns/Assimalign.Cohesion.Dns.Client.Dot/docs/REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/libraries/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
+		<Project Path="Dns/Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
+	</Folder>
 	<Folder Name="/libraries/FileSystem/">
 		<File Path="FileSystem/Directory.Build.props" />
 		<File Path="FileSystem/Directory.Build.targets" />
+		<File Path="FileSystem/README.md" />
 	</Folder>
 	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem/">
 		<File Path="FileSystem/Assimalign.Cohesion.FileSystem/README.md" />
 	</Folder>
 	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/">
+		<File Path="FileSystem/Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md" />
 		<File Path="FileSystem/Assimalign.Cohesion.FileSystem/docs/DESIGN.md" />
 		<File Path="FileSystem/Assimalign.Cohesion.FileSystem/docs/OVERVIEW.md" />
 	</Folder>
@@ -444,6 +482,7 @@
 	<Folder Name="/libraries/Http/">
 		<File Path="Http/Directory.Build.props" />
 		<File Path="Http/Directory.Build.targets" />
+		<File Path="Http/README.md" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http/">
 		<File Path="Http/Assimalign.Cohesion.Http/README.md" />
@@ -465,6 +504,47 @@
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/tests/">
 		<Project Path="Http/Assimalign.Cohesion.Http.ClientFactory/tests/Assimalign.Cohesion.Http.ClientFactory.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Cookies/">
+		<File Path="Http/Assimalign.Cohesion.Http.Cookies/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Cookies/docs/">
+		<File Path="Http/Assimalign.Cohesion.Http.Cookies/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Cookies/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Cookies/src/Assimalign.Cohesion.Http.Cookies.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Cookies/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Cookies/tests/Assimalign.Cohesion.Http.Cookies.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Forms/">
+		<File Path="Http/Assimalign.Cohesion.Http.Forms/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Forms/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Identity/" />
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Identity/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/" />
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/Assimalign.Cohesion.Http.ProtocolUpgrade.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Sessions/">
+		<File Path="Http/Assimalign.Cohesion.Http.Sessions/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Sessions/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Sessions/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.Sessions/tests/Assimalign.Cohesion.Http.Sessions.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Transports/">
 		<File Path="Http/Assimalign.Cohesion.Http.Transports/DESIGN_SUGGESTION.md" />

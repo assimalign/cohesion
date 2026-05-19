@@ -4,7 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
+namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// HTTP/1.1 implementation of <see cref="IHttpProtocolUpgrade"/>. Owns the response
@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 /// metadata.
 /// </para>
 /// </remarks>
-internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
+public sealed class HttpProtocolUpgrade : IHttpProtocolUpgrade
 {
     private static readonly HttpHeaderKey[] ForbiddenResponseHeaders =
     {
@@ -39,12 +39,12 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         HttpHeaderKey.TransferEncoding,
     };
 
-    private readonly Http1Context _context;
+    private readonly IHttpContext _context;
     private readonly Stream _stream;
     private int _accepted;
 
-    public Http1ProtocolUpgrade(
-        Http1Context context,
+    public HttpProtocolUpgrade(
+        IHttpContext context,
         Stream stream,
         HttpProtocolUpgradeKind kind,
         string? protocol)
@@ -70,8 +70,8 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
                 "The protocol upgrade has already been accepted for this exchange.");
         }
 
-        Http1Response response = (Http1Response)_context.Response;
-        HttpHeaderCollection headers = response.Headers;
+        IHttpResponse response = (IHttpResponse)_context.Response;
+        IHttpHeaderCollection headers = response.Headers;
 
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include
         // Content-Length or Transfer-Encoding; the tunnel carries opaque octets.
@@ -117,14 +117,14 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 
         await WriteHeadersAsync(headers, response, cancellationToken).ConfigureAwait(false);
 
-        _context.KeepAlive = false;
-        _context.ResponseFinalized = true;
+        //_context.KeepAlive = false;
+        //_context.ResponseFinalized = true;
         return _stream;
     }
 
     private async ValueTask WriteHeadersAsync(
-        HttpHeaderCollection headers,
-        Http1Response response,
+        IHttpHeaderCollection headers,
+        IHttpResponse response,
         CancellationToken cancellationToken)
     {
         StringBuilder builder = new();
@@ -142,12 +142,19 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
                 .Append("\r\n");
         }
 
-        foreach (HttpCookie cookie in response.Cookies)
+        // RFC 6265 §3 — each Set-Cookie value MUST be emitted on its own line.
+        // The cookie feature is attached only when the response cookies
+        // extension has been used; otherwise there are no cookies to drain.
+        IHttpResponseCookieFeature? cookieFeature = _context.Features.Get<IHttpResponseCookieFeature>();
+        if (cookieFeature is not null)
         {
-            builder.Append(HttpHeaderKey.SetCookie.ToString())
-                .Append(": ")
-                .Append(cookie.ToString())
-                .Append("\r\n");
+            foreach (HttpCookie cookie in cookieFeature.Cookies)
+            {
+                builder.Append(HttpHeaderKey.SetCookie.ToString())
+                    .Append(": ")
+                    .Append(cookie.ToString())
+                    .Append("\r\n");
+            }
         }
 
         builder.Append("\r\n");

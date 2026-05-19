@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Internal;
+using Assimalign.Cohesion.Http;
 
 public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
@@ -20,6 +20,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     public FileSystemPath? ContentRootPath { get; }
     public override IServiceProvider ServiceProvider => (_builder as IServiceProviderBuilder).Build();
     public override IHostEnvironment Environment => ServiceProvider.GetRequiredService<IHostEnvironment>();
-    public IEnumerable<IWebApplicationServer> Servers => HostedServices.OfType<IWebApplicationServer>();
     public override IEnumerable<IHostService> HostedServices => ServiceProvider.GetRequiredService<IEnumerable<IHostService>>();
+    public IEnumerable<IWebApplicationServer> Servers => HostedServices.OfType<IWebApplicationServer>();
+    public IEnumerable<IWebApplicationMiddleware> Middleware => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationMiddleware>>();
+    public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
 }

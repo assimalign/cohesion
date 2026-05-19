@@ -4,15 +4,25 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
 
-using Assimalign.Cohesion.Hosting;
-
 /// <summary>
 /// Represents an abstraction of a web server.
 /// </summary>
-public interface IWebApplication : IHost
+public interface IWebApplication
 {
     /// <summary>
     /// 
     /// </summary>
-    new IWebApplicationContext Context { get; }
+    IWebApplicationContext Context { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    Task StartAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

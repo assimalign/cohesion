@@ -1,12 +1,9 @@
 <Project>
-    <Target Name="TestMessage" BeforeTargets="Build">
-        <Message Text="Framework Version: $(TargetFrameworkVersion)" Importance="High" />
-    </Target>
     <PropertyGroup>
         <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
         <CohesionMajorVersion>$([System.Version]::Parse('$(TargetFramework.TrimStart('net'))').Major)</CohesionMajorVersion>
         <CohesionMinorVersion>0</CohesionMinorVersion>
-        <CohesionPatchVersion>0</CohesionPatchVersion>
+        <CohesionPatchVersion>1</CohesionPatchVersion>
         <CohesionVersion>$(CohesionMajorVersion).$(CohesionMinorVersion).$(CohesionPatchVersion)</CohesionVersion>
     </PropertyGroup>
 

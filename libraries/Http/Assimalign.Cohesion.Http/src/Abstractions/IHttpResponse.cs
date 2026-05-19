@@ -18,11 +18,6 @@ public interface IHttpResponse
     IHttpHeaderCollection Headers { get; }
 
     /// <summary>
-    /// Gets the collection of response cookies.
-    /// </summary>
-    IHttpCookieCollection Cookies { get; }
-
-    /// <summary>
     /// Get's the context associated with the response.
     /// </summary>
     IHttpContext HttpContext { get; }

@@ -27,13 +27,13 @@ namespace Assimalign.Cohesion.Http;
 /// subsequent reads.
 /// </para>
 /// </remarks>
-public interface IHttpFormFeature
+public interface IHttpFormFeature : IHttpFeature
 {
     /// <summary>
     /// Gets or sets the parsed form collection. <see langword="null"/> when
     /// the form has not yet been parsed or attached.
     /// </summary>
-    IHttpFormCollection? Form { get; set; }
+    IHttpFormCollection? Form { get; }
 
     /// <summary>
     /// Returns the parsed form collection, parsing the request body and

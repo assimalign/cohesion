@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
-using Assimalign.Cohesion.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
@@ -26,9 +26,37 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         _context = context;
         _options = options;
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
+
+        Init();
+    }
+
+
+    // TODO: Need to create an API that allows feature registration on HttpContext creation from the transport layer
+    private void Init()
+    {
+        Use((context, next) =>
+        {
+            var features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
+            foreach (var feature in features)
+            {
+                context.Features.Set(feature);
+            }
+            return next.Invoke(context);
+        });
     }
 
     public override WebApplicationContext Context => _context;
+
+    public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
+    {
+        ArgumentNullException.ThrowIfNull(middleware);
+        Func<IHttpContext, WebApplicationMiddleware, Task> middleware2 = middleware;
+        ((IWebApplicationPipelineBuilder)this).Use((WebApplicationMiddleware next) => (IHttpContext context) =>
+        {
+            return middleware2.Invoke(context, next);
+        });
+        return this;
+    }
     IWebApplicationContext IWebApplication.Context => Context;
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
@@ -87,6 +115,4 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
         return new WebApplicationBuilder(options);
     }
-
-    
 }

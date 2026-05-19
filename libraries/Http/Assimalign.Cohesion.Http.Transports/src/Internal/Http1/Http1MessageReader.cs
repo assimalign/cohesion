@@ -50,18 +50,19 @@ internal static class Http1MessageReader
 
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
 
-        // RFC 9110 §7.8 / §9.3.6 — classify the transition signal BEFORE consuming any
-        // body bytes. CONNECT in particular MUST NOT consume octets past the request
-        // headers; the bytes that follow belong to the tunnel.
-        (HttpProtocolUpgradeKind upgradeKind, string? upgradeProtocol) = ClassifyUpgrade(method, target, headers);
+        // RFC 9110 §9.3.6 — CONNECT requests MUST NOT consume octets past the request
+        // headers; the bytes that follow belong to the tunnel. Detect this before any
+        // body framing logic kicks in. We only care about the framing decision here;
+        // exposing a typed protocol-upgrade feature is the Assimalign.Cohesion.Http.ProtocolUpgrade
+        // package's job and requires a separate transport <-> ProtocolUpgrade bridge
+        // (tracked as follow-up).
+        bool isConnectTunnel = method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority;
 
         byte[] bodyBytes;
-        if (upgradeKind == HttpProtocolUpgradeKind.Connect)
+        if (isConnectTunnel)
         {
             // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
-            // or Transfer-Encoding. Anything after the headers is tunnel traffic, so
-            // we hand the application an empty body and let the upgrade hand over the
-            // raw stream when AcceptAsync is invoked.
+            // or Transfer-Encoding. Anything after the headers is tunnel traffic.
             bodyBytes = Array.Empty<byte>();
         }
         else
@@ -78,7 +79,6 @@ internal static class Http1MessageReader
         }
 
         HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
-        HttpCookieCollection cookies = ParseCookies(headers);
 
         // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
         //   - absolute-form  → authority component of the target supersedes any Host header
@@ -105,7 +105,6 @@ internal static class Http1MessageReader
             requestScheme,
             queryCollection,
             headers,
-            cookies,
             new MemoryStream(bodyBytes, writable: false));
         Http1Response response = new();
 
@@ -116,66 +115,7 @@ internal static class Http1MessageReader
             response,
             connectionInfo,
             cancellationToken,
-            keepAlive,
-            stream,
-            upgradeKind,
-            upgradeProtocol);
-    }
-
-    /// <summary>
-    /// Classifies whether the current request is a candidate for a connection
-    /// transition (HTTP/1.1 protocol upgrade or CONNECT tunnel) per RFC 9110 §7.8
-    /// and §9.3.6.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// CONNECT detection requires both the <c>CONNECT</c> method and the authority
-    /// request-target form (RFC 9112 §3.2.3); the request-target parser already
-    /// enforces this pairing, so the check here is defensive.
-    /// </para>
-    /// <para>
-    /// Upgrade detection requires <c>Connection: upgrade</c> (RFC 9110 §7.8.1 —
-    /// the Connection header is what makes Upgrade hop-by-hop and actionable;
-    /// presence of <c>Upgrade</c> alone is informational and is ignored). The
-    /// first protocol token in the <c>Upgrade</c> field is returned; further
-    /// tokens describe fallback preferences and are surfaced through the raw
-    /// header for the application to consult if needed.
-    /// </para>
-    /// </remarks>
-    private static (HttpProtocolUpgradeKind Kind, string? Protocol) ClassifyUpgrade(
-        HttpMethod method,
-        HttpRequestTarget target,
-        HttpHeaderCollection headers)
-    {
-        if (method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority)
-        {
-            return (HttpProtocolUpgradeKind.Connect, null);
-        }
-
-        if (!HeaderContainsToken(headers, HttpHeaderKey.Connection, "upgrade"))
-        {
-            return (HttpProtocolUpgradeKind.None, null);
-        }
-
-        if (!headers.TryGetValue(HttpHeaderKey.Upgrade, out HttpHeaderValue upgradeHeader))
-        {
-            // Connection: upgrade without an Upgrade header is a bare hop-by-hop
-            // signal with no protocol to negotiate — there is nothing to switch to.
-            return (HttpProtocolUpgradeKind.None, null);
-        }
-
-        // The Upgrade field is a comma-separated protocol list; the first token is
-        // the highest-priority protocol the client wants to switch to.
-        string raw = upgradeHeader.Value ?? string.Empty;
-        int comma = raw.IndexOf(',');
-        string firstProtocol = (comma < 0 ? raw : raw[..comma]).Trim();
-
-        if (firstProtocol.Length == 0)
-        {
-            return (HttpProtocolUpgradeKind.None, null);
-        }
-
-        return (HttpProtocolUpgradeKind.Upgrade, firstProtocol);
+            keepAlive);
     }
 
     private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(Stream stream, CancellationToken cancellationToken)
@@ -216,40 +156,6 @@ internal static class Http1MessageReader
                 headers[key] = value;
             }
         }
-    }
-
-    private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)
-    {
-        HttpCookieCollection cookies = new();
-
-        if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
-        {
-            return cookies;
-        }
-
-        foreach (string? headerValue in cookieHeader)
-        {
-            if (string.IsNullOrWhiteSpace(headerValue))
-            {
-                continue;
-            }
-
-            string[] segments = headerValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string segment in segments)
-            {
-                string[] parts = segment.Split('=', 2);
-                string name = parts[0].Trim();
-                string value = parts.Length == 2 ? parts[1].Trim() : string.Empty;
-
-                if (name.Length > 0)
-                {
-                    cookies.Add(new HttpCookie(name, value));
-                }
-            }
-        }
-
-        return cookies;
     }
 
     private static bool HeaderContainsToken(HttpHeaderCollection headers, HttpHeaderKey key, string expected)

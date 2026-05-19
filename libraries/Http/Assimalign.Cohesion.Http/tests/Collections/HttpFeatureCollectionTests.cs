@@ -1,3 +1,5 @@
+using System.Linq;
+
 using Shouldly;
 
 using Xunit;
@@ -6,7 +8,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpFeatureCollectionTests
 {
-    private interface ISampleFeature
+    private interface ISampleFeature : IHttpFeature
     {
         string Tag { get; }
     }
@@ -18,42 +20,38 @@ public class HttpFeatureCollectionTests
             Tag = tag;
         }
 
+        public string Name => nameof(SampleFeature);
         public string Tag { get; }
     }
 
-    private interface IOtherFeature
+    private interface IOtherFeature : IHttpFeature
     {
     }
 
     private sealed class OtherFeature : IOtherFeature
     {
+        public string Name => nameof(OtherFeature);
     }
 
     [Fact]
     public void Get_NotRegistered_ShouldReturnNull()
     {
-        // Arrange
         HttpFeatureCollection features = new();
 
-        // Act
         ISampleFeature? feature = features.Get<ISampleFeature>();
 
-        // Assert
         feature.ShouldBeNull();
     }
 
     [Fact]
     public void SetThenGet_ShouldReturnSameInstance()
     {
-        // Arrange
         HttpFeatureCollection features = new();
         SampleFeature instance = new("alpha");
 
-        // Act
         features.Set<ISampleFeature>(instance);
         ISampleFeature? retrieved = features.Get<ISampleFeature>();
 
-        // Assert
         retrieved.ShouldBeSameAs(instance);
         retrieved!.Tag.ShouldBe("alpha");
     }
@@ -61,66 +59,106 @@ public class HttpFeatureCollectionTests
     [Fact]
     public void Set_NullInstance_ShouldRemoveExistingRegistration()
     {
-        // Arrange
         HttpFeatureCollection features = new();
         features.Set<ISampleFeature>(new SampleFeature("a"));
 
-        // Act
         features.Set<ISampleFeature>(null);
 
-        // Assert
         features.Get<ISampleFeature>().ShouldBeNull();
     }
 
     [Fact]
     public void Set_TwiceWithDifferentInstances_ShouldReturnLatest()
     {
-        // Arrange
         HttpFeatureCollection features = new();
         features.Set<ISampleFeature>(new SampleFeature("first"));
         SampleFeature second = new("second");
 
-        // Act
         features.Set<ISampleFeature>(second);
 
-        // Assert
         features.Get<ISampleFeature>().ShouldBeSameAs(second);
     }
 
     [Fact]
     public void DifferentFeatureTypes_ShouldCoexistIndependently()
     {
-        // Arrange
         HttpFeatureCollection features = new();
         SampleFeature sample = new("s");
         OtherFeature other = new();
 
-        // Act
         features.Set<ISampleFeature>(sample);
         features.Set<IOtherFeature>(other);
 
-        // Assert
         features.Get<ISampleFeature>().ShouldBeSameAs(sample);
         features.Get<IOtherFeature>().ShouldBeSameAs(other);
     }
 
     [Fact]
-    public void Get_FeatureRegisteredAsInterface_ShouldNotBeRetrievableAsConcreteType()
+    public void GetByName_ShouldReturnRegisteredFeature()
     {
-        // The collection is keyed strictly by the type-parameter; registering
-        // as the interface and looking up as the concrete class returns null
-        // because they are different Type objects.
-        // Arrange
+        // Name-keyed lookup is the primitive contract; Get<T> is a convenience over it.
         HttpFeatureCollection features = new();
-        SampleFeature concrete = new("a");
-        features.Set<ISampleFeature>(concrete);
+        SampleFeature instance = new("named");
+        features.Set(instance);
 
-        // Act
-        SampleFeature? viaConcrete = features.Get<SampleFeature>();
-        ISampleFeature? viaInterface = features.Get<ISampleFeature>();
+        IHttpFeature? resolved = features.Get(nameof(SampleFeature));
 
-        // Assert
-        viaConcrete.ShouldBeNull();
-        viaInterface.ShouldBeSameAs(concrete);
+        resolved.ShouldBeSameAs(instance);
+    }
+
+    [Fact]
+    public void Remove_ByName_ShouldDropRegistration()
+    {
+        HttpFeatureCollection features = new();
+        features.Set(new SampleFeature("a"));
+
+        bool removed = features.Remove(nameof(SampleFeature));
+
+        removed.ShouldBeTrue();
+        features.Get(nameof(SampleFeature)).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Remove_UnknownName_ShouldReturnFalse()
+    {
+        HttpFeatureCollection features = new();
+
+        features.Remove("not-registered").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Version_ShouldIncrementOnMutation()
+    {
+        HttpFeatureCollection features = new();
+        int initial = features.Version;
+
+        features.Set(new SampleFeature("v1"));
+        int afterFirstSet = features.Version;
+
+        features.Set(new SampleFeature("v2"));
+        int afterSecondSet = features.Version;
+
+        features.Remove(nameof(SampleFeature));
+        int afterRemove = features.Version;
+
+        afterFirstSet.ShouldBeGreaterThan(initial);
+        afterSecondSet.ShouldBeGreaterThan(afterFirstSet);
+        afterRemove.ShouldBeGreaterThan(afterSecondSet);
+    }
+
+    [Fact]
+    public void Enumerate_ShouldYieldAllRegisteredFeatures()
+    {
+        HttpFeatureCollection features = new();
+        SampleFeature sample = new("s");
+        OtherFeature other = new();
+        features.Set(sample);
+        features.Set(other);
+
+        IHttpFeature[] enumerated = features.ToArray();
+
+        enumerated.Length.ShouldBe(2);
+        enumerated.ShouldContain(sample);
+        enumerated.ShouldContain(other);
     }
 }

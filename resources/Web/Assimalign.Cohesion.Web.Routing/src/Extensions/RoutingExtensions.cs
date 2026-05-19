@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Http;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,7 +10,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 public static class RoutingExtensions
 {
-    extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
+    extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
         /// Adds routing to the current web application pipeline.
@@ -25,7 +26,15 @@ public static class RoutingExtensions
                 
                 CancellationToken cancellationToken = cancellationTokenSource.Token;
 
-                IRouter router = RouterBuilder.Shared.Build();
+                IHttpFeatureCollection? features = context.Features;
+
+                if (features is null)
+                {
+                    throw new InvalidOperationException("No HTTP Features are available.");
+                }
+
+                IRouterFeature feature = features.Get<IRouterFeature>() ?? throw new InvalidOperationException("No router feature was registered.");
+                IRouter router = feature.Router;
 
                 await router.RouteAsync(context, cancellationToken).ConfigureAwait(false);
 
@@ -38,4 +47,35 @@ public static class RoutingExtensions
             return RouterBuilder.Shared;
         }
     }
+
+
+    extension(IWebApplicationBuilder builder)
+    {
+        public IWebApplicationBuilder AddRouting()
+        {
+            return builder.AddFeature<IHttpFeature>(new RouterFeature());
+        }
+    }
+
+    class RouterFeature : IRouterFeature
+    {
+        private IRouter? _router;
+
+        public IRouterBuilder Builder { get; } = new RouterBuilder();
+
+        public string Name => nameof(IRouterFeature);
+
+        public IRouter Router
+        {
+            get
+            {
+                if  (_router is null)
+                {
+                    _router = Builder.Build();
+                }
+                return _router;
+            }
+        }
+    }
+
 }

@@ -18,5 +18,8 @@ internal sealed class HttpAuthenticationFeature : IHttpAuthenticationFeature
     }
 
     /// <inheritdoc />
+    public string Name => nameof(HttpAuthenticationFeature);
+
+    /// <inheritdoc />
     public ClaimsPrincipal User { get; set; }
 }

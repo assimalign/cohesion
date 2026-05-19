@@ -31,32 +31,38 @@ public static class WebApplicationExtensions
     }
 
 
-    extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
+    extension(IWebApplicationBuilder builder)
     {
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="middleware"></param>
-        /// <returns></returns>
-        /// <exception cref="InvalidOperationException"></exception>
-        public TBuilder Use(Func<IServiceProvider?, IHttpContext, WebApplicationMiddleware, Task> middleware)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(middleware);
-
-            if (builder.Context.ServiceProvider is null)
-            {
-                throw new InvalidOperationException("No IServiceProvider was registered.");
-            }
-
-            IServiceProvider serviceProvider = builder.Context.ServiceProvider;
-            Func<IServiceProvider, IHttpContext, WebApplicationMiddleware, Task> middleware1 = middleware;
-
-            builder.Use((WebApplicationMiddleware next) => (IHttpContext httpContext) =>
-            {
-                return middleware1.Invoke(serviceProvider, httpContext, next);
-            });
-            return builder;
-        }
+        
     }
+
+
+    //extension<TBuilder>(TBuilder builder) where TBuilder : IWebApplicationPipelineBuilder, IWebApplication
+    //{
+    //    /// <summary>
+    //    /// 
+    //    /// </summary>
+    //    /// <param name="middleware"></param>
+    //    /// <returns></returns>
+    //    /// <exception cref="InvalidOperationException"></exception>
+    //    public TBuilder Use(Func<IServiceProvider?, IHttpContext, WebApplicationMiddleware, Task> middleware)
+    //    {
+    //        ArgumentNullException.ThrowIfNull(builder);
+    //        ArgumentNullException.ThrowIfNull(middleware);
+
+    //        if (builder.Context.ServiceProvider is null)
+    //        {
+    //            throw new InvalidOperationException("No IServiceProvider was registered.");
+    //        }
+
+    //        IServiceProvider serviceProvider = builder.Context.ServiceProvider;
+    //        Func<IServiceProvider, IHttpContext, WebApplicationMiddleware, Task> middleware1 = middleware;
+
+    //        builder.Use((WebApplicationMiddleware next) => (IHttpContext httpContext) =>
+    //        {
+    //            return middleware1.Invoke(serviceProvider, httpContext, next);
+    //        });
+    //        return builder;
+    //    }
+    //}
 }

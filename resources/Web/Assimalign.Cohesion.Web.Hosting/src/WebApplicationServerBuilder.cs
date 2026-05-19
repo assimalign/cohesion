@@ -9,13 +9,14 @@ namespace Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Transports;
 using Assimalign.Cohesion.Http.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Hosting;
 
-public sealed class WebApplicationServerManager
+public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
     private readonly HttpConnectionListenerOptions _options;
 
-    internal WebApplicationServerManager(WebApplicationBuilder builder)
+    internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
         _options = new HttpConnectionListenerOptions();
@@ -31,11 +32,14 @@ public sealed class WebApplicationServerManager
     /// </summary>
     /// <param name="server"></param>
     /// <returns></returns>
-    public WebApplicationServerManager UseServer(IWebApplicationServer server)
+    public WebApplicationServerBuilder UseServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
-        _builder.Services.AddSingleton<IWebApplicationServer>(new WebApplicationServerWrapper(server));
+        var service = new WebApplicationServer(server);
+
+        _builder.Services.AddSingleton<IWebApplicationServer>(service);
+        _builder.Services.AddSingleton<IHostService>(service);
 
         return this;
     }
@@ -45,18 +49,22 @@ public sealed class WebApplicationServerManager
     /// </summary>
     /// <param name="factory"></param>
     /// <returns></returns>
-    public WebApplicationServerManager UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
+    public WebApplicationServerBuilder UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _builder.Services.AddSingleton<IWebApplicationServer>(serviceProvider =>
+        Func<IServiceProvider, WebApplicationServer> factory2 = serviceProvider =>
         {
             IWebApplicationServer server = factory.Invoke(serviceProvider);
 
             ArgumentNullException.ThrowIfNull(server);
 
-            return new WebApplicationServerWrapper(server);
-        });
+            return new WebApplicationServer(server);
+        };
+
+
+        _builder.Services.AddSingleton<IWebApplicationServer>(factory2);
+        _builder.Services.AddSingleton<IHostService>(factory2);
 
         return this;
     }
@@ -66,11 +74,11 @@ public sealed class WebApplicationServerManager
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public WebApplicationServerManager ConfigureServer(Action<WebApplicationServerOptions> configure)
+    public WebApplicationServerBuilder ConfigureServer(Action<WebServerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new WebApplicationServerOptions(_options);
+        var options = new WebServerOptions(_options);
 
         configure.Invoke(options);
 

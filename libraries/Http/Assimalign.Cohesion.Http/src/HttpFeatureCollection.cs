@@ -1,166 +1,147 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Default <see cref="IHttpFeatureCollection"/> backed by a
-/// <see cref="Dictionary{TKey, TValue}"/> keyed on the registered feature
-/// interface <see cref="Type"/>.
+/// Default <see cref="IHttpFeatureCollection"/> implementation backed by a
+/// name-keyed <see cref="Dictionary{TKey, TValue}"/>. Features are identified
+/// by their <see cref="IHttpFeature.Name"/>; replacing a feature uses the same
+/// name as the slot.
 /// </summary>
 /// <remarks>
-/// Cheap to construct (one empty dictionary), no reflection at lookup
-/// time, AOT-safe — feature lookups go through <c>typeof(TFeature)</c>
-/// which is a JIT-time constant.
+/// <para>
+/// Cheap to construct (one lazily-allocated dictionary), no reflection at
+/// lookup or mutation time, AOT-safe. An optional <c>defaults</c> source can be
+/// supplied; features installed locally shadow same-named defaults, and the
+/// enumerator yields local features first then non-shadowed defaults.
+/// </para>
+/// <para>
+/// The collection's <see cref="Version"/> increments on every local mutation
+/// and adds the defaults' <see cref="IHttpFeatureCollection.Version"/> so
+/// consumers can cheaply detect any change in the effective feature set.
+/// </para>
 /// </remarks>
 public class HttpFeatureCollection : IHttpFeatureCollection
 {
-    private sealed class KeyComparer : IEqualityComparer<KeyValuePair<Type, object>>
-    {
-        public bool Equals(KeyValuePair<Type, object> x, KeyValuePair<Type, object> y)
-        {
-            return x.Key.Equals(y.Key);
-        }
-
-        public int GetHashCode(KeyValuePair<Type, object> obj)
-        {
-            return obj.Key.GetHashCode();
-        }
-    }
-
-    //private sealed class FeatureCollectionDebugView
-    //{
-    //    private readonly HttpFeatureCollection _features;
-
-    //    [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
-    //    public DictionaryItemDebugView<Type, object>[] Items => _features.Select<KeyValuePair<Type, object>, DictionaryItemDebugView<Type, object>>((KeyValuePair<Type, object> pair) => new DictionaryItemDebugView<Type, object>(pair)).ToArray();
-
-    //    public FeatureCollectionDebugView(HttpFeatureCollection features)
-    //    {
-    //        _features = features;
-            
-    //    }
-    //}
-
-    private static readonly KeyComparer FeatureKeyComparer = new KeyComparer();
-
     private readonly IHttpFeatureCollection? _defaults;
     private readonly int _initialCapacity;
-    private IDictionary<Type, object>? _features;
-    private volatile int _version;
+    private Dictionary<string, IHttpFeature>? _features;
+    private int _version;
 
-    
-
+    /// <summary>
+    /// Initializes an empty feature collection.
+    /// </summary>
     public HttpFeatureCollection()
     {
-        
     }
 
+    /// <summary>
+    /// Initializes an empty feature collection with the supplied initial
+    /// capacity hint for the backing dictionary.
+    /// </summary>
+    /// <param name="initialCapacity">A non-negative capacity hint.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="initialCapacity"/> is negative.</exception>
     public HttpFeatureCollection(int initialCapacity)
     {
-        ArgumentOutOfRangeException.ThrowIf(initialCapacity < 0, "Initial capacity must be a non-negative integer.");
+        ArgumentOutOfRangeException.ThrowIfNegative(initialCapacity);
         _initialCapacity = initialCapacity;
     }
 
+    /// <summary>
+    /// Initializes a feature collection that falls back to <paramref name="defaults"/>
+    /// for any name that is not installed locally.
+    /// </summary>
+    /// <param name="defaults">A read-through fallback feature source.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="defaults"/> is <see langword="null"/>.</exception>
     public HttpFeatureCollection(IHttpFeatureCollection defaults)
     {
+        ArgumentNullException.ThrowIfNull(defaults);
         _defaults = defaults;
     }
 
-    public virtual int Version
+    /// <inheritdoc />
+    public virtual int Version => _version + (_defaults?.Version ?? 0);
+
+    /// <inheritdoc />
+    public IHttpFeature? Get(string name)
     {
-        get
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        if (_features is not null && _features.TryGetValue(name, out IHttpFeature? local))
         {
-            return _version + (_defaults?.Version ?? 0);
+            return local;
         }
+
+        return _defaults?.Get(name);
     }
 
-    public bool IsReadOnly => false;
-
-    public object? this[Type key]
+    /// <inheritdoc />
+    public void Set(IHttpFeature? feature)
     {
-        get
+        // Set(null) is a no-op: the contract carries no name when feature is null,
+        // so there is no slot to remove. Callers that want explicit removal call
+        // Remove(name) directly.
+        if (feature is null)
         {
-            ArgumentNullException.ThrowIfNull(key, "key");
-            if (_features is null || !_features.TryGetValue(key, out var value))
-            {
-                return _defaults?[key];
-            }
-            return value;
+            return;
         }
-        set
-        {
-            ArgumentNullException.ThrowIfNull(key, "key");
-            if (value == null)
-            {
-                if (_features is not null && _features.Remove(key))
-                {
-                    _version++;
-                }
-                return;
-            }
-            if (_features is null)
-            {
-                _features = new Dictionary<Type, object>(_initialCapacity);
-            }
-            _features[key] = value;
-            _version++;
-        }
+
+        ArgumentException.ThrowIfNullOrEmpty(feature.Name);
+
+        _features ??= new Dictionary<string, IHttpFeature>(_initialCapacity, StringComparer.Ordinal);
+        _features[feature.Name] = feature;
+        _version++;
     }
 
-
-    IEnumerator IEnumerable.GetEnumerator()
+    /// <summary>
+    /// Removes the feature registered under <paramref name="name"/>. Returns
+    /// <see langword="true"/> when a local registration was removed; returns
+    /// <see langword="false"/> when no local registration existed (a same-named
+    /// feature in the defaults source is not touched and will still be visible
+    /// through <see cref="Get"/>).
+    /// </summary>
+    /// <param name="name">The feature name to remove.</param>
+    /// <returns><see langword="true"/> if a local feature was removed.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
+    public bool Remove(string name)
     {
-        return GetEnumerator();
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        if (_features is null || !_features.Remove(name))
+        {
+            return false;
+        }
+
+        _version++;
+        return true;
     }
 
-    public IEnumerator<KeyValuePair<Type, object>> GetEnumerator()
+    /// <inheritdoc />
+    public IEnumerator<IHttpFeature> GetEnumerator()
     {
-        if (_features != null)
+        if (_features is not null)
         {
-            foreach (KeyValuePair<Type, object> feature in _features)
+            foreach (IHttpFeature feature in _features.Values)
             {
                 yield return feature;
             }
         }
-        if (_defaults == null)
+
+        if (_defaults is null)
         {
             yield break;
         }
-        IEnumerable<KeyValuePair<Type, object>> enumerable;
-        if (_features != null)
-        {
-            enumerable = _defaults.Except<KeyValuePair<Type, object>>(_features, FeatureKeyComparer);
-        }
-        else
-        {
-            IEnumerable<KeyValuePair<Type, object>> defaults = _defaults;
-            enumerable = defaults;
-        }
-        foreach (KeyValuePair<Type, object> item in enumerable)
-        {
-            yield return item;
-        }
-    }
 
-    public TFeature? Get<TFeature>()
-    {
-        if (typeof(TFeature).IsValueType)
+        foreach (IHttpFeature fallback in _defaults)
         {
-            object? obj = this[typeof(TFeature)];
-            if (obj == null && Nullable.GetUnderlyingType(typeof(TFeature)) == null)
+            if (_features is null || !_features.ContainsKey(fallback.Name))
             {
-                throw new InvalidOperationException($"{typeof(TFeature).FullName} does not exist in the feature collection and because it is a struct the method can't return null. Use 'featureCollection[typeof({typeof(TFeature).FullName})] is not null' to check if the feature exists.");
+                yield return fallback;
             }
-            return (TFeature?)obj;
         }
-        return (TFeature?)this[typeof(TFeature)];
     }
 
-    public void Set<TFeature>(TFeature? instance)
-    {
-        this[typeof(TFeature)] = instance;
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

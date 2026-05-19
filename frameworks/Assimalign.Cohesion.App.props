@@ -95,6 +95,7 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
 
         <!-- Move from App when ready:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
@@ -117,6 +118,7 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Database'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Database" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
 
         <!-- Add as resources/Database/* projects come online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />

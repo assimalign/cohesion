@@ -26,12 +26,23 @@ internal static class Http1MessageWriter
 
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            await WriteAsciiAsync(stream, $"{header.Key}: {header.Value}\r\n", cancellationToken).ConfigureAwait(false);
-        }
-
-        foreach (HttpCookie cookie in context.Response.Cookies)
-        {
-            await WriteAsciiAsync(stream, $"{HttpHeaderKey.SetCookie}: {cookie}\r\n", cancellationToken).ConfigureAwait(false);
+            // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
+            // value; combining cookies into a single comma-separated value is
+            // forbidden. Every other header is comma-folded as usual.
+            if (header.Key == HttpHeaderKey.SetCookie)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        await WriteAsciiAsync(stream, $"{header.Key}: {value}\r\n", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            else
+            {
+                await WriteAsciiAsync(stream, $"{header.Key}: {header.Value}\r\n", cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);

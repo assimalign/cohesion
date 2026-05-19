@@ -334,7 +334,6 @@ internal sealed class Http2Stream
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
-        HttpCookieCollection cookies = ParseCookies(decodedHeaders.Headers);
         HttpHost host = !string.IsNullOrWhiteSpace(decodedHeaders.Authority)
             ? new HttpHost(decodedHeaders.Authority)
             : decodedHeaders.Headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
@@ -351,7 +350,6 @@ internal sealed class Http2Stream
             scheme,
             query,
             decodedHeaders.Headers,
-            cookies,
             new MemoryStream(bodyBytes, writable: false));
 
         return new Http2Context(this, request, new Http2Response(), connectionInfo, requestAborted);
@@ -369,39 +367,5 @@ internal sealed class Http2Stream
 
         path = HttpPath.FromUriComponent(requestTarget);
         return new HttpQueryCollection();
-    }
-
-    private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)
-    {
-        HttpCookieCollection cookies = new();
-
-        if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
-        {
-            return cookies;
-        }
-
-        foreach (string? headerValue in cookieHeader)
-        {
-            if (string.IsNullOrWhiteSpace(headerValue))
-            {
-                continue;
-            }
-
-            string[] segments = headerValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string segment in segments)
-            {
-                string[] parts = segment.Split('=', 2, StringSplitOptions.None);
-                string name = parts[0].Trim();
-                string value = parts.Length == 2 ? parts[1].Trim() : string.Empty;
-
-                if (name.Length > 0)
-                {
-                    cookies.Add(new HttpCookie(name, value));
-                }
-            }
-        }
-
-        return cookies;
     }
 }

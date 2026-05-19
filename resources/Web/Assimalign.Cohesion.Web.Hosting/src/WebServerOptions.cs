@@ -7,11 +7,11 @@ namespace Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Http.Transports;
 using Assimalign.Cohesion.Transports;
 
-public sealed class WebApplicationServerOptions
+public sealed class WebServerOptions
 {
     private readonly HttpConnectionListenerOptions _options;
 
-    internal WebApplicationServerOptions(HttpConnectionListenerOptions options)
+    internal WebServerOptions(HttpConnectionListenerOptions options)
     {
         _options = options;
     }

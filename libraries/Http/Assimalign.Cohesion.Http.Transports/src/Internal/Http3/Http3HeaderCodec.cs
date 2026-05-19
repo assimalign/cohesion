@@ -65,7 +65,6 @@ internal static class Http3HeaderCodec
         }
 
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
-        HttpCookieCollection cookies = ParseCookies(headers);
         HttpHost host = !string.IsNullOrWhiteSpace(authority)
             ? new HttpHost(authority)
             : headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
@@ -82,7 +81,6 @@ internal static class Http3HeaderCodec
             scheme,
             query,
             headers,
-            cookies,
             new MemoryStream(bodyBytes, writable: false));
     }
 
@@ -102,12 +100,23 @@ internal static class Http3HeaderCodec
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
-            WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
-        }
-
-        foreach (HttpCookie cookie in context.Response.Cookies)
-        {
-            WriteLiteralHeader(buffer, "set-cookie", cookie.ToString());
+            // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
+            // value; combining cookies into a single comma-folded value is
+            // forbidden.
+            if (header.Key == HttpHeaderKey.SetCookie)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        WriteLiteralHeader(buffer, "set-cookie", value);
+                    }
+                }
+            }
+            else
+            {
+                WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
+            }
         }
 
         return buffer.ToArray();
@@ -208,40 +217,6 @@ internal static class Http3HeaderCodec
 
         path = HttpPath.FromUriComponent(requestTarget);
         return new HttpQueryCollection();
-    }
-
-    private static HttpCookieCollection ParseCookies(HttpHeaderCollection headers)
-    {
-        HttpCookieCollection cookies = new();
-
-        if (!headers.TryGetValue(HttpHeaderKey.Cookie, out HttpHeaderValue cookieHeader))
-        {
-            return cookies;
-        }
-
-        foreach (string? headerValue in cookieHeader)
-        {
-            if (string.IsNullOrWhiteSpace(headerValue))
-            {
-                continue;
-            }
-
-            string[] segments = headerValue.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (string segment in segments)
-            {
-                string[] parts = segment.Split('=', 2);
-                string name = parts[0].Trim();
-                string value = parts.Length == 2 ? parts[1].Trim() : string.Empty;
-
-                if (name.Length > 0)
-                {
-                    cookies.Add(new HttpCookie(name, value));
-                }
-            }
-        }
-
-        return cookies;
     }
 
 }
