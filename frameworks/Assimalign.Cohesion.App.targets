@@ -11,9 +11,23 @@
             Ref     -> produce ref/<tfm>/<dll> + data/FrameworkList.xml
             Runtime -> produce runtimes/<rid>/lib/<tfm>/<dll> + data/RuntimeList.xml
 
-        Driven by the @(CohesionFrameworkAssembly) item list declared in
-        Assimalign.Cohesion.App.props (sibling file) - one declarative source
-        of truth for both the project graph and the manifest contents.
+        Driven by two item lists declared in Assimalign.Cohesion.App.props
+        (sibling file):
+
+            @(CohesionFrameworkAssembly)        - public. Ref pack + Runtime
+                                                  pack. Visible to consumers.
+            @(CohesionFrameworkPrivateAssembly) - implementation-only. Runtime
+                                                  pack ONLY. Not listed in the
+                                                  Ref pack's FrameworkList.xml,
+                                                  so consumers don't see these
+                                                  types in IntelliSense, but
+                                                  the host resolves them at
+                                                  run time because they're
+                                                  bundled in the runtime pack
+                                                  and listed in RuntimeList.xml.
+
+        The Ref-kind branches below stay on @(CohesionFrameworkAssembly).
+        The Runtime-kind branches iterate the union.
 
         Distribution is via NuGet - these targets just produce the .nupkg
         layouts the SDK's KnownFrameworkReference machinery expects to find.
@@ -56,6 +70,29 @@
     <PropertyGroup>
         <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);CohesionCollectFrameworkPack</TargetsForTfmSpecificContentInPackage>
     </PropertyGroup>
+
+    <!--
+        Auto-extend each Runtime csproj's CohesionProjectReference list with
+        the private-assembly bucket. Each <Framework>.Runtime.csproj already
+        declares the public set inline:
+
+            <CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
+                                      Exclude="$(AssemblyName)" />
+
+        Adding the private set here means individual Runtime csprojs don't
+        have to know the private bucket exists - new entries in
+        @(CohesionFrameworkPrivateAssembly) flow through automatically.
+
+        Ref-kind csprojs intentionally skip this: their ProjectReference is
+        only to their sibling Runtime project, which already CopyLocals every
+        private DLL into its bin/. The Ref pack reads files from there but
+        is filtered by @(CohesionFrameworkAssembly) alone in the Ref-kind
+        branch of CohesionCollectFrameworkPack below.
+    -->
+    <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Runtime'">
+        <CohesionProjectReference Include="@(CohesionFrameworkPrivateAssembly)"
+                                  Exclude="$(AssemblyName)" />
+    </ItemGroup>
 
     <!--
         Manifest writer. Takes the declarative @(CohesionFrameworkAssembly)
@@ -188,16 +225,18 @@
         </ItemGroup>
 
         <!-- ============ RUNTIME PACK ============ -->
-        <!-- Only when an RID is explicitly set; RID-less design-time builds skip pack. -->
+        <!-- Only when an RID is explicitly set; RID-less design-time builds skip pack.
+             Iterates the UNION of public + private assemblies: both ship in the runtime
+             pack, both are listed in RuntimeList.xml so the host resolves them. -->
         <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''">
-            <_CohesionExpectedAssembly Include="@(CohesionFrameworkAssembly->'$(_CohesionFrameworkSourceDir)%(Identity).dll')" />
+            <_CohesionExpectedAssembly Include="@(CohesionFrameworkAssembly->'$(_CohesionFrameworkSourceDir)%(Identity).dll');@(CohesionFrameworkPrivateAssembly->'$(_CohesionFrameworkSourceDir)%(Identity).dll')" />
         </ItemGroup>
 
         <Error Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != '' and !Exists('%(_CohesionExpectedAssembly.Identity)')"
-               Text="Framework assembly declared in @(CohesionFrameworkAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Build must run before pack and every entry needs a ProjectReference that CopyLocals into bin." />
+               Text="Framework assembly declared in @(CohesionFrameworkAssembly) or @(CohesionFrameworkPrivateAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Build must run before pack and every entry needs a ProjectReference that CopyLocals into bin." />
 
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''"
-            AssemblyNames="@(CohesionFrameworkAssembly)"
+            AssemblyNames="@(CohesionFrameworkAssembly);@(CohesionFrameworkPrivateAssembly)"
             FrameworkName="$(CohesionFrameworkName)"
             FrameworkVersion="$(CohesionVersion)"
             TargetFrameworkVersion="10.0"

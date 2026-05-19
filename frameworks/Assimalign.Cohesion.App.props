@@ -33,6 +33,36 @@
             Sdk.Web      -> App + App.Web
             Sdk.Database -> App + App.Database
         See sdks/Assimalign.Cohesion.Sdk[.Web|.Database]/Sdk/Sdk.props.
+
+        ================================================================
+        Public vs private assemblies
+        ================================================================
+        Two parallel item types are recognized per framework:
+
+          @(CohesionFrameworkAssembly)         - PUBLIC. Listed on the Ref
+                                                 pack's FrameworkList.xml AND
+                                                 shipped in the Runtime pack.
+                                                 Visible to consumers at
+                                                 compile time (IntelliSense
+                                                 sees these types).
+
+          @(CohesionFrameworkPrivateAssembly)  - PRIVATE. NOT listed on the
+                                                 Ref pack. Shipped in the
+                                                 Runtime pack only, and
+                                                 enumerated in RuntimeList.xml
+                                                 so the host resolves them.
+
+        Use the private bucket when a framework needs another framework's
+        library as an *implementation detail* at runtime but should not
+        surface that library to consumers at compile time. The canonical
+        example: App.Database needs Assimalign.Cohesion.Web internally to
+        host its database server, but a developer using Sdk.Database should
+        see only database types in IntelliSense - never web types.
+
+        The library that needs the cross-resource type takes a normal
+        CohesionProjectReference on the other library inside the repo, and
+        keeps every cross-resource use `internal`. The private-assembly
+        list is what hides that detail in the shipped artifact.
     -->
 
     <!-- ================================================================
@@ -123,6 +153,17 @@
         <!-- Add as resources/Database/* projects come online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
         ...etc...
+        -->
+
+        <!--
+            Private implementation dependencies. Shipped in App.Database's Runtime
+            pack but NOT listed on its Ref pack - consumers of Sdk.Database never
+            see these in IntelliSense, but the host resolves them at run time.
+
+            The hostable database server piece needs Assimalign.Cohesion.Web's
+            HTTP transport internally; uncomment when wiring it up:
+
+            <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         -->
     </ItemGroup>
 
