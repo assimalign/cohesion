@@ -3,7 +3,7 @@
         <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
         <CohesionMajorVersion>$([System.Version]::Parse('$(TargetFramework.TrimStart('net'))').Major)</CohesionMajorVersion>
         <CohesionMinorVersion>0</CohesionMinorVersion>
-        <CohesionPatchVersion>1</CohesionPatchVersion>
+        <CohesionPatchVersion>2</CohesionPatchVersion>
         <CohesionVersion>$(CohesionMajorVersion).$(CohesionMinorVersion).$(CohesionPatchVersion)</CohesionVersion>
     </PropertyGroup>
 
