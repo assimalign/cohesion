@@ -1,7 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Execution" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Execution" />
+		<!--
+			Web is an internal implementation detail of the database server piece.
+			PrivateAssets='all' (via CohesionPrivateProjectReference) keeps Web from
+			showing up in Assimalign.Cohesion.Database.nupkg's .nuspec dependency
+			list. The framework-pack distribution path still ships Web.dll at run
+			time because App.Database declares Web via CohesionFrameworkPrivateAssembly
+			in frameworks/Assimalign.Cohesion.App.props.
+		-->
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
 </Project>

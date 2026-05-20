@@ -160,11 +160,12 @@
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never
             see these in IntelliSense, but the host resolves them at run time.
 
-            The hostable database server piece needs Assimalign.Cohesion.Web's
-            HTTP transport internally; uncomment when wiring it up:
-
-            <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+            Pairs with <CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+            in resources/Database/.../Assimalign.Cohesion.Database.csproj: the library
+            uses Web internally without exposing it in its .nupkg's .nuspec, and the
+            framework Runtime pack carries Web.dll so the host can resolve it.
         -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
     </ItemGroup>
 
     <!-- ================================================================
