@@ -1,10 +1,6 @@
-﻿using System;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using Assimalign.Cohesion.Http;
 
 namespace Assimalign.Cohesion.Web;
-
-using Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 

@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database;
 
 using Assimalign.Cohesion.Web;
 
-public interface IDatabaseServer : IWebApplicationServer
+public interface IDatabaseServer 
 {
     int Version { get; }
 }

@@ -687,4 +687,11 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Sessions/tests/Assimalign.Cohesion.Web.Sessions.Tests.csproj" />
+	</Folder>
 </Solution>

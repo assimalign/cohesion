@@ -114,7 +114,7 @@
 	<Folder Name="/cohesion/extensions/VisualStudio/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/Assimalign.Cohesion/">
-		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" Id="4390ca1a-38cd-4650-87ed-e8cb11b4280d" />
+		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/frameworks/">
 		<File Path="frameworks/Assimalign.Cohesion.App.props" />
@@ -317,6 +317,7 @@
 	</Folder>
 	<Folder Name="/cohesion/installer/scripts/">
 		<File Path="installer/scripts/Cleanup-PriorRegistrations.ps1" />
+		<File Path="installer/scripts/Get-CohesionVersion.ps1" />
 		<File Path="installer/scripts/Install-Local.ps1" />
 		<File Path="installer/scripts/New-CohesionDomainScaffold.ps1" />
 	</Folder>
@@ -812,6 +813,13 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http/tests/Assimalign.Cohesion.Http.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Antiforgery/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Antiforgery/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Antiforgery/tests/Assimalign.Cohesion.Http.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ClientFactory/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.ClientFactory/README.md" />
 	</Folder>
@@ -852,6 +860,13 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/src/Assimalign.Cohesion.Http.RequestLifetime.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/tests/Assimalign.Cohesion.Http.RequestLifetime.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Sessions/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Sessions/README.md" />
@@ -1870,6 +1885,13 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Server/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Sessions/tests/Assimalign.Cohesion.Web.Sessions.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/sdks/">
 		<File Path="sdks/Directory.Build.props" />

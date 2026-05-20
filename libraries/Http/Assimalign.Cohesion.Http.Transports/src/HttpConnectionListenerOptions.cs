@@ -55,6 +55,7 @@ public sealed class HttpConnectionListenerOptions
     public HttpConnectionListenerOptions UseTransport(HttpProtocol protocol, ITransport transport, bool isSecure = false)
     {
         ArgumentNullException.ThrowIfNull(transport);
+        ArgumentException.ThrowIf(transport.Kind != TransportKind.Server, $"The transport '{nameof(transport)}' must be a server transport.");
 
         _registrations.Add(new HttpProtocolRegistration(protocol, transport, isSecure));
 

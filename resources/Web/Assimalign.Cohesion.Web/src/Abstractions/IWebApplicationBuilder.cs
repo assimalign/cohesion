@@ -32,7 +32,6 @@ public interface IWebApplicationBuilder
     /// <returns></returns>
     IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure);
 
-
     /// <summary>
     /// 
     /// </summary>

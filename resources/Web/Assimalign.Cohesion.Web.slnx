@@ -124,4 +124,11 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Server/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/src/">
+		<Project Path="Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Sessions/tests/Assimalign.Cohesion.Web.Sessions.Tests.csproj" />
+	</Folder>
 </Solution>

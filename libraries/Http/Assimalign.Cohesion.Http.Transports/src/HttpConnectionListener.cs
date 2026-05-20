@@ -168,7 +168,8 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
         {
             while (!_disposeCancellationTokenSource.IsCancellationRequested)
             {
-                ITransportConnection transportConnection = await registration.Transport.InitializeAsync(_disposeCancellationTokenSource.Token).ConfigureAwait(false);
+                ITransport transport = registration.Transport;
+                ITransportConnection transportConnection = await transport.InitializeAsync(_disposeCancellationTokenSource.Token).ConfigureAwait(false);
                 HttpConnection connection = _factory.Create(registration, transportConnection);
 
                 await _acceptedConnections.Writer.WriteAsync(connection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);

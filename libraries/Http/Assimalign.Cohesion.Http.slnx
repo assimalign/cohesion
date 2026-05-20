@@ -21,6 +21,13 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http/tests/">
 		<Project Path="Assimalign.Cohesion.Http/tests/Assimalign.Cohesion.Http.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Antiforgery/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Antiforgery/src/">
+		<Project Path="Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Antiforgery/tests/">
+		<Project Path="Assimalign.Cohesion.Http.Antiforgery/tests/Assimalign.Cohesion.Http.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ClientFactory/">
 		<File Path="Assimalign.Cohesion.Http.ClientFactory/README.md" />
 	</Folder>
@@ -61,6 +68,13 @@
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLifetime/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLifetime/src/">
+		<Project Path="Assimalign.Cohesion.Http.RequestLifetime/src/Assimalign.Cohesion.Http.RequestLifetime.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLifetime/tests/">
+		<Project Path="Assimalign.Cohesion.Http.RequestLifetime/tests/Assimalign.Cohesion.Http.RequestLifetime.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Sessions/">
 		<File Path="Assimalign.Cohesion.Http.Sessions/README.md" />
