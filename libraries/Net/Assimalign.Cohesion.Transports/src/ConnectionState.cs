@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace Assimalign.Cohesion.Transports;
+﻿namespace Assimalign.Cohesion.Transports;
 
 public enum ConnectionState
 {

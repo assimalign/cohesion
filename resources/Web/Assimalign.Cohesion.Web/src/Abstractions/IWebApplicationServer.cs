@@ -4,6 +4,9 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
 
+/// <summary>
+/// 
+/// </summary>
 public interface IWebApplicationServer
 {
     /// <summary>

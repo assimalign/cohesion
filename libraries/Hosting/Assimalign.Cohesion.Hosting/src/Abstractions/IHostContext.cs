@@ -29,11 +29,6 @@ public interface IHostContext
     IEnumerable<IHostService> HostedServices { get; }
 
     /// <summary>
-    /// The Host Service Provider.
-    /// </summary>
-    IServiceProvider? ServiceProvider { get; }
-
-    /// <summary>
     /// Signals the host to shutdown
     /// </summary>
     void Shutdown();

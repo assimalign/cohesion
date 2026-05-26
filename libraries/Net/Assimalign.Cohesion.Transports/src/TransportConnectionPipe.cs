@@ -13,6 +13,7 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
 
+
     /// <summary>
     /// Creates a <see cref="ITransportConnectionPipe"/> from a stream.
     /// </summary>

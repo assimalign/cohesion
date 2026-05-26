@@ -426,8 +426,9 @@ public class Http2TransportTests
     /// <summary>
     /// Drives the receive loop on a server with the supplied bytes and asserts
     /// that the output stream contains a GOAWAY frame whose error code matches
-    /// <paramref name="expectedErrorCode"/>. The receive loop is expected to
-    /// throw <see cref="Http2ConnectionException"/> carrying the same code.
+    /// <paramref name="expectedErrorCode"/>. The receive loop emits GOAWAY on
+    /// the wire then yields nothing — by contract a malformed peer must never
+    /// crash the listener, so the enumerable completes without throwing.
     /// </summary>
     private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode)
     {
@@ -439,25 +440,17 @@ public class Http2TransportTests
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
 
-        Exception? captured = null;
-        try
+        // The receive loop must absorb the protocol violation: emit GOAWAY on
+        // the wire (asserted below) and complete the enumerable without
+        // propagating an exception, so a malformed peer cannot crash the
+        // listener.
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
         {
-            await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
-            {
-                // Should not yield — these payloads are all malformed.
-            }
+            // Should not yield — these payloads are all malformed.
         }
-        catch (Exception error)
-        {
-            captured = error;
-        }
-
-        captured.ShouldNotBeNull();
-        captured.ShouldBeOfType<Http2ConnectionException>();
-        ((Http2ConnectionException)captured!).ErrorCode.ShouldBe(expectedErrorCode);
 
         // The peer must have observed a GOAWAY frame on the wire carrying the
-        // same error code as the exception.
+        // expected error code.
         byte[] output = await transportContext.ReadOutputAsync();
         Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
     }

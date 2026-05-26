@@ -2,6 +2,8 @@
 	<PropertyGroup>
 		<Description>A collection of generic network transports for creating client and server implementations.</Description>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
@@ -11,4 +13,5 @@
 		<CohesionValueType Include="ValueTypes\TransportId.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.Transports" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="ValueTypes\TransportProtocol.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Transports" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 	</ItemGroup>
+	
 </Project>

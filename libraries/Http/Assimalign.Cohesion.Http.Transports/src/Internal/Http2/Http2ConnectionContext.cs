@@ -51,8 +51,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
-        : base(transportContext, isSecure)
+    public Http2ConnectionContext(
+        ITransportConnectionContext transportContext,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
+        : base(transportContext, isSecure, createFeatures)
     {
         _headerDecoder = new HPackDecoder();
         _streams = new Dictionary<int, Http2Stream>();
@@ -60,48 +63,47 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         _remoteSettings = new Http2ConnectionSettings();
     }
 
+    /// <summary>
+    /// Yields HTTP/2 request contexts for the lifetime of this connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wire-level failures and HTTP/2 connection-level protocol errors
+    /// scope to this connection only. <see cref="Http2ConnectionException"/>
+    /// emits the required <c>GOAWAY</c> (RFC 9113 §6.8) and then exits the
+    /// enumerable cleanly; the listener stays alive for subsequent
+    /// peers. <see cref="Http2StreamException"/> stays recoverable per
+    /// RFC 9113 §5.4.2 &#8211; a <c>RST_STREAM</c> is emitted and the
+    /// loop continues processing other streams on the same connection.
+    /// Cancellation propagates so cooperative shutdown is unaffected.
+    /// </para>
+    /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        if (!await TryInitializeAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield break;
+        }
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            ReceivedFrame? receivedFrame;
-            try
-            {
-                receivedFrame = await ReadFrameAsync(Stream, _localSettings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Http2ConnectionException error)
-            {
-                await EmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
-                throw;
-            }
-
-            if (receivedFrame is null)
+            FrameReadOutcome read = await TryReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            if (read.TerminateConnection)
             {
                 yield break;
             }
+            if (read.Frame is null)
+            {
+                // Clean end-of-stream — peer closed gracefully.
+                yield break;
+            }
 
-            Http2Context? completedContext;
-            try
+            ReceivedFrame received = read.Frame.Value;
+
+            FrameProcessOutcome processed = await TryProcessFrameAsync(received, cancellationToken).ConfigureAwait(false);
+            if (processed.TerminateConnection)
             {
-                completedContext = await ProcessFrameAsync(receivedFrame.Value, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Http2StreamException streamError)
-            {
-                // RFC 9113 §5.4.2 — a stream error is recoverable: emit a
-                // RST_STREAM carrying the error code and continue processing
-                // other streams on the same connection.
-                await EmitRstStreamAsync(streamError.StreamId, streamError.ErrorCode, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-            catch (Http2ConnectionException error)
-            {
-                // RFC 9113 §6.8 — every connection-level failure MUST be
-                // signalled to the peer with a GOAWAY carrying the offending
-                // error code, before the underlying transport is torn down.
-                await EmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
-                throw;
+                yield break;
             }
 
             // RFC 9113 §6.9 — DATA frames consume credit from both the
@@ -109,14 +111,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // pair of WINDOW_UPDATE frames here to credit the bytes back
             // to the peer as soon as we have consumed them, keeping the
             // pipeline flowing for long-running request bodies.
-            if (receivedFrame.Value.Frame.Type == Http2FrameType.Data
-                && receivedFrame.Value.Frame.PayloadLength > 0)
+            if (received.Frame.Type == Http2FrameType.Data
+                && received.Frame.PayloadLength > 0)
             {
-                int dataLength = receivedFrame.Value.Frame.PayloadLength;
+                int dataLength = received.Frame.PayloadLength;
                 _connectionReceiveWindow.TryReplenish(dataLength);
                 await EmitWindowUpdateAsync(0, dataLength, cancellationToken).ConfigureAwait(false);
 
-                int streamId = receivedFrame.Value.Frame.StreamId;
+                int streamId = received.Frame.StreamId;
                 if (_streams.TryGetValue(streamId, out Http2Stream? stream))
                 {
                     stream.ReceiveWindow.TryReplenish(dataLength);
@@ -124,11 +126,152 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 }
             }
 
-            if (completedContext is not null)
+            if (processed.Context is not null)
             {
-                yield return completedContext;
+                yield return processed.Context;
             }
         }
+    }
+
+    /// <summary>
+    /// Drives <see cref="EnsureInitializedAsync"/> with the same per-connection
+    /// failure-isolation contract as the main loop: any preface mismatch (which
+    /// already emits GOAWAY before throwing), wire-level read failure during the
+    /// preface, or write failure while emitting the server SETTINGS terminates
+    /// the receive enumerable cleanly rather than crashing the listener.
+    /// </summary>
+    private async Task<bool> TryInitializeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Http2ConnectionException)
+        {
+            // EnsureInitializedAsync already emitted GOAWAY before
+            // throwing on a preface mismatch.
+            return false;
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the next HTTP/2 frame, classifying failures so the receive
+    /// loop can route them: connection-level protocol errors emit
+    /// <c>GOAWAY</c> and terminate; wire-level transport failures
+    /// terminate silently (no GOAWAY is possible after the peer is
+    /// already gone); cancellation propagates.
+    /// </summary>
+    private async Task<FrameReadOutcome> TryReadFrameAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            ReceivedFrame? frame = await ReadFrameAsync(Stream, _localSettings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+            return new FrameReadOutcome(frame, terminate: false);
+        }
+        catch (Http2ConnectionException error)
+        {
+            await TryEmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
+            return new FrameReadOutcome(frame: null, terminate: true);
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+            return new FrameReadOutcome(frame: null, terminate: true);
+        }
+    }
+
+    /// <summary>
+    /// Processes a single received frame, classifying failures:
+    /// stream-level errors emit <c>RST_STREAM</c> and let the loop
+    /// continue (RFC 9113 §5.4.2 — stream errors are recoverable);
+    /// connection-level errors emit <c>GOAWAY</c> and terminate the
+    /// connection (RFC 9113 §6.8); wire-level transport failures
+    /// terminate without GOAWAY.
+    /// </summary>
+    private async Task<FrameProcessOutcome> TryProcessFrameAsync(ReceivedFrame received, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Http2Context? context = await ProcessFrameAsync(received, cancellationToken).ConfigureAwait(false);
+            return new FrameProcessOutcome(context, terminate: false);
+        }
+        catch (Http2StreamException streamError)
+        {
+            await TryEmitRstStreamAsync(streamError.StreamId, streamError.ErrorCode, cancellationToken).ConfigureAwait(false);
+            return new FrameProcessOutcome(context: null, terminate: false);
+        }
+        catch (Http2ConnectionException error)
+        {
+            await TryEmitGoAwayAsync(error.ErrorCode, cancellationToken).ConfigureAwait(false);
+            return new FrameProcessOutcome(context: null, terminate: true);
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+            return new FrameProcessOutcome(context: null, terminate: true);
+        }
+    }
+
+    private async Task TryEmitGoAwayAsync(Http2ErrorCode errorCode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EmitGoAwayAsync(errorCode, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The peer may already be gone — the GOAWAY is best-effort
+            // since the connection is terminating regardless.
+        }
+    }
+
+    private async Task TryEmitRstStreamAsync(int streamId, Http2ErrorCode errorCode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EmitRstStreamAsync(streamId, errorCode, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort: a transport failure while emitting RST_STREAM
+            // will surface as a connection-level read failure on the next
+            // iteration and tear the connection down through the normal
+            // path.
+        }
+    }
+
+    private static bool IsWireLevelFailure(Exception exception)
+    {
+        return exception is EndOfStreamException
+            or IOException
+            or System.Net.Sockets.SocketException;
+    }
+
+    private readonly struct FrameReadOutcome
+    {
+        public FrameReadOutcome(ReceivedFrame? frame, bool terminate)
+        {
+            Frame = frame;
+            TerminateConnection = terminate;
+        }
+
+        public ReceivedFrame? Frame { get; }
+        public bool TerminateConnection { get; }
+    }
+
+    private readonly struct FrameProcessOutcome
+    {
+        public FrameProcessOutcome(Http2Context? context, bool terminate)
+        {
+            Context = context;
+            TerminateConnection = terminate;
+        }
+
+        public Http2Context? Context { get; }
+        public bool TerminateConnection { get; }
     }
 
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
@@ -727,7 +870,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // the application's IHttpContext.
         try
         {
-            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CancellationToken.None);
+            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CreateFeatures?.Invoke(), CancellationToken.None);
         }
         catch (HPack.HPackDecodingException error)
         {

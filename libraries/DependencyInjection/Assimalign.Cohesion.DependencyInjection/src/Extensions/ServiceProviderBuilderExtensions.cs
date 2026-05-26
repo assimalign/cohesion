@@ -16,7 +16,7 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a transient service of the type specified in <paramref name="serviceType"/> with an
         /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationType">The implementation type of the service.</param>
@@ -34,7 +34,7 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a transient service of the type specified in <paramref name="serviceType"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <param name="builder">The <see cref="IServiceProviderBuilder"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register.</param>
@@ -53,11 +53,11 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a transient service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Transient"/>
         public IServiceProviderBuilder AddTransient<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
@@ -71,9 +71,9 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a transient service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Transient"/>
@@ -87,10 +87,10 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a transient service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Transient"/>
         public IServiceProviderBuilder AddTransient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>()
@@ -104,10 +104,10 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a transient service of the type specified in <typeparamref name="TService"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Transient"/>
@@ -124,11 +124,11 @@ public static class ServiceProviderBuilderExtensions
         /// Adds a transient service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation" /> using the
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Transient"/>
@@ -145,9 +145,9 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a scoped service of the type specified in <paramref name="serviceType"/> with an
         /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationType">The implementation type of the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
@@ -164,9 +164,9 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a scoped service of the type specified in <paramref name="serviceType"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
@@ -183,11 +183,11 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Scoped"/>
         public IServiceProviderBuilder AddScoped<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
@@ -201,9 +201,9 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a scoped service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Scoped"/>
@@ -217,10 +217,10 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a scoped service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Scoped"/>
         public IServiceProviderBuilder AddScoped<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>()
@@ -234,10 +234,10 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Scoped"/>
@@ -254,11 +254,11 @@ public static class ServiceProviderBuilderExtensions
         /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation" /> using the
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Scoped"/>
@@ -275,7 +275,7 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with an
         /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationType">The implementation type of the service.</param>
@@ -293,9 +293,9 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
@@ -312,11 +312,11 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
         public IServiceProviderBuilder AddSingleton<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()
@@ -330,9 +330,9 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a singleton service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
@@ -346,10 +346,10 @@ public static class ServiceProviderBuilderExtensions
 
         /// <summary>
         /// Adds a singleton service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
         public IServiceProviderBuilder AddSingleton<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>()
@@ -363,10 +363,10 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with a
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
@@ -383,11 +383,11 @@ public static class ServiceProviderBuilderExtensions
         /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with an
         /// implementation type specified in <typeparamref name="TImplementation" /> using the
         /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
         /// <typeparam name="TService">The type of the service to add.</typeparam>
         /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationFactory">The factory that creates the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
@@ -404,9 +404,9 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with an
         /// instance specified in <paramref name="implementationInstance"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="serviceType">The type of the service to register.</param>
         /// <param name="implementationInstance">The instance of the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
@@ -425,9 +425,9 @@ public static class ServiceProviderBuilderExtensions
         /// <summary>
         /// Adds a singleton service of the type specified in <typeparamref name="TService" /> with an
         /// instance specified in <paramref name="implementationInstance"/> to the
-        /// specified <see cref="IServiceCollection"/>.
+        /// specified <see cref="IServiceContainer"/>.
         /// </summary>
-        /// <param name="builder">The <see cref="IServiceCollection"/> to add the service to.</param>
+        /// <param name="builder">The <see cref="IServiceContainer"/> to add the service to.</param>
         /// <param name="implementationInstance">The instance of the service.</param>
         /// <returns>A reference to this instance after the operation has completed.</returns>
         /// <seealso cref="ServiceLifetime.Singleton"/>
@@ -641,7 +641,7 @@ public static class ServiceProviderBuilderExtensions
             }
             if (!builder.Services.Any((ServiceDescriptor d) => d.ServiceType == descriptor2.ServiceType && d.GetImplementationType() == implementationType))
             {
-                builder.Services.Add(descriptor2);
+                builder.Services.Register(descriptor2);
                 return true;
             }
             return false;
@@ -679,7 +679,7 @@ public static class ServiceProviderBuilderExtensions
 
             if (serviceDescriptor is not null)
             {
-                builder.Services.Remove(serviceDescriptor);
+                builder.Services.Unregister(serviceDescriptor);
             }
 
             builder.Add(descriptor2);
@@ -701,7 +701,7 @@ public static class ServiceProviderBuilderExtensions
 
                 if (serviceDescriptor.ServiceType == serviceType)
                 {
-                    builder.Services.RemoveAt(num);
+                    builder.Services.UnregisterAt(num);
                 }
             }
             return builder;

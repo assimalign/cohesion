@@ -21,7 +21,7 @@ public interface IHostService
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 
+    /// Stops the host service.
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>

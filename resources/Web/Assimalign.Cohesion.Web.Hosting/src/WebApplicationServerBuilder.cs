@@ -1,11 +1,11 @@
-﻿using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Http;
+﻿using Assimalign.Cohesion.Http;
 using System;
 using System.Collections.Generic;
 using System.Text;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Transports;
 using Assimalign.Cohesion.Http.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -15,16 +15,12 @@ public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
     private readonly HttpConnectionListenerOptions _options;
+    //private readonly Action<WebApplicationBuilder> _default;
 
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
         _options = new HttpConnectionListenerOptions();
-
-        builder.Services.AddSingleton<IHttpConnectionListener>(serviceProvider =>
-        {
-            return new HttpConnectionListener(_options);
-        });
     }
 
     /// <summary>
@@ -74,11 +70,11 @@ public sealed class WebApplicationServerBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public WebApplicationServerBuilder ConfigureServer(Action<WebServerOptions> configure)
+    public WebApplicationServerBuilder UseServer(Action<WebApplicationServerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new WebServerOptions(_options);
+        var options = new WebApplicationServerOptions(_options);
 
         configure.Invoke(options);
 

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +28,11 @@ public interface ITransportConnection : IDisposable, IAsyncDisposable
     /// Represents the current state of the pipeline.
     /// </summary>
     ConnectionState State { get; }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    ITransportPipeline Pipeline { get; }
 
     /// <summary>
     /// Aborts the connection.

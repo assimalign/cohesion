@@ -18,9 +18,9 @@ public sealed class ServiceProviderFactory
     private static Factory factory = new();
     private static ConcurrentDictionary<string, Func<IServiceProvider>> providers = new(StringComparer.CurrentCultureIgnoreCase);
 
-    public ServiceProviderFactory Register(Action<IServiceProviderBuilder> configure)
+    public ServiceProviderFactory Register(Action<ServiceProviderBuilder> configure)
     {
-        IServiceProviderBuilder builder = new ServiceProviderBuilder();
+        ServiceProviderBuilder builder = new ServiceProviderBuilder();
 
         configure.Invoke(builder);
 
@@ -31,15 +31,15 @@ public sealed class ServiceProviderFactory
 
         builder.Add(descriptor);
 
-        providers[defaultKey] = () => builder.Build();
+        providers[defaultKey] = () => ((IServiceProviderBuilder)builder).Build();
 
         return this;
     }
-    public ServiceProviderFactory Register(string serviceProviderName, IServiceCollection services)
+    public ServiceProviderFactory Register(string serviceProviderName, ServiceContainer services)
     {
         var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(factory);
 
-        services.Add(descriptor);
+        services.Register(descriptor);
 
         providers.TryAdd(serviceProviderName, () =>
         {
@@ -48,9 +48,9 @@ public sealed class ServiceProviderFactory
 
         return this;
     }
-    public ServiceProviderFactory Register(string serviceProviderName, Action<IServiceProviderBuilder> configure)
+    public ServiceProviderFactory Register(string serviceProviderName, Action<ServiceProviderBuilder> configure)
     {
-        IServiceProviderBuilder builder = new ServiceProviderBuilder();
+        ServiceProviderBuilder builder = new ServiceProviderBuilder();
 
         configure.Invoke(builder);
 
@@ -61,7 +61,7 @@ public sealed class ServiceProviderFactory
 
         builder.Add(descriptor);
 
-        providers[serviceProviderName] = () => builder.Build();
+        providers[serviceProviderName] = () => ((IServiceProviderBuilder)builder).Build();
 
         return this;
     }

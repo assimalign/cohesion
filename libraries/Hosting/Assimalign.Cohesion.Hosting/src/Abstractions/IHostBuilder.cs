@@ -2,6 +2,9 @@
 
 namespace Assimalign.Cohesion.Hosting;
 
+// TODO: Define the IHostBuilder interface for building the host. Right now need
+// more use cases to better understand the requirements for this interface.
+
 /// <summary>
 /// A builder pattern for creating a <see cref="IHost"/>.
 /// </summary>

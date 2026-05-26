@@ -315,7 +315,7 @@ internal sealed class Http2Stream
         }
     }
 
-    public Http2Context CreateContext(HPackDecoder decoder, HttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken connectionAborted)
+    public Http2Context CreateContext(HPackDecoder decoder, HttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, IHttpFeatureCollection? features, CancellationToken connectionAborted)
     {
         if (!IsRequestReady)
         {
@@ -352,7 +352,7 @@ internal sealed class Http2Stream
             decodedHeaders.Headers,
             new MemoryStream(bodyBytes, writable: false));
 
-        return new Http2Context(this, request, new Http2Response(), connectionInfo, requestAborted);
+        return new Http2Context(this, request, new Http2Response(), connectionInfo, requestAborted, features);
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

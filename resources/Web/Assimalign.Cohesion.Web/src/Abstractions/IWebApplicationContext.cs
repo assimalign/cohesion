@@ -1,8 +1,8 @@
-﻿using Assimalign.Cohesion.Http;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Web;
+
+using Assimalign.Cohesion.Http;
 
 /// <summary>
 /// 
@@ -22,7 +22,7 @@ public interface IWebApplicationContext
     IEnumerable<IWebApplicationServer> Servers { get; }
 
     /// <summary>
-    /// A collection of features that are available in the web application context. These features can include things like authentication,
+    /// A collection of features that are available in the web application context.
     /// </summary>
     IEnumerable<IHttpFeature> Features { get; }
 }

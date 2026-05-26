@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.DependencyInjection;
 
 public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposable
 {
-    private static readonly ConcurrentDictionary<int, IServiceCollection> services = new();
+    private static readonly ConcurrentDictionary<int, IServiceContainer> services = new();
     private static readonly ConcurrentDictionary<int, IServiceProvider> providers = new();
 
 
@@ -16,25 +16,22 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
 
     public ServiceProviderBuilder(ServiceProviderOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _options = options;
+        _options = ArgumentNullException.ThrowIfNull<ServiceProviderOptions>(options);
     }
 
-    public IServiceCollection Services => services.GetOrAdd(this.GetHashCode(), new ServiceCollection());    
+    public IServiceContainer Services => services.GetOrAdd(this.GetHashCode(), new ServiceContainer());
+    
     public IServiceProviderBuilder Add(ServiceDescriptor serviceDescriptor)
     {
         ArgumentNullException.ThrowIfNull(serviceDescriptor);
 
-        Services.Add(serviceDescriptor);
+        Services.Register(serviceDescriptor);
 
         return this;
     }
     IServiceProvider IServiceProviderBuilder.Build()
     {
-        return new ServiceProvider(
-            Services, 
-            _options);
+        return new ServiceProvider((ServiceContainer)Services, _options);
     }
 
     public void Dispose()

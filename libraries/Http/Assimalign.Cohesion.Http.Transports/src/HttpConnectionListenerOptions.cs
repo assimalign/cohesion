@@ -42,7 +42,42 @@ public sealed class HttpConnectionListenerOptions
     /// <summary>
     /// Gets the configured transports.
     /// </summary>
-    public IReadOnlyCollection<ITransport> Transports => _registrations.Select(static registration => registration.Transport).ToArray();
+    public IReadOnlyCollection<ServerTransport> Transports => _registrations.Select(static registration => registration.Transport).ToArray();
+
+    /// <summary>
+    /// Gets or sets a factory invoked once per <see cref="IHttpContext"/>
+    /// at construction time to produce the request-scoped
+    /// <see cref="IHttpFeatureCollection"/> that backs
+    /// <see cref="IHttpContext.Features"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Feature lifetime is intentionally bound to the
+    /// <see cref="IHttpContext"/> rather than the underlying connection:
+    /// <see cref="IHttpContext"/> is <see cref="IAsyncDisposable"/>, so
+    /// features that own disposable state (handles, scoped service
+    /// providers, cryptographic material) get deterministic cleanup at
+    /// the end of every request. Any feature in the returned collection
+    /// that implements <see cref="IAsyncDisposable"/> or
+    /// <see cref="IDisposable"/> is disposed when the owning context
+    /// disposes.
+    /// </para>
+    /// <para>
+    /// The factory is invoked synchronously on the receive path each time
+    /// a new <see cref="IHttpContext"/> is materialised &#8212; once per
+    /// HTTP/1.1 request, once per HTTP/2 / HTTP/3 stream. Keep it
+    /// inexpensive (no I/O); the returned collection becomes the request's
+    /// <see cref="IHttpContext.Features"/> directly, and any feature it
+    /// already carries is visible to the first middleware to read
+    /// <see cref="IHttpContext.Features"/>.
+    /// </para>
+    /// <para>
+    /// Leave this property <see langword="null"/> to opt out &#8212; each
+    /// request then gets a fresh empty feature collection, which is the
+    /// default behaviour.
+    /// </para>
+    /// </remarks>
+    public Func<IHttpFeatureCollection>? CreateFeatures { get; set; }
 
     /// <summary>
     /// Adds a pre-configured transport for the supplied HTTP protocol.
@@ -52,10 +87,9 @@ public sealed class HttpConnectionListenerOptions
     /// <param name="isSecure">Indicates whether connections accepted from the transport are secured.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="transport"/> is <see langword="null"/>.</exception>
-    public HttpConnectionListenerOptions UseTransport(HttpProtocol protocol, ITransport transport, bool isSecure = false)
+    public HttpConnectionListenerOptions UseTransport(HttpProtocol protocol, ServerTransport transport, bool isSecure = false)
     {
         ArgumentNullException.ThrowIfNull(transport);
-        ArgumentException.ThrowIf(transport.Kind != TransportKind.Server, $"The transport '{nameof(transport)}' must be a server transport.");
 
         _registrations.Add(new HttpProtocolRegistration(protocol, transport, isSecure));
 

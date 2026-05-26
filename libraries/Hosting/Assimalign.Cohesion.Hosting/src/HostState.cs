@@ -7,5 +7,5 @@ public enum HostState
     Started,
     Running = Started,
     Stopping,
-    Stopped,
+    Stopped
 }

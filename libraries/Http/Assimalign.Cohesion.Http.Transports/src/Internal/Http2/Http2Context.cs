@@ -4,8 +4,14 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
 internal sealed class Http2Context : TransportHttpContext
 {
-    public Http2Context(Http2Stream stream, Http2Request request, Http2Response response, HttpConnectionInfo connectionInfo, CancellationToken requestAborted)
-        : base(HttpVersion.Http20, request, response, connectionInfo, requestAborted)
+    public Http2Context(
+        Http2Stream stream,
+        Http2Request request,
+        Http2Response response,
+        HttpConnectionInfo connectionInfo,
+        CancellationToken requestAborted,
+        IHttpFeatureCollection? features = null)
+        : base(HttpVersion.Http20, request, response, connectionInfo, requestAborted, features)
     {
         Stream = stream;
     }

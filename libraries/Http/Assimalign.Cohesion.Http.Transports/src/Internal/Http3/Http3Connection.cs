@@ -16,8 +16,11 @@ internal sealed class Http3Connection : HttpConnection
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(IMultiplexTransportConnection connection, bool isSecure)
-        : base(connection, isSecure)
+    public Http3Connection(
+        IMultiplexTransportConnection connection,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
+        : base(connection, isSecure, createFeatures)
     {
         _connection = connection;
     }
@@ -39,7 +42,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        _openContext = new Http3ConnectionContext(_connection, IsSecure);
+        _openContext = new Http3ConnectionContext(_connection, IsSecure, CreateFeatures);
 
         return _openContext;
     }

@@ -33,7 +33,7 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _factory = new HttpConnectionFactory();
+        _factory = new HttpConnectionFactory(options.CreateFeatures);
         _registrations = new List<HttpProtocolRegistration>(options.GetRegistrations());
         _acceptLoops = new List<Task>(_registrations.Count);
         _acceptedConnections = Channel.CreateBounded<HttpConnection>(new BoundedChannelOptions(options.BacklogCapacity)

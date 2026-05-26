@@ -564,6 +564,9 @@
 		<File Path="Http/Assimalign.Cohesion.Http.Transports/DESIGN_SUGGESTION.md" />
 		<File Path="Http/Assimalign.Cohesion.Http.Transports/README.md" />
 	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Transports/docs/">
+		<File Path="Http/Assimalign.Cohesion.Http.Transports/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Transports/examples/">
 		<File Path="Http/Assimalign.Cohesion.Http.Transports/examples/README.md" />
 	</Folder>
@@ -701,6 +704,27 @@
 	</Folder>
 	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports/tests/">
 		<Project Path="Net/Assimalign.Cohesion.Transports/tests/Assimalign.Cohesion.Transports.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Quic/" />
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Quic/src/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Quic/src/Assimalign.Cohesion.Transports.Quic.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Quic/tests/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Quic/tests/Assimalign.Cohesion.Transports.Quic.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Tcp/" />
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Tcp/src/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Tcp/src/Assimalign.Cohesion.Transports.Tcp.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Tcp/tests/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Tcp/tests/Assimalign.Cohesion.Transports.Tcp.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Udp/" />
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Udp/src/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Udp/src/Assimalign.Cohesion.Transports.Udp.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Net/Assimalign.Cohesion.Transports.Udp/tests/">
+		<Project Path="Net/Assimalign.Cohesion.Transports.Udp/tests/Assimalign.Cohesion.Transports.Udp.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/ObjectMapping/">
 		<File Path="ObjectMapping/Directory.Build.props" />

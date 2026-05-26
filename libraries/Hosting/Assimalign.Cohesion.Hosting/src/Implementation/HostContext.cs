@@ -30,7 +30,6 @@ public abstract class HostContext : IHostContext
         }
     }
     public abstract IHostEnvironment Environment { get; }
-    public abstract IServiceProvider? ServiceProvider { get; }
     public abstract IEnumerable<IHostService> HostedServices { get; }
 
     internal Action? ShutdownCallback { get; set; }

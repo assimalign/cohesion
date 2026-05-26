@@ -29,7 +29,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         "Assimalign.Cohesion.DependencyInjection.VerifyOpenGenericServiceTrimmability",
         out bool verifyOpenGenerics) ? verifyOpenGenerics : false;
 
-    internal ServiceProvider(ICollection<ServiceDescriptor> serviceDescriptors, ServiceProviderOptions options)
+    internal ServiceProvider(ServiceContainer container, ServiceProviderOptions options)
     {
         // note that Root needs to be set before calling GetEngine(), because the engine may need to access Root
         Root = new ServiceProviderEngineScope(this, isRootScope: true);
@@ -37,7 +37,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         createServiceAccessor = CreateServiceAccessor;
         realizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>>();
 
-        CallSiteFactory = new CallSiteFactory(serviceDescriptors);
+        CallSiteFactory = new CallSiteFactory(container);
         CallSiteFactory.Add(typeof(IServiceProvider), new ServiceProviderCallSite()); // The list of built in services that aren't part of the list of service descriptors. keep this in sync with CallSiteFactory.IsService
         CallSiteFactory.Add(typeof(IServiceScopeFactory), new ConstantCallSite(typeof(IServiceScopeFactory), Root));
         CallSiteFactory.Add(typeof(IServiceLookup), new ConstantCallSite(typeof(IServiceLookup), CallSiteFactory));
@@ -50,7 +50,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         {
             List<Exception>? exceptions = null;
 
-            foreach (ServiceDescriptor serviceDescriptor in serviceDescriptors)
+            foreach (ServiceDescriptor serviceDescriptor in container)
             {
                 try
                 {

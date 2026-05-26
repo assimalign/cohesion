@@ -18,6 +18,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
 
+    private bool _isBuilt;
+
     public WebApplicationBuilder(WebApplicationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -26,7 +28,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Configuration = new ConfigurationManager();
         Logging = new LoggerFactoryBuilder();
         Services = new ServiceProviderBuilder();
-        ServerManager = new WebApplicationServerBuilder(this);
+        Server = new WebApplicationServerBuilder(this);
 
         _options = options;
         _context = new WebApplicationContext(Services);
@@ -40,7 +42,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <summary>
     /// 
     /// </summary>
-    public WebApplicationServerBuilder ServerManager { get; } 
+    public WebApplicationServerBuilder Server { get; } 
 
     /// <summary>
     /// 
@@ -63,17 +65,21 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <returns></returns>
     public WebApplication Build()
     {
+        InvalidOperationException.ThrowIf(_isBuilt, "The application has already been built.");
+
         WebApplication app = new WebApplication(_context, _options);
 
-        Services.AddSingleton<WebApplicationServer>();
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
         Services.AddSingleton<ILoggerFactory>(Logging.Build());
+        Services.AddSingleton<IWebApplicationContext>(_context);
         Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
         Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
         {
             return serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
         });
+
+        _isBuilt = true;
 
         return app;
     }
@@ -110,7 +116,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        ServerManager.UseServer(server);
+        Server.UseServer(server);
         return this;
     }
 

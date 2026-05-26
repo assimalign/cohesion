@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http.Transports.Internal;
 
 internal sealed class HttpProtocolRegistration
 {
-    public HttpProtocolRegistration(HttpProtocol protocol, ITransport transport, bool isSecure)
+    public HttpProtocolRegistration(HttpProtocol protocol, ServerTransport transport, bool isSecure)
     {
         Protocol = protocol;
         Transport = transport;
@@ -13,7 +13,7 @@ internal sealed class HttpProtocolRegistration
 
     public HttpProtocol Protocol { get; }
 
-    public ITransport Transport { get; }
+    public ServerTransport Transport { get; }
 
     public bool IsSecure { get; }
 }

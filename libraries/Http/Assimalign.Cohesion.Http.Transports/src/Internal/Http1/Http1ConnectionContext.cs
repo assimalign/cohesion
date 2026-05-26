@@ -12,8 +12,11 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
-    public Http1ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
-        : base(transportContext, isSecure)
+    public Http1ConnectionContext(
+        ITransportConnectionContext transportContext,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
+        : base(transportContext, isSecure, createFeatures)
     {
     }
 
@@ -85,6 +88,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 Stream,
                 ConnectionInfo,
                 GetScheme(ConnectionInfo.IsSecure),
+                CreateFeatures?.Invoke(),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsWireLevelFailure(ex))

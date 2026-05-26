@@ -13,26 +13,26 @@ public interface IHostLifecycleService : IHostService
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StartingAsync(CancellationToken cancellationToken);
+    Task StartingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StartedAsync(CancellationToken cancellationToken);
+    Task StartedAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StoppingAsync(CancellationToken cancellationToken);
+    Task StoppingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    Task StoppedAsync(CancellationToken cancellationToken);
+    Task StoppedAsync(CancellationToken cancellationToken = default);
 }

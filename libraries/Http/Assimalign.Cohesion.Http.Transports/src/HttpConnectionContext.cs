@@ -1,13 +1,13 @@
 ﻿using System;
-
-namespace Assimalign.Cohesion.Http.Transports;
-
-using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Transports;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Transports;
+
+namespace Assimalign.Cohesion.Http.Transports;
 
 public abstract class HttpConnectionContext : IHttpConnectionContext
 {

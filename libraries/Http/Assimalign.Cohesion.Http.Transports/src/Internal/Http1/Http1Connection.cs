@@ -11,8 +11,11 @@ internal sealed class Http1Connection : HttpConnection
     private readonly ISingleStreamTransportConnection _connection;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(ISingleStreamTransportConnection connection, bool isSecure)
-        : base(connection, isSecure)
+    public Http1Connection(
+        ISingleStreamTransportConnection connection,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
+        : base(connection, isSecure, createFeatures)
     {
         _connection = connection;
     }
@@ -30,7 +33,7 @@ internal sealed class Http1Connection : HttpConnection
         }
 
         ITransportConnectionContext transportContext = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        _openContext = new Http1ConnectionContext(transportContext, IsSecure);
+        _openContext = new Http1ConnectionContext(transportContext, IsSecure, CreateFeatures);
 
         return _openContext;
     }

@@ -3,6 +3,13 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
+/*
+ Sequence 
+    1. IWebApplicationBuilder builds the IWebApplication
+    2. IWebApplication.StartAsync() starts the web server and begins processing requests
+    
+ 
+ */
 
 /// <summary>
 /// Represents an abstraction of a web server.

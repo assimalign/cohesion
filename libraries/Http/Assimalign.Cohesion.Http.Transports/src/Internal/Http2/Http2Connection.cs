@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,8 +11,11 @@ internal sealed class Http2Connection : HttpConnection
     private readonly ISingleStreamTransportConnection _connection;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(ISingleStreamTransportConnection connection, bool isSecure)
-        : base(connection, isSecure)
+    public Http2Connection(
+        ISingleStreamTransportConnection connection,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
+        : base(connection, isSecure, createFeatures)
     {
         _connection = connection;
     }
@@ -30,7 +34,7 @@ internal sealed class Http2Connection : HttpConnection
 
         ITransportConnectionContext context = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        _context = new Http2ConnectionContext(context, IsSecure);
+        _context = new Http2ConnectionContext(context, IsSecure, CreateFeatures);
 
         return _context;
     }

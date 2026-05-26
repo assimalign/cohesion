@@ -10,6 +10,16 @@ using Http;
 /// </summary>
 public interface IWebApplicationBuilder 
 {
+
+      ///// <summary>
+    ///// 
+    ///// </summary>
+    ///// <typeparam name="TFeature"></typeparam>
+    ///// <param name="feature"></param>
+    ///// <returns></returns>
+    //IWebApplicationBuilder AddFeature<TFeature>(TFeature feature) where TFeature : IHttpFeature;
+
+
     /// <summary>
     /// Adds a feature to be used within the HttpContext Feature Collection. <see cref="IHttpContext.Features"/>
     /// </summary>
@@ -18,15 +28,7 @@ public interface IWebApplicationBuilder
     IWebApplicationBuilder AddFeature(IHttpFeature feature);
 
     /// <summary>
-    /// 
-    /// </summary>
-    /// <typeparam name="TFeature"></typeparam>
-    /// <param name="feature"></param>
-    /// <returns></returns>
-    IWebApplicationBuilder AddFeature<TFeature>(TFeature feature) where TFeature : IHttpFeature;
-
-    /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
@@ -38,6 +40,13 @@ public interface IWebApplicationBuilder
     /// <param name="server"></param>
     /// <returns></returns>
     IWebApplicationBuilder AddServer(IWebApplicationServer server);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="server"></param>
+    /// <returns></returns>
+    IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server);
 
     /// <summary>
     /// 

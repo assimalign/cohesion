@@ -5,6 +5,6 @@
 	<Import Project="Targets\Build.References.Packages.targets" />
 	<Import Project="Targets\Build.References.Projects.targets" />
 	<!-- <Import Project="Targets\Build.References.Analyzers.targets" /> -->
-	<!-- <Import Project="Targets\SharedFiles.targets" /> -->
+	<Import Project="Targets\Build.SharedFiles.targets"  Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
 
 </Project>

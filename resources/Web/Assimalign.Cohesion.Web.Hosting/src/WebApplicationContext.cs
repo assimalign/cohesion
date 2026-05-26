@@ -12,13 +12,18 @@ using Assimalign.Cohesion.Http;
 
 public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
-    private readonly ServiceProviderBuilder _builder;
+    private readonly Lazy<IServiceProvider> _serviceProvider;
     internal WebApplicationContext(ServiceProviderBuilder builder)
     {
-        _builder = ArgumentNullException.ThrowIfNull<ServiceProviderBuilder>(builder);
+        ArgumentNullException.ThrowIfNull(builder);
+
+        _serviceProvider = new Lazy<IServiceProvider>(() => 
+        {
+            return (builder as IServiceProviderBuilder).Build();
+        });
     }
-    public FileSystemPath? ContentRootPath { get; }
-    public override IServiceProvider ServiceProvider => (_builder as IServiceProviderBuilder).Build();
+    public FileSystemPath? ContentRootPath { get; init; }
+    public IServiceProvider ServiceProvider => _serviceProvider.Value;
     public override IHostEnvironment Environment => ServiceProvider.GetRequiredService<IHostEnvironment>();
     public override IEnumerable<IHostService> HostedServices => ServiceProvider.GetRequiredService<IEnumerable<IHostService>>();
     public IEnumerable<IWebApplicationServer> Servers => HostedServices.OfType<IWebApplicationServer>();

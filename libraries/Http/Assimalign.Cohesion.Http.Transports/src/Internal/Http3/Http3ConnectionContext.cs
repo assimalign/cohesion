@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Quic;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private static readonly ITransportConnectionPipe DisabledPipe = new TransportConnectionPipe(Stream.Null);
     private readonly IMultiplexTransportConnection _connection;
     private readonly Dictionary<string, object?> _items;
+    private readonly Func<IHttpFeatureCollection>? _createFeatures;
     private readonly bool _isSecure;
     private EndPoint _localEndPoint;
     private EndPoint _remoteEndPoint;
@@ -25,11 +27,15 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(IMultiplexTransportConnection connection, bool isSecure)
+    public Http3ConnectionContext(
+        IMultiplexTransportConnection connection,
+        bool isSecure,
+        Func<IHttpFeatureCollection>? createFeatures)
     {
         _connection = connection;
         _isSecure = isSecure;
         _items = new Dictionary<string, object?>(StringComparer.Ordinal);
+        _createFeatures = createFeatures;
         _localEndPoint = connection is QuicTransportConnection quicConnection
             ? quicConnection.LocalEndPoint
             : new IPEndPoint(IPAddress.None, 0);
@@ -46,31 +52,157 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     public override IDictionary<string, object?> Items => _items;
 
+    /// <summary>
+    /// Yields HTTP/3 request contexts for the lifetime of this connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Failure handling is split between two scopes. Per-stream failures —
+    /// truncated frames, malformed QPACK, varint overflow, a per-stream
+    /// <see cref="IOException"/> — let the loop continue accepting more
+    /// inbound streams on the same QUIC connection (HTTP/3 has no
+    /// connection-level header table to corrupt, so a bad request on one
+    /// stream is harmless to the others). Connection-terminating failures —
+    /// the QUIC connection itself going away
+    /// (<see cref="QuicException"/>), the multiplex transport being
+    /// disposed, or cancellation — exit the enumerable cleanly so the
+    /// listener stays alive for the next peer.
+    /// </para>
+    /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            ITransportConnectionContext streamContext;
-
-            try
-            {
-                streamContext = await _connection.OpenInboundAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
+            StreamAcceptOutcome accept = await TryAcceptInboundAsync(cancellationToken).ConfigureAwait(false);
+            if (accept.TerminateConnection)
             {
                 yield break;
             }
+            if (accept.StreamContext is null)
+            {
+                // Non-terminating accept failure is not expected, but guard
+                // anyway: skip and try the next inbound.
+                continue;
+            }
 
+            ITransportConnectionContext streamContext = accept.StreamContext;
             _localEndPoint = streamContext.LocalEndPoint;
             _remoteEndPoint = streamContext.RemoteEndPoint;
 
-            Http3Context? context = await ReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
+            Http3Context? context = await TryReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
 
             if (context is not null)
             {
                 yield return context;
             }
         }
+    }
+
+    /// <summary>
+    /// Accepts the next inbound QUIC stream on this multiplex connection.
+    /// QUIC-level failures (peer aborted the connection, the multiplex was
+    /// disposed) and cancellation signal connection termination so the
+    /// receive loop exits without throwing into the caller's
+    /// <c>await foreach</c>.
+    /// </summary>
+    private async Task<StreamAcceptOutcome> TryAcceptInboundAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            ITransportConnectionContext streamContext = await _connection.OpenInboundAsync(cancellationToken).ConfigureAwait(false);
+            return new StreamAcceptOutcome(streamContext, terminate: false);
+        }
+        catch (OperationCanceledException)
+        {
+            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+        }
+        catch (QuicException)
+        {
+            // The QUIC connection itself is gone — peer aborted, idle
+            // timeout, or a transport-level error. No more streams will
+            // arrive on this connection.
+            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The underlying multiplex transport has been disposed
+            // (cooperative shutdown raced this accept).
+            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+        }
+    }
+
+    /// <summary>
+    /// Reads a single request off the supplied QUIC stream. Any per-stream
+    /// failure — truncated frames, malformed QPACK literal, overflow in a
+    /// QUIC varint, an I/O error on this stream alone — is absorbed and
+    /// returns <see langword="null"/>, signalling the caller to drop this
+    /// stream and keep accepting more on the same QUIC connection.
+    /// </summary>
+    private async Task<Http3Context?> TryReadRequestAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation during a per-stream read is treated as
+            // per-stream — the outer loop check on cancellationToken will
+            // break out at the top of the next iteration if the cancel
+            // applies to the whole connection.
+            return null;
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Wire-level transport failures that can surface from
+    /// <c>OpenInboundAsync</c>: low-level <see cref="IOException"/>,
+    /// <see cref="System.Net.Sockets.SocketException"/>, and unexpected
+    /// end-of-stream during the accept handshake. The QUIC connection is
+    /// no longer usable when these fire.
+    /// </summary>
+    private static bool IsWireLevelFailure(Exception exception)
+    {
+        return exception is EndOfStreamException
+            or IOException
+            or System.Net.Sockets.SocketException;
+    }
+
+    /// <summary>
+    /// Per-stream parse failures from the HTTP/3 frame reader and the
+    /// QPACK literal decoder. These do not invalidate the QUIC connection
+    /// — the offending stream is dropped and the receive loop keeps
+    /// accepting subsequent streams.
+    /// </summary>
+    private static bool IsPerStreamFailure(Exception exception)
+    {
+        return exception is EndOfStreamException
+            or InvalidDataException
+            or NotSupportedException
+            or OverflowException
+            or ArgumentOutOfRangeException
+            or IndexOutOfRangeException
+            or IOException;
+    }
+
+    private readonly struct StreamAcceptOutcome
+    {
+        public StreamAcceptOutcome(ITransportConnectionContext? streamContext, bool terminate)
+        {
+            StreamContext = streamContext;
+            TerminateConnection = terminate;
+        }
+
+        public ITransportConnectionContext? StreamContext { get; }
+        public bool TerminateConnection { get; }
     }
 
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
@@ -133,7 +265,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         Http3Response response = new();
         HttpConnectionInfo connectionInfo = new(streamContext.LocalEndPoint, streamContext.RemoteEndPoint, _isSecure);
 
-        return new Http3Context(request, response, connectionInfo, cancellationToken, streamContext);
+        return new Http3Context(request, response, connectionInfo, cancellationToken, streamContext, _createFeatures?.Invoke());
     }
 
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)

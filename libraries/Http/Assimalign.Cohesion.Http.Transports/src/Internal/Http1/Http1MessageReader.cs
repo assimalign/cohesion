@@ -13,6 +13,7 @@ internal static class Http1MessageReader
         Stream stream,
         HttpConnectionInfo connectionInfo,
         HttpScheme scheme,
+        IHttpFeatureCollection? features,
         CancellationToken cancellationToken)
     {
         string? requestLine = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
@@ -115,7 +116,8 @@ internal static class Http1MessageReader
             response,
             connectionInfo,
             cancellationToken,
-            keepAlive);
+            keepAlive,
+            features);
     }
 
     private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(Stream stream, CancellationToken cancellationToken)

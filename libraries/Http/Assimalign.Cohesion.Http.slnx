@@ -89,6 +89,9 @@
 		<File Path="Assimalign.Cohesion.Http.Transports/DESIGN_SUGGESTION.md" />
 		<File Path="Assimalign.Cohesion.Http.Transports/README.md" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Transports/docs/">
+		<File Path="Assimalign.Cohesion.Http.Transports/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Transports/examples/">
 		<File Path="Assimalign.Cohesion.Http.Transports/examples/README.md" />
 	</Folder>

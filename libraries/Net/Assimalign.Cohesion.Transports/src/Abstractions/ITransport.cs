@@ -20,7 +20,7 @@ public interface ITransport : IDisposable, IAsyncDisposable
     /// <remarks>
     /// Useful when a server is listening on multiple transports, each transport will have a unique identifier.
     /// </remarks>
-    TransportId Id { get;  }
+    TransportId Id { get; }
 
     /// <summary>
     /// Specifies whether the transport is a client or server.

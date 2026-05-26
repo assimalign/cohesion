@@ -9,8 +9,9 @@ internal sealed class Http1Context : TransportHttpContext
         Http1Response response,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        bool keepAlive)
-        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted)
+        bool keepAlive,
+        IHttpFeatureCollection? features = null)
+        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted, features)
     {
         KeepAlive = keepAlive;
     }

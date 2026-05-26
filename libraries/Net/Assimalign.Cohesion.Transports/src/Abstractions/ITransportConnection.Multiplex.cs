@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Transports;
 public interface IMultiplexTransportConnection : ITransportConnection
 {
     /// <summary>
-    /// Opens the inbound point to point connection that allows reading and writing.
+    /// Opens the inbound point to point connection.
     /// </summary>
     /// <returns></returns>
     ITransportConnectionContext OpenInbound();

@@ -17,11 +17,12 @@ internal sealed class CallSiteFactory : IServiceLookup
     private readonly ConcurrentDictionary<Type, object>                             callSiteLocks      = new();
     private readonly CallSiteStackGuard                                             callSiteStackGuard;
 
-    public CallSiteFactory(ICollection<ServiceDescriptor> descriptors)
+    public CallSiteFactory(ServiceContainer container)
     {
         this.callSiteStackGuard = new();
-        this.descriptors = new ServiceDescriptor[descriptors.Count];
-        descriptors.CopyTo(this.descriptors, 0);
+        this.descriptors = new ServiceDescriptor[container.Count];
+        
+        container.CopyTo(this.descriptors, 0);
 
         Populate();
     }

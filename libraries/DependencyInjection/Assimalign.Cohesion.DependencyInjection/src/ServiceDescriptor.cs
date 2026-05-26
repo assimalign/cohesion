@@ -20,7 +20,8 @@ public class ServiceDescriptor
     /// <exception cref="ArgumentException"><paramref name="implementationType"/> must be assignable to <paramref name="serviceType"/></exception>
     public ServiceDescriptor(
         Type serviceType,
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType, ServiceLifetime lifetime)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType, 
+        ServiceLifetime lifetime)
         : this(serviceType, lifetime)
     {
         ArgumentNullException.ThrowIfNull(serviceType);

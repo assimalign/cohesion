@@ -5,6 +5,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Transports.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Transports.Quic" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Remove="Internal\Extensions\**\*.cs" />
