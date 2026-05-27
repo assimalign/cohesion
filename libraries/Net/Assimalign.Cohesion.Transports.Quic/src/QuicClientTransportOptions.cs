@@ -21,7 +21,8 @@ using Assimalign.Cohesion.Transports.Internal;
 [SupportedOSPlatform("osx")]
 public sealed class QuicClientTransportOptions
 {
-    private readonly TransportPipelineBuilder<QuicTransportConnection, QuicTransportContext> _builder;
+    private readonly TransportPipelineBuilder<QuicTransportContext> _builder;
+    private readonly Lazy<TransportPipeline<QuicTransportContext>> _pipeline;
     private long _defaultStreamErrorCode;
     private long _defaultCloseErrorCode;
 
@@ -30,7 +31,8 @@ public sealed class QuicClientTransportOptions
     /// </summary>
     public QuicClientTransportOptions()
     {
-        _builder = new TransportPipelineBuilder<QuicTransportConnection, QuicTransportContext>();
+        _builder = new TransportPipelineBuilder<QuicTransportContext>();
+        _pipeline = new Lazy<TransportPipeline<QuicTransportContext>>(() => _builder.Build());
         ClientAuthenticationOptions = new SslClientAuthenticationOptions
         {
             ApplicationProtocols = new List<SslApplicationProtocol>
@@ -99,8 +101,7 @@ public sealed class QuicClientTransportOptions
     /// <param name="middleware">The middleware delegate to add.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="middleware"/> is <see langword="null"/>.</exception>
-    public QuicClientTransportOptions Use(
-        Func<QuicTransportConnection, QuicTransportContext, TransportMiddleware, CancellationToken, Task> middleware)
+    public QuicClientTransportOptions Use(Func<QuicTransportContext, TransportMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 
@@ -109,10 +110,7 @@ public sealed class QuicClientTransportOptions
         return this;
     }
 
-    internal TransportPipeline BuildPipeline()
-    {
-        return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
-    }
+    internal TransportPipeline<QuicTransportContext> Pipeline => _pipeline.Value;
 
     internal TransportStreamPipeOptionsContext CreateStreamOptions()
     {

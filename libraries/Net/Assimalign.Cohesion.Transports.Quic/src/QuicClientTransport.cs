@@ -18,7 +18,7 @@ using Assimalign.Cohesion.Transports.Internal;
 public sealed class QuicClientTransport : ClientTransport<QuicTransportConnection>
 {
     private readonly QuicClientTransportOptions _options;
-    private readonly TransportPipeline _pipeline;
+    private readonly TransportPipeline<QuicTransportContext> _pipeline;
     private readonly List<QuicTransportConnection> _connections;
 
     private bool _isDisposed;
@@ -32,7 +32,7 @@ public sealed class QuicClientTransport : ClientTransport<QuicTransportConnectio
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _pipeline = options.BuildPipeline();
+        _pipeline = options.Pipeline;
         _connections = new List<QuicTransportConnection>();
     }
 

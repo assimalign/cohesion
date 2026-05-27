@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Transports.Tests;
 
-public class SocketTransportConnectionSettingsTests
+public class TcpTransportConnectionSettingsTests
 {
     [Fact]
     public void CreateConnectionSettings_WhenCreatedFromTcpOptions_ShouldUseAdaptiveMemoryPool()
@@ -20,7 +20,7 @@ public class SocketTransportConnectionSettingsTests
         };
 
         // Act
-        SocketTransportConnectionSettings[] settings = options.CreateConnectionSettings();
+        TcpTransportConnectionSettings[] settings = options.CreateConnectionSettings();
 
         AdaptiveMemoryPool inputPool = Assert.IsType<AdaptiveMemoryPool>(settings[0].PipeOptions.InputOptions.Pool);
         AdaptiveMemoryPool outputPool = Assert.IsType<AdaptiveMemoryPool>(settings[0].PipeOptions.OutputOptions.Pool);

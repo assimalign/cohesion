@@ -4,7 +4,7 @@ using System.IO.Pipelines;
 
 namespace Assimalign.Cohesion.Transports.Internal;
 
-internal static class TransportPipeOptionsFactory
+internal static partial class TransportPipeOptionsFactory
 {
     private const int DefaultReadBufferSize = 64 * 1024;
     private const int DefaultWriteBufferSize = 16 * 1024;
@@ -32,31 +32,6 @@ internal static class TransportPipeOptionsFactory
         });
     }
 
-    public static TcpTransportConnectionSettings[] CreateSocketConnectionSettings(
-        int count,
-        bool unsafePreferInLineScheduling = false,
-        bool waitForDataBeforeAllocatingBuffer = false,
-        long? maxReadBufferSize = 0,
-        long? maxWriteBufferSize = 0)
-    {
-        var settings = new TcpTransportConnectionSettings[count];
-
-        for (int index = 0; index < count; index++)
-        {
-            settings[index] = new TcpTransportConnectionSettings()
-            {
-                IsServer = true,
-                PipeOptions = CreateSocketPipeOptions(
-                    maxReadBufferSize,
-                    maxWriteBufferSize,
-                    unsafePreferInLineScheduling),
-                WaitForDataBeforeAllocatingBuffer = waitForDataBeforeAllocatingBuffer
-            };
-        }
-
-        return settings;
-    }
-
     public static TransportPipeOptionsContext CreatePipeOptions(
         long? maxReadBufferSize,
         long? maxWriteBufferSize,
@@ -70,29 +45,6 @@ internal static class TransportPipeOptionsFactory
             maxWriteBufferSize,
             applicationScheduler,
             transportScheduler);
-    }
-
-    public static SocketTransportPipeOptionsContext CreateSocketPipeOptions(
-        long? maxReadBufferSize,
-        long? maxWriteBufferSize,
-        bool unsafePreferInLineScheduling)
-    {
-        PipeScheduler applicationScheduler = GetApplicationScheduler(unsafePreferInLineScheduling);
-        PipeScheduler transportScheduler = GetSocketTransportScheduler(unsafePreferInLineScheduling);
-        PipeScheduler senderScheduler = unsafePreferInLineScheduling
-            ? PipeScheduler.Inline
-            : OperatingSystem.IsWindows()
-                ? transportScheduler
-                : PipeScheduler.Inline;
-
-        return new SocketTransportPipeOptionsContext(
-            CreatePipeOptions(
-                maxReadBufferSize,
-                maxWriteBufferSize,
-                applicationScheduler,
-                transportScheduler),
-            transportScheduler,
-            senderScheduler);
     }
 
     public static TransportStreamPipeOptionsContext CreateStreamOptions(long? readBufferSize, long? writeBufferSize)
@@ -126,13 +78,6 @@ internal static class TransportPipeOptionsFactory
         return unsafePreferInLineScheduling
             ? PipeScheduler.Inline
             : PipeScheduler.ThreadPool;
-    }
-
-    private static PipeScheduler GetSocketTransportScheduler(bool unsafePreferInLineScheduling)
-    {
-        return unsafePreferInLineScheduling
-            ? PipeScheduler.Inline
-            : new SocketPipeScheduler();
     }
 
     private static TransportPipeOptionsContext CreatePipeOptions(

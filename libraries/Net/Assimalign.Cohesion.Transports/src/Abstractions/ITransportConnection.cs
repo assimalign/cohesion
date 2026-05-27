@@ -32,7 +32,7 @@ public interface ITransportConnection : IDisposable, IAsyncDisposable
     /// <summary>
     /// 
     /// </summary>
-    ITransportPipeline Pipeline { get; }
+    //ITransportPipeline Pipeline { get; }
 
     /// <summary>
     /// Aborts the connection.

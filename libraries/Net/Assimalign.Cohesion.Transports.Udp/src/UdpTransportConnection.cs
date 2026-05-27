@@ -23,7 +23,6 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     private readonly TransportPipeOptionsContext _pipeOptions;
     private readonly Pipe _receivePipe;
     private readonly Pipe _sendPipe;
-    private readonly TransportPipeline _pipeline;
     private readonly Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask<int>> _sendAsync;
     private readonly CancellationTokenSource _shutdownTokenSource;
     private readonly Lock _stateLock;
@@ -37,7 +36,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     internal UdpTransportConnection(
         Socket socket,
         TransportId transportId,
-        TransportPipeline pipeline,
+        TransportPipeline<UdpTransportConnectionContext> pipeline,
         TransportPipeOptionsContext pipeOptions,
         bool ownsSocket)
     {
@@ -49,7 +48,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
         _ownsSocket = ownsSocket;
         _hasReceiveLoop = true;
         _pipeOptions = pipeOptions;
-        _pipeline = pipeline;
+        Pipeline = pipeline;
         _sendAsync = (buffer, cancellationToken) => socket.SendAsync(buffer, SocketFlags.None, cancellationToken);
         _shutdownTokenSource = new CancellationTokenSource();
         _stateLock = new Lock();
@@ -68,7 +67,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
 
     internal UdpTransportConnection(
         TransportId transportId,
-        TransportPipeline pipeline,
+        TransportPipeline<UdpTransportConnectionContext> pipeline,
         EndPoint localEndPoint,
         EndPoint remoteEndPoint,
         TransportPipeOptionsContext pipeOptions,
@@ -84,7 +83,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
         _ownsSocket = false;
         _hasReceiveLoop = false;
         _pipeOptions = pipeOptions;
-        _pipeline = pipeline;
+        Pipeline = pipeline;
         _sendAsync = sendAsync;
         _shutdownTokenSource = new CancellationTokenSource();
         _stateLock = new Lock();
@@ -102,16 +101,19 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     }
 
     /// <inheritdoc />
-    public ConnectionId Id { get; } = ConnectionId.New();
+    public override ConnectionId Id { get; } = ConnectionId.New();
 
     /// <inheritdoc />
-    public TransportId TransportId { get; }
+    public override TransportId TransportId { get; }
 
     /// <inheritdoc />
-    public TransportProtocol Protocol { get; } = TransportProtocol.Udp;
+    public override TransportProtocol Protocol { get; } = TransportProtocol.Udp;
 
     /// <inheritdoc />
-    public ConnectionState State => _state;
+    public override ConnectionState State => _state;
+
+    /// <inheritdoc />
+    protected override TransportPipeline<UdpTransportConnectionContext>? Pipeline { get; }
 
     /// <summary>
     /// Gets the strongly typed UDP connection context.
@@ -121,13 +123,13 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     internal Action? OnDispose { get; set; }
 
     /// <inheritdoc />
-    public UdpTransportConnectionContext Open()
+    public override UdpTransportConnectionContext Open()
     {
         return OpenAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
-    public async ValueTask<UdpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<UdpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
@@ -151,29 +153,16 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
 
         TransportEventSource.Log.TransportConnectionStart(Protocol, TransportId, Id);
 
-        await _pipeline.ExecuteAsync(this, Context, cancellationToken).ConfigureAwait(false);
+        if (Pipeline is not null)
+        {
+            await Pipeline.ExecuteAsync(Context, cancellationToken).ConfigureAwait(false);
+        }
 
         return Context;
     }
 
-    ITransportConnectionContext ISingleStreamTransportConnection.Open()
-    {
-        return Open();
-    }
-
-    async ValueTask<ITransportConnectionContext> ISingleStreamTransportConnection.OpenAsync(CancellationToken cancellationToken)
-    {
-        return await OpenAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     /// <inheritdoc />
-    public void Abort()
-    {
-        AbortAsync().AsTask().GetAwaiter().GetResult();
-    }
-
-    /// <inheritdoc />
-    public async ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         if (_isDisposed)
         {
@@ -235,13 +224,13 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    public override void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (_isDisposed)
         {

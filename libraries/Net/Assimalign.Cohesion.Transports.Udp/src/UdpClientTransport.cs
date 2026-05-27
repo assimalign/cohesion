@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Transports.Internal;
 public sealed class UdpClientTransport : ClientTransport<UdpTransportConnection>
 {
     private readonly UdpClientTransportOptions _options;
-    private readonly TransportPipeline _pipeline;
+    private readonly TransportPipeline<UdpTransportConnectionContext> _pipeline;
     private readonly List<UdpTransportConnection> _connections;
 
     private bool _isDisposed;
@@ -28,7 +28,7 @@ public sealed class UdpClientTransport : ClientTransport<UdpTransportConnection>
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _pipeline = options.BuildPipeline();
+        _pipeline = options.Pipeline;
         _connections = new List<UdpTransportConnection>();
     }
 

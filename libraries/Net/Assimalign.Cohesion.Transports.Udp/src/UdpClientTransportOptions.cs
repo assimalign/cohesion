@@ -12,14 +12,16 @@ using Assimalign.Cohesion.Transports.Internal;
 /// </summary>
 public sealed class UdpClientTransportOptions
 {
-    private readonly TransportPipelineBuilder<UdpTransportConnection, UdpTransportConnectionContext> _builder;
+    private readonly TransportPipelineBuilder<UdpTransportConnectionContext> _builder;
+    private readonly Lazy<TransportPipeline<UdpTransportConnectionContext>> _pipeline;
 
     /// <summary>
     /// Creates a new set of UDP client transport options.
     /// </summary>
     public UdpClientTransportOptions()
     {
-        _builder = new TransportPipelineBuilder<UdpTransportConnection, UdpTransportConnectionContext>();
+        _builder = new TransportPipelineBuilder<UdpTransportConnectionContext>();
+        _pipeline = new Lazy<TransportPipeline<UdpTransportConnectionContext>>(() => _builder.Build());
     }
 
     /// <summary>
@@ -53,8 +55,7 @@ public sealed class UdpClientTransportOptions
     /// <param name="middleware">The middleware delegate to add.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="middleware"/> is <see langword="null"/>.</exception>
-    public UdpClientTransportOptions Use(
-        Func<UdpTransportConnection, UdpTransportConnectionContext, TransportMiddleware, CancellationToken, Task> middleware)
+    public UdpClientTransportOptions Use(Func<UdpTransportConnectionContext, TransportMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
 
@@ -63,10 +64,7 @@ public sealed class UdpClientTransportOptions
         return this;
     }
 
-    internal TransportPipeline BuildPipeline()
-    {
-        return (TransportPipeline)((ITransportPipelineBuilder)_builder).Build();
-    }
+    internal TransportPipeline<UdpTransportConnectionContext> Pipeline => _pipeline.Value;
 
     internal TransportPipeOptionsContext CreatePipeOptions()
     {

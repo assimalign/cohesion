@@ -21,8 +21,4 @@
         <Compile Update="@(CohesionSharedFile->'%(FilePath)')" Link="%(File)" />
         <CohesionSharedFile Remove="@(CohesionSharedFile)" />
 	</ItemGroup>
-
-    <Target Name="Build">
-        <Message Text="Files @(CohesionSharedFile->'%(FileDirectory)')" Importance="high" />
-    </Target>
 </Project>

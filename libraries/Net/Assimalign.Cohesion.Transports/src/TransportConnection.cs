@@ -52,6 +52,4 @@ public abstract class TransportConnection : ITransportConnection
     /// <inheritdoc />
     public abstract ValueTask DisposeAsync();
 
-    /// <inheritdoc />
-    ITransportPipeline ITransportConnection.Pipeline => Pipeline;
 }

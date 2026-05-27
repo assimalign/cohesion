@@ -7,6 +7,6 @@
         <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
         <CohesionPackageReference Include="xunit" />
         <CohesionPackageReference Include="xunit.runner.visualstudio" />
-        <CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Transports.Quic" />
     </ItemGroup>
 </Project>

@@ -184,6 +184,7 @@ public class TransportExtensionsTests
         public TransportId TransportId { get; } = TransportId.New();
         public TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
         public ConnectionState State { get; }
+        public ITransportPipeline Pipeline { get; } = null!;
 
         public void Abort() { }
 
@@ -199,6 +200,7 @@ public class TransportExtensionsTests
         public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public ITransportConnectionPipe Pipe { get; } = new TestPipe();
+        public CancellationToken ConnectionCancelled { get; } = CancellationToken.None;
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
     }
 

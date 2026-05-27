@@ -19,7 +19,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            "Assimalign.Cohesion.Transports"
+            "Assimalign.Cohesion.Transports",
+            "Assimalign.Cohesion.Transports.Tcp",
+            "Assimalign.Cohesion.Transports.Udp",
+            "Assimalign.Cohesion.Transports.Quic"
           ]
     steps:
       - uses: actions/checkout@v4

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Xunit;
 
 namespace Assimalign.Cohesion.Transports.Tests;
@@ -13,25 +14,25 @@ public class TransportPipelineBuilderTests
     public async Task ExecuteAsync_WhenMiddlewareIsConfigured_ShouldExecuteInRegistrationOrder()
     {
         var calls = new List<string>();
-        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+        var builder = new TransportPipelineBuilder<TestContext>();
 
-        builder.Use(async (connection, context, next, cancellationToken) =>
+        builder.Use(async (context, next) =>
         {
             calls.Add("first-before");
-            await next(connection, context, cancellationToken).ConfigureAwait(false);
+            await next(context).ConfigureAwait(false);
             calls.Add("first-after");
         });
 
-        builder.Use(async (connection, context, next, cancellationToken) =>
+        builder.Use(async (context, next) =>
         {
             calls.Add("second-before");
-            await next(connection, context, cancellationToken).ConfigureAwait(false);
+            await next(context).ConfigureAwait(false);
             calls.Add("second-after");
         });
 
-        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
+        TransportPipeline<TestContext> pipeline = builder.Build();
 
-        await pipeline.ExecuteAsync(new TestConnection(), new TestContext());
+        await pipeline.ExecuteAsync(new TestContext());
 
         Assert.Equal(new[]
         {
@@ -43,124 +44,51 @@ public class TransportPipelineBuilderTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenConnectionTypeDoesNotMatch_ShouldThrowTransportPipelineConfigurationException()
+    public async Task ExecuteAsync_WhenContextTypeDoesNotMatch_ShouldThrow()
     {
-        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+        var builder = new TransportPipelineBuilder<TestContext>();
 
-        builder.Use((connection, context, next, cancellationToken) =>
-            next(connection, context, cancellationToken));
+        builder.Use((context, next) => next(context));
 
         ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
 
-        var exception = await Assert.ThrowsAsync<TransportPipelineConfigurationException>(() =>
-            pipeline.ExecuteAsync(new AnotherConnection(), new TestContext()));
-
-        Assert.Contains(typeof(TestConnection).Name, exception.Message);
-        Assert.Contains(typeof(AnotherConnection).Name, exception.Message);
+        await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+            pipeline.ExecuteAsync(new AnotherContext()));
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenContextTypeDoesNotMatch_ShouldThrowTransportPipelineConfigurationException()
+    public async Task ExecuteAsync_WhenMiddlewareThrows_ShouldPropagateException()
     {
-        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
+        var builder = new TransportPipelineBuilder<TestContext>();
+        var sentinel = new InvalidOperationException("middleware boom");
 
-        builder.Use((connection, context, next, cancellationToken) =>
-            next(connection, context, cancellationToken));
+        builder.Use((ctx, next) => throw sentinel);
 
-        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
+        TransportPipeline<TestContext> pipeline = builder.Build();
 
-        var exception = await Assert.ThrowsAsync<TransportPipelineConfigurationException>(() =>
-            pipeline.ExecuteAsync(new TestConnection(), new AnotherContext()));
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            pipeline.ExecuteAsync(new TestContext()));
 
-        Assert.Contains(typeof(TestContext).Name, exception.Message);
-        Assert.Contains(typeof(AnotherContext).Name, exception.Message);
+        Assert.Same(sentinel, thrown);
     }
 
-    [Fact]
-    public async Task ExecuteAsync_WhenCancellationTokenIsProvided_ShouldFlowThroughMiddlewareChain()
+    private sealed class TestContext : TransportConnectionContext
     {
-        var observedTokens = new List<CancellationToken>();
-        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
-        using var cancellationTokenSource = new CancellationTokenSource();
-        CancellationToken cancellationToken = cancellationTokenSource.Token;
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
-        builder.Use(async (connection, context, next, token) =>
-        {
-            observedTokens.Add(token);
-            await next(connection, context, token).ConfigureAwait(false);
-        });
+        public override EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public override EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public override ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
 
-        builder.Use((connection, context, next, token) =>
-        {
-            observedTokens.Add(token);
-            return Task.CompletedTask;
-        });
+        public override CancellationToken ConnectionCancelled => _cancellationTokenSource.Token;
 
-        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
-
-        await pipeline.ExecuteAsync(new TestConnection(), new TestContext(), cancellationToken);
-
-        Assert.Equal(2, observedTokens.Count);
-        Assert.All(observedTokens, token => Assert.Equal(cancellationToken, token));
+        public new void Cancel() => _cancellationTokenSource.Cancel();
     }
 
-    [Fact]
-    public async Task ExecuteAsync_WhenCancellationTokenIsCanceled_ShouldAllowMiddlewareToObserveCancellation()
+    private sealed class AnotherContext : TransportConnectionContext
     {
-        var builder = new TransportPipelineBuilder<TestConnection, TestContext>();
-        using var cancellationTokenSource = new CancellationTokenSource();
-
-        cancellationTokenSource.Cancel();
-
-        builder.Use((connection, context, next, cancellationToken) =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return next(connection, context, cancellationToken);
-        });
-
-        ITransportPipeline pipeline = ((ITransportPipelineBuilder)builder).Build();
-
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            pipeline.ExecuteAsync(new TestConnection(), new TestContext(), cancellationTokenSource.Token));
-    }
-
-    private sealed class TestConnection : ITransportConnection
-    {
-        public ConnectionId Id { get; } = ConnectionId.New();
-        public TransportId TransportId { get; } = TransportId.New();
-        public TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
-        public ConnectionState State { get; } = ConnectionState.Open;
-        public void Abort() { }
-        public ValueTask AbortAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-        public void Dispose() { }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class AnotherConnection : ITransportConnection
-    {
-        public ConnectionId Id { get; } = ConnectionId.New();
-        public TransportId TransportId { get; } = TransportId.New();
-        public TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
-        public ConnectionState State { get; } = ConnectionState.Open;
-        public void Abort() { }
-        public ValueTask AbortAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-        public void Dispose() { }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class TestContext : ITransportConnectionContext
-    {
-        public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
-        public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
-        public ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
-        public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
-    }
-
-    private sealed class AnotherContext : ITransportConnectionContext
-    {
-        public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
-        public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
-        public ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
-        public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+        public override EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public override EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
+        public override ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
     }
 }

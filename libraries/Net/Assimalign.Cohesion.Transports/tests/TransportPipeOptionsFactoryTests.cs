@@ -1,4 +1,3 @@
-using System;
 using System.Buffers;
 using System.IO.Pipelines;
 
@@ -84,43 +83,5 @@ public class TransportPipeOptionsFactoryTests
 
         // Assert
         Assert.Equal((int)maxBufferSize, options.WriterOptions.MinimumBufferSize);
-    }
-
-    [Fact]
-    public void CreateSocketConnectionSettings_WhenCreated_ShouldUseSocketSchedulersAndSharedAdaptivePool()
-    {
-        // Arrange
-        const long maxReadBufferSize = 128 * 1024;
-        const long maxWriteBufferSize = 64 * 1024;
-
-        // Act
-        SocketTransportConnectionSettings[] settings = TransportPipeOptionsFactory.CreateSocketConnectionSettings(
-            1,
-            unsafePreferInLineScheduling: false,
-            maxReadBufferSize: maxReadBufferSize,
-            maxWriteBufferSize: maxWriteBufferSize);
-
-        try
-        {
-            AdaptiveMemoryPool inputPool = Assert.IsType<AdaptiveMemoryPool>(settings[0].PipeOptions.InputOptions.Pool);
-            AdaptiveMemoryPool outputPool = Assert.IsType<AdaptiveMemoryPool>(settings[0].PipeOptions.OutputOptions.Pool);
-
-            // Assert
-            Assert.Same(inputPool, outputPool);
-            Assert.IsType<SocketPipeScheduler>(settings[0].PipeOptions.ReceiverScheduler);
-
-            if (OperatingSystem.IsWindows())
-            {
-                Assert.Same(settings[0].PipeOptions.ReceiverScheduler, settings[0].PipeOptions.SenderScheduler);
-            }
-            else
-            {
-                Assert.Same(PipeScheduler.Inline, settings[0].PipeOptions.SenderScheduler);
-            }
-        }
-        finally
-        {
-            settings[0].PipeOptions.Dispose();
-        }
     }
 }

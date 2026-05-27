@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Transports;
 [SupportedOSPlatform("osx")]
 public sealed class QuicTransportContext : TransportConnectionContext
 {
-    private readonly Dictionary<string, object?> _items;
+    private ITransportConnectionPipe _pipe;
 
     internal QuicTransportContext(
         QuicTransportConnection connection,
@@ -29,8 +29,7 @@ public sealed class QuicTransportContext : TransportConnectionContext
         Stream = stream;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
-        Pipe = new TransportConnectionPipe(stream, readerOptions, writerOptions);
-        _items = new Dictionary<string, object?>(StringComparer.Ordinal);
+        _pipe = new TransportConnectionPipe(stream, readerOptions, writerOptions);
     }
 
     /// <summary>
@@ -41,14 +40,13 @@ public sealed class QuicTransportContext : TransportConnectionContext
     internal QuicStream Stream { get; }
 
     /// <inheritdoc />
-    public override override EndPoint LocalEndPoint { get; }
+    public override EndPoint LocalEndPoint { get; }
 
     /// <inheritdoc />
     public override EndPoint RemoteEndPoint { get; }
 
     /// <inheritdoc />
-    public override ITransportConnectionPipe Pipe { get; = }
-
+    public override ITransportConnectionPipe Pipe => _pipe;
 
     /// <summary>
     /// Replaces the active connection pipe with a custom implementation.
@@ -58,7 +56,7 @@ public sealed class QuicTransportContext : TransportConnectionContext
     public void SetPipe(ITransportConnectionPipe pipe)
     {
         ArgumentNullException.ThrowIfNull(pipe);
-        Pipe = pipe;
+        _pipe = pipe;
     }
 
     internal ValueTask DisposeAsync()

@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports;
 
-public abstract class HttpConnection : IHttpConnection
+public abstract class HttpConnection : TransportConnection<HttpConnectionContext>, IHttpConnection
 {
     internal HttpConnection(
         ITransportConnection connection,
@@ -31,27 +31,27 @@ public abstract class HttpConnection : IHttpConnection
     /// </summary>
     protected Func<IHttpFeatureCollection>? CreateFeatures { get; }
 
-    public ConnectionId Id => Connection.Id;
-    public TransportId TransportId => Connection.TransportId;
-    public TransportProtocol Protocol => TransportProtocol.Http;
-    public ConnectionState State => Connection.State;
+    public override ConnectionId Id => Connection.Id;
+    public override TransportId TransportId => Connection.TransportId;
+    public override TransportProtocol Protocol => TransportProtocol.Http;
+    public override ConnectionState State => Connection.State;
 
-    public void Abort()
+    public override void Abort()
     {
         Connection.Abort();
     }
 
-    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         return Connection.AbortAsync(cancellationToken);
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
-    public abstract ValueTask DisposeAsync();
+    public abstract override ValueTask DisposeAsync();
 
     public abstract HttpConnectionContext Open();
 

@@ -1,11 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<RootNamespace>Assimalign.Cohesion.Transports</RootNamespace>
     </PropertyGroup>
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
     </ItemGroup>
 	<ItemGroup>
 		<CohesionSharedFile Include="Assimalign.Cohesion.Transports" File="Internal\Diagnostics\TransportEventSource.cs" />
+		<CohesionSharedFile Include="Assimalign.Cohesion.Transports" File="Internal\TransportPipeOptionsContext.cs" />
+		<CohesionSharedFile Include="Assimalign.Cohesion.Transports" File="Internal\TransportStreamPipeOptionsContext.cs" />
+		<CohesionSharedFile Include="Assimalign.Cohesion.Transports" File="Internal\TransportPipeOptionsFactory.cs" />
 	</ItemGroup>
 </Project>

@@ -17,7 +17,7 @@ public sealed class UdpServerTransport : ServerTransport<UdpTransportConnection>
     private const int DatagramBufferSize = 65_535;
 
     private readonly UdpServerTransportOptions _options;
-    private readonly TransportPipeline _pipeline;
+    private readonly TransportPipeline<UdpTransportConnectionContext> _pipeline;
     private readonly List<UdpTransportConnection> _connections;
     private readonly Dictionary<string, UdpTransportConnection> _peerConnections;
     private readonly Lock _stateLock;

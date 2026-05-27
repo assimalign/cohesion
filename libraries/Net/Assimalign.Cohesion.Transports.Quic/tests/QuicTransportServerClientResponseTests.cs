@@ -1,4 +1,3 @@
-#if NET7_0_OR_GREATER
 using System;
 using System.Buffers;
 using System.IO.Pipelines;
@@ -7,16 +6,22 @@ using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Runtime.Versioning;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Xunit;
 
 namespace Assimalign.Cohesion.Transports.Tests;
 
+[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
+[SupportedOSPlatform("osx")]
 public class QuicTransportServerClientResponseTests
 {
     [Fact]
@@ -142,4 +147,3 @@ public class QuicTransportServerClientResponseTests
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(10));
     }
 }
-#endif
