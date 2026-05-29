@@ -68,8 +68,8 @@ $cohesionPatch   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'Cohes
 # Minor/Patch must be literal integers; if either ever becomes an MSBuild
 # expression we'd silently produce a junk version, so fail loud instead.
 foreach ($p in @(
-    @{ Name = 'CohesionMinorVersion'; Value = $cohesionMinor },
-    @{ Name = 'CohesionPatchVersion'; Value = $cohesionPatch }
+    @{ Name = 'CohesionMinorVersion'; Value = $cohesionMinor }
+    @{ Name = 'CohesionPatchVersion'; Value = $cohesionPatch.Split('-')[0] }
 )) {
     if ($p.Value -notmatch '^\d+$') {
         throw "<$($p.Name)> in '$versionPropsPath' must be a literal integer, got '$($p.Value)'."
