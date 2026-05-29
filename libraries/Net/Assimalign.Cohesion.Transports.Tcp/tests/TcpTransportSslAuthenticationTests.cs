@@ -44,24 +44,30 @@ public class TcpTransportSslAuthenticationTests
         await using TcpServerTransport transport = TcpServerTransport.Create(options =>
         {
             options.EndPoint = endpoint;
-            options.Use(async (context, next) =>
+            options.UseSecureConnection(options =>
             {
-                ITransportConnectionPipe pipe = context.Pipe;
-                Stream stream = pipe.GetStream();
+                options.ServerCertificate = certificate;
+                options.EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+                options.ClientCertificateRequired = false;
+            }); 
+            //options.Use(async (context, next) =>
+            //{
+            //    ITransportConnectionPipe pipe = context.Pipe;
+            //    Stream stream = pipe.GetStream();
 
-                var sslStream = new SslStream(stream, leaveInnerStreamOpen: false);
+            //    var sslStream = new SslStream(stream, leaveInnerStreamOpen: false);
 
-                await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
-                {
-                    ServerCertificate = certificate,
-                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                    ClientCertificateRequired = false
-                }, cancellationToken).ConfigureAwait(false);
+            //    await sslStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+            //    {
+            //        ServerCertificate = certificate,
+            //        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+            //        ClientCertificateRequired = false
+            //    }, cancellationToken).ConfigureAwait(false);
 
-                context.SetPipe(new TransportConnectionPipe(sslStream));
+            //    context.SetPipe(new TransportConnectionPipe(sslStream));
 
-                await next(context).ConfigureAwait(false);
-            });
+            //    await next(context).ConfigureAwait(false);
+            //});
         });
 
         await using TcpTransportConnection connection = await transport.AcceptOrListenAsync(cancellationToken);
@@ -83,26 +89,31 @@ public class TcpTransportSslAuthenticationTests
         await using TcpClientTransport transport = TcpClientTransport.Create(options =>
         {
             options.EndPoint = endpoint;
-            options.Use(async (context, next) =>
+            options.UseSecureConnection(options =>
             {
-                ITransportConnectionPipe pipe = context.Pipe;
-                Stream stream = pipe.GetStream();
-
-                var sslStream = new SslStream(
-                    stream,
-                    leaveInnerStreamOpen: false,
-                    userCertificateValidationCallback: static (_, _, _, _) => true);
-
-                await sslStream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
-                {
-                    TargetHost = "localhost",
-                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
-                }, cancellationToken).ConfigureAwait(false);
-
-                context.SetPipe(new TransportConnectionPipe(sslStream));
-
-                await next(context).ConfigureAwait(false);
+                options.TargetHost = "localhost";
+                options.EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
             });
+            //options.Use(async (context, next) =>
+            //{
+            //    ITransportConnectionPipe pipe = context.Pipe;
+            //    Stream stream = pipe.GetStream();
+
+            //    var sslStream = new SslStream(
+            //        stream,
+            //        leaveInnerStreamOpen: false,
+            //        userCertificateValidationCallback: static (_, _, _, _) => true);
+
+            //    await sslStream.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            //    {
+            //        TargetHost = "localhost",
+            //        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+            //    }, cancellationToken).ConfigureAwait(false);
+
+            //    context.SetPipe(new TransportConnectionPipe(sslStream));
+
+            //    await next(context).ConfigureAwait(false);
+            //});
         });
 
         await using TcpTransportConnection connection = await transport.ConnectAsync(cancellationToken);

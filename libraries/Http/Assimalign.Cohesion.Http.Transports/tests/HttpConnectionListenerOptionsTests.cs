@@ -36,8 +36,8 @@ public class HttpConnectionListenerOptionsTests
     {
         // Arrange
         HttpConnectionListenerOptions options = new();
-        TestServerTransport http1Transport = new(TransportProtocol.Tcp, Array.Empty<ITransportConnection>());
-        TestServerTransport http3Transport = new(TransportProtocol.Quic, Array.Empty<ITransportConnection>());
+        TestServerTransport http1Transport = new(TransportProtocol.Tcp, Array.Empty<TransportConnection>());
+        TestServerTransport http3Transport = new(TransportProtocol.Quic, Array.Empty<TransportConnection>());
 
         // Act
         options

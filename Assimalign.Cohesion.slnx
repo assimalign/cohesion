@@ -114,7 +114,7 @@
 	<Folder Name="/cohesion/extensions/VisualStudio/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/Assimalign.Cohesion/">
-		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" />
+		<Project Path="extensions/VisualStudio/src/Assimalign.Cohesion/Assimalign.Cohesion.csproj" Id="4390ca1a-38cd-4650-87ed-e8cb11b4280d" />
 	</Folder>
 	<Folder Name="/cohesion/frameworks/">
 		<File Path="frameworks/Assimalign.Cohesion.App.props" />

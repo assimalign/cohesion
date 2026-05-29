@@ -18,7 +18,7 @@ public class HttpConnectionListenerTests
         // Arrange
         TestTransportConnectionContext context = new(HttpProtocolPayloadFactory.CreateHttp1Request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"));
         TestSingleStreamTransportConnection connection = new(context, TransportProtocol.Tcp);
-        TestServerTransport transport = new(TransportProtocol.Tcp, new ITransportConnection[] { connection });
+        TestServerTransport transport = new(TransportProtocol.Tcp, new TransportConnection[] { connection });
         HttpConnectionListenerOptions options = new();
         options.UseTransport(HttpProtocol.Http11, transport);
 

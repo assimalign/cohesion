@@ -58,7 +58,6 @@ public sealed class WebApplicationServerBuilder
             return new WebApplicationServer(server);
         };
 
-
         _builder.Services.AddSingleton<IWebApplicationServer>(factory2);
         _builder.Services.AddSingleton<IHostService>(factory2);
 

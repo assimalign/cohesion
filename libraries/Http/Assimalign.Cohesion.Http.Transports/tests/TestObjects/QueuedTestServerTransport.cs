@@ -6,48 +6,34 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
-internal sealed class QueuedTestServerTransport : ITransport
+internal sealed class QueuedTestServerTransport : ServerTransport
 {
-    private readonly Queue<ITransportConnection> _connections;
-    private readonly Queue<TaskCompletionSource<ITransportConnection>> _waiters;
+    private readonly Queue<TransportConnection> _connections;
+    private readonly Queue<TaskCompletionSource<TransportConnection>> _waiters;
     private readonly Lock _lock;
     private readonly TaskCompletionSource<object?> _waitingForConnection;
 
     public QueuedTestServerTransport(TransportProtocol protocol)
     {
-        _connections = new Queue<ITransportConnection>();
-        _waiters = new Queue<TaskCompletionSource<ITransportConnection>>();
+        _connections = new Queue<TransportConnection>();
+        _waiters = new Queue<TaskCompletionSource<TransportConnection>>();
         _lock = new Lock();
         _waitingForConnection = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         Protocol = protocol;
-        Id = TransportId.New();
     }
 
-    public TransportId Id { get; }
-
-    public TransportKind Kind => TransportKind.Server;
-
-    public TransportProtocol Protocol { get; }
+    public override TransportProtocol Protocol { get; }
 
     public int InitializeAsyncCount { get; private set; }
 
     public Task WaitingForConnection => _waitingForConnection.Task;
 
-    public void Dispose()
-    {
-    }
-
-    public ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
     }
 
-    public ITransportConnection Initialize()
-    {
-        return InitializeAsync().GetAwaiter().GetResult();
-    }
-
-    public Task<ITransportConnection> InitializeAsync(CancellationToken cancellationToken = default)
+    protected override Task<TransportConnection> InitializeAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
@@ -58,13 +44,13 @@ internal sealed class QueuedTestServerTransport : ITransport
                 return Task.FromResult(_connections.Dequeue());
             }
 
-            TaskCompletionSource<ITransportConnection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<TransportConnection> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             if (cancellationToken.CanBeCanceled)
             {
                 cancellationToken.Register(static state =>
                 {
-                    TaskCompletionSource<ITransportConnection> completion = (TaskCompletionSource<ITransportConnection>)state!;
+                    TaskCompletionSource<TransportConnection> completion = (TaskCompletionSource<TransportConnection>)state!;
                     completion.TrySetCanceled();
                 }, waiter);
             }
@@ -76,7 +62,7 @@ internal sealed class QueuedTestServerTransport : ITransport
         }
     }
 
-    public void Enqueue(ITransportConnection connection)
+    public void Enqueue(TransportConnection connection)
     {
         lock (_lock)
         {

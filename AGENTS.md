@@ -8,9 +8,9 @@ This document defines specific coding standards and rules for the Cohesion proje
 
 ### Development Environment
 
-- .NET SDK `10.0.101` or later is required and pinned in `global.json`
+- .NET SDK `11.0.100-preview.4.26230.115` or later is required and pinned in `global.json`
 - Projects compile with `LangVersion=Preview` and `EnablePreviewFeatures=true`
-- Libraries target `net10.0` through the shared build configuration
+- Libraries target `net11.0` through the shared build configuration
 - NativeAOT compatibility is a standing requirement across the repo
 
 ### Quick Commands

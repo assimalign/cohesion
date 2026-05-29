@@ -1,12 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-public abstract class SingleStreamTransportConnection<TContext> : TransportConnection<TContext> where TContext : TransportConnectionContext
+public abstract class SingleStreamTransportConnection<TContext> : TransportConnection<TContext>, ISingleStreamTransportConnection 
+    where TContext : TransportConnectionContext
 {
     /// <summary>
     /// Opens the point to point connection that allows reading and writing.
@@ -22,4 +20,14 @@ public abstract class SingleStreamTransportConnection<TContext> : TransportConne
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public abstract ValueTask<TContext> OpenAsync(CancellationToken cancellationToken = default);
+
+    ITransportConnectionContext ISingleStreamTransportConnection.Open()
+    {
+        return Open();
+    }
+
+    async ValueTask<ITransportConnectionContext> ISingleStreamTransportConnection.OpenAsync(CancellationToken cancellationToken)
+    {
+        return await OpenAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

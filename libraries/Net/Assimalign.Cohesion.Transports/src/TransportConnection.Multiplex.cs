@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-public abstract class MultiplexTransportConnection : TransportConnection
+public abstract class MultiplexTransportConnection : TransportConnection, IMultiplexTransportConnection
 {
     /// <summary>
     /// Opens the inbound point to point connection.
@@ -33,4 +33,24 @@ public abstract class MultiplexTransportConnection : TransportConnection
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public abstract ValueTask<TransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default);
+
+    ITransportConnectionContext IMultiplexTransportConnection.OpenInbound()
+    {
+        return OpenInbound();
+    }
+
+    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
+    {
+        return await OpenInboundAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    ITransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
+    {
+        return OpenOutbound();
+    }
+
+    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
+    {
+        return await OpenOutboundAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

@@ -1,16 +1,19 @@
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO.Pipelines;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
-internal sealed class TestTransportConnectionContext : ITransportConnectionContext
+internal sealed class TestTransportConnectionContext : TransportConnectionContext, IDisposable
 {
     private readonly PipeReader _outputReader;
+    private readonly CancellationTokenSource _connectionCancelledSource;
 
     public TestTransportConnectionContext(byte[] input, EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null)
     {
@@ -33,16 +36,28 @@ internal sealed class TestTransportConnectionContext : ITransportConnectionConte
         _outputReader = outputPipe.Reader;
         LocalEndPoint = localEndPoint ?? new IPEndPoint(IPAddress.Loopback, 8080);
         RemoteEndPoint = remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 5000);
-        Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
+        _connectionCancelledSource = new CancellationTokenSource();
     }
 
-    public EndPoint LocalEndPoint { get; }
+    public override EndPoint LocalEndPoint { get; }
 
-    public EndPoint RemoteEndPoint { get; }
+    public override EndPoint RemoteEndPoint { get; }
 
-    public ITransportConnectionPipe Pipe { get; }
+    public override ITransportConnectionPipe Pipe { get; }
 
-    public IDictionary<string, object?> Items { get; }
+    /// <summary>
+    /// Cancellation token signalled when the test driver simulates a
+    /// connection close. Test code can wire this through to assertions
+    /// that exercise the connection-lifetime hook on
+    /// <see cref="ITransportConnectionContext.ConnectionCancelled"/>.
+    /// </summary>
+    public override CancellationToken ConnectionCancelled => _connectionCancelledSource.Token;
+
+    /// <summary>
+    /// Trips <see cref="ConnectionCancelled"/> so receive-loop tests can
+    /// drive the same lifetime signal a real transport would raise.
+    /// </summary>
+    public void CancelConnection() => _connectionCancelledSource.Cancel();
 
     public async Task<byte[]> ReadOutputAsync()
     {
@@ -51,4 +66,6 @@ internal sealed class TestTransportConnectionContext : ITransportConnectionConte
         _outputReader.AdvanceTo(result.Buffer.End);
         return output;
     }
+
+    public void Dispose() => _connectionCancelledSource.Dispose();
 }

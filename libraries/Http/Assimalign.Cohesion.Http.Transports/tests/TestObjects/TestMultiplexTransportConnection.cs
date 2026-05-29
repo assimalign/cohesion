@@ -7,9 +7,10 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
-internal sealed class TestMultiplexTransportConnection : IMultiplexTransportConnection
+internal sealed class TestMultiplexTransportConnection : MultiplexTransportConnection
 {
     private readonly Queue<TestTransportConnectionContext> _inboundContexts;
+    private ConnectionState _state;
 
     public TestMultiplexTransportConnection(IEnumerable<TestTransportConnectionContext> inboundContexts, TransportProtocol protocol)
     {
@@ -17,66 +18,66 @@ internal sealed class TestMultiplexTransportConnection : IMultiplexTransportConn
         Protocol = protocol;
         Id = ConnectionId.New();
         TransportId = TransportId.New();
-        State = ConnectionState.Idle;
+        _state = ConnectionState.Idle;
     }
 
-    public ConnectionId Id { get; }
+    public override ConnectionId Id { get; }
 
-    public TransportId TransportId { get; }
+    public override TransportId TransportId { get; }
 
-    public TransportProtocol Protocol { get; }
+    public override TransportProtocol Protocol { get; }
 
-    public ConnectionState State { get; private set; }
+    public override ConnectionState State => _state;
 
-    public void Abort()
+    public override void Abort()
     {
-        State = ConnectionState.Aborted;
+        _state = ConnectionState.Aborted;
     }
 
-    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         Abort();
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
-        State = ConnectionState.Closed;
+        _state = ConnectionState.Closed;
     }
 
-    public ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         Dispose();
         return ValueTask.CompletedTask;
     }
 
-    public ITransportConnectionContext OpenInbound()
+    public override TransportConnectionContext OpenInbound()
     {
-        State = ConnectionState.Open;
+        _state = ConnectionState.Open;
         return DequeueInbound();
     }
 
-    public ValueTask<ITransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<TransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default)
     {
         if (_inboundContexts.Count == 0)
         {
-            return ValueTask.FromException<ITransportConnectionContext>(new OperationCanceledException(cancellationToken));
+            return ValueTask.FromException<TransportConnectionContext>(new OperationCanceledException(cancellationToken));
         }
 
-        return ValueTask.FromResult(OpenInbound());
+        return ValueTask.FromResult<TransportConnectionContext>(OpenInbound());
     }
 
-    public ITransportConnectionContext OpenOutbound()
+    public override TransportConnectionContext OpenOutbound()
     {
-        return new TestTransportConnectionContext(System.Array.Empty<byte>());
+        return new TestTransportConnectionContext(Array.Empty<byte>());
     }
 
-    public ValueTask<ITransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<TransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default)
     {
-        return ValueTask.FromResult(OpenOutbound());
+        return ValueTask.FromResult<TransportConnectionContext>(OpenOutbound());
     }
 
-    private ITransportConnectionContext DequeueInbound()
+    private TransportConnectionContext DequeueInbound()
     {
         return _inboundContexts.Dequeue();
     }

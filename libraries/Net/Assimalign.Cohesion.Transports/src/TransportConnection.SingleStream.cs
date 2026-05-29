@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
-public abstract class SingleStreamTransportConnection : TransportConnection
+public abstract class SingleStreamTransportConnection : TransportConnection, ISingleStreamTransportConnection
 {
     /// <summary>
     /// Opens the point to point connection that allows reading and writing.
@@ -20,4 +20,14 @@ public abstract class SingleStreamTransportConnection : TransportConnection
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public abstract ValueTask<TransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default);
+
+    ITransportConnectionContext ISingleStreamTransportConnection.Open()
+    {
+        return Open();
+    }
+
+    async ValueTask<ITransportConnectionContext> ISingleStreamTransportConnection.OpenAsync(CancellationToken cancellationToken)
+    {
+        return await OpenAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

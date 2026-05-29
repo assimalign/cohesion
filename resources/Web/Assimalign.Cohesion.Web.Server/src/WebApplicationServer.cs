@@ -1,5 +1,4 @@
-﻿using Assimalign.Cohesion.Http.Transports;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -40,7 +39,7 @@ public sealed class WebApplicationServer : IWebApplicationServer
                 await foreach (IHttpContext httpContext in httpConnectionContext.ReceiveAsync().WithCancellation(token))
                 {
                     // Process the received context
-                    await _pipeline.InvokeAsync(httpContext, token).ConfigureAwait(false);
+                    await _pipeline.ExecuteAsync(httpContext, token).ConfigureAwait(false);
 
                     await httpConnectionContext.SendAsync(httpContext).ConfigureAwait(false);
 

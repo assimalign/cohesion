@@ -9,5 +9,5 @@ public abstract class TransportConnection<TContext> : TransportConnection where 
     /// <summary>
     /// 
     /// </summary>
-    protected new abstract TransportPipeline<TContext>? Pipeline { get; }
+    protected new virtual TransportPipeline<TContext>? Pipeline { get; }
 }

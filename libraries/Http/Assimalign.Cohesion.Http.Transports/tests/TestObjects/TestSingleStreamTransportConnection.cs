@@ -5,9 +5,10 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
-internal sealed class TestSingleStreamTransportConnection : ISingleStreamTransportConnection
+internal sealed class TestSingleStreamTransportConnection : SingleStreamTransportConnection
 {
     private readonly TestTransportConnectionContext _context;
+    private ConnectionState _state;
 
     public TestSingleStreamTransportConnection(TestTransportConnectionContext context, TransportProtocol protocol)
     {
@@ -15,47 +16,47 @@ internal sealed class TestSingleStreamTransportConnection : ISingleStreamTranspo
         Protocol = protocol;
         Id = ConnectionId.New();
         TransportId = TransportId.New();
-        State = ConnectionState.Idle;
+        _state = ConnectionState.Idle;
     }
 
-    public ConnectionId Id { get; }
+    public override ConnectionId Id { get; }
 
-    public TransportId TransportId { get; }
+    public override TransportId TransportId { get; }
 
-    public TransportProtocol Protocol { get; }
+    public override TransportProtocol Protocol { get; }
 
-    public ConnectionState State { get; private set; }
+    public override ConnectionState State => _state;
 
-    public void Abort()
+    public override void Abort()
     {
-        State = ConnectionState.Aborted;
+        _state = ConnectionState.Aborted;
     }
 
-    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         Abort();
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
-        State = ConnectionState.Closed;
+        _state = ConnectionState.Closed;
     }
 
-    public ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         Dispose();
         return ValueTask.CompletedTask;
     }
 
-    public ITransportConnectionContext Open()
+    public override TransportConnectionContext Open()
     {
-        State = ConnectionState.Open;
+        _state = ConnectionState.Open;
         return _context;
     }
 
-    public ValueTask<ITransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<TransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
-        return ValueTask.FromResult(Open());
+        return ValueTask.FromResult<TransportConnectionContext>(Open());
     }
 }

@@ -6,42 +6,28 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
-internal sealed class TestServerTransport : ITransport
+internal sealed class TestServerTransport : ServerTransport
 {
-    private readonly Queue<ITransportConnection> _connections;
+    private readonly Queue<TransportConnection> _connections;
 
-    public TestServerTransport(TransportProtocol protocol, IEnumerable<ITransportConnection> connections)
+    public TestServerTransport(TransportProtocol protocol, IEnumerable<TransportConnection> connections)
     {
-        _connections = new Queue<ITransportConnection>(connections);
+        _connections = new Queue<TransportConnection>(connections);
         Protocol = protocol;
-        Id = TransportId.New();
     }
 
-    public TransportId Id { get; }
+    public override TransportProtocol Protocol { get; }
 
-    public TransportKind Kind => TransportKind.Server;
-
-    public TransportProtocol Protocol { get; }
-
-    public void Dispose()
-    {
-    }
-
-    public ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
     }
 
-    public ITransportConnection Initialize()
-    {
-        return InitializeAsync().GetAwaiter().GetResult();
-    }
-
-    public Task<ITransportConnection> InitializeAsync(CancellationToken cancellationToken = default)
+    protected override Task<TransportConnection> InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (_connections.Count == 0)
         {
-            return Task.FromCanceled<ITransportConnection>(cancellationToken.IsCancellationRequested ? cancellationToken : new CancellationToken(true));
+            return Task.FromCanceled<TransportConnection>(cancellationToken.IsCancellationRequested ? cancellationToken : new CancellationToken(true));
         }
 
         return Task.FromResult(_connections.Dequeue());

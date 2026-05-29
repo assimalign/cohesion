@@ -1,18 +1,17 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Text;
 using System.Threading;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Transports;
 
 public abstract class TransportConnectionContext : ITransportConnectionContext
 {
-    private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+    private readonly CancellationTokenSource _cancellationTokenSource;
 
     protected TransportConnectionContext()
     {
-        //ConnectionCancelled.Register()
+        _cancellationTokenSource = new CancellationTokenSource();
     }
 
     /// <summary>
@@ -33,16 +32,18 @@ public abstract class TransportConnectionContext : ITransportConnectionContext
     /// <summary>
     /// 
     /// </summary>
-    public virtual CancellationToken ConnectionCancelled { get; }
+    public virtual CancellationToken ConnectionCancelled => _cancellationTokenSource.Token;
 
     /// <summary>
     /// 
     /// </summary>
     public virtual IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
 
-
-    public void Cancel()
+    /// <summary>
+    /// 
+    /// </summary>
+    public virtual void Cancel()
     {
-
+        _cancellationTokenSource.Cancel();
     }
 }
