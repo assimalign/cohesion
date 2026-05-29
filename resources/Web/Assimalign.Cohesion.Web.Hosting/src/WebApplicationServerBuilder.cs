@@ -16,6 +16,7 @@ public sealed class WebApplicationServerBuilder
     private readonly WebApplicationBuilder _builder;
     private readonly HttpConnectionListenerOptions _options;
     //private readonly Action<WebApplicationBuilder> _default;
+    private readonly List<Action<WebApplicationServerOptions>> _configurations = new();
 
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
@@ -73,7 +74,7 @@ public sealed class WebApplicationServerBuilder
     {
         ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new WebApplicationServerOptions(_options);
+        var options = new WebApplicationServerOptions(_builder);
 
         configure.Invoke(options);
 
