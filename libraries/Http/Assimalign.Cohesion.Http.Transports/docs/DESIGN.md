@@ -154,6 +154,96 @@ delegate invocation and the feature lookup chains through
   per-request async feature setup emerges, the factory signature can be
   widened without breaking existing callers.
 
+## IsSecure propagation from transport middleware
+
+### What it is
+
+`HttpContext.ConnectionInfo.IsSecure` reports whether the underlying
+transport carrying this request is currently secured. Two signals
+combine to produce that value:
+
+1. **Registration-time hint.** When a transport is registered with
+   `HttpConnectionListenerOptions.UseTransport(..., isSecure: true)` (or
+   via the convenience `UseHttp3` which always sets it true), that hint
+   is captured on `HttpProtocolRegistration.IsSecure`. This is the
+   "operator knows up-front" path &#8212; TLS terminated at an upstream
+   load balancer, QUIC's always-on encryption, mTLS provisioned outside
+   the process.
+
+2. **Transport-pipeline signal.** Transport-level middleware that
+   establishes a secure session at runtime (e.g. `SslStream` wrapping
+   a raw TCP socket) records the fact via the typed
+   `ITransportConnectionContext.IsSecure` extension shipped in
+   `Assimalign.Cohesion.Transports`. The middleware writes
+   `context.IsSecure = true;` after a successful handshake.
+
+The HTTP layer's effective value is `registrationHint || transportReports`.
+The OR is deliberate: a registration that is explicitly secure stays
+secure even when the transport never sets the flag (no down-negotiation),
+and a transport that newly reports secure promotes the connection even
+when the registration was left as the default `false`.
+
+### Where the probe runs
+
+The probe lives in each protocol's `*Connection.OpenAsync`
+(`Http1Connection`, `Http2Connection`), at the single point where the
+HTTP connection context is constructed:
+
+```csharp
+ITransportConnectionContext transportContext = await _connection.OpenAsync(token);
+bool effectiveIsSecure = IsSecure || transportContext.IsSecure;
+_openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure, CreateFeatures);
+```
+
+This timing is correct because the transport pipeline (where TLS
+middleware runs) executes *inside* `_connection.OpenAsync`. By the time
+the `await` returns, every middleware on the connection has run and
+the transport context's `Items` are fully populated. There is no race
+between the probe and the handshake.
+
+The effective value is then baked into `HttpConnectionInfo.IsSecure`
+and carried into every per-request `HttpContext.ConnectionInfo` on the
+connection &#8212; the probe runs once per connection, not once per
+request.
+
+### Why the extension lives in Assimalign.Cohesion.Transports
+
+The `IsSecure` extension is a transport-layer concern, not an
+HTTP-layer concern: any future consumer of a transport (HTTP, RPC,
+WebSocket, custom protocol) needs to know whether the connection
+beneath them is secured, and any transport-level middleware (TLS,
+mTLS, peer-authentication proxies) needs a typed way to record that
+without depending on a higher protocol library. Placing the extension
+in the abstractions library keeps the dependency direction correct.
+
+Storage is the existing `ITransportConnectionContext.Items` dictionary
+under the `TransportSecurityExtensions.IsSecureItemKey` constant; the
+extension property handles the cast and missing-key path so consumers
+do not reach into the dictionary directly.
+
+### HTTP/3
+
+`Http3Connection` does not run this probe because HTTP/3 is always
+secured (QUIC requires TLS 1.3 by construction). The
+`UseHttp3(...)` registration helper pins `isSecure: true` and the
+`Http3ConnectionContext` flows that through unchanged.
+
+### Non-goals
+
+- **Mid-connection upgrade (STARTTLS / `Upgrade: TLS/1.0`).** Once the
+  connection's effective `IsSecure` is computed at `OpenAsync` time it
+  stays for the lifetime of the connection. The transport probe runs
+  once; per-request flipping is not supported. RFC 2817 in-band TLS
+  upgrade over HTTP/1.1 would require a separate, explicit
+  re-construction of the connection context and is intentionally out
+  of scope.
+- **Down-negotiation.** A registration that declared `isSecure: true`
+  cannot be demoted by a transport that fails to set the flag. The OR
+  rule guarantees this in both directions.
+- **Rich TLS metadata** (client certificate, ALPN, cipher suite).
+  Future work; the same `Items`-backed pattern accommodates additional
+  typed extensions next to `IsSecure` without changing this design.
+
 ## Receive-loop failure isolation
 
 Each protocol's receive loop (`Http1ConnectionContext.ReceiveAsync`,

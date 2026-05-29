@@ -13,7 +13,12 @@ internal class WebApplicationPipeline : IWebApplicationPipeline
     {
         _middleware = middleware;
     }
-    
+
+    public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    {
+        throw new System.NotImplementedException();
+    }
+
     public async ValueTask InvokeAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         await _middleware.Invoke(context);

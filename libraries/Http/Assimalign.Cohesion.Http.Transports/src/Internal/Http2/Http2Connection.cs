@@ -34,7 +34,14 @@ internal sealed class Http2Connection : HttpConnection
 
         ITransportConnectionContext context = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        _context = new Http2ConnectionContext(context, IsSecure, CreateFeatures);
+        // The registration-time isSecure is a hint; the transport pipeline
+        // may have established a secure session in the meantime (TLS
+        // middleware wrapping the raw socket in SslStream, for example) and
+        // recorded that via context.IsSecure. Promote either signal to the
+        // effective value so HttpContext.ConnectionInfo.IsSecure reflects
+        // the truth at request-read time.
+        bool effectiveIsSecure = IsSecure || context.IsSecure;
+        _context = new Http2ConnectionContext(context, effectiveIsSecure, CreateFeatures);
 
         return _context;
     }

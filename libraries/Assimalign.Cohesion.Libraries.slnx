@@ -790,6 +790,20 @@
 	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
 		<Project Path="OpenApi/Assimalign.Cohesion.OpenApi/tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/" />
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/src/">
+		<Project Path="OpenApi/Assimalign.Cohesion.OpenApi.Serialization/src/Assimalign.Cohesion.OpenApi.Serialization.csproj" />
+	</Folder>
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/tests/">
+		<Project Path="OpenApi/Assimalign.Cohesion.OpenApi.Serialization/tests/Assimalign.Cohesion.OpenApi.Serialization.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation/" />
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation/src/">
+		<Project Path="OpenApi/Assimalign.Cohesion.OpenApi.Validation/src/Assimalign.Cohesion.OpenApi.Validation.csproj" />
+	</Folder>
+	<Folder Name="/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation/tests/">
+		<Project Path="OpenApi/Assimalign.Cohesion.OpenApi.Validation/tests/Assimalign.Cohesion.OpenApi.Validation.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/OpenTelemetry/">
 		<File Path="OpenTelemetry/Directory.Build.props" />
 		<File Path="OpenTelemetry/Directory.Build.targets" />

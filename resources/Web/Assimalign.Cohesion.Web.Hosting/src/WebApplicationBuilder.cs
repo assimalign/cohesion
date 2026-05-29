@@ -137,13 +137,15 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         return ((IWebApplicationBuilder)this).AddFeature(_ => feature);
     }
-    IWebApplicationBuilder IWebApplicationBuilder.AddFeature<TFeature>(TFeature feature)
-    {
-        return ((IWebApplicationBuilder)this).AddFeature((IHttpFeature)feature);
-    }
+
     IWebApplicationBuilder IWebApplicationBuilder.AddFeature(Func<IWebApplicationContext, IHttpFeature> configure)
     {
         Services.AddSingleton<IHttpFeature>(configure.Invoke(_context));
         return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddServer(Func<IWebApplicationContext, IWebApplicationServer> server)
+    {
+        throw new NotImplementedException();
     }
 }

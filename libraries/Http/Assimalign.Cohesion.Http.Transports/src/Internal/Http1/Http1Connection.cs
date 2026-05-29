@@ -33,7 +33,14 @@ internal sealed class Http1Connection : HttpConnection
         }
 
         ITransportConnectionContext transportContext = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        _openContext = new Http1ConnectionContext(transportContext, IsSecure, CreateFeatures);
+        // The registration-time isSecure is a hint; the transport pipeline
+        // may have established a secure session in the meantime (TLS
+        // middleware wrapping the raw socket in SslStream, for example) and
+        // recorded that via context.IsSecure. Promote either signal to the
+        // effective value so HttpContext.ConnectionInfo.IsSecure reflects
+        // the truth at request-read time.
+        bool effectiveIsSecure = IsSecure || transportContext.IsSecure;
+        _openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure, CreateFeatures);
 
         return _openContext;
     }

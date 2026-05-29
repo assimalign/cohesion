@@ -42,7 +42,6 @@ $Solutions | ForEach-Object {
             "**\build\Build.props"
             "**\build\Build.targets"
         ) `
-        -IncludeReferences `
         -Force `
         -Verbose
 }

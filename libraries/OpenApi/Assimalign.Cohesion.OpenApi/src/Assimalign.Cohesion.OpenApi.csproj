@@ -1,4 +1,5 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Canonical, version-aware OpenAPI description object model for the Cohesion OpenApi family. Represents the union of the OpenAPI 3.0.x, 3.1.x, and 3.2.x description surfaces as a single object graph, with an explicit version capability matrix that gates fields and semantics per supported line. Includes the format-agnostic OpenApiNode value tree used for examples, defaults, and specification extensions. This package is the foundation every other OpenApi package (serialization, validation, fluent authoring, attributes, source generation, generation) builds on; it carries no serialization-format or service-runtime concerns.</Description>
+	</PropertyGroup>
 </Project>
