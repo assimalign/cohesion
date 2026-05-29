@@ -19,7 +19,6 @@ internal sealed class TransportEventSource : EventSource
     private long _connectionsTimedOut;
     private long _currentConnections;
 
-    
     internal TransportEventSource() : base("Assimalign.Cohesion.Transports.TransportEventSource")
     {
     }

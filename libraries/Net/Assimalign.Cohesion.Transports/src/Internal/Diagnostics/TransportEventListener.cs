@@ -11,6 +11,9 @@ namespace Assimalign.Cohesion.Transports.Internal.Sockets
         [ThreadStatic] 
         private static bool _insideCallback;
 
+
+        
+
         protected override void OnEventWritten(EventWrittenEventArgs data)
         {
            

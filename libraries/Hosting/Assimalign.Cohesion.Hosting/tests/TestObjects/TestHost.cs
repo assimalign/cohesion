@@ -12,7 +12,7 @@ internal class TestHostContext : HostContext
         Environment = new HostEnvironment("Test");
     }
     public override IHostEnvironment Environment { get; }
-    public override IServiceProvider? ServiceProvider { get; }
+    public IServiceProvider? ServiceProvider { get; }
     public override IEnumerable<IHostService> HostedServices { get; }
 }
 

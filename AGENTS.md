@@ -56,6 +56,7 @@ pwsh installer/scripts/Install-Local.ps1
 
 - Prefer Cohesion-specific MSBuild items over stock items where available
 - Internal dependencies should use `CohesionProjectReference`
+- Internal dependencies that must NOT flow to consumers of the resulting `.nupkg` should use `CohesionPrivateProjectReference` (paired with a `CohesionFrameworkPrivateAssembly` entry on the owning framework - see "Cross-resource dependencies" below)
 - External packages should use `CohesionPackageReference`
 - Central package versions are managed in `build/Targets/PackageReferences.targets`
 - Strongly typed value objects may be generated through `CohesionCodeGenValueType`
@@ -183,6 +184,75 @@ into the framework's NuGet packs along with a matching entry in
 `FrameworkList.xml` and `RuntimeList.xml`. The validation in `App.targets`
 hard-fails if a listed assembly isn't on disk after the build, so a typo or
 missing project surfaces loudly.
+
+### Cross-resource dependencies (private implementation details)
+
+A library sometimes needs another library as an internal implementation
+detail without exposing that dependency to its consumers. Canonical
+example: the database server piece inside `Assimalign.Cohesion.Database`
+uses `Assimalign.Cohesion.Web` for HTTP transport, but a developer writing
+`<Project Sdk="Assimalign.Cohesion.Sdk.Database">` should see database
+types only - Web is a hidden runtime concern.
+
+Two coordinated items make this work:
+
+- **`CohesionPrivateProjectReference`** (in the library csproj) resolves
+  by name like `CohesionProjectReference`, but the emitted
+  `<ProjectReference>` carries `PrivateAssets="all"`. The target compiles
+  in and CopyLocals to bin as usual, but does NOT appear as a
+  `<dependency>` in the library's `.nupkg` `.nuspec`. Direct consumers
+  of that `.nupkg` never learn about the private library.
+
+- **`CohesionFrameworkPrivateAssembly`** (in
+  `frameworks/Assimalign.Cohesion.App.props`) sits alongside
+  `CohesionFrameworkAssembly` in the per-framework ItemGroup. The
+  framework's Runtime pack ships its DLL and lists it on `RuntimeList.xml`;
+  the Ref pack does NOT include it and `FrameworkList.xml` omits it. Net
+  effect: consumers of `Sdk.<Domain>` never see the type in IntelliSense,
+  but the host resolves it at run time.
+
+Worked example. In `resources/Database/.../Assimalign.Cohesion.Database.csproj`:
+
+```xml
+<CohesionProjectReference        Include="Assimalign.Cohesion.Core" />
+<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Execution" />
+<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+```
+
+In `frameworks/Assimalign.Cohesion.App.props`, under the App.Database
+ItemGroup:
+
+```xml
+<CohesionFrameworkAssembly        Include="Assimalign.Cohesion.App.Database" />
+<CohesionFrameworkAssembly        Include="Assimalign.Cohesion.Database" />
+<CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+```
+
+Result:
+
+| Artifact | Contains / lists Web |
+| --- | --- |
+| `Assimalign.Cohesion.Database.nupkg` `.nuspec` dependencies | No |
+| `Assimalign.Cohesion.App.Database.Ref.nupkg` + `FrameworkList.xml` | No |
+| `Assimalign.Cohesion.App.Database.Runtime.<rid>.nupkg` + `RuntimeList.xml` | Yes |
+
+Privacy is enforced at the package boundary, not in the type system. The
+library can `using Assimalign.Cohesion.Web;` freely, and the compiler
+will let any `public` member return or accept a Web type. A leak surfaces
+downstream as a `CS0012` ("type is defined in an assembly that is not
+referenced") for the consumer, because Web isn't in their assembly
+graph. To keep privacy honest:
+
+- Cross-library uses of the private dep stay `internal` inside the
+  owning library. If hosts need to configure the underlying piece
+  (timeouts, ports, etc.), expose proxy types on the public side and
+  translate internally.
+- Forgetting `CohesionPrivateProjectReference` (using
+  `CohesionProjectReference` instead) leaks the private dep as a
+  transitive `<dependency>` of the public `.nupkg`. Forgetting
+  `CohesionFrameworkPrivateAssembly` means the private DLL isn't in the
+  Runtime pack, so the host crashes at run time the moment the private
+  path is exercised.
 
 ### Adding a new framework + SDK domain
 
@@ -344,6 +414,15 @@ installer/scripts/
 2. **Use `CohesionProjectReference` for internal project dependencies**
    ```xml
    <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+   ```
+   - When the dependency is an internal implementation detail that should
+     NOT flow to consumers of the library's `.nupkg`, use
+     `CohesionPrivateProjectReference` instead, and pair it with a
+     matching `CohesionFrameworkPrivateAssembly` entry in
+     `frameworks/Assimalign.Cohesion.App.props`. See "Cross-resource
+     dependencies" under Framework + SDK Architecture for the full pattern.
+   ```xml
+   <CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
    ```
 
 3. **Use `CohesionPackageReference` for NuGet packages**

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.DependencyInjection;
 public interface IServiceContainer : IEnumerable<ServiceDescriptor>
 {
     /// <summary>
-    /// 
+    /// Get's the number of service descriptors in the container.
     /// </summary>
     int Count { get; }
 

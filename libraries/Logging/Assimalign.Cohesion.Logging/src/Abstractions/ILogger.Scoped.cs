@@ -2,6 +2,8 @@ using System;
 
 namespace Assimalign.Cohesion.Logging;
 
+// TODO: Need to change the way scoped logging is implemented.
+
 /// <summary>
 /// A logger bound to a parent scope. Entries written through the scoped logger inherit the
 /// parent's <see cref="ParentId"/> as their <see cref="ILoggerEntry.ParentId"/>.
