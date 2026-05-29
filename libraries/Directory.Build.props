@@ -22,7 +22,11 @@
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Release' and $(IsSourceProject)">
 		<PackageVersion>$(CohesionVersion)</PackageVersion>
-		<AssemblyVersion>$(CohesionVersion)</AssemblyVersion>
+		<!-- Numeric prefix only: AssemblyVersion is numeric major.minor.build.revision
+		     (CS7034). The full semver including prerelease suffix lives on
+		     PackageVersion / InformationalVersion. -->
+		<AssemblyVersion>$(CohesionVersionPrefix)</AssemblyVersion>
+		<FileVersion>$(CohesionVersionPrefix)</FileVersion>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
 	</PropertyGroup>

@@ -17,8 +17,13 @@
 	</PropertyGroup>
 	<!-- Package Metadata -->
 	<PropertyGroup>
-		<Version>$(CohesionVersion)</Version>
-		<PackageVersion>$(Version)</PackageVersion>
+		<!-- VersionPrefix/VersionSuffix split (not <Version> directly): a prerelease
+		     semver like "11.0.2-preview.1" handed straight to <Version> propagates
+		     to [assembly: AssemblyVersion] and trips CS7034. The SDK composes
+		     Version = $(VersionPrefix)-$(VersionSuffix) at the end, which becomes
+		     PackageVersion via the default. -->
+		<VersionPrefix>$(CohesionVersionPrefix)</VersionPrefix>
+		<VersionSuffix Condition="'$(CohesionVersionSuffix)' != ''">$(CohesionVersionSuffix)</VersionSuffix>
 		<Authors>Assimalign</Authors>
 		<Description>Cohesion MSBuild SDK and local packaging feed for framework, library, and resource packages.</Description>
 		<PackageReadmeFile>README.md</PackageReadmeFile>

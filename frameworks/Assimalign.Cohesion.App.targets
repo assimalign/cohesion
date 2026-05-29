@@ -205,10 +205,16 @@
         <Error Condition="'$(CohesionFrameworkKind)' == 'Ref' and !Exists('%(_CohesionExpectedAssembly.Identity)')"
                Text="Framework assembly declared in @(CohesionFrameworkAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Confirm the library has a project under libraries/ or resources/ that CohesionProjectReference can resolve, and that the project builds successfully." />
 
+        <!--
+            FrameworkVersion = $(CohesionVersionPrefix), NOT $(CohesionVersion).
+            The task writes this value as AssemblyVersion="..." into each <File>
+            entry; the .NET SDK's ResolveTargetingPackAssets parses it as a
+            System.Version, which rejects semver suffixes.
+        -->
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Ref'"
             AssemblyNames="@(CohesionFrameworkAssembly)"
             FrameworkName="$(CohesionFrameworkName)"
-            FrameworkVersion="$(CohesionVersion)"
+            FrameworkVersion="$(CohesionVersionPrefix)"
             TargetFrameworkVersion="10.0"
             PublicKeyToken="$(CohesionPublicKeyToken)"
             PathPrefix=""
@@ -235,10 +241,11 @@
         <Error Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != '' and !Exists('%(_CohesionExpectedAssembly.Identity)')"
                Text="Framework assembly declared in @(CohesionFrameworkAssembly) or @(CohesionFrameworkPrivateAssembly) but missing on disk: %(_CohesionExpectedAssembly.Identity). Build must run before pack and every entry needs a ProjectReference that CopyLocals into bin." />
 
+        <!-- Same constraint as the Ref pack writer above: numeric prefix only. -->
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Runtime' and '$(RuntimeIdentifier)' != ''"
             AssemblyNames="@(CohesionFrameworkAssembly);@(CohesionFrameworkPrivateAssembly)"
             FrameworkName="$(CohesionFrameworkName)"
-            FrameworkVersion="$(CohesionVersion)"
+            FrameworkVersion="$(CohesionVersionPrefix)"
             TargetFrameworkVersion="10.0"
             PublicKeyToken="$(CohesionPublicKeyToken)"
             PathPrefix="runtimes/$(RuntimeIdentifier)/lib/$(TargetFrameworkLatest)/"
