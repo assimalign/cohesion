@@ -19,6 +19,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             'Assimalign.Cohesion.OpenApi',
+            'Assimalign.Cohesion.OpenApi.Serialization',
+            'Assimalign.Cohesion.OpenApi.Validation',
         ]
     steps:
       - uses: actions/checkout@v4

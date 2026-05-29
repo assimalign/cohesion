@@ -18,8 +18,10 @@ runs:
     - name: Install .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: |
-          10.x
+        # Install exactly the SDK pinned in global.json (currently the .NET 11
+        # preview). Reading the version from global.json keeps CI in lockstep
+        # with the repo's pinned SDK so a future bump needs no workflow edit.
+        global-json-file: global.json
 
     - name: Restore build tasks
       shell: pwsh
