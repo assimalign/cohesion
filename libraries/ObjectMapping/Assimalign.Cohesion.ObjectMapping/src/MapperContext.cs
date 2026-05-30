@@ -11,6 +11,12 @@ public sealed class MapperContext : IMapperContext
 	private readonly object _target;
 	private readonly object _source;
 
+	/// <summary>
+	/// 
+	/// </summary>
+	/// <param name="target"></param>
+	/// <param name="source"></param>
+	/// <exception cref="ArgumentNullException"></exception>
 	public MapperContext(object target, object source)
 	{
 		_target = ArgumentNullException.ThrowIfNull<object>(target);
@@ -30,5 +36,5 @@ public sealed class MapperContext : IMapperContext
     public MapperCollectionHandling CollectionHandling { get; init; }
 
 	/// <inheritdoc cref="IMapperContext.Profiles"/>
-	public required IEnumerable<IMapperProfile> Profiles { get; init; }
+	public required IReadOnlyList<IMapperProfile> Profiles { get; init; }
 }

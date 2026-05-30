@@ -7,7 +7,6 @@ using System.Linq;
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 using Assimalign.Cohesion.ObjectMapping.Properties;
-using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 internal sealed class MapperActionNestedProfile<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TTargetMember : class, new()
@@ -32,7 +31,6 @@ internal sealed class MapperActionNestedProfile<TTarget, TTargetMember, TSource,
         TargetGetter = target.Compile();
     }
 
-    public int Id => this.TargetType.GetHashCode() + TargetMember.GetHashCode();
     public Type TargetType => typeof(TTarget);
     public MemberInfo TargetMember { get; }
     public Func<TTarget, TTargetMember> TargetGetter { get; }
@@ -42,7 +40,7 @@ internal sealed class MapperActionNestedProfile<TTarget, TTargetMember, TSource,
     public Func<TSource, TSourceMember> SourceGetter { get; }
     public Expression<Func<TSource, TSourceMember>> SourceExpression { get; }
     // To prevent searching a profile in the Mapper options lets just store the reference in a property.
-    public IMapperProfile Profile { get; init; }
+   // public IMapperProfile Profile { get; init; }
 
     public void Invoke(IMapperContext context)
     {
@@ -91,7 +89,7 @@ internal sealed class MapperActionNestedProfile<TTarget, TTargetMember, TSource,
         }
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return default;
+            return default!;
         }
     }
     private TTargetMember GetTargetValue(TTarget target)

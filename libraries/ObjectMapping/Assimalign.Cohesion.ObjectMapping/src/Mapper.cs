@@ -1,10 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
@@ -21,13 +16,27 @@ public sealed class Mapper : IMapper
     /// <param name="options"></param>
     public Mapper(MapperOptions options)
     {
-        _options = ArgumentNullException.ThrowIfNull<MapperOptions>(options);
+        ArgumentNullException.ThrowIfNull<MapperOptions>(options);
+
+        _options = options;
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<IMapperProfile> Profiles => _options.Profiles.AsReadOnly();
+    public string Name => _options.Name;
 
     /// <inheritdoc />
+    public IReadOnlyList<IMapperProfile> Profiles => _options.Profiles;
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="target"></param>
+    /// <param name="source"></param>
+    /// <param name="targetType"></param>
+    /// <param name="sourceType"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException"></exception>
+    /// <exception cref="ArgumentNullException"></exception>
     public object Map(object target, object source, Type targetType, Type sourceType)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -40,9 +49,9 @@ public sealed class Mapper : IMapper
             throw new ArgumentException($"The source type '{sourceType.FullName}' is not assignable from the actual source type '{source.GetType().FullName}'.");
         }
 
-        if (!targetType.IsAssignableTo(targetType.GetType()))
+        if (!targetType.IsAssignableTo(target.GetType()))
         {
-
+            throw new ArgumentException($"The target type '{targetType.FullName}' is not assignable from the actual target type '{target.GetType().FullName}'.");
         }
  
         MapperContext context = new MapperContext(target, source)
@@ -56,7 +65,7 @@ public sealed class Mapper : IMapper
         {
             IMapperProfile profile = Profiles[i];
 
-            if (profile.SourceType == sourceType && profile.TargetType == targetType)
+            if (profile.IsMatch(targetType, sourceType))
             {
                 foreach (IMapperAction action in profile.MapActions)
                 {
@@ -66,20 +75,5 @@ public sealed class Mapper : IMapper
         }
 
         return target;
-    }
-
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
-    public static IMapper Create(Action<MapperBuilder> configure)
-    {
-        var builder = new MapperBuilder();
-
-        configure.Invoke(builder);
-
-        return new Mapper(builder.Options);
     }
 }

@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Reflection;
-using System.Collections;
-using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 using Assimalign.Cohesion.ObjectMapping.Properties;
+using System.Collections.Generic;
 
 internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TTargetMember : class, new()
@@ -30,8 +29,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         TargetGetter = target.Compile();
     }
 
-    
-    public int Id => this.TargetType.GetHashCode();
+
     public Type TargetType => typeof(TTarget);
     public MemberInfo TargetMember { get; }
     public Func<TTarget, TTargetMember> TargetGetter { get; }
@@ -50,19 +48,18 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         var sourceValue = GetSourceValue(source);
         var targetValue = GetTargetValue(target);
 
-        var profiles = context.Profiles
-            .Where(p => p.TargetType == typeof(TTargetMember) && p.SourceType == typeof(TSourceMember));
+        IReadOnlyList<IMapperProfile> profiles = context.Profiles;
 
-        foreach (var profile in profiles)
+        for (int i = 0; i < profiles.Count; i++)
         {
-            foreach (var action in profile.MapActions)
+            IMapperProfile profile = profiles[i];
+
+            if (profile.IsMatch(typeof(TTargetMember), typeof(TSourceMember)))
             {
-                action.Invoke(new MapperContext(targetValue, sourceValue)
+                foreach (IMapperAction action in profile.MapActions)
                 {
-                    Profiles = context.Profiles,
-                    CollectionHandling = context.CollectionHandling,
-                    IgnoreHandling = context.IgnoreHandling
-                });
+                    action.Invoke(context);
+                }
             }
         }
 
@@ -77,7 +74,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
             SetValue(target, targetValue);
         }
         // This will NEITHER allow 'Null' or 'Default' values
-        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue.Equals(default(TSourceMember)))
+        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue!.Equals(default(TSourceMember)))
         {
             SetValue(target, targetValue);
         }
@@ -104,7 +101,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return default(TSourceMember);
+            return default(TSourceMember)!;
         }
     }
     private void SetValue(object targetInstance, object targetValue)
@@ -128,7 +125,4 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
                 }
         }
     }
-
-    public override bool Equals(object instance) => instance is IMapperAction action ? action.Id == this.Id : false;
-    public override int GetHashCode() => HashCode.Combine(TargetType, TargetMember);
 }

@@ -42,6 +42,27 @@ $Solutions | ForEach-Object {
             "**\build\Build.props"
             "**\build\Build.targets"
         ) `
+        -IncludeReferences `
         -Force `
         -Verbose
 }
+
+
+New-CohesionDotnetSolution `
+        -SolutionPath "C:\Source\repos\assimalign\cohesion\resources\Web\Assimalign.Cohesion.Web.slnx" `
+        -IgnorePaths @(
+            "$BasePath\_out"
+            "$BasePath\.claude"
+            "$BasePath\.vscode"
+            "$BasePath\.dotnet-cli-home"
+            "**\sdks\Assimalign.Cohesion.Sdk*\**\*.props"
+            "**\sdks\Assimalign.Cohesion.Sdk*\**\*.targets"
+            "**\build\Targets\**"
+            "**\build\Build.props"
+            "**\build\Build.targets"
+        ) `
+        -IncludeReferences `
+        -Force `
+        -Verbose
+
+

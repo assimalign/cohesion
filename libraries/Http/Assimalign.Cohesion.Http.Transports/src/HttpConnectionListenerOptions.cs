@@ -74,7 +74,7 @@ public sealed class HttpConnectionListenerOptions
     /// <para>
     /// Leave this property <see langword="null"/> to opt out &#8212; each
     /// request then gets a fresh empty feature collection, which is the
-    /// default behaviour.
+    /// default behavior.
     /// </para>
     /// </remarks>
     public Func<IHttpFeatureCollection>? CreateFeatures { get; set; }

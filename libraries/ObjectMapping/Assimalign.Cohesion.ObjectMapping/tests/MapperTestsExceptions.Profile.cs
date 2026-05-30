@@ -27,7 +27,7 @@ public partial class MapperTestsExceptions
     {
         Assert.Throws<ArgumentException>(() =>
         {
-            var descriptor = new MapperActionDescriptor<TestPerson, TestUser>();
+            var descriptor = new MapperProfileDescriptor<TestPerson, TestUser>();
             var profile = new MapperProfileTestCase1();
 
             profile.Configure(descriptor);
@@ -48,7 +48,7 @@ public partial class MapperTestsExceptions
     {
         Assert.Throws<InvalidCastException>(() =>
         {
-            var descriptor = new MapperActionDescriptor<TestUser, TestPerson>();
+            var descriptor = new MapperProfileDescriptor<TestUser, TestPerson>();
             var profile = new MapperProfileTestCase2();
 
             profile.Configure(descriptor);
@@ -69,7 +69,7 @@ public partial class MapperTestsExceptions
     {
         Assert.Throws<ArgumentException>(() =>
         {
-            var descriptor = new MapperActionDescriptor<TestUser, TestPerson>();
+            var descriptor = new MapperProfileDescriptor<TestUser, TestPerson>();
             var profile = new MapperProfileTestCase3();
 
             profile.Configure(descriptor);

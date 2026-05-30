@@ -14,14 +14,25 @@ using Assimalign.Cohesion.Hosting;
 public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
-    private readonly HttpConnectionListenerOptions _options;
-    //private readonly Action<WebApplicationBuilder> _default;
-    private readonly List<Action<WebApplicationServerOptions>> _configurations = new();
+    private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
-        _options = new HttpConnectionListenerOptions();
+        _builder.Services.AddSingleton<IWebApplicationServer>(serviceProvider =>
+        {
+            IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
+            {
+                foreach (var action in _configurations)
+                {
+                    action.Invoke(serviceProvider, options);
+                }
+            });
+
+            IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
+
+            return new WebApplicationServer(pipeline, listener);
+        });
     }
 
     /// <summary>
@@ -70,13 +81,23 @@ public sealed class WebApplicationServerBuilder
     /// </summary>
     /// <param name="configure"></param>
     /// <returns></returns>
-    public WebApplicationServerBuilder UseServer(Action<WebApplicationServerOptions> configure)
+    public WebApplicationServerBuilder UseServer(Action<HttpConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
-        var options = new WebApplicationServerOptions(_builder);
+        return UseServer((_, options) => configure.Invoke(options));
+    }
 
-        configure.Invoke(options);
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="configure"></param>
+    /// <returns></returns>
+    public WebApplicationServerBuilder UseServer(Action<IServiceProvider, HttpConnectionListenerOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        _configurations.Add(configure);
 
         return this;
     }

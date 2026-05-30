@@ -1,30 +1,24 @@
 ﻿using System;
 using System.Linq;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
 using Assimalign.Cohesion.ObjectMapping.Internal;
+using System.Diagnostics.CodeAnalysis;
 
-public sealed class MapperBuilder
+public sealed class MapperBuilder : IMapperBuilder
 {
+    private readonly MapperOptions _options;
+    private Mapper? _mapper;
+
     public MapperBuilder()
     {
-        this.Options = new MapperOptions();
-        this.Profiles = new List<IMapperProfile>();
+        _options = new();
     }
 
-    internal MapperOptions Options { get; init; }
-
-    internal IList<IMapperProfile> Profiles { get; init; }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="configure"></param>
-    public void AddOptions(Action<MapperOptions> configure)
+    public MapperBuilder(MapperOptions options)
     {
-        configure.Invoke(this.Options); 
+        _options = ArgumentNullException.ThrowIfNull<MapperOptions>(options);
     }
 
     /// <summary>
@@ -34,21 +28,44 @@ public sealed class MapperBuilder
     /// <typeparam name="TSource"></typeparam>
     /// <param name="profile"></param>
     /// <exception cref="ArgumentException"></exception>
-    public void AddProfile<TTarget, TSource>(IMapperProfile<TTarget, TSource> profile)
+    public MapperBuilder AddProfile(IMapperProfile profile)
     {
-        if (Profiles.Any(x => x.SourceType == typeof(TSource) && x.TargetType == typeof(TTarget)))
-        {
-            throw new ArgumentException($"A profile with the same target type: '{profile.TargetType.Name}' and source type: '{profile.SourceType.Name}' has already been added.");
-        }
+        ArgumentNullException.ThrowIfNull(profile);
 
-        Profiles.Add(profile);
+        _options.Profiles.Add(profile);
 
-        IMapperActionDescriptor descriptor = new MapperActionDescriptor<TTarget, TSource>()
-        {
-            Profiles = this.Profiles,
-            MapActions = profile.MapActions
-        };
+        return this;
+    }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <typeparam name="TTarget"></typeparam>
+    /// <typeparam name="TSource"></typeparam>
+    /// <param name="configure"></param>
+    /// <returns></returns>
+    public MapperBuilder AddProfile<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TTarget,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSource>(Action<MapperProfileDescriptor<TTarget, TSource>> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
 
-        profile.Configure(descriptor);
+        return AddProfile(new DefaultMapperProfile<TTarget, TSource>(configure));
+    }
+
+
+    public Mapper Build()
+    {
+        InvalidOperationException.ThrowIf(_mapper is not null, "Mapper has already been built.");
+        return _mapper = new Mapper(_options);
+    }
+
+    IMapperBuilder IMapperBuilder.AddProfile(IMapperProfile profile)
+    {
+        return AddProfile(profile);
+    }
+
+    IMapper IMapperBuilder.Build()
+    {
+        return Build();
     }
 }

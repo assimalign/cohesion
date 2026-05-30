@@ -9,9 +9,6 @@
 		<CohesionPackageReference Include="System.Management.Automation" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
-	<ItemGroup>
-	  <Folder Include="Cmdlets\Dotnet\Invoke-CohesionDotnetBuild\" />
-	</ItemGroup>
 	<Target Name="WriteManifest" AfterTargets="Build">
 		<PropertyGroup>
 			<CohesionCmletsToExport>

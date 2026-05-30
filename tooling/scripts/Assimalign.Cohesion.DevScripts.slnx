@@ -1,3 +1,6 @@
 <Solution>
+  <Folder Name="/refs/">
+    <Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+  </Folder>
   <Project Path="src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj" />
 </Solution>

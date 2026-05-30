@@ -18,7 +18,20 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
         ".csproj"
     };
 
-    private Dictionary<string, string> _referenceCache = new Dictionary<string, string>();
+    private readonly Dictionary<string, string> _referenceCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _unresolvedReferences = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string>? _projectIndex;
+
+    // Build-output and version-control directories never contribute valid reference candidates.
+    private static readonly string[] _excludedReferenceSegments =
+    {
+        $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}.vs{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}_out{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}",
+    };
 
 
     public NewCohesionDotnetSolutionCmdlet() { }
@@ -314,78 +327,159 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
 
     private void GetReferenceTree(string solutionPath, string projectPath)
     {
-        string? solutionParentPath = Directory.GetParent(solutionPath)?.FullName;
+        Project project;
 
-        if (solutionParentPath is null)
+        try
         {
+            using FileStream stream = File.Open(projectPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+            XmlSerializer serializer = new XmlSerializer(typeof(Project));
+
+            project = (Project)serializer.Deserialize(stream)!;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // A locked, missing, or malformed project file must not abort the whole
+            // solution generation - warn and keep resolving the remaining references.
+            WriteWarning($"Unable to read project references from '{projectPath}': {exception.Message}");
             return;
         }
 
-        XmlSerializer serializer = new XmlSerializer(typeof(Project));
-
-        using FileStream stream = File.Open(projectPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-
-        Project? project = (Project)serializer.Deserialize(stream)!;
+        Dictionary<string, string> projectIndex = GetProjectIndex(solutionPath);
 
         foreach (var itemGroup in project.ItemGroups)
         {
-            if (itemGroup.CohesionProjectReferences.Any())
+            foreach (var reference in itemGroup.CohesionProjectReferences)
             {
-                WriteVerbose($"Found Project References: {itemGroup.CohesionProjectReferences.Count}");
+                var include = reference?.Include;
 
-                foreach (var reference in itemGroup.CohesionProjectReferences)
+                // Ignore malformed '<CohesionProjectReference />' entries that carry no Include.
+                if (string.IsNullOrWhiteSpace(include))
                 {
-                    // Check if the project was already found
-                    if (_referenceCache.ContainsKey(reference?.Include!))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    foreach (var projectFile in EnumerateProjectFiles(solutionPath))
-                    {
-                        var projectName = Path.GetFileNameWithoutExtension(projectFile);
+                // Skip references already resolved, or already known to be unresolvable.
+                // The negative cache is what stops the previous behavior of re-scanning
+                // the disk every time for a reference that does not exist.
+                if (_referenceCache.ContainsKey(include) || _unresolvedReferences.Contains(include))
+                {
+                    continue;
+                }
 
-                        if (projectName == reference?.Include)
-                        {
-                            _referenceCache[reference?.Include!] = Path.GetRelativePath(solutionPath, projectFile).Replace("\\", "/");
+                if (projectIndex.TryGetValue(include, out var referencePath))
+                {
+                    _referenceCache[include] = Path.GetRelativePath(solutionPath, referencePath).Replace("\\", "/");
 
-                            // Get Sub references. Want to identify the references of the references
-                            GetReferenceTree(solutionPath, projectFile);
+                    WriteVerbose($"Resolved project reference '{include}' -> {_referenceCache[include]}");
 
-                            break;
-                        }
-                    }
+                    // Resolve the references of the resolved project. The cache check
+                    // above doubles as the cycle guard for circular references.
+                    GetReferenceTree(solutionPath, referencePath);
+                }
+                else
+                {
+                    _unresolvedReferences.Add(include);
+
+                    WriteVerbose($"Project reference '{include}' was not found under the search root; skipping.");
                 }
             }
         }
     }
 
 
-    private IEnumerable<string> EnumerateProjectFiles(string path)
+    /// <summary>
+    /// Builds, once per cmdlet invocation, a lookup of candidate reference projects keyed by
+    /// project name (file name without extension). Candidates are every <c>*.csproj</c> beneath
+    /// the resolved search root, excluding projects that already live inside the solution
+    /// directory and any in build-output or version-control directories.
+    /// </summary>
+    private Dictionary<string, string> GetProjectIndex(string solutionPath)
     {
-        string? parent = Directory.GetParent(path)?.FullName;
-
-        if (parent is not null)
+        if (_projectIndex is not null)
         {
-            var projects = Directory.EnumerateFiles(parent, $"*.csproj", new EnumerationOptions()
-            {
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = true,
-                MaxRecursionDepth = 5
+            return _projectIndex;
+        }
 
-            }).Where(file => !file.StartsWith(path)); // Exclude projects from already searched directories
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var item in projects)
+        string searchRoot = GetReferenceSearchRoot(solutionPath);
+
+        // Projects inside the solution directory are emitted by the solution-generation pass,
+        // so they must not be duplicated as external references.
+        string solutionPrefix =
+            solutionPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+
+        var options = new EnumerationOptions()
+        {
+            IgnoreInaccessible = true,
+            RecurseSubdirectories = true
+        };
+
+        foreach (var projectFile in Directory.EnumerateFiles(searchRoot, "*.csproj", options))
+        {
+            if (projectFile.StartsWith(solutionPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                yield return item;
+                continue;
             }
 
-            foreach (var next in EnumerateProjectFiles(parent))
+            if (IsExcludedReferencePath(projectFile))
             {
-                yield return next;
+                continue;
+            }
+
+            var projectName = Path.GetFileNameWithoutExtension(projectFile);
+
+            // First match wins when several projects share a file name.
+            if (!index.ContainsKey(projectName))
+            {
+                index[projectName] = projectFile;
             }
         }
+
+        WriteVerbose($"Indexed {index.Count} candidate reference project(s) under '{searchRoot}'.");
+
+        return _projectIndex = index;
     }
+
+
+    /// <summary>
+    /// Resolves the directory the reference search is bounded to. Prefers the repository root
+    /// (the nearest ancestor containing a <c>.git</c> entry) so the search can never walk the
+    /// entire drive; when the solution is not inside a git repository the search is bounded to
+    /// the solution's immediate parent directory.
+    /// </summary>
+    private static string GetReferenceSearchRoot(string solutionPath)
+    {
+        DirectoryInfo? parent = Directory.GetParent(solutionPath);
+
+        if (parent is null)
+        {
+            // The solution lives at a drive root; there is nothing above it to search.
+            return solutionPath;
+        }
+
+        for (DirectoryInfo? current = parent; current is not null; current = current.Parent)
+        {
+            string gitPath = Path.Combine(current.FullName, ".git");
+
+            if (Directory.Exists(gitPath) || File.Exists(gitPath))
+            {
+                return current.FullName;
+            }
+        }
+
+        return parent.FullName;
+    }
+
+
+    /// <summary>
+    /// Determines whether a discovered project path lives in a build-output or version-control
+    /// directory that should never contribute reference candidates.
+    /// </summary>
+    private static bool IsExcludedReferencePath(string path) =>
+        _excludedReferenceSegments.Any(segment => path.Contains(segment, StringComparison.OrdinalIgnoreCase));
 
 
     [XmlRoot("Project")]

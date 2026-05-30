@@ -20,7 +20,7 @@ internal static class MapperUtility
             expression = Expression.Property(expression, paths[i]);
         }
 
-        return expression as MemberExpression;
+        return (expression as MemberExpression)!;
     }
 }
 

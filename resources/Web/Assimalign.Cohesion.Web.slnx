@@ -131,4 +131,21 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Sessions/tests/Assimalign.Cohesion.Web.Sessions.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/refs/" >
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Transports/src/Assimalign.Cohesion.Http.Transports.csproj" />
+		<Project Path="../../libraries/Net/Assimalign.Cohesion.Transports/src/Assimalign.Cohesion.Transports.csproj" />
+		<Project Path="../../libraries/Net/Assimalign.Cohesion.Transports.Tcp/src/Assimalign.Cohesion.Transports.Tcp.csproj" />
+		<Project Path="../../libraries/Net/Assimalign.Cohesion.Transports.Quic/src/Assimalign.Cohesion.Transports.Quic.csproj" />
+		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
+		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Cookies/src/Assimalign.Cohesion.Http.Cookies.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
+	</Folder>
 </Solution>

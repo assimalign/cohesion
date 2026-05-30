@@ -7,9 +7,10 @@ using System.Collections.Generic;
 using System.Net;
 using System.Text;
 using System.Threading;
-using Assimalign.Cohesion.Web.Routing;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
+using System.Linq;
 
 using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 
@@ -20,36 +21,52 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder();
 AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
 builder.Server
-    .UseServer(options =>
+    .UseServer((serviceProvider, options) =>
     {
-        options.UseHttp1(transport =>
+        options.CreateFeatures = () =>
         {
-            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
-            transport.Use((connection, context, next, token) =>
+            IEnumerable<IHttpFeature> features = serviceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
+
+            var collection = new HttpFeatureCollection(features.Count());
+
+            foreach (var feature in features)
             {
-                return next.Invoke(connection, context, token);
-            });
+                collection.Set(feature);
+            }
 
-            Console.WriteLine($"Listening On: {transport.EndPoint}");
-        });
-        options.UseHttp2(transport =>
+            return collection;
+        };
+        options.UseHttp1(tcp =>
         {
-            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8082);
-        });
-    });
 
-builder.AddRouting();
+        });
+
+        //options.UseHttp1(transport =>
+        //{
+        //    transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8085);
+        //    transport.Use((connection, context, next, token) =>
+        //    {
+        //        return next.Invoke(connection, context, token);
+        //    });
+
+        //    Console.WriteLine($"Listening On: {transport.EndPoint}");
+        //});
+        //options.UseHttp2(transport =>
+        //{
+        //    transport.EndPoint = new IPEndPoint(IPAddress.Loopback, 8082);
+        //});
+    });
 
 WebApplication app = builder.Build();
 
 
-app.UseRouting();
-app.MapGet("/test", (context) =>
-{
-    Console.WriteLine("Received request: " + context.Request.Path);
+//app.UseRouting();
+//app.MapGet("/test", (context) =>
+//{
+//    Console.WriteLine("Received request: " + context.Request.Path);
 
 
-    return Task.CompletedTask;
-});
+//    return Task.CompletedTask;
+//});
 
 await app.RunAsync();

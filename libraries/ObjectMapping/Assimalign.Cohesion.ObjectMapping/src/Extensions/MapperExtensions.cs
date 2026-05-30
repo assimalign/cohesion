@@ -4,8 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
-using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
-
 public static partial class MapperExtensions
 {
     extension(IMapper mapper)
@@ -24,11 +22,19 @@ public static partial class MapperExtensions
             {
                 return instance;
             }
-            else
-            {
-                throw new Exception("");
-            }
+
+            throw new Exception("");
         }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="TTarget"></typeparam>
+        /// <typeparam name="TSource"></typeparam>
+        /// <param name="target"></param>
+        /// <param name="source"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         public TTarget Map<TTarget, TSource>(TTarget target, TSource source)
         {
             if (mapper.Map(target!, source!, typeof(TTarget), typeof(TSource)) is TTarget instance)
@@ -40,23 +46,29 @@ public static partial class MapperExtensions
                 throw new InvalidOperationException("");
             }
         }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="source"></param>
+        /// <param name="targetType"></param>
+        /// <param name="sourceType"></param>
+        /// <returns></returns>
         public object Map(object source, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type targetType, Type sourceType)
         {
             object? target = null;
 
-            try
-            {
-                target = Activator.CreateInstance(targetType);
-            }
-            catch (Exception exception)
-            {
-                throw new MapperInstanceCreationException(targetType, exception);
-            }
+            target = Activator.CreateInstance(targetType);
 
             return mapper.Map(target!, source, targetType, sourceType);
         }
 
-
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="TTarget"></typeparam>
+        /// <param name="sources"></param>
+        /// <returns></returns>
         public TTarget Map<TTarget>(params object[] sources) where TTarget : class, new()
         {
             var target = new TTarget();
@@ -69,6 +81,13 @@ public static partial class MapperExtensions
             return target;
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="TTarget"></typeparam>
+        /// <typeparam name="TSource"></typeparam>
+        /// <param name="sources"></param>
+        /// <returns></returns>
         public IEnumerable<TTarget> Map<TTarget, TSource>(IEnumerable<TSource> sources) where TTarget : class, new()
         {
             var targets = new List<TTarget>();
@@ -84,34 +103,15 @@ public static partial class MapperExtensions
         }
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <typeparam name="TKey"></typeparam>
-    /// <typeparam name="TValue"></typeparam>
-    /// <param name="enumerable"></param>
-    /// <param name="keySelector"></param>
-    /// <param name="valueSelector"></param>
-    /// <returns></returns>
-    public static Dictionary<TKey, TValue> ToDictionary<T, TKey, TValue>(this IEnumerable<T> enumerable, Func<T, TKey> keySelector, Func<T, TValue> valueSelector)
+
+    extension(IMapperProfile profile)
     {
-        if (enumerable is null)
+        public bool IsMatch(Type targetType, Type sourceType)
         {
-            return null;
+            ArgumentNullException.ThrowIfNull(profile);
+
+            return profile.TargetType == targetType && profile.SourceType == sourceType;
         }
-
-        var dictionary = new Dictionary<TKey, TValue>();
-
-        foreach (var item in enumerable)
-        {
-            dictionary.Add(keySelector(item), valueSelector(item));
-        }
-
-        return dictionary;
     }
-
-    // public static TOut ToReferenceType<Tin, TOut>()
-
 }
 

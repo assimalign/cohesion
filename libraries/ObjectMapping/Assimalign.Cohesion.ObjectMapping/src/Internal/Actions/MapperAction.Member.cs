@@ -39,7 +39,6 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
     }
 
 
-    public int Id => this.TargetType.GetHashCode() + TargetMember.GetHashCode();
     public Type TargetType => typeof(TTarget);
     public MemberInfo TargetMember { get; }
     public Func<TTarget, TTargetMember> TargetGetter { get; }
@@ -61,7 +60,7 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
         // This will ALWAYS allow 'Null' and 'Default' values
         if (context.IgnoreHandling == MapperIgnoreHandling.Never)
         {
-            SetValue(target, sourceValue);
+            SetValue(target, sourceValue!);
         }
         // This will NEVER allow 'Null' values (Defaults will be set if ValueType)
         else if (context.IgnoreHandling == MapperIgnoreHandling.Always && sourceValue is not null)
@@ -69,7 +68,7 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
             SetValue(target, sourceValue);
         }
         // This will NEITHER allow 'Null' or 'Default' values
-        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue.Equals(default(TSourceMember)))
+        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue!.Equals(default(TSourceMember)))
         {
             SetValue(target, sourceValue);
         }
@@ -84,7 +83,7 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
         // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return default(TTargetMember);
+            return default(TTargetMember)!;
         }
     }
     private TSourceMember GetSourceValue(TSource source)
@@ -96,7 +95,7 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
         // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return default(TSourceMember);
+            return default(TSourceMember)!;
         }
     }
     private void SetValue(object targetInstance, object targetValue)
@@ -120,8 +119,5 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
                 }
         }
     }
-
-    public override bool Equals(object instance) => instance is IMapperAction action ? action.Id == this.Id : false;
-    public override int GetHashCode() => HashCode.Combine(TargetType, TargetMember);
 }
 

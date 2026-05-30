@@ -10,12 +10,11 @@ using Assimalign.Cohesion.Transports;
 
 public sealed class WebApplicationServerOptions
 {
-    private readonly WebApplicationBuilder _builder;
-    private static readonly HttpConnectionListenerOptions _options = new();
+    private readonly HttpConnectionListenerOptions _options = new();
 
-    internal WebApplicationServerOptions(WebApplicationBuilder builder)
+    internal WebApplicationServerOptions(IServiceProvider serviceProvider)
     {
-        _builder = builder;
+        
     }
 
     public Func<IHttpFeatureCollection>? CreateFeatures

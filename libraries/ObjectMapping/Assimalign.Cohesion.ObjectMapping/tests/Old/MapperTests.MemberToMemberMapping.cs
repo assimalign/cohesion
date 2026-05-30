@@ -18,14 +18,14 @@ public partial class MapperTests
         protected override void OnBuild(IMapperProfileBuilder builder)
         {
             builder
-                .CreateProfile<Person1, Person2>(descriptor =>
+                .CreateProfile<Person1, Person2>(static descriptor =>
                 {
                     descriptor
-                        .MapMember(target => target.Age, source => source.Details.Age)
+                        .MapMember(static target => target.Age, static source => source.Details.Age)
                         .MapMember(target => target.Birthdate, source => source.Details.Birthdate.GetValueOrDefault())
                         .MapMember(target => target.FirstName, source => source.Details.FirstName)
                         .MapMember(target => target.LastName, source => source.Details.LastName)
-                        .MapMember("MiddleName", "Details.MiddleName")
+                        //.MapMember("MiddleName", "Details.MiddleName")
                         .MapMemberEnumerables(target => target.OtherAddresses, source => source.Details.OtherAddresses);
                 })
                 .CreateProfile<Person2, Person1>(descriptor =>
@@ -58,14 +58,14 @@ public partial class MapperTests
 
     public partial class MapperMemberToMemberProfile : MapperProfile<Person1, Person2>
     {
-        public override void Configure(IMapperActionDescriptor<Person1, Person2> descriptor)
+        protected override void Configure(MapperProfileDescriptor<Person1, Person2> descriptor)
         {
             descriptor
                 .MapMember(target => target.Age, source => source.Details.Age)
                 .MapMember(target => target.Birthdate, source => source.Details.Birthdate.GetValueOrDefault())
                 .MapMember(target => target.FirstName, source => source.Details.FirstName)
                 .MapMember(target => target.LastName, source => source.Details.LastName)
-                .MapMember("MiddleName", "Details.MiddleName")
+                //.MapMember("MiddleName", "Details.MiddleName")
                 .MapMember(target => target.Following, source => source.Details.Following.ToDictionary(key => key.Id, value => new Person1()
                 {
                     FirstName = value.FirstName

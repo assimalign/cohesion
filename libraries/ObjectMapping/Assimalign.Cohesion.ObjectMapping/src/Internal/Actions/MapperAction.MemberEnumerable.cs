@@ -7,13 +7,12 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 using Assimalign.Cohesion.ObjectMapping.Properties;
-using Assimalign.Cohesion.ObjectMapping.Internal.Exceptions;
 
 internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TSourceMember : class, new()
     where TTargetMember : class, new()
 {
-    private Func<IEnumerable<TTargetMember>, IEnumerable<TTargetMember>> convert;
+    private Func<IEnumerable<TTargetMember>, IEnumerable<TTargetMember>>? convert;
 
     public MapperActionMemberEnumerable(Expression<Func<TTarget, IEnumerable<TTargetMember>>> target, Expression<Func<TSource, IEnumerable<TSourceMember>>> source)
     {
@@ -62,7 +61,6 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         }
     }
 
-    public int Id => this.TargetType.GetHashCode() + TargetMember.GetHashCode();
     public Type TargetType => typeof(TTarget);
     public MemberInfo TargetMember { get; }
     public Func<TTarget, IEnumerable<TTargetMember>> TargetGetter { get; }
@@ -132,7 +130,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return default(IEnumerable<TTargetMember>);
+            return default(IEnumerable<TTargetMember>)!;
         }
     }
     private IEnumerable<TSourceMember> GetSourceValue(TSource source)
@@ -143,7 +141,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         }
         catch (Exception exception) when (exception is NullReferenceException)
         {
-            return null;
+            return null!;
         }
     }
 

@@ -1,5 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ObjectMapping</RootNamespace>
 		<Description>
@@ -8,7 +7,7 @@
 		</Description>
 	</PropertyGroup>
 	<ItemGroup>
-	  <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Update="Properties\Resources.Designer.cs">
@@ -23,5 +22,4 @@
 			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
 		</EmbeddedResource>
 	</ItemGroup>
-	
 </Project>

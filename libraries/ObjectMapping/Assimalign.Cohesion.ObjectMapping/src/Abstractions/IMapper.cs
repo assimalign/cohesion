@@ -8,6 +8,11 @@ namespace Assimalign.Cohesion.ObjectMapping;
 public interface IMapper
 {
     /// <summary>
+    /// Gets the name of the mapper.
+    /// </summary>
+    string Name { get; }
+
+    /// <summary>
     /// Maps properties from a source object to a destination object using the provided type information.
     /// </summary>
     /// <param name="source">The source object to map from.</param>
