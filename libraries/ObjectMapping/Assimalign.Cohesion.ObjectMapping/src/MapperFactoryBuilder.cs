@@ -1,31 +1,38 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
-/// 
+/// Builds an <see cref="IMapperFactory"/> from one or more named mappers.
 /// </summary>
 /// <remarks>
-/// Use a factory to separate mappers that may have conflicting mapping profiles for the same source and destination types.
+/// Use a factory to separate mappers that may have conflicting mapping profiles for the same source and target types.
 /// </remarks>
 public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
 {
     private readonly ConcurrentDictionary<string, IMapper> _mappers;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MapperFactoryBuilder"/> class.
+    /// </summary>
     public MapperFactoryBuilder()
     {
         _mappers = new ConcurrentDictionary<string, IMapper>();
     }
 
     /// <summary>
-    /// 
+    /// Adds a named mapper configured through a <see cref="MapperBuilder"/>.
     /// </summary>
-    /// <param name="mapperName"></param>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="mapperName">The unique name the mapper is addressable by.</param>
+    /// <param name="configure">A callback that configures and builds the mapper.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="mapperName"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
     public MapperFactoryBuilder AddMapper(string mapperName, Func<MapperBuilder, Mapper> configure)
     {
+        ArgumentNullException.ThrowIfNull(mapperName);
+        ArgumentNullException.ThrowIfNull(configure);
+
         _mappers.GetOrAdd(mapperName, name =>
         {
             var builder = new MapperBuilder(new MapperOptions()
@@ -40,14 +47,18 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
     }
 
     /// <summary>
-    /// 
+    /// Adds a named mapper with a specific null/default handling strategy.
     /// </summary>
-    /// <param name="mapperName"></param>
-    /// <param name="ignoreHandling"></param>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="mapperName">The unique name the mapper is addressable by.</param>
+    /// <param name="ignoreHandling">The null/default handling strategy for the mapper.</param>
+    /// <param name="configure">A callback that configures and builds the mapper.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="mapperName"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
     public MapperFactoryBuilder AddMapper(string mapperName, MapperIgnoreHandling ignoreHandling, Func<MapperBuilder, Mapper> configure)
     {
+        ArgumentNullException.ThrowIfNull(mapperName);
+        ArgumentNullException.ThrowIfNull(configure);
+
         _mappers.GetOrAdd(mapperName, name =>
         {
             var builder = new MapperBuilder(new MapperOptions()
@@ -63,14 +74,18 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
     }
 
     /// <summary>
-    /// 
+    /// Adds a named mapper with a specific collection handling strategy.
     /// </summary>
-    /// <param name="mapperName"></param>
-    /// <param name="collectionHandling"></param>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="mapperName">The unique name the mapper is addressable by.</param>
+    /// <param name="collectionHandling">The collection handling strategy for the mapper.</param>
+    /// <param name="configure">A callback that configures and builds the mapper.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="mapperName"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
     public MapperFactoryBuilder AddMapper(string mapperName, MapperCollectionHandling collectionHandling, Func<MapperBuilder, Mapper> configure)
     {
+        ArgumentNullException.ThrowIfNull(mapperName);
+        ArgumentNullException.ThrowIfNull(configure);
+
         _mappers.GetOrAdd(mapperName, name =>
         {
             var builder = new MapperBuilder(new MapperOptions()
@@ -86,15 +101,19 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
     }
 
     /// <summary>
-    /// 
+    /// Adds a named mapper with specific null/default and collection handling strategies.
     /// </summary>
-    /// <param name="mapperName"></param>
-    /// <param name="ignoreHandling"></param>
-    /// <param name="collectionHandling"></param>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="mapperName">The unique name the mapper is addressable by.</param>
+    /// <param name="ignoreHandling">The null/default handling strategy for the mapper.</param>
+    /// <param name="collectionHandling">The collection handling strategy for the mapper.</param>
+    /// <param name="configure">A callback that configures and builds the mapper.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="mapperName"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
     public MapperFactoryBuilder AddMapper(string mapperName, MapperIgnoreHandling ignoreHandling, MapperCollectionHandling collectionHandling, Func<MapperBuilder, Mapper> configure)
     {
+        ArgumentNullException.ThrowIfNull(mapperName);
+        ArgumentNullException.ThrowIfNull(configure);
+
         _mappers.GetOrAdd(mapperName, name =>
         {
             var builder = new MapperBuilder(new MapperOptions()
@@ -110,8 +129,10 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
         return this;
     }
 
-
-
+    /// <summary>
+    /// Builds an <see cref="IMapperFactory"/> over the mappers registered so far.
+    /// </summary>
+    /// <returns>A factory that resolves the registered mappers by name.</returns>
     public IMapperFactory Build()
     {
         return new MapperFactory(_mappers);
@@ -130,18 +151,14 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _mappers.GetOrAdd(Guid.NewGuid().ToString(), name =>
-        {
-            var builder = new MapperBuilder(new MapperOptions()
-            {
-                Name = name
-            });
-            return factory.Invoke(builder);
-        });
+        var mapper = factory.Invoke(new MapperBuilder());
+
+        _mappers.GetOrAdd(mapper.Name, mapper);
+
         return this;
     }
 
-    private class MapperFactory : IMapperFactory
+    private sealed class MapperFactory : IMapperFactory
     {
         private readonly ConcurrentDictionary<string, IMapper> _mappers;
 
@@ -152,7 +169,14 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
 
         public IMapper Create(string mapperName)
         {
-            return _mappers[mapperName];
+            ArgumentNullException.ThrowIfNull(mapperName);
+
+            if (_mappers.TryGetValue(mapperName, out var mapper))
+            {
+                return mapper;
+            }
+
+            throw new MapperException($"No mapper has been registered with the name '{mapperName}'.");
         }
     }
 }

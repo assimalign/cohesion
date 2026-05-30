@@ -1,16 +1,44 @@
-﻿using System;
+using System;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Diagnostics.CodeAnalysis;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 using Assimalign.Cohesion.ObjectMapping.Properties;
-using System.Collections.Generic;
 
+/*
+ * Maps a complex (reference) member by delegating to the profiles registered for the member's
+ * target/source types, against a child context scoped to the member instances. Reads and writes
+ * go through delegates that are either supplied directly (the AOT-safe path emitted by the source
+ * generator) or compiled from expression trees (the run-time fallback).
+ */
 internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
     where TTargetMember : class, new()
     where TSourceMember : class, new()
 {
+    private readonly Func<TSource, TSourceMember?> _sourceGetter;
+    private readonly Func<TTarget, TTargetMember?> _targetGetter;
+    private readonly Action<TTarget, TTargetMember?> _setter;
+
+    /// <summary>
+    /// AOT-safe path: the getters and setter are supplied directly (the shape the source generator emits).
+    /// </summary>
+    public MapperActionMemberType(
+        Func<TSource, TSourceMember?> sourceGetter,
+        Func<TTarget, TTargetMember?> targetGetter,
+        Action<TTarget, TTargetMember?> setter)
+    {
+        _sourceGetter = sourceGetter ?? throw new ArgumentNullException(nameof(sourceGetter));
+        _targetGetter = targetGetter ?? throw new ArgumentNullException(nameof(targetGetter));
+        _setter = setter ?? throw new ArgumentNullException(nameof(setter));
+    }
+
+    /// <summary>
+    /// Run-time fallback: compiles the getters and setter from expression trees. Not NativeAOT-safe.
+    /// </summary>
+    [RequiresDynamicCode("Compiles member-access expressions at run time; prefer a source-generated profile for AOT.")]
     public MapperActionMemberType(Expression<Func<TTarget, TTargetMember>> target, Expression<Func<TSource, TSourceMember>> source)
     {
         if (target.Body is not MemberExpression memberExpression)
@@ -20,23 +48,13 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         // Ensure that the member is of type TTarget (Target Members cannot be nested.)
         if (memberExpression.Member.DeclaringType != typeof(TTarget))
         {
-            throw new Exception(string.Format(Resources.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
+            throw new ArgumentException(string.Format(Resources.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
         }
-        SourceExpression = source;
-        SourceGetter = source.Compile();
-        TargetExpression = target;
-        TargetMember = memberExpression.Member;
-        TargetGetter = target.Compile();
+
+        _sourceGetter = source.Compile();
+        _targetGetter = target.Compile();
+        _setter = MapperUtility.CompileSetter<TTarget, TTargetMember?>(memberExpression.Member);
     }
-
-
-    public Type TargetType => typeof(TTarget);
-    public MemberInfo TargetMember { get; }
-    public Func<TTarget, TTargetMember> TargetGetter { get; }
-    public Expression<Func<TTarget, TTargetMember>> TargetExpression { get; }
-    public Type SourceType => typeof(TSource);
-    public Func<TSource, TSourceMember> SourceGetter { get; }
-    public Expression<Func<TSource, TSourceMember>> SourceExpression { get; }
 
     public void Invoke(IMapperContext context)
     {
@@ -46,7 +64,26 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         }
 
         var sourceValue = GetSourceValue(source);
+
+        // A null nested source is treated like a null scalar: only written when nulls are allowed.
+        if (sourceValue is null)
+        {
+            if (context.IgnoreHandling == MapperIgnoreHandling.Never)
+            {
+                _setter.Invoke(target, null);
+            }
+
+            return;
+        }
+
         var targetValue = GetTargetValue(target);
+
+        var nestedContext = new MapperContext(targetValue, sourceValue)
+        {
+            Profiles = context.Profiles,
+            IgnoreHandling = context.IgnoreHandling,
+            CollectionHandling = context.CollectionHandling
+        };
 
         IReadOnlyList<IMapperProfile> profiles = context.Profiles;
 
@@ -58,25 +95,24 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
             {
                 foreach (IMapperAction action in profile.MapActions)
                 {
-                    action.Invoke(context);
+                    action.Invoke(nestedContext);
                 }
             }
         }
 
-        // This will ALWAYS allow 'Null' and 'Default' values
-        if (context.IgnoreHandling == MapperIgnoreHandling.Never)
+        _setter.Invoke(target, targetValue);
+    }
+
+    private TSourceMember? GetSourceValue(TSource source)
+    {
+        try
         {
-            SetValue(target, targetValue);
+            return _sourceGetter.Invoke(source);
         }
-        // This will NEVER allow 'Null' values (Defaults will be set if ValueType)
-        else if (context.IgnoreHandling == MapperIgnoreHandling.Always && sourceValue is not null)
+        // Catch NullReferenceException only; occurs when a chained source member is null.
+        catch (NullReferenceException)
         {
-            SetValue(target, targetValue);
-        }
-        // This will NEITHER allow 'Null' or 'Default' values
-        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue!.Equals(default(TSourceMember)))
-        {
-            SetValue(target, targetValue);
+            return default;
         }
     }
 
@@ -84,45 +120,12 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
     {
         try
         {
-            return TargetGetter.Invoke(target) ?? new TTargetMember();
+            return _targetGetter.Invoke(target) ?? new TTargetMember();
         }
-        // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
-        catch (Exception exception) when (exception is NullReferenceException)
+        // Catch NullReferenceException only; occurs when a chained target member is null.
+        catch (NullReferenceException)
         {
             return new TTargetMember();
-        }
-    }
-    private TSourceMember GetSourceValue(TSource source)
-    {
-        try
-        {
-            return SourceGetter.Invoke(source);
-        }
-        // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
-        catch (Exception exception) when (exception is NullReferenceException)
-        {
-            return default(TSourceMember)!;
-        }
-    }
-    private void SetValue(object targetInstance, object targetValue)
-    {
-        switch (TargetMember)
-        {
-            case PropertyInfo property:
-                {
-                    property.SetValue(targetInstance, targetValue);
-                    break;
-                }
-            case FieldInfo field:
-                {
-                    field.SetValue(targetInstance, targetValue);
-                    break;
-                }
-            default:
-                {
-                    // This should never hit, but added just encase
-                    throw new NotSupportedException($"The Target Member  of expression '{TargetExpression}' is not supported. Unknown System.Reflection.MemberInfo.");
-                }
         }
     }
 }

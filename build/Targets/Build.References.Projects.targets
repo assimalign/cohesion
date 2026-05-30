@@ -2,43 +2,57 @@
     <!--
         Project Reference By Name Only.
 
-        Lets a library/resource csproj reference another by its assembly name
-        instead of by relative csproj path. Resolution walks libraries/ and
-        resources/ once, matches each <CohesionProjectReference Include="X" />
-        to the csproj whose filename is "X.csproj", and emits a regular
-        <ProjectReference Include="<resolved-path>" />.
+        Lets a library/resource/analyzer csproj reference another by its
+        assembly name instead of by relative csproj path. Resolution walks
+        libraries/ + resources/ (for code refs) and analyzers/ (for analyzer
+        refs) once, matches each item's Include to the csproj whose filename
+        matches, and emits a regular <ProjectReference Include="<resolved-path>" />
+        with the appropriate per-flavor metadata.
 
-        Two flavours:
+        Three flavours:
 
-          CohesionProjectReference        - PUBLIC. Resulting <ProjectReference>
-                                            has default semantics: the target
-                                            is compiled against, CopyLocal'd
-                                            into bin/, AND appears as a
-                                            <dependency> in this library's
+          CohesionProjectReference        - PUBLIC code reference. Resulting
+                                            <ProjectReference> has default
+                                            semantics: compiled against,
+                                            CopyLocal'd into bin/, AND appears
+                                            as a <dependency> in this library's
                                             .nupkg .nuspec (flows to consumers).
 
-          CohesionPrivateProjectReference - PRIVATE. Same compile + CopyLocal
-                                            behaviour, but the resulting
-                                            <ProjectReference> carries
-                                            PrivateAssets="all", which
-                                            suppresses the <dependency> entry
-                                            in the .nuspec. Consumers of this
-                                            library's .nupkg never learn about
-                                            the target.
+          CohesionPrivateProjectReference - PRIVATE code reference. Same compile
+                                            + CopyLocal behaviour, but the
+                                            resulting <ProjectReference> carries
+                                            PrivateAssets="all", which suppresses
+                                            the <dependency> entry in the .nuspec.
+                                            Consumers of this library's .nupkg
+                                            never learn about the target.
 
-                                            Use for "this library needs X as
-                                            an internal implementation detail
-                                            but should not expose X to its
-                                            consumers". Pair with a matching
+                                            Use for "this library needs X as an
+                                            internal implementation detail but
+                                            should not expose X to its consumers".
+                                            Pair with a matching
                                             <CohesionFrameworkPrivateAssembly>
                                             entry in
                                             frameworks/Assimalign.Cohesion.App.props
                                             so the containing framework's
                                             Runtime pack still ships X.dll at
                                             run time.
+
+          CohesionAnalyzerReference       - ROSLYN ANALYZER / SOURCE GENERATOR
+                                            reference. Resolves against
+                                            analyzers/**/*.csproj. Emits a
+                                            <ProjectReference> with
+                                            OutputItemType="Analyzer" +
+                                            ReferenceOutputAssembly="false" so
+                                            the analyzer activates at compile
+                                            time (dogfood); AND adds the built
+                                            analyzer DLL to the consuming
+                                            library's nupkg under
+                                            analyzers/dotnet/cs/ so external
+                                            consumers pick it up automatically
+                                            via <PackageReference>.
     -->
     <ItemGroup>
-        <!-- Index all candidate projects ONCE. -->
+        <!-- Index code projects ONCE. -->
         <_CohesionProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
         <_CohesionProject Update="@(_CohesionProject)" ProjectId="%(_CohesionProject.Filename)" ProjectPath="%(_CohesionProject.Identity)" />
 
@@ -53,5 +67,69 @@
         <CohesionPrivateProjectReference Remove="@(CohesionPrivateProjectReference->HasMetadata('ProjectPath'))" />
 
         <_CohesionProject Remove="@(_CohesionProject)" />
+
+        <!-- Index analyzer projects ONCE. -->
+        <_CohesionAnalyzerProject Include="$(CohesionRepositoryDirectory)analyzers\**\*.csproj" />
+        <_CohesionAnalyzerProject Update="@(_CohesionAnalyzerProject)" ProjectId="%(_CohesionAnalyzerProject.Filename)" ProjectPath="%(_CohesionAnalyzerProject.Identity)" />
+
+        <!--
+            Analyzer refs. OutputItemType=Analyzer + ReferenceOutputAssembly=false
+            tells the .NET SDK to load the project's output as a Roslyn analyzer
+            (instead of a normal assembly reference) when the consumer builds.
+            PrivateAssets=all keeps the analyzer csproj from leaking as a NuGet
+            dependency of the consuming library.
+        -->
+        <CohesionAnalyzerReference Update="@(_CohesionAnalyzerProject->'%(ProjectId)')" ProjectPath="%(_CohesionAnalyzerProject.ProjectPath)" />
+        <ProjectReference Include="@(CohesionAnalyzerReference->'%(ProjectPath)')"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false"
+                          PrivateAssets="all" />
+
+        <!--
+            Capture the resolved analyzer csproj paths for the pack hook below.
+            We can't reuse @(CohesionAnalyzerReference) directly because it gets
+            consumed (Remove'd) immediately so MSBuild's incremental graph
+            cleanup is happy.
+        -->
+        <_CohesionAnalyzerResolved Include="@(CohesionAnalyzerReference->'%(ProjectPath)')" />
+        <CohesionAnalyzerReference Remove="@(CohesionAnalyzerReference->HasMetadata('ProjectPath'))" />
+
+        <_CohesionAnalyzerProject Remove="@(_CohesionAnalyzerProject)" />
     </ItemGroup>
+
+    <!--
+        Pack each referenced analyzer DLL into the consuming library's nupkg at
+        analyzers/dotnet/cs/<Name>.dll. NuGet's built-in analyzer convention
+        picks them up automatically on every consumer that adds a
+        <PackageReference> to the library, so no extra wiring is needed on the
+        consumer side.
+
+        We hook TargetsForTfmSpecificContentInPackage (same extension point the
+        SDK pack uses) and look up each analyzer's GetTargetPath at pack time -
+        that yields the actual DLL path including the analyzer's own TFM
+        (netstandard2.0), without us having to hardcode it.
+    -->
+    <!--
+        Top-level PropertyGroup Conditions can't reference @(items) (MSB4099),
+        so extend the hook unconditionally; the target's own Condition gates
+        execution to projects that actually declared an analyzer reference.
+    -->
+    <PropertyGroup>
+        <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_CollectCohesionAnalyzersForPack</TargetsForTfmSpecificContentInPackage>
+    </PropertyGroup>
+
+    <Target Name="_CollectCohesionAnalyzersForPack"
+            Condition="'@(_CohesionAnalyzerResolved)' != ''">
+        <MSBuild Projects="@(_CohesionAnalyzerResolved)"
+                 Targets="GetTargetPath"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="OutDir;OutputPath;IntermediateOutputPath;TargetFramework;TargetFrameworks;RuntimeIdentifier">
+            <Output TaskParameter="TargetOutputs" ItemName="_CohesionAnalyzerDll" />
+        </MSBuild>
+        <ItemGroup>
+            <TfmSpecificPackageFile Include="@(_CohesionAnalyzerDll)">
+                <PackagePath>analyzers/dotnet/cs</PackagePath>
+            </TfmSpecificPackageFile>
+        </ItemGroup>
+    </Target>
 </Project>

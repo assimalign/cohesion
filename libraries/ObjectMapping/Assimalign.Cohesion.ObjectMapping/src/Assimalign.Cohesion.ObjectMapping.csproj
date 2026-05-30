@@ -8,6 +8,16 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<!--
+			MapperProfileGenerator emits TryConfigureGenerated overrides for
+			class-based MapperProfile<T,S> subclasses. The build wires it as a
+			Roslyn source generator (so it runs at compile time here AND for
+			downstream consumers) and bundles the analyzer DLL inside this
+			library's .nupkg at analyzers/dotnet/cs/, so external consumers
+			pick it up automatically via PackageReference. See
+			build/Targets/Build.References.Projects.targets for the resolver.
+		-->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Update="Properties\Resources.Designer.cs">

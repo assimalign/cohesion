@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!--
+		    AOT-compatibility guard. IsAotCompatible=true turns on the trim/AOT/single-file
+		    Roslyn analyzers; promoting their diagnostics to errors means a clean build proves
+		    that source-generated profiles plus the runtime map path are AOT-safe. The generator
+		    suppresses IL2026/IL3050 on the (unreachable) reflection-based Configure of each
+		    generated profile; if that suppression regressed, this project would fail to build.
+		-->
+		<IsAotCompatible>true</IsAotCompatible>
+		<IsPackable>false</IsPackable>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+		<!-- Allow the object-mapping generator's interceptors (inline AddProfile<T,S>(lambda)). -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.ObjectMapping.Generated</InterceptorsNamespaces>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+</Project>

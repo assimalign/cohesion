@@ -1,14 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
+		<RunSettingsFilePath>$(MSBuildProjectDirectory)\coverlet.runsettings</RunSettingsFilePath>
+		<!-- Allow the object-mapping generator's interceptors (inline AddProfile<T,S>(lambda)). -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.ObjectMapping.Generated</InterceptorsNamespaces>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
+		<!-- Run the object-mapping generator over this project's test profiles (analyzer
+		     references do not flow transitively through the library ProjectReference). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 </Project>

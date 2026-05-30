@@ -1,19 +1,21 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
-/// 
+/// The default <see cref="IMapper"/> implementation. Holds a fixed set of
+/// profiles and applies the matching ones each time <see cref="Map"/> is called.
 /// </summary>
 public sealed class Mapper : IMapper
 {
     private readonly MapperOptions _options;
 
     /// <summary>
-    /// 
+    /// Initializes a new <see cref="Mapper"/> from the supplied options.
     /// </summary>
-    /// <param name="options"></param>
+    /// <param name="options">The options describing the mapper name, profiles, and handling behavior.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     public Mapper(MapperOptions options)
     {
         ArgumentNullException.ThrowIfNull<MapperOptions>(options);
@@ -24,19 +26,12 @@ public sealed class Mapper : IMapper
     /// <inheritdoc />
     public string Name => _options.Name;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the profiles registered with this mapper.
+    /// </summary>
     public IReadOnlyList<IMapperProfile> Profiles => _options.Profiles;
 
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="target"></param>
-    /// <param name="source"></param>
-    /// <param name="targetType"></param>
-    /// <param name="sourceType"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="ArgumentNullException"></exception>
+    /// <inheritdoc />
     public object Map(object target, object source, Type targetType, Type sourceType)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -44,16 +39,16 @@ public sealed class Mapper : IMapper
         ArgumentNullException.ThrowIfNull(targetType);
         ArgumentNullException.ThrowIfNull(sourceType);
 
-        if (!sourceType.IsAssignableTo(source.GetType()))
+        if (!source.GetType().IsAssignableTo(sourceType))
         {
-            throw new ArgumentException($"The source type '{sourceType.FullName}' is not assignable from the actual source type '{source.GetType().FullName}'.");
+            throw new ArgumentException($"The source object of type '{source.GetType().FullName}' is not assignable to the declared source type '{sourceType.FullName}'.", nameof(source));
         }
 
-        if (!targetType.IsAssignableTo(target.GetType()))
+        if (!target.GetType().IsAssignableTo(targetType))
         {
-            throw new ArgumentException($"The target type '{targetType.FullName}' is not assignable from the actual target type '{target.GetType().FullName}'.");
+            throw new ArgumentException($"The target object of type '{target.GetType().FullName}' is not assignable to the declared target type '{targetType.FullName}'.", nameof(target));
         }
- 
+
         MapperContext context = new MapperContext(target, source)
         {
             Profiles = Profiles,

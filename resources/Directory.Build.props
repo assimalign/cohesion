@@ -26,8 +26,12 @@
 		     PackageVersion / InformationalVersion. -->
 		<AssemblyVersion>$(CohesionVersionPrefix)</AssemblyVersion>
 		<FileVersion>$(CohesionVersionPrefix)</FileVersion>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+		<!--
+		    See libraries/Directory.Build.props for why GeneratePackageOnBuild
+		    and GenerateRuntimeConfigurationFiles are deliberately NOT set true.
+		    Short version: they cause NU5026 once any library using
+		    CohesionAnalyzerReference enters the build graph.
+		-->
 	</PropertyGroup>
 	<!-- #endregion -->
 

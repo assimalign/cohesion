@@ -1,19 +1,38 @@
-﻿using System;
-using System.Reflection;
-using System.Collections;
-using System.Linq;
+using System;
 using System.Linq.Expressions;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 using Assimalign.Cohesion.ObjectMapping.Properties;
 
 
-/* 
- * This Mapper Action is for member to member mapping
+/*
+ * Scalar member-to-member mapping. Reads through a getter and writes through a
+ * setter. The delegates can be supplied directly (the AOT-safe path, used by the
+ * source generator) or derived from expression trees at run time (the fallback
+ * path, which is not NativeAOT-safe and is annotated accordingly).
  */
 internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
 {
+    private readonly Func<TSource, TSourceMember> _getter;
+    private readonly Action<TTarget, TSourceMember> _setter;
+
+    /// <summary>
+    /// AOT-safe path: the getter and setter are supplied directly. This is the shape the
+    /// source generator emits — no expression compilation occurs.
+    /// </summary>
+    public MapperActionMember(Func<TSource, TSourceMember> getter, Action<TTarget, TSourceMember> setter)
+    {
+        _getter = getter ?? throw new ArgumentNullException(nameof(getter));
+        _setter = setter ?? throw new ArgumentNullException(nameof(setter));
+    }
+
+    /// <summary>
+    /// Runtime fallback: compiles a getter and a setter from expression trees. Not
+    /// NativeAOT-safe (relies on <see cref="Expression{T}.Compile()"/>).
+    /// </summary>
+    [RequiresDynamicCode("Compiles member-access expressions at run time; prefer a source-generated profile for AOT.")]
     public MapperActionMember(Expression<Func<TTarget, TTargetMember>> target, Expression<Func<TSource, TSourceMember>> source)
     {
         if (target.Body is not MemberExpression memberExpression)
@@ -31,21 +50,9 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
             throw new InvalidCastException($"The source expression '{source}' cannot be assigned to the target expression '{target}'.");
         }
 
-        SourceExpression = source;
-        SourceGetter = source.Compile();
-        TargetExpression = target;
-        TargetMember = memberExpression.Member;
-        TargetGetter = target.Compile();
+        _getter = source.Compile();
+        _setter = MapperUtility.CompileSetter<TTarget, TSourceMember>(memberExpression.Member);
     }
-
-
-    public Type TargetType => typeof(TTarget);
-    public MemberInfo TargetMember { get; }
-    public Func<TTarget, TTargetMember> TargetGetter { get; }
-    public Expression<Func<TTarget, TTargetMember>> TargetExpression { get; }
-    public Type SourceType => typeof(TSource);
-    public Func<TSource, TSourceMember> SourceGetter { get; }
-    public Expression<Func<TSource, TSourceMember>> SourceExpression { get; }
 
     public void Invoke(IMapperContext context)
     {
@@ -55,69 +62,36 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
         }
 
         var sourceValue = GetSourceValue(source);
-        var targetValue = GetTargetValue(target);
 
-        // This will ALWAYS allow 'Null' and 'Default' values
-        if (context.IgnoreHandling == MapperIgnoreHandling.Never)
+        switch (context.IgnoreHandling)
         {
-            SetValue(target, sourceValue!);
-        }
-        // This will NEVER allow 'Null' values (Defaults will be set if ValueType)
-        else if (context.IgnoreHandling == MapperIgnoreHandling.Always && sourceValue is not null)
-        {
-            SetValue(target, sourceValue);
-        }
-        // This will NEITHER allow 'Null' or 'Default' values
-        else if (context.IgnoreHandling == MapperIgnoreHandling.WhenMappingDefaults && !sourceValue!.Equals(default(TSourceMember)))
-        {
-            SetValue(target, sourceValue);
+            // This will ALWAYS allow 'Null' and 'Default' values
+            case MapperIgnoreHandling.Never:
+                _setter.Invoke(target, sourceValue);
+                break;
+
+            // This will NEVER allow 'Null' values (Defaults will be set if ValueType)
+            case MapperIgnoreHandling.Always when sourceValue is not null:
+                _setter.Invoke(target, sourceValue);
+                break;
+
+            // This will NEITHER allow 'Null' nor 'Default' values
+            case MapperIgnoreHandling.WhenMappingDefaults when sourceValue is not null && !sourceValue.Equals(default(TSourceMember)):
+                _setter.Invoke(target, sourceValue);
+                break;
         }
     }
 
-    private TTargetMember GetTargetValue(TTarget target)
-    {
-        try
-        {
-            return TargetGetter.Invoke(target);
-        }
-        // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
-        catch (Exception exception) when (exception is NullReferenceException)
-        {
-            return default(TTargetMember)!;
-        }
-    }
     private TSourceMember GetSourceValue(TSource source)
     {
         try
         {
-            return SourceGetter.Invoke(source);
+            return _getter.Invoke(source);
         }
         // Let's catch the exception for Null References only. This occurs when the Source Member Expression is chained and possibly null.
-        catch (Exception exception) when (exception is NullReferenceException)
+        catch (NullReferenceException)
         {
-            return default(TSourceMember)!;
-        }
-    }
-    private void SetValue(object targetInstance, object targetValue)
-    {
-        switch (TargetMember)
-        {
-            case PropertyInfo property:
-                {
-                    property.SetValue(targetInstance, targetValue);
-                    break;
-                }
-            case FieldInfo field:
-                {
-                    field.SetValue(targetInstance, targetValue);
-                    break;
-                }
-            default:
-                {
-                    // This should never hit, but added just encase
-                    throw new NotSupportedException($"The Target Member  of expression '{TargetExpression}' is not supported. Unknown System.Reflection.MemberInfo.");
-                }
+            return default!;
         }
     }
 }
-

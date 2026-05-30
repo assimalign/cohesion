@@ -9,18 +9,27 @@
 .DESCRIPTION
     Zero system-wide registration. Zero MSBuild SDK resolver. Zero admin.
 
-    What this script produces in _out/packages/:
-        Assimalign.Cohesion.Sdk.<ver>.nupkg
-        Assimalign.Cohesion.Sdk.Web.<ver>.nupkg
-        Assimalign.Cohesion.Sdk.Database.<ver>.nupkg
-        Assimalign.Cohesion.App.Ref.<ver>.nupkg              (targeting pack)
-        Assimalign.Cohesion.App.Runtime.<rid>.<ver>.nupkg    (one per RID)
+    What this script produces in _out/packages/, in three distribution shapes:
 
-    Consumers then write <Project Sdk="Assimalign.Cohesion.Sdk"> and the SDK
-    auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
+        SDK packs (consumed via <Project Sdk="Assimalign.Cohesion.Sdk[.X]">):
+            Assimalign.Cohesion.Sdk.<ver>.nupkg
+            Assimalign.Cohesion.Sdk.<Domain>.<ver>.nupkg
+
+        Framework packs (auto-included by the SDK via <FrameworkReference>):
+            Assimalign.Cohesion.App[.<Domain>].Ref.<ver>.nupkg              (targeting pack)
+            Assimalign.Cohesion.App[.<Domain>].Runtime.<rid>.<ver>.nupkg    (one per RID)
+
+        Individual library packs (consumed directly via <PackageReference>):
+            Assimalign.Cohesion.Core.<ver>.nupkg
+            Assimalign.Cohesion.<Library>.<ver>.nupkg
+            ... one per src csproj under libraries/ + resources/
+
+    SDK-path consumers write <Project Sdk="Assimalign.Cohesion.Sdk"> and the
+    SDK auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
     which the SDK's KnownFrameworkReference machinery resolves by pulling the
     targeting pack at compile time and (for self-contained builds) the runtime
-    pack at publish time.
+    pack at publish time. Direct-reference consumers bypass the SDK and pull a
+    single library via <PackageReference>.
 
 .PARAMETER Configuration
     Debug or Release. Defaults to Debug.
@@ -31,11 +40,20 @@
 
 .PARAMETER SkipSdks
     Skip rebuilding the SDK packages. Useful when iterating only on framework
-    code.
+    or library code.
 
 .PARAMETER SkipFramework
     Skip rebuilding the framework packs. Useful when iterating only on SDK
     targets or props.
+
+.PARAMETER SkipLibraries
+    Skip rebuilding the individual library + resource packs. Useful when
+    iterating only on SDK / framework wiring.
+
+.PARAMETER ContinueOnLibraryError
+    When set, library/resource pack failures in section [5/5] are collected
+    and reported at the end instead of aborting the run. Useful for landing
+    the working subset of the feed while WIP libraries don't compile.
 
 .EXAMPLE
     pwsh installer\scripts\Install-Local.ps1
@@ -54,6 +72,13 @@ param(
 
     [switch]$SkipSdks,
     [switch]$SkipFramework,
+    [switch]$SkipLibraries,
+
+    # When set, library/resource pack failures in section [5/5] are reported
+    # at the end instead of aborting the run. Useful while WIP libraries
+    # don't compile - lets the rest of the feed land. Default off so CI
+    # treats a broken library as a hard failure.
+    [switch]$ContinueOnLibraryError,
 
     # Bypass the locked-cache check. Use only if you understand the risk:
     # the new .nupkg is still produced under _out/packages, but the cached
@@ -199,7 +224,7 @@ if ($globalPackagesRoot) {
 # etc.). Without this DLL on disk every subsequent dotnet pack fails with
 # MSB4062 ("task could not be loaded"). Local devs typically already have it
 # from previous builds; CI's fresh runner doesn't.
-Write-Host "[1/4] Building Cohesion build tasks..." -ForegroundColor Cyan
+Write-Host "[1/5] Building Cohesion build tasks..." -ForegroundColor Cyan
 $buildTasksProj = Join-Path $repoRoot 'build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj'
 Write-Host "  build $buildTasksProj" -ForegroundColor DarkGray
 & dotnet build $buildTasksProj -c $Configuration --nologo
@@ -208,7 +233,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for $buildTasksProj" }
 
 #region 2. SDK packs --------------------------------------------------------
 if (-not $SkipSdks) {
-    Write-Host "[2/4] Packing SDK projects..." -ForegroundColor Cyan
+    Write-Host "[2/5] Packing SDK projects..." -ForegroundColor Cyan
     # SDK project list. Each entry maps to sdks/<SdkName>/Tasks/<SdkName>.Tasks.csproj.
     # Resource-domain SDKs are scaffolded by New-CohesionDomainScaffold.ps1; each
     # corresponds to a folder under resources/ and a framework family in
@@ -245,13 +270,13 @@ if (-not $SkipSdks) {
     }
 }
 else {
-    Write-Host "[2/4] Skipping SDK packs (-SkipSdks)." -ForegroundColor DarkYellow
+    Write-Host "[2/5] Skipping SDK packs (-SkipSdks)." -ForegroundColor DarkYellow
 }
 #endregion
 
 #region 3. Framework runtime packs (per framework x per RID) ---------------
 if (-not $SkipFramework) {
-    Write-Host "[3/4] Packing framework runtime pack(s)..." -ForegroundColor Cyan
+    Write-Host "[3/5] Packing framework runtime pack(s)..." -ForegroundColor Cyan
     foreach ($framework in $cohesionFrameworks) {
         $runtimeProj = Join-Path $repoRoot "frameworks\$framework.Runtime\src\$framework.Runtime.csproj"
         if (-not (Test-Path -LiteralPath $runtimeProj)) {
@@ -266,13 +291,13 @@ if (-not $SkipFramework) {
     }
 }
 else {
-    Write-Host "[3/4] Skipping runtime packs (-SkipFramework)." -ForegroundColor DarkYellow
+    Write-Host "[3/5] Skipping runtime packs (-SkipFramework)." -ForegroundColor DarkYellow
 }
 #endregion
 
 #region 4. Framework targeting packs (one per framework) -------------------
 if (-not $SkipFramework) {
-    Write-Host "[4/4] Packing framework targeting pack(s)..." -ForegroundColor Cyan
+    Write-Host "[4/5] Packing framework targeting pack(s)..." -ForegroundColor Cyan
     foreach ($framework in $cohesionFrameworks) {
         $refsProj = Join-Path $repoRoot "frameworks\$framework.Refs\src\$framework.Refs.csproj"
         if (-not (Test-Path -LiteralPath $refsProj)) {
@@ -285,7 +310,60 @@ if (-not $SkipFramework) {
     }
 }
 else {
-    Write-Host "[4/4] Skipping targeting pack (-SkipFramework)." -ForegroundColor DarkYellow
+    Write-Host "[4/5] Skipping targeting pack (-SkipFramework)." -ForegroundColor DarkYellow
+}
+#endregion
+
+#region 5. Individual library + resource packs ----------------------------
+# Each library/resource csproj is its own NuGet package, addressed via
+# <PackageReference Include="Assimalign.Cohesion.<X>" />. Distinct from the
+# framework distribution path (Sdk + App.<Domain>.Ref/.Runtime) which bundles
+# library assemblies into the framework packs - consumers who want a single
+# library without the full SDK / framework reference live on this path.
+#
+# Historically this was implicit: <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+# on libraries/ + resources/ made each library auto-pack on Build, and the
+# framework Refs/Runtime packs above triggered those builds transitively. That
+# property is now removed because it races with the build output once any
+# project's graph contains an analyzer-style ProjectReference (NU5026); see
+# libraries/Directory.Build.props for the full reasoning. Packing libraries
+# explicitly here is the replacement.
+if (-not $SkipLibraries) {
+    Write-Host "[5/5] Packing libraries + resources..." -ForegroundColor Cyan
+    # Enumerate <src>\*.csproj under libraries/ and resources/, skipping:
+    #   * anything under bin/ or obj/
+    #   * test csprojs (a few unfortunately live under src/ instead of the
+    #     normal tests/ sibling - filename match catches them either way)
+    $libraryProjects = @(
+        Get-ChildItem -Path (Join-Path $repoRoot 'libraries')  -Recurse -Filter '*.csproj' -File |
+            Where-Object { $_.Directory.Name -eq 'src' -and $_.FullName -notmatch '[\\/]bin[\\/]|[\\/]obj[\\/]' -and $_.BaseName -notmatch '\.Tests?$' }
+        Get-ChildItem -Path (Join-Path $repoRoot 'resources')  -Recurse -Filter '*.csproj' -File |
+            Where-Object { $_.Directory.Name -eq 'src' -and $_.FullName -notmatch '[\\/]bin[\\/]|[\\/]obj[\\/]' -and $_.BaseName -notmatch '\.Tests?$' }
+    ) | Sort-Object FullName
+    Write-Host ("  found {0} project(s)" -f $libraryProjects.Count) -ForegroundColor DarkGray
+
+    $libraryFailures = @()
+    foreach ($p in $libraryProjects) {
+        Write-Host "  pack $($p.FullName)" -ForegroundColor DarkGray
+        & dotnet pack $p.FullName -c $Configuration --nologo
+        if ($LASTEXITCODE -ne 0) {
+            if ($ContinueOnLibraryError) {
+                $libraryFailures += $p.FullName
+                Write-Host "    !! pack failed (continuing because -ContinueOnLibraryError)" -ForegroundColor DarkYellow
+            }
+            else {
+                throw "dotnet pack failed for $($p.FullName)"
+            }
+        }
+    }
+    if ($libraryFailures.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("[5/5] {0} library/resource pack(s) failed:" -f $libraryFailures.Count) -ForegroundColor DarkYellow
+        $libraryFailures | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
+    }
+}
+else {
+    Write-Host "[5/5] Skipping library/resource packs (-SkipLibraries)." -ForegroundColor DarkYellow
 }
 #endregion
 

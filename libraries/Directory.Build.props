@@ -27,8 +27,22 @@
 		     PackageVersion / InformationalVersion. -->
 		<AssemblyVersion>$(CohesionVersionPrefix)</AssemblyVersion>
 		<FileVersion>$(CohesionVersionPrefix)</FileVersion>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+		<!--
+		    GeneratePackageOnBuild is deliberately NOT set true. With it true,
+		    `dotnet pack` triggers a pack-during-build that runs Pack against
+		    bin/ before CopyToOutput has finished, producing NU5026 ("file to
+		    be packed was not found") for the .dll or runtimeconfig.json. The
+		    race only manifests when the build graph includes an analyzer-style
+		    ProjectReference (OutputItemType=Analyzer + ReferenceOutputAssembly=false),
+		    which happens for any library using CohesionAnalyzerReference.
+		    Use `dotnet pack` (or installer/scripts/Install-Local.ps1) to pack;
+		    `dotnet build` should just build.
+
+		    Same reasoning for not setting GenerateRuntimeConfigurationFiles=true:
+		    it's an Exe-only setting; on libraries it pulls a phantom
+		    runtimeconfig.json into the pack input set and trips NU5026 when
+		    the file (correctly) isn't generated.
+		-->
 	</PropertyGroup>
 	<!-- #endregion -->
 

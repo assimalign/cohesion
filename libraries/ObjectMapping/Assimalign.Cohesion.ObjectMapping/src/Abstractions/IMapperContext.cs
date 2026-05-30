@@ -1,10 +1,10 @@
-﻿using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
 /// <summary>
-/// 
+/// Carries the state for a single mapping invocation: the source and target
+/// instances, the available profiles, and the handling behavior.
 /// </summary>
 public interface IMapperContext
 {
@@ -19,25 +19,22 @@ public interface IMapperContext
     object Target { get; }
 
     /// <summary>
-    /// The collection of profiles encapsulated by the mapper.
+    /// The collection of profiles encapsulated by the mapper. Used to resolve
+    /// nested profiles for complex and enumerable members.
     /// </summary>
-    /// <remarks>
     IReadOnlyList<IMapperProfile> Profiles { get; }
 
     /// <summary>
-    /// Specifies whether a target member should be 
-    /// ignored when writing nulls or defaults from source member.
-    /// <remarks>
-    ///     <b>The default is 'Never'</b>
-    /// </remarks>
+    /// Specifies whether a target member should be ignored when writing nulls or
+    /// defaults from the source member.
     /// </summary>
+    /// <remarks>
+    ///     <b>The default is 'Never'.</b>
+    /// </remarks>
     MapperIgnoreHandling IgnoreHandling { get; }
 
     /// <summary>
-    /// Specifies whether an enumerable member should be overridden or 
-    /// merged together
+    /// Specifies whether an enumerable member should be overridden or merged together.
     /// </summary>
     MapperCollectionHandling CollectionHandling { get; }
-
-    
 }
