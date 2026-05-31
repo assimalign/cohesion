@@ -1,7 +1,2 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	
-	<ItemGroup>
-		<Compile Include="..\Assimalign.Cohesion.Net.Core\Primitives\IO\FilePath.cs" Link="IO\FilePath.cs" />
-	</ItemGroup>
-	
+<Project Sdk="Microsoft.NET.Sdk">
 </Project>

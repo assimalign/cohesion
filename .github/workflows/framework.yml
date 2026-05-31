@@ -99,10 +99,19 @@ jobs:
         # All RIDs declared on KnownFrameworkReference's RuntimePackRuntimeIdentifiers
         # in sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
         # Keep this list in sync with that file.
+        #
+        # -ContinueOnLibraryError: section [5/5] (individual library + resource
+        # packs) collects failures and reports them at the end instead of
+        # aborting. The SDK + framework distribution path (sections [1..4/5])
+        # still hard-fails on any error - that's what consumers actually
+        # restore. Direct <PackageReference> consumers can opt in to whatever
+        # subset of libraries does pack; the failed-pack list at the end of
+        # the step makes WIP libraries visible without blocking CI.
         run: |
           ./installer/scripts/Install-Local.ps1 `
               -Configuration Release `
-              -Rids win-x64,win-arm64,linux-x64,linux-arm64,linux-musl-x64,osx-x64,osx-arm64
+              -Rids win-x64,win-arm64,linux-x64,linux-arm64,linux-musl-x64,osx-x64,osx-arm64 `
+              -ContinueOnLibraryError
 
       - name: Upload .nupkg artifacts
         uses: actions/upload-artifact@v4
