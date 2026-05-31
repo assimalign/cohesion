@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Generic;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading.Tasks;
@@ -8,7 +7,7 @@ using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Amqp.Transports.Tests.TestObjects;
 
-internal sealed class TestTransportConnectionContext : ITransportConnectionContext
+internal sealed class TestTransportConnectionContext : TransportConnectionContext
 {
     private readonly PipeReader _outputReader;
 
@@ -24,16 +23,13 @@ internal sealed class TestTransportConnectionContext : ITransportConnectionConte
         _outputReader = outputPipe.Reader;
         LocalEndPoint = localEndPoint ?? new IPEndPoint(IPAddress.Loopback, 5672);
         RemoteEndPoint = remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 45678);
-        Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
     }
 
-    public EndPoint LocalEndPoint { get; }
+    public override EndPoint LocalEndPoint { get; }
 
-    public EndPoint RemoteEndPoint { get; }
+    public override EndPoint RemoteEndPoint { get; }
 
-    public ITransportConnectionPipe Pipe { get; }
-
-    public IDictionary<string, object?> Items { get; }
+    public override ITransportConnectionPipe Pipe { get; }
 
     public async Task<byte[]> ReadOutputAsync()
     {

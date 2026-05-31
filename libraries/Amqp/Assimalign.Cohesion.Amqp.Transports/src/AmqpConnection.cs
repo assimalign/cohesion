@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Amqp.Transports;
 /// <summary>
 /// Represents an AMQP connection layered on top of a carrier transport connection.
 /// </summary>
-public abstract class AmqpConnection : IAmqpConnection
+public abstract class AmqpConnection : TransportConnection<AmqpConnectionContext>, IAmqpConnection
 {
     private readonly ITransportConnection _connection;
     private readonly TransportId _transportId;
@@ -25,37 +25,37 @@ public abstract class AmqpConnection : IAmqpConnection
     }
 
     /// <inheritdoc />
-    public ConnectionId Id => _connection.Id;
+    public override ConnectionId Id => _connection.Id;
 
     /// <inheritdoc />
-    public TransportId TransportId => _transportId;
+    public override TransportId TransportId => _transportId;
 
     /// <inheritdoc />
-    public TransportProtocol Protocol => TransportProtocol.Amqp;
+    public override TransportProtocol Protocol => TransportProtocol.Amqp;
 
     /// <inheritdoc />
-    public ConnectionState State => _connection.State;
+    public override ConnectionState State => _connection.State;
 
     /// <inheritdoc />
-    public void Abort()
+    public override void Abort()
     {
         _connection.Abort();
     }
 
     /// <inheritdoc />
-    public ValueTask AbortAsync(CancellationToken cancellationToken = default)
+    public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         return _connection.AbortAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    public override void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
-    public abstract ValueTask DisposeAsync();
+    public abstract override ValueTask DisposeAsync();
 
     /// <summary>
     /// Opens the AMQP connection context.
