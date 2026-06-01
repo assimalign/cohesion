@@ -154,15 +154,23 @@ jobs:
         shell: pwsh
         env:
           COHESION_VERSION: ${{ needs.pack.outputs.version }}
-        # Three inline consumer csprojs, one per SDK profile. Each references
+        # Four inline consumer csprojs, one per SDK profile. Each references
         # a Core type to prove the App framework reference resolves through
         # whichever chained SDK it's using:
         #
-        #   SmokeTest.App      -> Sdk          -> App
-        #   SmokeTest.Web      -> Sdk.Web      -> App + App.Web
-        #   SmokeTest.Database -> Sdk.Database -> App + App.Database
+        #   SmokeTest.App           -> Sdk          -> App
+        #   SmokeTest.Web           -> Sdk.Web      -> App + App.Web
+        #   SmokeTest.Database      -> Sdk.Database -> App + App.Database
+        #   SmokeTest.MapperProfile -> Sdk          -> App (with source generator)
         #
-        # All three share one nuget.config that points at the artifact feed.
+        # The MapperProfile profile additionally proves SDK-path consumers
+        # pick up <CohesionFrameworkAnalyzer> entries shipped inside
+        # App.Ref.nupkg at analyzers/dotnet/cs/. Its Program.cs defines a
+        # partial MapperProfile<T,S> subclass; the generator should emit a
+        # TryConfigureGenerated override file under obj/ which the
+        # "Verify ..." step below asserts on.
+        #
+        # All four share one nuget.config that points at the artifact feed.
         run: |
           $feedPath = (Resolve-Path packages).Path
           $version = $env:COHESION_VERSION
@@ -191,6 +199,31 @@ jobs:
           Console.WriteLine(`$"Core type resolved: {typeof(AppEnvironment).FullName}");
           "@
 
+          # MapperProfile profile: a partial subclass that the generator should
+          # detect (class, partial, inherits from MapperProfile<T,S>, Configure
+          # body is a fluent chain of MapMember calls). The generator emits
+          # UserMapper.MapperProfile.g.cs alongside this file.
+          #
+          # Top-level statement comes BEFORE the type declarations (C# CS8803).
+          # Configure override is `protected` to match the base class signature.
+          $mapperProgram = @"
+          using Assimalign.Cohesion;
+          using Assimalign.Cohesion.ObjectMapping;
+
+          Console.WriteLine(`$"UserMapper loaded: {typeof(UserMapper).FullName}");
+
+          public sealed class SourceUser { public string Name { get; set; } = string.Empty; public int Id { get; set; } }
+          public sealed class TargetUser { public string DisplayName { get; set; } = string.Empty; public int UserId { get; set; } }
+
+          public partial class UserMapper : MapperProfile<TargetUser, SourceUser>
+          {
+              protected override void Configure(MapperProfileDescriptor<TargetUser, SourceUser> descriptor) =>
+                  descriptor
+                      .MapMember(t => t.DisplayName, s => s.Name)
+                      .MapMember(t => t.UserId,      s => s.Id);
+          }
+          "@
+
           # global.json pins all three Cohesion SDKs. Sdk.Web and Sdk.Database
           # both chain to Assimalign.Cohesion.Sdk via <Import Sdk="..."> which
           # doesn't honor inline-version syntax - the base SDK has to be
@@ -206,16 +239,37 @@ jobs:
           "@
 
           $profiles = @(
-              @{ Dir='SmokeTest.App';      Sdk='Assimalign.Cohesion.Sdk' },
-              @{ Dir='SmokeTest.Web';      Sdk='Assimalign.Cohesion.Sdk.Web' },
-              @{ Dir='SmokeTest.Database'; Sdk='Assimalign.Cohesion.Sdk.Database' }
+              @{ Dir='SmokeTest.App';           Sdk='Assimalign.Cohesion.Sdk' },
+              @{ Dir='SmokeTest.Web';           Sdk='Assimalign.Cohesion.Sdk.Web' },
+              @{ Dir='SmokeTest.Database';      Sdk='Assimalign.Cohesion.Sdk.Database' },
+              # CA2252 fires on preview-API usage even with EnablePreviewFeatures=true
+              # (Cohesion preview attributes don't satisfy the analyzer here);
+              # suppress for the smoke test - the gating happens at the build level.
+              @{
+                  Dir='SmokeTest.MapperProfile'
+                  Sdk='Assimalign.Cohesion.Sdk'
+                  Program=$mapperProgram
+                  EmitGeneratedFiles=$true
+                  NoWarn='CA2252'
+              }
           )
 
           foreach ($p in $profiles) {
               New-Item -ItemType Directory -Path $p.Dir -Force | Out-Null
               $nugetConfig | Set-Content -Encoding utf8 "$($p.Dir)/nuget.config"
               $globalJson  | Set-Content -Encoding utf8 "$($p.Dir)/global.json"
-              $program     | Set-Content -Encoding utf8 "$($p.Dir)/Program.cs"
+
+              $programBody = if ($p.ContainsKey('Program')) { $p.Program } else { $program }
+              $programBody | Set-Content -Encoding utf8 "$($p.Dir)/Program.cs"
+
+              # Per-profile extras built as a single block of additional PropertyGroup lines.
+              $extraProps = ''
+              if ($p.EmitGeneratedFiles) {
+                  $extraProps += '<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>'
+              }
+              if ($p.NoWarn) {
+                  $extraProps += "<NoWarn>`$(NoWarn);$($p.NoWarn)</NoWarn>"
+              }
 
               $csproj = @"
           <Project Sdk=`"$($p.Sdk)`">
@@ -225,6 +279,7 @@ jobs:
               <Nullable>enable</Nullable>
               <ImplicitUsings>enable</ImplicitUsings>
               <EnablePreviewFeatures>true</EnablePreviewFeatures>
+              $extraProps
             </PropertyGroup>
           </Project>
           "@
@@ -234,7 +289,7 @@ jobs:
       - name: Build smoke tests (validates targeting packs)
         shell: pwsh
         run: |
-          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database','SmokeTest.MapperProfile') {
               Write-Host "::group::$dir build"
               Push-Location $dir
               try {
@@ -244,13 +299,35 @@ jobs:
               Write-Host "::endgroup::"
           }
 
+      - name: Verify MapperProfile source generator activated via SDK chain
+        shell: pwsh
+        # The SmokeTest.MapperProfile consumer uses <Project Sdk="Assimalign.Cohesion.Sdk">,
+        # so its analyzer set comes from App.Ref.nupkg's analyzers/dotnet/cs/ folder
+        # (placed there by <CohesionFrameworkAnalyzer Include="..." /> in
+        # frameworks/Assimalign.Cohesion.App.props). With
+        # <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles> set on
+        # that consumer's csproj, a successful generator run writes
+        # UserMapper.MapperProfile.g.cs under obj/.../generated/.../. Absence of
+        # that file means the analyzer didn't load via the framework path -
+        # exactly the regression this step exists to catch.
+        run: |
+          $generated = Get-ChildItem -Recurse -Path 'SmokeTest.MapperProfile/obj' -Filter '*.MapperProfile.g.cs' -ErrorAction SilentlyContinue
+          if (-not $generated) {
+              Write-Host "::error::MapperProfileGenerator did NOT emit *.MapperProfile.g.cs under SmokeTest.MapperProfile/obj. The source generator is not loading via the SDK -> framework -> analyzer chain."
+              Write-Host "Generator output search root: SmokeTest.MapperProfile/obj"
+              Get-ChildItem -Recurse 'SmokeTest.MapperProfile/obj' -Directory | ForEach-Object { Write-Host "  $($_.FullName)" }
+              throw "Source generator output missing."
+          }
+          Write-Host "MapperProfileGenerator output ($($generated.Count) file(s)):"
+          $generated | ForEach-Object { Write-Host "  $($_.FullName)" }
+
       - name: Publish self-contained for ${{ matrix.rid }} (validates runtime packs)
         shell: pwsh
         # Self-contained publish pulls each framework's Runtime pack for the
-        # current RID. If any of the three runtime packs is missing or has a
-        # bad RuntimeList.xml, this step fails for that SDK profile.
+        # current RID. If any of the runtime packs is missing or has a bad
+        # RuntimeList.xml, this step fails for that SDK profile.
         run: |
-          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database','SmokeTest.MapperProfile') {
               Write-Host "::group::$dir publish"
               Push-Location $dir
               try {
@@ -264,7 +341,7 @@ jobs:
         shell: pwsh
         # Cross-platform: apphost extension is .exe on Windows, none elsewhere.
         run: |
-          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database') {
+          foreach ($dir in 'SmokeTest.App','SmokeTest.Web','SmokeTest.Database','SmokeTest.MapperProfile') {
               $publishDir = "$dir/bin/Release/net10.0/${{ matrix.rid }}/publish"
               $apphost = if ($IsWindows) { "$publishDir/$dir.exe" } else { "$publishDir/$dir" }
               if (-not (Test-Path -LiteralPath $apphost)) {

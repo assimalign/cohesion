@@ -72,6 +72,45 @@
     </PropertyGroup>
 
     <!--
+        Resolve <CohesionFrameworkAnalyzer> items declared in App.props (per-framework)
+        and add a build-only ProjectReference for each. The Ref pack later bundles each
+        resolved analyzer DLL at analyzers/dotnet/cs/ inside the .nupkg (see the Ref-pack
+        section of CohesionCollectFrameworkPack below), so SDK-path consumers pick up
+        the analyzer automatically via the .NET SDK's ResolveTargetingPackAssets.
+
+        Steps (file-scope ItemGroup, runs at evaluation):
+          1. Index analyzers/**/*.csproj by filename.
+          2. Resolve each <CohesionFrameworkAnalyzer> name to its csproj path.
+          3. Capture the resolved paths as @(_CohesionFrameworkAnalyzerResolved) for the
+             pack target to consume.
+          4. Inject a <ProjectReference ReferenceOutputAssembly="false" PrivateAssets="all">
+             per resolved analyzer ONLY when this is the Ref pack project, so MSBuild
+             builds the analyzer transitively. The Refs project itself doesn't use the
+             analyzer to compile (its csproj has no code) - the reference is just a
+             build-order edge guaranteeing the DLL exists on disk by pack time.
+    -->
+    <ItemGroup>
+        <_CohesionFrameworkAnalyzerProject Include="$(CohesionRepositoryDirectory)analyzers\**\*.csproj" />
+        <_CohesionFrameworkAnalyzerProject Update="@(_CohesionFrameworkAnalyzerProject)"
+                                           ProjectId="%(_CohesionFrameworkAnalyzerProject.Filename)"
+                                           ProjectPath="%(_CohesionFrameworkAnalyzerProject.Identity)" />
+
+        <CohesionFrameworkAnalyzer Update="@(_CohesionFrameworkAnalyzerProject->'%(ProjectId)')"
+                                   ProjectPath="%(_CohesionFrameworkAnalyzerProject.ProjectPath)" />
+
+        <_CohesionFrameworkAnalyzerResolved Include="@(CohesionFrameworkAnalyzer->'%(ProjectPath)')" />
+
+        <ProjectReference Include="@(_CohesionFrameworkAnalyzerResolved)"
+                          Condition="'$(CohesionFrameworkKind)' == 'Ref'"
+                          ReferenceOutputAssembly="false"
+                          PrivateAssets="all"
+                          SkipGetTargetFrameworkProperties="true"
+                          UndefineProperties="TargetFramework;RuntimeIdentifier" />
+
+        <_CohesionFrameworkAnalyzerProject Remove="@(_CohesionFrameworkAnalyzerProject)" />
+    </ItemGroup>
+
+    <!--
         Auto-extend each Runtime csproj's CohesionProjectReference list with
         the private-assembly bucket. Each <Framework>.Runtime.csproj already
         declares the public set inline:
@@ -106,6 +145,15 @@
                AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
         <ParameterGroup>
             <AssemblyNames ParameterType="System.String[]" Required="true" />
+            <!--
+                Optional Roslyn analyzer DLL identities. Emitted as
+                <File Type="Analyzer" Path="analyzers/dotnet/cs/<name>.dll" ...>
+                entries so the .NET SDK's ResolveTargetingPackAssets task
+                surfaces them as @(Analyzer) items in the consumer's compile.
+                Only meaningful for the Ref pack (analyzers are compile-time);
+                pass empty / unset for the Runtime pack.
+            -->
+            <AnalyzerNames ParameterType="System.String[]" Required="false" />
             <FrameworkName Required="true" />
             <FrameworkVersion Required="true" />
             <TargetFrameworkVersion Required="true" />
@@ -152,6 +200,21 @@
                 {
                     sb.Append("  <File Type=\"Managed\"")
                       .Append(" Path=\"").Append(pathPrefix).Append(name).Append(".dll\"")
+                      .Append(" PublicKeyToken=\"").Append(pkt).Append("\"")
+                      .Append(" AssemblyName=\"").Append(name).Append("\"")
+                      .Append(" AssemblyVersion=\"").Append(asmVersion).Append("\"")
+                      .Append(" FileVersion=\"").Append(fileVersion).Append("\"")
+                      .Append(" />\r\n");
+                }
+
+                // Analyzer entries. Path is the package-relative location where the
+                // SDK's ResolveTargetingPackAssets expects to find the DLL (matches
+                // the location TfmSpecificPackageFile placed them at: analyzers/dotnet/cs/).
+                var analyzerNames = AnalyzerNames ?? new string[0];
+                foreach (var name in analyzerNames.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.Append("  <File Type=\"Analyzer\"")
+                      .Append(" Path=\"analyzers/dotnet/cs/").Append(name).Append(".dll\"")
                       .Append(" PublicKeyToken=\"").Append(pkt).Append("\"")
                       .Append(" AssemblyName=\"").Append(name).Append("\"")
                       .Append(" AssemblyVersion=\"").Append(asmVersion).Append("\"")
@@ -213,6 +276,7 @@
         -->
         <CohesionWriteFrameworkList Condition="'$(CohesionFrameworkKind)' == 'Ref'"
             AssemblyNames="@(CohesionFrameworkAssembly)"
+            AnalyzerNames="@(CohesionFrameworkAnalyzer)"
             FrameworkName="$(CohesionFrameworkName)"
             FrameworkVersion="$(CohesionVersionPrefix)"
             TargetFrameworkVersion="10.0"
@@ -227,6 +291,27 @@
             </TfmSpecificPackageFile>
             <TfmSpecificPackageFile Include="$(_CohesionFrameworkListPath)">
                 <PackagePath>data/FrameworkList.xml</PackagePath>
+            </TfmSpecificPackageFile>
+        </ItemGroup>
+
+        <!--
+            Analyzer DLLs. By this point the file-scope ItemGroup at the top of this
+            file has already injected a build-only <ProjectReference> per analyzer, so
+            the DLLs exist on disk. GetTargetPath returns each analyzer's compiled
+            output path; the SDK's ResolveTargetingPackAssets task picks these up via
+            the standard analyzers/dotnet/cs/ convention when a consumer's
+            <FrameworkReference> resolves to this Ref pack.
+        -->
+        <MSBuild Condition="'$(CohesionFrameworkKind)' == 'Ref' and '@(_CohesionFrameworkAnalyzerResolved)' != ''"
+                 Projects="@(_CohesionFrameworkAnalyzerResolved)"
+                 Targets="GetTargetPath"
+                 Properties="Configuration=$(Configuration)"
+                 RemoveProperties="OutDir;OutputPath;IntermediateOutputPath;TargetFramework;TargetFrameworks;RuntimeIdentifier">
+            <Output TaskParameter="TargetOutputs" ItemName="_CohesionFrameworkAnalyzerDll" />
+        </MSBuild>
+        <ItemGroup Condition="'$(CohesionFrameworkKind)' == 'Ref' and '@(_CohesionFrameworkAnalyzerDll)' != ''">
+            <TfmSpecificPackageFile Include="@(_CohesionFrameworkAnalyzerDll)">
+                <PackagePath>analyzers/dotnet/cs</PackagePath>
             </TfmSpecificPackageFile>
         </ItemGroup>
 

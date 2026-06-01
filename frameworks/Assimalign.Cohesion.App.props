@@ -102,6 +102,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Transports" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.CircuitBreaker" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Fallback" />
@@ -110,9 +111,24 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Retry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Resilience.Timeout" />
 
+        <!--
+            Roslyn analyzers / source generators shipped INSIDE this framework's
+            Ref pack at analyzers/dotnet/cs/. SDK-path consumers (i.e. anyone
+            using <Project Sdk="Assimalign.Cohesion.Sdk">) auto-pick these up
+            via the .NET SDK's ResolveTargetingPackAssets, the same way a
+            direct <PackageReference> consumer auto-picks up the analyzer
+            bundled inside the owning library's own .nupkg. By-name lookup
+            against analyzers/**/*.csproj.
+
+            MapperProfileGenerator emits TryConfigureGenerated overrides for
+            subclasses of Assimalign.Cohesion.ObjectMapping.MapperProfile<T,S>,
+            which is why it ships with the App framework (where ObjectMapping
+            lives).
+        -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration" />
+
         <!-- WIP / not yet building - uncomment as each library comes online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" />
         -->
