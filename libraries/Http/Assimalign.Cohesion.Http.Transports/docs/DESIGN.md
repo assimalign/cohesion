@@ -265,6 +265,132 @@ The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
 cooperative shutdown is unaffected.
 
+## HTTP/3 stream model and SETTINGS engine
+
+### What it is
+
+HTTP/3 (RFC 9114) runs over QUIC, which surfaces two kinds of
+peer-initiated streams: **bidirectional** streams carry requests, and
+**unidirectional** streams carry control data, QPACK table
+synchronisation, and (from a server) pushes. `Http3ConnectionContext`
+demultiplexes the two off a single accept loop:
+
+```
+accept inbound QUIC stream
+  ├─ bidirectional → request stream → parse HEADERS/DATA → yield IHttpContext
+  └─ unidirectional → read stream-type varint (RFC 9114 §6.2):
+       0x00 control      → read SETTINGS, apply, then keep open
+       0x02 QPACK encoder→ accept (no instructions; dynamic table disabled)
+       0x03 QPACK decoder→ accept (no instructions; dynamic table disabled)
+       0x01 push         → connection error (client must not push)
+       other             → abandon (unknown types are not an error)
+```
+
+The stream direction is reported by the transport via the
+`ITransportConnectionContext.IsBidirectional` signal (see below); the
+HTTP layer never inspects QUIC stream IDs directly.
+
+### Control stream and SETTINGS
+
+RFC 9114 §6.2.1 / §7.2.4 impose two hard rules that the engine enforces
+as connection errors (the loop stops yielding and the connection tears
+down):
+
+- **At most one control stream per peer.** A second control stream is
+  `H3_STREAM_CREATION_ERROR`.
+- **The first frame on the control stream MUST be SETTINGS.** A missing
+  or non-SETTINGS first frame is `H3_MISSING_SETTINGS`.
+
+The SETTINGS payload is parsed into `Http3PeerSettings`, a small
+identifier→value store that recognises `QPACK_MAX_TABLE_CAPACITY`
+(0x01), `MAX_FIELD_SECTION_SIZE` (0x06), `QPACK_BLOCKED_STREAMS` (0x07),
+and `SETTINGS_ENABLE_CONNECT_PROTOCOL` (0x08). Unknown identifiers are
+retained-but-ignored per RFC 9114 §7.2.4.1. Later control frames are not
+acted on in this supported subset — the engine reads and applies the
+mandatory opening SETTINGS frame and leaves the stream open.
+
+### QPACK encoder/decoder streams
+
+Each of the QPACK encoder (0x02) and decoder (0x03) streams may appear
+at most once (RFC 9204 §4.2); a duplicate is a connection error. With
+the QPACK dynamic table disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the
+posture #335 builds on) these streams carry no instructions the server
+must act on, so accepting the stream and recording that it was seen is
+sufficient. The streams are not drained frame-by-frame.
+
+### Push streams
+
+A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
+— only a server may push, and Cohesion does not push (see "server push
+(de-scoped)" below). The engine treats it as a connection error.
+
+### Incremental reads off the PipeReader
+
+The unidirectional-stream handlers read directly off the transport's
+`PipeReader` (`ITransportConnectionPipe.Input`) using a buffered
+`ReadOnlySequence<byte>` model, **not** the `Stream` adapter that the
+request path uses. Two reasons:
+
+1. **Correct incremental framing.** Control data arrives as a varint
+   stream-type prefix followed by length-delimited frames. A varint's
+   width is encoded in its first two bits, so the reader must be able to
+   buffer "not enough bytes yet, ask for more" without losing the bytes
+   it already saw. `PipeReader.AdvanceTo(consumed, examined)` expresses
+   exactly that; layering a `Stream` over the pipe and reading
+   byte-by-byte does not, and in practice the adapter reported spurious
+   end-of-stream when a multi-byte read followed a run of single-byte
+   varint reads on the same pipe.
+2. **No double-buffering.** Reading the sequence in place and slicing the
+   SETTINGS payload out of the buffered segment avoids copying the whole
+   stream into a `MemoryStream` first.
+
+`QuicVariableLengthInteger.TryDecode(ReadOnlySequence<byte>, …)` is the
+incremental counterpart to the existing span-based `Decode`; it reports
+how many bytes it consumed so the loop can advance the reader precisely.
+
+> **Latent decoder bug fixed in passing.** The QUIC varint length
+> selector was written `first >> 6 switch { … }`. The C# `switch`
+> expression binds tighter than `>>`, so this parsed as
+> `first >> (6 switch { … })` = `first >> 8` — always `0` for a single
+> byte, meaning *every* varint was decoded as one byte. Single-byte
+> values (< 64) decode correctly that way, which is why no prior test
+> caught it; the first multi-byte varint on the decode path (a SETTINGS
+> value of 8192) exposed it. Fixed to `(first >> 6) switch { … }` in
+> `Decode`, `ReadAsync`, and `TryDecode`.
+
+### Why `IsBidirectional` lives on the transport abstraction
+
+Demultiplexing request streams from control/QPACK/push streams requires
+knowing a stream's direction, and only the transport knows it. The
+signal is therefore a member on `ITransportConnectionContext` in
+`Assimalign.Cohesion.Transports`, defined as a default interface member
+returning `true` so every existing single-stream context (TCP, ordinary
+request streams) is unaffected. Only a multiplex transport that exposes
+unidirectional streams overrides it: the QUIC transport's
+`QuicTransportContext` returns
+`Stream.Type == QuicStreamType.Bidirectional`. Keeping the signal in the
+transport abstraction — rather than inferring direction in the HTTP
+layer — preserves the dependency direction and lets any future protocol
+over QUIC reuse it.
+
+### AOT posture
+
+No reflection, no runtime code generation. Stream-type dispatch is a
+`switch` over varint constants; SETTINGS parsing is buffer arithmetic;
+the peer-settings store is a plain dictionary.
+
+### Non-goals
+
+- **Acting on post-SETTINGS control frames.** `GOAWAY`, `MAX_PUSH_ID`,
+  and friends are read off the wire where they appear but are not acted
+  on in this subset (the server never pushes, so `MAX_PUSH_ID` is inert;
+  graceful `GOAWAY`-driven drain is future work).
+- **QPACK dynamic table.** Encoder/decoder streams are accepted but not
+  processed; the static-table + Huffman + literal field-section support
+  (#335) runs with the dynamic table disabled.
+- **Flow control / stream limits.** QUIC-level flow control and
+  `MAX_STREAMS` accounting live in the QUIC transport, not here.
+
 ## Scope decision: server push (de-scoped)
 
 Cohesion **does not implement HTTP/2 or HTTP/3 server push.** This is a

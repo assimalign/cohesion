@@ -40,6 +40,9 @@ public sealed class QuicTransportContext : TransportConnectionContext
     internal QuicStream Stream { get; }
 
     /// <inheritdoc />
+    public override bool IsBidirectional => Stream.Type == QuicStreamType.Bidirectional;
+
+    /// <inheritdoc />
     public override EndPoint LocalEndPoint { get; }
 
     /// <inheritdoc />

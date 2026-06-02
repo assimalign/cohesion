@@ -35,7 +35,14 @@ public abstract class TransportConnectionContext : ITransportConnectionContext
     public virtual CancellationToken ConnectionCancelled => _cancellationTokenSource.Token;
 
     /// <summary>
-    /// 
+    /// Gets a value indicating whether the stream this context represents is
+    /// bidirectional. Defaults to <see langword="true"/>; multiplex transports
+    /// that expose unidirectional streams (QUIC) override it.
+    /// </summary>
+    public virtual bool IsBidirectional => true;
+
+    /// <summary>
+    ///
     /// </summary>
     public virtual IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
 
