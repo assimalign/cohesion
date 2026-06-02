@@ -334,11 +334,10 @@ internal sealed class Http2Stream
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
-        HttpHost host = !string.IsNullOrWhiteSpace(decodedHeaders.Authority)
-            ? new HttpHost(decodedHeaders.Authority)
-            : decodedHeaders.Headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
-                ? new HttpHost(hostValue.Value)
-                : HttpHost.Empty;
+        // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
+        // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
+        // reconcile authority identically.
+        HttpHost host = HttpFieldNormalization.ResolveAuthority(decodedHeaders.Authority, decodedHeaders.Headers);
         HttpScheme scheme = decodedHeaders.Scheme is null
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;

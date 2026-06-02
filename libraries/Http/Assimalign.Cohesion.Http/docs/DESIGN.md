@@ -116,3 +116,52 @@ dictionaries. Fully AOT/trim safe.
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer.
+
+## Cross-version normalization
+
+`HttpFieldNormalization` is the operational layer over `HttpFieldRules`: where
+`HttpFieldRules` classifies field *names*, `HttpFieldNormalization` performs the
+*translation operations* a transport applies while turning a wire field section
+into an `IHttpRequest` / `IHttpResponse`. It exists so HTTP/1.1, HTTP/2, and
+HTTP/3 normalize the shared concepts identically instead of each re-encoding the
+quirks.
+
+### What it centralizes
+
+- **Authority resolution** (`ResolveAuthority`) — an explicit authority (the
+  HTTP/2 / HTTP/3 `:authority` pseudo-header, or the HTTP/1.1 absolute-form
+  target authority) supersedes the `Host` header, then falls back to `Host`,
+  then to `HttpHost.Empty` (RFC 9112 §3.2.2, RFC 9113 §8.3.1, RFC 9114 §4.3.1).
+  HTTP/2 (`Http2Stream`) and HTTP/3 (`Http3HeaderCodec`) both call it, so a
+  request with `:authority` set and a conflicting `Host` resolves the same way
+  on both.
+- **Connection-specific rejection** (`IsForbiddenInHttp2Or3` +
+  `IsTeValueValidInHttp2Or3`) — `Connection`, `Proxy-Connection`, `Keep-Alive`,
+  `Transfer-Encoding`, and `Upgrade` are forbidden in HTTP/2 and HTTP/3, and
+  `TE` may only be `trailers` (RFC 9113 §8.2.2, RFC 9114 §4.2). The HTTP/2 HPACK
+  decoder and the HTTP/3 codec share this rule — closing a real gap where the
+  HTTP/3 path previously did not reject these fields.
+- **Repeated-field combining** (`CombineFieldValue`) — the request `Cookie`
+  field coalesces with `"; "` (RFC 9113 §8.2.3, RFC 9114 §4.2.1); `Set-Cookie`
+  is never folded; other list fields combine as distinct values. Previously the
+  HTTP/3 path combined cookies with a comma; now it matches HTTP/2.
+
+### Version-specific boundaries that must NOT cross
+
+The normalization layer is deliberately the *only* place these
+version-spanning rules live, but some behaviors are intentionally version-local
+and must not be normalized away:
+
+- **Framing fields** (`Transfer-Encoding`, `Content-Length`, `Connection`,
+  `Keep-Alive`) are HTTP/1.1 connection mechanics. They are rejected — not
+  translated — when they appear in HTTP/2 / HTTP/3, because their semantics do
+  not exist there.
+- **Pseudo-headers** (`:method`, `:scheme`, `:path`, `:authority`) are an
+  HTTP/2 / HTTP/3 concept; they are reconciled into the version-neutral
+  request shape (method, scheme, path, host) at decode time and never emitted
+  as ordinary fields on the HTTP/1.1 side.
+
+### AOT posture
+
+Pure logic over the existing collections — no reflection, no codegen. Fully
+AOT/trim safe.

@@ -62,12 +62,11 @@ internal sealed class HPackDecodedHeaders
 
         if (Headers.TryGetValue(key, out HttpHeaderValue existingValue))
         {
-            // RFC 9113 §8.2.3 — multiple Cookie fields in an HTTP/2
-            // field section MUST be coalesced into a single field with
-            // "; " separator before forwarding to HTTP/1.1 semantics.
-            Headers[key] = string.Equals(name, "cookie", StringComparison.OrdinalIgnoreCase)
-                ? string.Concat(existingValue.Value, "; ", value)
-                : HttpHeaderValue.Concat(existingValue, value);
+            // RFC 9113 §8.2.3 — repeated-field combining (Cookie coalesces with
+            // "; "; other list fields combine as distinct values) is the same
+            // rule for HTTP/2 and HTTP/3, centralized in HttpFieldNormalization
+            // so both versions behave identically.
+            Headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
         }
         else
         {
@@ -164,23 +163,21 @@ internal sealed class HPackDecodedHeaders
 
     private static void RejectIfConnectionSpecific(string name, string value)
     {
-        // RFC 9113 §8.2.2 — these connection-specific header fields are
-        // forbidden in HTTP/2 because their semantics conflict with the
-        // protocol's multiplexed framing.
-        if (string.Equals(name, "connection", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "proxy-connection", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "keep-alive", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "transfer-encoding", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "upgrade", StringComparison.OrdinalIgnoreCase))
+        HttpHeaderKey key = new(name);
+
+        // RFC 9113 §8.2.2 — connection-specific header fields are forbidden in
+        // HTTP/2 (the rule is shared with HTTP/3 and lives in
+        // HttpFieldNormalization so both versions reject the same set).
+        if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
         {
             throw new HPackDecodingException(
                 $"Connection-specific header field '{name}' is forbidden in HTTP/2 (RFC 9113 §8.2.2).");
         }
 
-        // RFC 9113 §8.2.2 — TE is the one exception: it MAY appear, but
-        // its value MUST be exactly "trailers".
+        // RFC 9113 §8.2.2 — TE is the one exception: it MAY appear, but its
+        // value MUST be exactly "trailers".
         if (string.Equals(name, "te", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(value, "trailers", StringComparison.OrdinalIgnoreCase))
+            && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
         {
             throw new HPackDecodingException(
                 $"HTTP/2 field 'TE' MUST carry only the value 'trailers'; got '{value}'.");
