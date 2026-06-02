@@ -1,8 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<Description>HTTP antiforgery (CSRF) protection for the Cohesion HTTP family. Layered on top of Assimalign.Cohesion.Http; implements IHttpAntiforgery using a signed double-submit token model (HMAC-SHA256) over Assimalign.Cohesion.Http.Cookies (cookie-token storage) and Assimalign.Cohesion.Http.Forms (form-field request-token extraction). Server-side only; protocol-only consumers (clients, proxies, edge caches) should not reference this package.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
 	</ItemGroup>
 </Project>
