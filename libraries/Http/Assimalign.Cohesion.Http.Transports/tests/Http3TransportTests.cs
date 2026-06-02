@@ -182,6 +182,95 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should decode a Huffman-coded request field section")]
+    public async Task Http3_OnHuffmanEncodedRequest_ShouldParseFields()
+    {
+        // RFC 9204 §4.1.2 — names and values may be Huffman-coded. The whole
+        // field section here uses literal field lines with Huffman strings.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            huffman: true,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/huff"),
+            (":authority", "example.com"),
+            ("accept", "application/json"));
+
+        TestTransportConnectionContext streamContext = new(payload);
+        TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Get);
+        httpContext.Request.Path.Value.ShouldBe("/huff");
+        httpContext.Request.Host.Value.ShouldBe("example.com");
+        httpContext.Request.Headers[HttpHeaderKey.Accept].Value.ShouldBe("application/json");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with an uppercase field name")]
+    public Task Http3_OnUppercaseFieldName_ShouldDropStream()
+        // RFC 9114 §4.2 — uppercase field names are malformed.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "a"),
+            ("X-Bad", "v")));
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with a pseudo-header after a regular field")]
+    public Task Http3_OnPseudoHeaderAfterRegularField_ShouldDropStream()
+        // RFC 9114 §4.3 — pseudo-headers MUST precede regular fields.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            ("x-early", "1"),
+            (":scheme", "https"),
+            (":path", "/")));
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with a duplicate pseudo-header")]
+    public Task Http3_OnDuplicatePseudoHeader_ShouldDropStream()
+        // RFC 9114 §4.3.1 — a pseudo-header MUST NOT appear more than once.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            (":method", "POST"),
+            (":scheme", "https"),
+            (":path", "/")));
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with an unknown pseudo-header")]
+    public Task Http3_OnUnknownPseudoHeader_ShouldDropStream()
+        // RFC 9114 §4.3.1 — an unknown request pseudo-header is malformed.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            (":bogus", "x"),
+            (":scheme", "https"),
+            (":path", "/")));
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream missing the :path pseudo-header")]
+    public Task Http3_OnMissingPathPseudoHeader_ShouldDropStream()
+        // RFC 9114 §4.3.1 — a non-CONNECT request MUST include :path.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":authority", "a")));
+
+    private static async Task AssertMalformedRequestIsDroppedAsync(byte[] requestPayload)
+    {
+        // A per-stream field-section failure drops the offending stream; with
+        // a single stream the connection then ends, so no context is yielded.
+        TestTransportConnectionContext streamContext = new(requestPayload);
+        TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
     private static async Task<IHttpContext> ReadSingleContextAsync(IHttpConnectionContext context)
     {
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
