@@ -21,8 +21,10 @@ stored in `IHttpContext.Features`.
 
 | Type | Role |
 |------|------|
-| `IHttpSession` | Abstract session contract &mdash; identifier, key/value bag, load/commit lifecycle |
+| `IHttpSession` | Abstract session contract &mdash; `Id`, `IsAvailable`, `Keys`, key/value bag, load/commit lifecycle |
 | `HttpSession` | In-memory implementation |
+| `HttpSessionExtensions` | Typed accessors over `IHttpSession`: `GetString`/`SetString`, `GetInt32`/`SetInt32`, `TryGetString`/`TryGetInt32` |
+| `HttpSessionOptions` | Session configuration (cookie name, idle timeout) |
 | `IHttpSessionFeature` | Per-exchange session state stored in `IHttpContext.Features` |
 | `HttpSessionFeature` | Default in-memory feature implementation (internal; constructed via the `Session` setter) |
 | `HttpContextSessionExtensions` | `context.Session` / `context.RequireSession` extension properties on `IHttpContext` |
@@ -47,6 +49,26 @@ When no session middleware has run, `context.Session` returns `null` and
 `context.RequireSession` throws `InvalidOperationException` &mdash; the
 distinction lets opt-in middleware peek without forcing every consumer
 into a try/catch.
+
+## Typed access
+
+The store is binary; typed accessors are extension members on
+`IHttpSession`, so they work for any implementation:
+
+```csharp
+session.SetString("user-id", "42");      // UTF-8
+session.SetInt32("cart-count", 3);       // big-endian Int32
+
+string? user = session.GetString("user-id");   // "42"
+int? count = session.GetInt32("cart-count");    // 3
+bool has = session.TryGetInt32("cart-count", out int n);
+
+foreach (string key in session.Keys) { /* ... */ }
+bool ready = session.IsAvailable;        // true once LoadAsync has completed
+```
+
+`GetInt32` returns `null` when the stored value is not exactly four bytes, so
+a string value is never silently reinterpreted as an int.
 
 ## Implementing a custom feature
 
