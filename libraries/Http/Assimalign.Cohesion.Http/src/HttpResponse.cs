@@ -26,6 +26,13 @@ public abstract class HttpResponse : IHttpResponse
     /// </summary>
     public abstract HttpHeaderCollection Headers { get; }
 
+    /// <summary>
+    /// Gets the response trailer section (RFC 9110 §6.5). Defaults to the
+    /// shared unsupported (empty, read-only) collection; transports that emit
+    /// trailers override this with a supported collection.
+    /// </summary>
+    public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
+
     /// <inheritdoc />
     public abstract HttpContext HttpContext { get; }
 
@@ -33,5 +40,6 @@ public abstract class HttpResponse : IHttpResponse
     public abstract Stream Body { get; set; }
 
     IHttpHeaderCollection IHttpResponse.Headers => Headers;
+    IHttpTrailerCollection IHttpResponse.Trailers => Trailers;
     IHttpContext IHttpResponse.HttpContext => HttpContext;
 }

@@ -40,6 +40,13 @@ public abstract class HttpRequest : IHttpRequest
     /// </summary>
     public abstract HttpHeaderCollection Headers { get; }
 
+    /// <summary>
+    /// Gets the request trailer section (RFC 9110 §6.5). Defaults to the
+    /// shared unsupported (empty, read-only) collection; transports that
+    /// surface trailers override this with a supported collection.
+    /// </summary>
+    public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
+
     /// <inheritdoc />
     public abstract HttpContext HttpContext { get; }
 
@@ -48,5 +55,6 @@ public abstract class HttpRequest : IHttpRequest
 
     IHttpQueryCollection IHttpRequest.Query => Query;
     IHttpHeaderCollection IHttpRequest.Headers => Headers;
+    IHttpTrailerCollection IHttpRequest.Trailers => Trailers;
     IHttpContext IHttpRequest.HttpContext => HttpContext;
 }

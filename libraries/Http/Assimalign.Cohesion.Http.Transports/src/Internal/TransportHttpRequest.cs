@@ -14,7 +14,8 @@ internal abstract class TransportHttpRequest : HttpRequest
         HttpScheme scheme,
         HttpQueryCollection query,
         HttpHeaderCollection headers,
-        Stream body)
+        Stream body,
+        HttpTrailerCollection? trailers = null)
     {
         Host = host;
         Path = path;
@@ -23,6 +24,7 @@ internal abstract class TransportHttpRequest : HttpRequest
         Query = query;
         Headers = headers;
         Body = body;
+        Trailers = trailers ?? HttpTrailerCollection.Unsupported;
     }
 
     public override HttpHost Host { get; set; }
@@ -36,6 +38,8 @@ internal abstract class TransportHttpRequest : HttpRequest
     public override HttpQueryCollection Query { get; }
 
     public override HttpHeaderCollection Headers { get; }
+
+    public override HttpTrailerCollection Trailers { get; }
 
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(

@@ -55,6 +55,55 @@ public class Http1TransportTests
         responseText.ShouldContain("created");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should surface chunked request trailers on request.Trailers")]
+    public async Task Http1_OnChunkedRequestWithTrailers_ShouldSurfaceTrailers()
+    {
+        // RFC 9112 §7.1.2 — a chunked request may carry a trailer section after
+        // the terminating zero-length chunk. The transport parses it; the .02
+        // field-section model surfaces it via request.Trailers with the
+        // trailer-section lifecycle (available once the body is fully read).
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\n" +
+            "Host: api.test\r\n" +
+            "Transfer-Encoding: chunked\r\n" +
+            "Trailer: X-Checksum\r\n" +
+            "\r\n" +
+            "5\r\nhello\r\n" +
+            "0\r\n" +
+            "X-Checksum: abc123\r\n" +
+            "\r\n");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Trailers.IsSupported.ShouldBeTrue();
+        httpContext.Request.Trailers["X-Checksum"].Value.ShouldBe("abc123");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should expose an unsupported trailer section for a non-chunked request")]
+    public async Task Http1_OnNonChunkedRequest_ShouldExposeUnsupportedTrailers()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestTransportConnectionContext transportContext = new(payload);
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // A non-chunked request cannot carry a trailer section (RFC 9112 §7.1.2).
+        httpContext.Request.Trailers.IsSupported.ShouldBeFalse();
+        httpContext.Request.Trailers.Count.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse absolute-form request targets")]
     public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
     {

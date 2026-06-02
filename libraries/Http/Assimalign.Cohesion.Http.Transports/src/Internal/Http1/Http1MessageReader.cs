@@ -60,6 +60,7 @@ internal static class Http1MessageReader
         bool isConnectTunnel = method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority;
 
         byte[] bodyBytes;
+        HttpTrailerCollection? requestTrailers = null;
         if (isConnectTunnel)
         {
             // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
@@ -73,10 +74,14 @@ internal static class Http1MessageReader
             // chunked encodings.
             Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(stream, headers, cancellationToken).ConfigureAwait(false);
             bodyBytes = messageBody.Body;
-            // Trailers are parsed (and validated against the smuggling-vector header list)
-            // but not yet exposed on IHttpRequest — that wiring belongs to the .02
-            // field-section work.
-            _ = messageBody.Trailers;
+            // RFC 9112 §7.1.2 — only chunked transfer can carry a trailer
+            // section. Surface the parsed trailers (possibly empty) as a
+            // supported trailer collection on the request; non-chunked requests
+            // cannot carry trailers and keep the default unsupported collection.
+            if (HeaderContainsToken(headers, HttpHeaderKey.TransferEncoding, "chunked"))
+            {
+                requestTrailers = new HttpTrailerCollection(messageBody.Trailers, isSupported: true);
+            }
         }
 
         HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
@@ -106,7 +111,8 @@ internal static class Http1MessageReader
             requestScheme,
             queryCollection,
             headers,
-            new MemoryStream(bodyBytes, writable: false));
+            new MemoryStream(bodyBytes, writable: false),
+            requestTrailers);
         Http1Response response = new();
 
         bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");

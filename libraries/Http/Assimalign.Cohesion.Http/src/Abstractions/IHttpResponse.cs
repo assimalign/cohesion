@@ -18,6 +18,22 @@ public interface IHttpResponse
     IHttpHeaderCollection Headers { get; }
 
     /// <summary>
+    /// Gets the response trailer section — the fields a server queues to emit
+    /// after the body (RFC 9110 §6.5).
+    /// <see cref="IHttpTrailerCollection.IsSupported"/> reports whether the
+    /// exchange can carry trailers; adding to an unsupported collection throws.
+    /// </summary>
+    /// <remarks>
+    /// Defined as a default interface member returning the shared unsupported
+    /// (empty, read-only) collection so the trailer section could be added to
+    /// the core message model without breaking every existing
+    /// <see cref="IHttpResponse"/> implementation. The abstract
+    /// <see cref="HttpResponse"/> base and the protocol transports override it
+    /// with a real collection where trailers are emitted.
+    /// </remarks>
+    IHttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
+
+    /// <summary>
     /// Get's the context associated with the response.
     /// </summary>
     IHttpContext HttpContext { get; }

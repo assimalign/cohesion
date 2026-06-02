@@ -48,6 +48,22 @@ public interface IHttpRequest
     IHttpHeaderCollection Headers { get; }
 
     /// <summary>
+    /// Gets the request trailer section — the fields that follow the body
+    /// (RFC 9110 §6.5). Empty when the request carried no trailers;
+    /// <see cref="IHttpTrailerCollection.IsSupported"/> reports whether the
+    /// exchange surfaces a trailer section at all.
+    /// </summary>
+    /// <remarks>
+    /// Defined as a default interface member returning the shared unsupported
+    /// (empty, read-only) collection so the trailer section could be added to
+    /// the core message model without breaking every existing
+    /// <see cref="IHttpRequest"/> implementation. The abstract
+    /// <see cref="HttpRequest"/> base and the protocol transports override it
+    /// with a real collection where trailers are surfaced.
+    /// </remarks>
+    IHttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
+
+    /// <summary>
     /// Get's the context associated with the request.
     /// </summary>
     IHttpContext HttpContext { get; }
