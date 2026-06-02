@@ -82,6 +82,43 @@ internal static class HttpProtocolPayloadFactory
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Builds the bytes a peer would send on its HTTP/3 control stream: the
+    /// control stream-type prefix (0x00) followed by a SETTINGS frame carrying
+    /// the supplied identifier/value pairs.
+    /// </summary>
+    public static byte[] CreateHttp3ControlStream(params (long Id, long Value)[] settings)
+    {
+        using MemoryStream settingsPayload = new();
+        foreach ((long id, long value) in settings)
+        {
+            WriteQuicInteger(settingsPayload, id);
+            WriteQuicInteger(settingsPayload, value);
+        }
+
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, 0x00); // control stream type
+        WriteHttp3Frame(buffer, 0x4 /* SETTINGS */, settingsPayload.ToArray());
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds the bytes for a generic HTTP/3 unidirectional stream: the
+    /// stream-type prefix followed by an optional raw payload. Used to drive
+    /// QPACK / push / unknown stream-type handling in tests.
+    /// </summary>
+    public static byte[] CreateHttp3UnidirectionalStream(long streamType, byte[]? payload = null)
+    {
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, streamType);
+        if (payload is { Length: > 0 })
+        {
+            buffer.Write(payload, 0, payload.Length);
+        }
+
+        return buffer.ToArray();
+    }
+
     public static IReadOnlyList<(long FrameType, byte[] Payload)> ParseHttp3Frames(byte[] payload)
     {
         List<(long FrameType, byte[] Payload)> frames = new();
@@ -417,7 +454,7 @@ internal static class HttpProtocolPayloadFactory
     private static long DecodeQuicInteger(byte[] buffer, ref int index)
     {
         byte first = buffer[index++];
-        int length = first >> 6 switch
+        int length = (first >> 6) switch
         {
             0 => 1,
             1 => 2,

@@ -15,8 +15,10 @@ internal sealed class TestTransportConnectionContext : TransportConnectionContex
     private readonly PipeReader _outputReader;
     private readonly CancellationTokenSource _connectionCancelledSource;
 
-    public TestTransportConnectionContext(byte[] input, EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null)
+    public TestTransportConnectionContext(byte[] input, EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null, bool isBidirectional = true)
     {
+        IsBidirectional = isBidirectional;
+
         // Pipes default to pauseWriterThreshold = 64 KB, which blocks the
         // synchronous prime write below for any input larger than that.
         // Tests for flow-control / large-frame scenarios need bigger
@@ -44,6 +46,14 @@ internal sealed class TestTransportConnectionContext : TransportConnectionContex
     public override EndPoint RemoteEndPoint { get; }
 
     public override ITransportConnectionPipe Pipe { get; }
+
+    /// <summary>
+    /// Whether this stream is bidirectional (a request stream) or
+    /// unidirectional (an HTTP/3 control / QPACK / push stream). Defaults to
+    /// <see langword="true"/>; set to <see langword="false"/> to simulate a
+    /// peer-initiated unidirectional stream.
+    /// </summary>
+    public override bool IsBidirectional { get; }
 
     /// <summary>
     /// Cancellation token signalled when the test driver simulates a

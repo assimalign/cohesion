@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,7 +19,7 @@ internal static class QuicVariableLengthInteger
         }
 
         byte first = buffer[0];
-        int length = first >> 6 switch
+        int length = (first >> 6) switch
         {
             0 => 1,
             1 => 2,
@@ -45,7 +46,7 @@ internal static class QuicVariableLengthInteger
     public static long Decode(ReadOnlySpan<byte> buffer, ref int index)
     {
         byte first = buffer[index++];
-        int length = first >> 6 switch
+        int length = (first >> 6) switch
         {
             0 => 1,
             1 => 2,
@@ -65,6 +66,55 @@ internal static class QuicVariableLengthInteger
         }
 
         return (long)value;
+    }
+
+    /// <summary>
+    /// Attempts to decode a QUIC variable-length integer (RFC 9000 §16) from
+    /// the start of a buffered sequence without consuming bytes that are not
+    /// yet available. Used for incremental reads off a
+    /// <see cref="System.IO.Pipelines.PipeReader"/>.
+    /// </summary>
+    /// <param name="buffer">The buffered bytes to decode from.</param>
+    /// <param name="value">The decoded value when a complete integer is present.</param>
+    /// <param name="consumed">The position immediately after the decoded integer.</param>
+    /// <returns>
+    /// <see langword="true"/> when a complete integer was decoded; otherwise
+    /// <see langword="false"/>, indicating more bytes are required.
+    /// </returns>
+    public static bool TryDecode(ReadOnlySequence<byte> buffer, out long value, out SequencePosition consumed)
+    {
+        value = 0;
+        consumed = buffer.Start;
+
+        SequenceReader<byte> reader = new(buffer);
+
+        if (!reader.TryRead(out byte first))
+        {
+            return false;
+        }
+
+        int length = (first >> 6) switch
+        {
+            0 => 1,
+            1 => 2,
+            2 => 4,
+            _ => 8
+        };
+        ulong result = (ulong)(first & 0x3F);
+
+        for (int offset = 1; offset < length; offset++)
+        {
+            if (!reader.TryRead(out byte next))
+            {
+                return false;
+            }
+
+            result = (result << 8) | next;
+        }
+
+        value = (long)result;
+        consumed = reader.Position;
+        return true;
     }
 
     public static void Write(Stream stream, long value)

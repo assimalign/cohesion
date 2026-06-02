@@ -1,6 +1,8 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Quic;
 using System.Runtime.Versioning;
@@ -20,6 +22,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private readonly Dictionary<string, object?> _items;
     private readonly Func<IHttpFeatureCollection>? _createFeatures;
     private readonly bool _isSecure;
+    private readonly Http3PeerSettings _peerSettings = new();
+    private bool _controlStreamReceived;
+    private bool _qpackEncoderStreamReceived;
+    private bool _qpackDecoderStreamReceived;
     private EndPoint _localEndPoint;
     private EndPoint _remoteEndPoint;
 
@@ -89,12 +95,229 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             _localEndPoint = streamContext.LocalEndPoint;
             _remoteEndPoint = streamContext.RemoteEndPoint;
 
+            // RFC 9114 §6 — a bidirectional stream is a request stream; the
+            // peer's unidirectional streams carry a type prefix (control,
+            // QPACK encoder/decoder, push) and are demultiplexed separately.
+            if (!streamContext.IsBidirectional)
+            {
+                if (await TryHandleUnidirectionalStreamAsync(streamContext, cancellationToken).ConfigureAwait(false))
+                {
+                    // A control-stream protocol violation — duplicate control
+                    // or QPACK stream, missing/!SETTINGS first frame, or a
+                    // client-created push stream — is a connection error
+                    // (RFC 9114 §6.2). Terminate the connection.
+                    yield break;
+                }
+
+                continue;
+            }
+
             Http3Context? context = await TryReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
 
             if (context is not null)
             {
                 yield return context;
             }
+        }
+    }
+
+    /// <summary>
+    /// Demultiplexes a peer-initiated unidirectional stream by its RFC 9114
+    /// §6.2 stream-type prefix. Returns <see langword="true"/> when the stream
+    /// is a connection-level protocol violation that must terminate the
+    /// connection (duplicate control / QPACK stream, missing or non-SETTINGS
+    /// first control frame, or a client-created push stream); otherwise
+    /// <see langword="false"/>.
+    /// </summary>
+    private async Task<bool> TryHandleUnidirectionalStreamAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
+    {
+        // RFC 9114 §6.2 — read directly off the PipeReader rather than the
+        // Stream adapter. Unidirectional streams are processed incrementally
+        // (a varint stream-type prefix, then type-specific frames), which the
+        // buffered ReadOnlySequence model expresses directly without the
+        // adapter's read-size quirks.
+        PipeReader reader = streamContext.Pipe.Input;
+
+        long? streamType;
+        try
+        {
+            streamType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+            // The stream type could not be read — RFC 9114 §6.2 permits
+            // abandoning an unparseable unidirectional stream without
+            // affecting the connection.
+            return false;
+        }
+
+        if (streamType is null)
+        {
+            return false;
+        }
+
+        switch (streamType.Value)
+        {
+            case Http3StreamType.Control:
+                return await TryHandleControlStreamAsync(reader, cancellationToken).ConfigureAwait(false);
+
+            case Http3StreamType.QPackEncoder:
+                // RFC 9204 §4.2 — at most one encoder stream. With the dynamic
+                // table disabled (QPACK_MAX_TABLE_CAPACITY = 0) it carries no
+                // instructions to process, so accepting it is sufficient.
+                if (_qpackEncoderStreamReceived)
+                {
+                    return true;
+                }
+
+                _qpackEncoderStreamReceived = true;
+                return false;
+
+            case Http3StreamType.QPackDecoder:
+                if (_qpackDecoderStreamReceived)
+                {
+                    return true;
+                }
+
+                _qpackDecoderStreamReceived = true;
+                return false;
+
+            case Http3StreamType.Push:
+                // RFC 9114 §6.2.2 — a client MUST NOT create a push stream;
+                // treat it as H3_STREAM_CREATION_ERROR.
+                return true;
+
+            default:
+                // RFC 9114 §6.2 — unknown unidirectional stream types are not
+                // an error; the recipient may abandon them.
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads and applies the peer's control stream. Enforces a single control
+    /// stream and that its first frame is SETTINGS (RFC 9114 §6.2.1 / §7.2.4).
+    /// Returns <see langword="true"/> on a protocol violation.
+    /// </summary>
+    private async Task<bool> TryHandleControlStreamAsync(PipeReader reader, CancellationToken cancellationToken)
+    {
+        if (_controlStreamReceived)
+        {
+            // RFC 9114 §6.2.1 — only one control stream per peer.
+            return true;
+        }
+
+        _controlStreamReceived = true;
+
+        try
+        {
+            // RFC 9114 §6.2.1 / §7.2.4 — the first frame on the control stream
+            // MUST be SETTINGS. The frame is read and applied; later control
+            // frames are not acted on in this supported subset.
+            long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+            long? frameLength = frameType is null
+                ? null
+                : await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+
+            if (frameType is null || frameLength is null || frameType.Value != (long)Http3FrameType.Settings)
+            {
+                // Missing or non-SETTINGS first frame — H3_MISSING_SETTINGS.
+                return true;
+            }
+
+            byte[] payload = await ReadExactAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
+            ApplySettings(payload);
+            return false;
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+            // The control stream is critical; a read/parse failure is a
+            // connection error (H3_FRAME_ERROR / H3_CLOSED_CRITICAL_STREAM).
+            return true;
+        }
+    }
+
+    private void ApplySettings(byte[] payload)
+    {
+        int index = 0;
+        while (index < payload.Length)
+        {
+            long identifier = QuicVariableLengthInteger.Decode(payload, ref index);
+            long value = QuicVariableLengthInteger.Decode(payload, ref index);
+            _peerSettings.Set(identifier, value);
+        }
+    }
+
+    /// <summary>
+    /// Reads a single QUIC variable-length integer off the pipe, buffering
+    /// across reads until a complete integer is available. Returns
+    /// <see langword="null"/> when the stream ends before any byte arrives.
+    /// </summary>
+    private static async Task<long?> ReadVarintAsync(PipeReader reader, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            ReadOnlySequence<byte> buffer = result.Buffer;
+
+            if (QuicVariableLengthInteger.TryDecode(buffer, out long value, out SequencePosition consumed))
+            {
+                reader.AdvanceTo(consumed);
+                return value;
+            }
+
+            if (result.IsCompleted)
+            {
+                if (buffer.IsEmpty)
+                {
+                    // Clean end of stream before the next integer began.
+                    reader.AdvanceTo(buffer.End);
+                    return null;
+                }
+
+                // Bytes remain but cannot form a complete integer.
+                reader.AdvanceTo(buffer.End);
+                throw new EndOfStreamException("The QUIC variable-length integer was incomplete.");
+            }
+
+            // Not enough buffered yet; mark everything examined so the next
+            // read waits for more bytes rather than returning the same span.
+            reader.AdvanceTo(buffer.Start, buffer.End);
+        }
+    }
+
+    /// <summary>
+    /// Reads exactly <paramref name="length"/> bytes off the pipe, buffering
+    /// across reads. Throws <see cref="EndOfStreamException"/> when the stream
+    /// ends first.
+    /// </summary>
+    private static async Task<byte[]> ReadExactAsync(PipeReader reader, int length, CancellationToken cancellationToken)
+    {
+        if (length == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        while (true)
+        {
+            ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            ReadOnlySequence<byte> buffer = result.Buffer;
+
+            if (buffer.Length >= length)
+            {
+                ReadOnlySequence<byte> slice = buffer.Slice(0, length);
+                byte[] payload = slice.ToArray();
+                reader.AdvanceTo(slice.End);
+                return payload;
+            }
+
+            if (result.IsCompleted)
+            {
+                reader.AdvanceTo(buffer.End);
+                throw new EndOfStreamException("The HTTP/3 control SETTINGS frame was truncated.");
+            }
+
+            reader.AdvanceTo(buffer.Start, buffer.End);
         }
     }
 
