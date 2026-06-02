@@ -4,8 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-using Assimalign.Cohesion.ObjectMapping.Properties;
-
 
 /*
  * Scalar member-to-member mapping. Reads through a getter and writes through a
@@ -35,23 +33,24 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
     [RequiresDynamicCode("Compiles member-access expressions at run time; prefer a source-generated profile for AOT.")]
     public MapperActionMember(Expression<Func<TTarget, TTargetMember>> target, Expression<Func<TSource, TSourceMember>> source)
     {
-        if (target.Body is not MemberExpression memberExpression)
+        if (target.Body is not MemberExpression)
         {
             throw new ArgumentException($"The target expression body: '{target}' must be a MemberExpression.");
         }
-        // Ensure that the member is of type TTarget (Target Members cannot be nested.)
-        if (memberExpression.Member.DeclaringType != typeof(TTarget))
+        // The target may be a member path (e.g. t => t.Info.FirstName); intermediate members are
+        // created on demand by the compiled setter.
+        if (MapperUtility.ExtractMemberPath(target) is not { Length: > 0 } path)
         {
-            throw new ArgumentException(string.Format(Resources.MapperExceptionInvalidChaining, target, typeof(TTarget).Name));
+            throw new ArgumentException($"The target expression '{target}' must be a member access path on the parameter (e.g. 't => t.A.B').");
         }
-        // Check if the source type can be assigned to the target type, if not throw an exception
+        // Check if the source type can be assigned to the target (leaf) type, if not throw an exception
         if (!typeof(TSourceMember).IsAssignableTo(typeof(TTargetMember)))
         {
             throw new InvalidCastException($"The source expression '{source}' cannot be assigned to the target expression '{target}'.");
         }
 
         _getter = source.Compile();
-        _setter = MapperUtility.CompileSetter<TTarget, TSourceMember>(memberExpression.Member);
+        _setter = MapperUtility.CompilePathSetter<TTarget, TSourceMember>(path);
     }
 
     public void Invoke(IMapperContext context)

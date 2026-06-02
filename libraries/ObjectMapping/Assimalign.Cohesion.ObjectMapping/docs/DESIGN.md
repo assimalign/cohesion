@@ -124,6 +124,9 @@ calls. For each, it emits a partial `TryConfigureGenerated` override that re-reg
 the mappings through the delegate-based overloads:
 
 - `MapMember(t => t.X, s => …)` → `MapMember(<source lambda verbatim>, static (target, value) => target.X = value)`.
+  A **nested target path** (`t => t.A.B`) emits a setter that creates null intermediates on demand:
+  `static (target, value) => (target.A ??= new A()).B = value`. Each intermediate must be a settable
+  reference type with a public parameterless constructor (otherwise the call falls back).
 - `MapMemberTypes(t => t.X, s => …)` → `MapMemberTypes(<source>, <target>, static (target, value) => target.X = value)`.
 - `MapMemberEnumerables(t => t.X, s => …)` → `MapMemberEnumerables(<source>, <target>, static (target, items) => target.X = <conversion>)`,
   where `<conversion>` is chosen at compile time from the target member's declared
@@ -154,15 +157,15 @@ location through `SemanticModel.GetInterceptableLocation`) emits:
 - an `[InterceptsLocation]` interceptor that redirects the call to
   `builder.AddProfile(new <generated profile>())` and never invokes the user lambda (so its
   `Expression.Compile()` never runs), and
-- an assembly-level `[UnconditionalSuppressMessage(Scope = "member", Target = "<containing member>")]`
+- an assembly-level `[UnconditionalSuppressMessage(Scope = "member"/"type", Target = "<containing member or type>")]`
   for `IL2026`/`IL3050`, because the inline lambda — which still compiles into the user's method — is
   statically reachable to the analyzer even though the interceptor never runs it. (A `file`-scoped
   `InterceptsLocationAttribute` is emitted to avoid collisions with other generators.)
 
-The member-scoped suppression is necessarily coarser than the class-based, type-scoped one: it
-silences `IL2026`/`IL3050` for the whole member that contains the intercepted call. A member that
-mixes an intercepted inline profile with a genuinely dynamic call (`MapAll*`, etc.) would have the
-latter's warning hidden too.
+The suppression is **member-scoped** when the containing member is referenceable by name (the common
+case), and falls back to **type-scoped** when it is not (e.g. a synthesized member). It is necessarily
+coarser than the class-based, type-scoped suppression: a member that mixes an intercepted inline
+profile with a genuinely dynamic call (`MapAll*`, etc.) would have the latter's warning hidden too.
 
 Consumers that use inline profiles must opt their project into the interceptor namespace:
 
@@ -183,6 +186,15 @@ inline profiles, and so fails the build if the generator or either suppression r
   `InterceptorsNamespaces` opt-in above. Shipping a `.props` in the library package that sets it
   automatically for consumers is a packaging follow-up (the in-repo test and AOT-guard projects set
   it explicitly today).
+- **Inline profiles written directly in top-level statements** (`Program.cs` with no explicit method)
+  are still *intercepted* — they run AOT-safe, with no `Expression.Compile()`. But the AOT analyzer
+  warning cannot be auto-suppressed there: the enclosing symbol is the synthesized `<Main>$` entry
+  point, whose documentation id is not matchable by member-scope, and a type-scope suppression on the
+  synthesized `Program` does not cover the lambda-cache class the warning is attributed to (only the
+  far-too-broad module scope works). So under `IsAotCompatible` with warnings-as-errors, a top-level
+  inline profile still reports `IL3050`/`IL2026` — a false positive, since the call is intercepted.
+  Workarounds: move the mapper setup into a method or a class-based profile (both are fully covered),
+  or add `<NoWarn>IL2026;IL3050</NoWarn>` for that project.
 - The AOT guard is not yet wired into CI / the solution; building it is currently a manual
   (or to-be-added pipeline) step.
 
@@ -192,8 +204,12 @@ inline profiles, and so fails the build if the generator or either suppression r
   checked with `Type.IsAssignableTo`, which does not consider implicit conversions
   (e.g. `int` → `int?` or `int` → `long`). Supply a conversion in the source
   expression instead: `source => (int?)source.Age`.
-- **No flattening/unflattening conventions** (e.g. `Customer.Name` → `CustomerName`)
-  beyond the explicit dotted-path form of `MapMember(string, string)`.
+- **Explicit nested target paths are supported; convention-based flattening is not.**
+  `MapMember(t => t.Info.FirstName, s => s.FirstName)` (and the dotted-path
+  `MapMember("Info.FirstName", "FirstName")` form) map into a nested target, creating null
+  intermediates on demand (intermediates must be settable reference types with a public
+  parameterless constructor). Automatic name-based flattening/unflattening (e.g. inferring
+  `Customer.Name` ↔ `CustomerName`) remains a non-goal.
 - **Targets must be reference types.** Mapping mutates the target in place; struct
   targets would be mutated on a copy.
 - **No async mapping.** Mapping is synchronous and CPU-bound.

@@ -2,6 +2,7 @@
 	<Import Project="..\Directory.Build.props" />
 	<!-- Shared package properties -->
 	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkForSdks)</TargetFramework>
 		<OutputType>Library</OutputType>
 		<!-- <EnableDefaultItems>false</EnableDefaultItems> -->
 		<GenerateDependencyFile>false</GenerateDependencyFile>

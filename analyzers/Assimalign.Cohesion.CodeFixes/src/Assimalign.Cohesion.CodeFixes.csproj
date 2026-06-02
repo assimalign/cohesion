@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+	</ItemGroup>
+</Project>

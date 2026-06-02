@@ -116,4 +116,21 @@ public static class AotSample
 
         return mapper.Map(new OrderDto(), entity);
     }
+
+    /// <summary>
+    /// Maps into a nested target member path (<c>t =&gt; t.Customer.Name</c>). The generator emits a
+    /// path setter that creates the intermediate on demand, so this is AOT-safe.
+    /// </summary>
+    /// <param name="entity">The source entity.</param>
+    /// <returns>The mapped DTO.</returns>
+    public static OrderDto MapNested(OrderEntity entity)
+    {
+        IMapper mapper = new MapperBuilder()
+            .AddProfile<OrderDto, OrderEntity>(d => d
+                .MapMember(t => t.Id, s => s.Id)
+                .MapMember(t => t.Customer!.Name, s => s.Customer!.Name))
+            .Build();
+
+        return mapper.Map(new OrderDto(), entity);
+    }
 }

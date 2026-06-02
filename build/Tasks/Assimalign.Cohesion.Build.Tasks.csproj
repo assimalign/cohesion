@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<DebugType>embedded</DebugType>
 		<IsPackable>true</IsPackable>
 		<Nullable>enable</Nullable>

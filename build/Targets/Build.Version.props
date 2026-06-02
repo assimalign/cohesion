@@ -1,7 +1,7 @@
 <Project>
     <PropertyGroup>
         <!-- Major version tracks the targeted .NET runtime release for simpler release management. -->
-        <CohesionMajorVersion>$([System.Version]::Parse('$(TargetFramework.TrimStart('net'))').Major)</CohesionMajorVersion>
+        <CohesionMajorVersion>$([System.Version]::Parse('$(TargetFrameworkLatest.TrimStart('net'))').Major)</CohesionMajorVersion>
         <CohesionMinorVersion>0</CohesionMinorVersion>
         <!--
             Patch may carry an optional semver prerelease tag after a single '-',
@@ -10,7 +10,7 @@
             semver is welcome) while the numeric core feeds AssemblyVersion /
             FileVersion (where the C# compiler enforces numeric-only via CS7034).
         -->
-        <CohesionPatchVersion>1-preview.1</CohesionPatchVersion>
+        <CohesionPatchVersion>1-preview.2</CohesionPatchVersion>
 
         <!-- Numeric core. Suitable for AssemblyVersion / FileVersion. -->
         <_CohesionPatchCore>$(CohesionPatchVersion.Split('-')[0])</_CohesionPatchCore>

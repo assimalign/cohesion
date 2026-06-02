@@ -22,6 +22,7 @@
         [assembly: AssemblyVersion], which rejects suffixes with CS7034.
     -->
     <PropertyGroup>
+        <TargetFramework>$(TargetFrameworkForFrameworks)</TargetFramework>
         <VersionPrefix>$(CohesionVersionPrefix)</VersionPrefix>
         <VersionSuffix Condition="'$(CohesionVersionSuffix)' != ''">$(CohesionVersionSuffix)</VersionSuffix>
     </PropertyGroup>

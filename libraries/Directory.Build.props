@@ -8,6 +8,7 @@
 					/test
 	-->
 	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkForLibraries)</TargetFramework>
 		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
 		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
 	</PropertyGroup>

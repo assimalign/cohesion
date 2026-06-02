@@ -221,12 +221,20 @@ public class MapperMemberMappingTests
     }
 
     [Fact]
-    public void MapMember_TargetExpressionChainedMember_ThrowsArgumentException()
+    public void MapMember_ChainedTargetMember_CreatesIntermediateAndMaps()
     {
-        // Act / Assert: target member belongs to CustomerTarget, not OrderTarget
-        Should.Throw<ArgumentException>(() => new MapperBuilder()
+        // Arrange: a chained target member is now supported; the intermediate is created on demand
+        var mapper = new MapperBuilder()
             .AddProfile<OrderTarget, OrderSource>(descriptor => descriptor
-                .MapMember(target => target.Customer!.Name, source => source.Id)));
+                .MapMember(target => target.Customer!.Name, source => source.Id))
+            .Build();
+
+        // Act
+        var result = mapper.Map<OrderTarget, OrderSource>(new OrderSource { Id = "ORD-1" });
+
+        // Assert
+        result.Customer.ShouldNotBeNull();
+        result.Customer!.Name.ShouldBe("ORD-1");
     }
 
     [Fact]

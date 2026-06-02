@@ -92,23 +92,10 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
                 return false;
             }
 
-            // arg0 must select a direct target member: p => p.Member (a trailing `!` is unwrapped).
-            if (arguments[0].Expression is not SimpleLambdaExpressionSyntax targetLambda)
-            {
-                return false;
-            }
-
-            var targetBody = targetLambda.Body;
-
-            if (targetBody is PostfixUnaryExpressionSyntax postfix
-                && postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression))
-            {
-                targetBody = postfix.Operand;
-            }
-
-            if (targetBody is not MemberAccessExpressionSyntax targetMember
-                || targetMember.Expression is not IdentifierNameSyntax targetIdentifier
-                || targetIdentifier.Identifier.Text != targetLambda.Parameter.Identifier.Text)
+            // arg0 selects a target member path: p => p.Member or p => p.A.B.C (a trailing `!` is
+            // unwrapped at each level). Intermediates are created on demand for MapMember.
+            if (arguments[0].Expression is not SimpleLambdaExpressionSyntax targetLambda
+                || !TryParseTargetPath(targetLambda, model, ct, out var pathNames, out var intermediateNews, out var leafAccess))
             {
                 return false;
             }
@@ -122,7 +109,7 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
                 return false;
             }
 
-            var memberName = targetMember.Name.Identifier.Text;
+            var leafName = pathNames[pathNames.Count - 1];
             var sourceText = arguments[1].Expression.ToString();
             var targetText = arguments[0].Expression.ToString();
             var order = memberAccess.Name.SpanStart;
@@ -132,25 +119,45 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
             switch (methodName)
             {
                 case "MapMember":
-                    // Only emit when the source value is assignable to the target member without an
-                    // implicit numeric/nullable conversion (matching the runtime IsAssignableTo check),
-                    // so the generated `target.X = value` always compiles and behaves identically.
-                    if (!IsScalarAssignable(model, arguments[1].Expression, targetMember))
+                    // Only emit when the source value is assignable to the target leaf member without
+                    // an implicit numeric/nullable conversion (matching the runtime IsAssignableTo check),
+                    // so the generated assignment always compiles and behaves identically.
+                    if (!IsScalarAssignable(model, arguments[1].Expression, leafAccess))
                     {
                         return false;
                     }
 
-                    call = $".MapMember({sourceText}, static (target, value) => target.{memberName} = value)";
+                    // Build the (possibly nested) assignment target, creating null intermediates:
+                    // (target.A ??= new A()).B = value
+                    var setTarget = "target";
+                    for (int i = 0; i < pathNames.Count - 1; i++)
+                    {
+                        setTarget = $"({setTarget}.{pathNames[i]} ??= {intermediateNews[i]})";
+                    }
+
+                    call = $".MapMember({sourceText}, static (target, value) => {setTarget}.{leafName} = value)";
                     break;
 
                 case "MapMemberTypes":
-                    call = $".MapMemberTypes({sourceText}, {targetText}, static (target, value) => target.{memberName} = value)";
+                    // Nested-object mappings target a single member.
+                    if (pathNames.Count != 1)
+                    {
+                        return false;
+                    }
+
+                    call = $".MapMemberTypes({sourceText}, {targetText}, static (target, value) => target.{leafName} = value)";
                     break;
 
                 default: // MapMemberEnumerables
-                    var collectionType = model.GetTypeInfo(targetMember, ct).Type;
+                    // Enumerable mappings target a single member.
+                    if (pathNames.Count != 1)
+                    {
+                        return false;
+                    }
+
+                    var collectionType = model.GetTypeInfo(leafAccess, ct).Type;
                     var conversion = GetEnumerableConversion(collectionType);
-                    call = $".MapMemberEnumerables({sourceText}, {targetText}, static (target, items) => target.{memberName} = {conversion})";
+                    call = $".MapMemberEnumerables({sourceText}, {targetText}, static (target, items) => target.{leafName} = {conversion})";
                     break;
             }
 
@@ -214,6 +221,77 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
         return conversion.IsIdentity || conversion.IsReference || conversion.IsBoxing;
     }
 
+    /// <summary>
+    /// Parses a target member-access lambda (<c>p =&gt; p.A.B</c>, trailing <c>!</c> unwrapped at each
+    /// level) into its root-to-leaf member names. For each intermediate member it records a
+    /// <c>new T()</c> expression and verifies the member is a reference type with a public
+    /// parameterless constructor (so it can be created on demand). Returns <see langword="false"/>
+    /// when the body is not a pure member-access chain rooted at the parameter, or an intermediate
+    /// cannot be created.
+    /// </summary>
+    private static bool TryParseTargetPath(
+        SimpleLambdaExpressionSyntax targetLambda,
+        SemanticModel model,
+        CancellationToken ct,
+        out List<string> names,
+        out List<string> intermediateNews,
+        out MemberAccessExpressionSyntax leafAccess)
+    {
+        names = new List<string>();
+        intermediateNews = new List<string>();
+        leafAccess = null!;
+
+        var parameterName = targetLambda.Parameter.Identifier.Text;
+        var accesses = new List<MemberAccessExpressionSyntax>();
+        var current = Unwrap(targetLambda.Body as ExpressionSyntax);
+
+        while (current is MemberAccessExpressionSyntax access)
+        {
+            accesses.Add(access);
+            current = Unwrap(access.Expression);
+        }
+
+        if (accesses.Count == 0
+            || current is not IdentifierNameSyntax identifier
+            || identifier.Identifier.Text != parameterName)
+        {
+            return false;
+        }
+
+        leafAccess = accesses[0]; // leaf-first, before reversing
+        accesses.Reverse();       // root-to-leaf
+
+        for (int i = 0; i < accesses.Count; i++)
+        {
+            names.Add(accesses[i].Name.Identifier.Text);
+
+            if (i < accesses.Count - 1)
+            {
+                if (model.GetTypeInfo(accesses[i], ct).Type is not INamedTypeSymbol type
+                    || !type.IsReferenceType
+                    || !type.InstanceConstructors.Any(c => c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public))
+                {
+                    return false;
+                }
+
+                intermediateNews.Add($"new {type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}()");
+            }
+        }
+
+        return true;
+
+        static ExpressionSyntax? Unwrap(ExpressionSyntax? expression)
+        {
+            while (expression is PostfixUnaryExpressionSyntax postfix
+                && postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression))
+            {
+                expression = postfix.Operand;
+            }
+
+            return expression;
+        }
+    }
+
     private static string GetEnumerableConversion(ITypeSymbol? memberType)
     {
         if (memberType is IArrayTypeSymbol)
@@ -252,7 +330,7 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
                 or MethodKind.Destructor
                 or MethodKind.UserDefinedOperator
                 or MethodKind.Conversion,
-            IPropertySymbol or IFieldSymbol or IEventSymbol => true,
+            IPropertySymbol or IFieldSymbol or IEventSymbol or INamedTypeSymbol => true,
             _ => false
         };
     }
@@ -409,10 +487,19 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
         // The single argument must be a lambda whose body is the fluent configuration chain.
         var argument = invocation.ArgumentList.Arguments[0].Expression;
 
-        ExpressionSyntax? chain = argument switch
+        CSharpSyntaxNode? lambdaBody = argument switch
         {
-            SimpleLambdaExpressionSyntax simple => simple.Body as ExpressionSyntax,
-            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.Body as ExpressionSyntax,
+            SimpleLambdaExpressionSyntax simple => simple.Body,
+            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.Body,
+            _ => null
+        };
+
+        // The body is either an expression (d => d.MapMember(...)) or a single-statement block
+        // (d => { d.MapMember(...); }).
+        ExpressionSyntax? chain = lambdaBody switch
+        {
+            ExpressionSyntax expression => expression,
+            BlockSyntax { Statements.Count: 1 } block when block.Statements[0] is ExpressionStatementSyntax statement => statement.Expression,
             _ => null
         };
 
@@ -431,8 +518,8 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
         var targetType = method.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var sourceType = method.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        // The member that contains the inline call, so its (unreachable) expression mapping can be
-        // suppressed. Walk past lambdas / local functions to the first real documentable member.
+        // Suppress the (unreachable) expression-based configuration for the member that contains the
+        // inline call. Walk past lambdas / local functions to the first real member or type.
         var enclosing = ctx.SemanticModel.GetEnclosingSymbol(invocation.SpanStart, ct);
 
         while (enclosing is not null && !IsDocumentableMember(enclosing))
@@ -440,12 +527,33 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
             enclosing = enclosing.ContainingSymbol;
         }
 
+        // A referenceable member (a normal method/property/...) gets a precise member-scoped
+        // suppression. A synthesized member — e.g. a top-level program's '<Main>$', whose
+        // documentation id the analyzer will not match — falls back to a type-scoped suppression.
+        string? suppressionTarget;
+        string suppressionScope;
+
+        if (enclosing is not null and not INamedTypeSymbol
+            && enclosing.CanBeReferencedByName
+            && enclosing.GetDocumentationCommentId() is { } memberDocId)
+        {
+            suppressionTarget = memberDocId;
+            suppressionScope = "member";
+        }
+        else
+        {
+            var containingType = enclosing as INamedTypeSymbol ?? enclosing?.ContainingType;
+            suppressionTarget = containingType?.GetDocumentationCommentId();
+            suppressionScope = "type";
+        }
+
         return new InlineModel(
             targetType,
             sourceType,
             mappingBody,
             location.GetInterceptsLocationAttributeSyntax(),
-            enclosing?.GetDocumentationCommentId());
+            suppressionTarget,
+            suppressionScope);
     }
 
     private static void EmitInline(SourceProductionContext spc, ImmutableArray<InlineModel> models)
@@ -461,13 +569,18 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
         builder.AppendLine("#nullable enable");
         builder.AppendLine();
 
-        // Suppress the (unreachable) expression-based configuration in each containing member.
-        foreach (var docId in models.Select(static m => m.SuppressionTargetDocId).Where(static id => id is not null).Distinct())
+        // Suppress the (unreachable) expression-based configuration for each distinct target/scope.
+        foreach (var suppression in models
+            .Where(static m => m.SuppressionTargetDocId is not null)
+            .Select(static m => (Target: m.SuppressionTargetDocId, m.SuppressionScope))
+            .Distinct())
         {
-            builder.Append("[assembly: global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"Trimming\", \"IL2026\", Scope = \"member\", Target = \"")
-                .Append(docId).Append("\", Justification = \"").Append(SuppressionJustification).AppendLine("\")]");
-            builder.Append("[assembly: global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL3050\", Scope = \"member\", Target = \"")
-                .Append(docId).Append("\", Justification = \"").Append(SuppressionJustification).AppendLine("\")]");
+            builder.Append("[assembly: global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"Trimming\", \"IL2026\", Scope = \"")
+                .Append(suppression.SuppressionScope).Append("\", Target = \"").Append(suppression.Target)
+                .Append("\", Justification = \"").Append(SuppressionJustification).AppendLine("\")]");
+            builder.Append("[assembly: global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(\"AOT\", \"IL3050\", Scope = \"")
+                .Append(suppression.SuppressionScope).Append("\", Target = \"").Append(suppression.Target)
+                .Append("\", Justification = \"").Append(SuppressionJustification).AppendLine("\")]");
         }
 
         builder.AppendLine();
@@ -545,5 +658,6 @@ public sealed class MapperProfileGenerator : IIncrementalGenerator
         string SourceType,
         string Body,
         string InterceptsLocationAttribute,
-        string? SuppressionTargetDocId);
+        string? SuppressionTargetDocId,
+        string SuppressionScope);
 }

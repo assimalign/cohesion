@@ -1,6 +1,7 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
 	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkForResources)</TargetFramework>
 		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
 		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
 	</PropertyGroup>

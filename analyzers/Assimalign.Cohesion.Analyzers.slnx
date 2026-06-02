@@ -1,0 +1,44 @@
+<Solution>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Database/" />
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Database/src/">
+    <Project Path="Assimalign.Cohesion.CodeFixes.Database/src/Assimalign.Cohesion.CodeFixes.Database.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Database/tests/">
+    <Project Path="Assimalign.Cohesion.CodeFixes.Database/tests/Assimalign.Cohesion.CodeFixes.DatabaseTests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Web/" />
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Web/src/">
+    <Project Path="Assimalign.Cohesion.CodeFixes.Web/src/Assimalign.Cohesion.CodeFixes.Web.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes.Web/tests/">
+    <Project Path="Assimalign.Cohesion.CodeFixes.Web/tests/Assimalign.Cohesion.CodeFixes.WebTests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes/" />
+  <Folder Name="/Assimalign.Cohesion.CodeFixes/src/">
+    <Project Path="Assimalign.Cohesion.CodeFixes/src/Assimalign.Cohesion.CodeFixes.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.CodeFixes/tests/">
+    <Project Path="Assimalign.Cohesion.CodeFixes/tests/Assimalign.Cohesion.CodeFixesTests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.Database/src/Assimalign.Cohesion.SourceGeneration.Database.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.Database/tests/Assimalign.Cohesion.SourceGeneration.DatabaseTests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Web/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Web/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.Web/src/Assimalign.Cohesion.SourceGeneration.Web.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Web/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.Web/tests/Assimalign.Cohesion.SourceGeneration.WebTests.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration/src/Assimalign.Cohesion.SourceGeneration.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration/tests/Assimalign.Cohesion.SourceGeneration.Tests.csproj" />
+  </Folder>
+</Solution>
