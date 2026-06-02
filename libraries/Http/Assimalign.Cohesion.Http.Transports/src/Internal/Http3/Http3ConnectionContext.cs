@@ -484,11 +484,19 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         byte[] bodyBytes = body.ToArray();
-        Http3Request request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, _isSecure ? HttpScheme.Https : HttpScheme.Http, bodyBytes);
+        Http3Request request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, _isSecure ? HttpScheme.Https : HttpScheme.Http, bodyBytes, out string? extendedConnectProtocol);
         Http3Response response = new();
         HttpConnectionInfo connectionInfo = new(streamContext.LocalEndPoint, streamContext.RemoteEndPoint, _isSecure);
 
-        return new Http3Context(request, response, connectionInfo, cancellationToken, streamContext, _createFeatures?.Invoke());
+        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamContext, _createFeatures?.Invoke());
+
+        // RFC 9220 — model a valid extended CONNECT explicitly as a feature.
+        if (extendedConnectProtocol is not null)
+        {
+            context.Features.Set(new HttpExtendedConnectFeature(extendedConnectProtocol));
+        }
+
+        return context;
     }
 
     private static async Task WriteFrameAsync(Stream stream, Http3FrameType frameType, byte[] payload, CancellationToken cancellationToken)

@@ -26,6 +26,12 @@ internal sealed class HPackDecodedHeaders
 
     public string? Scheme { get; private set; }
 
+    /// <summary>
+    /// The <c>:protocol</c> pseudo-header (RFC 8441), present only on an
+    /// extended CONNECT request. <see langword="null"/> for ordinary requests.
+    /// </summary>
+    public string? Protocol { get; private set; }
+
     public HttpHeaderCollection Headers { get; }
 
     /// <summary>
@@ -131,6 +137,20 @@ internal sealed class HPackDecodedHeaders
                 }
 
                 Scheme = value;
+                return;
+
+            case ":protocol":
+                // RFC 8441 §4 — the extended CONNECT protocol indicator. Its
+                // CONNECT-only / required-companion rules are cross-field and
+                // are validated once the whole section is decoded
+                // (HttpFieldNormalization.ValidateExtendedConnect).
+                if (Protocol is not null)
+                {
+                    throw new HPackDecodingException(
+                        "Pseudo-header field ':protocol' MUST NOT appear more than once.");
+                }
+
+                Protocol = value;
                 return;
 
             case ":status":

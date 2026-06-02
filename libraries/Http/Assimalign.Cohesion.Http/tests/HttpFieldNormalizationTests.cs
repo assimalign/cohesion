@@ -89,4 +89,46 @@ public class HttpFieldNormalizationTests
 
         combined.Count.ShouldBe(2);
     }
+
+    [Theory]
+    [InlineData("CONNECT", "websocket", true)]
+    [InlineData("GET", "websocket", false)]
+    [InlineData("CONNECT", null, false)]
+    [InlineData("CONNECT", "", false)]
+    [InlineData(null, "websocket", false)]
+    public void IsExtendedConnect_ClassifiesCorrectly(string? method, string? protocol, bool expected)
+    {
+        HttpFieldNormalization.IsExtendedConnect(method, protocol).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void ValidateExtendedConnect_WhenNoProtocol_ShouldReturnNull()
+    {
+        // No :protocol — an ordinary request (or classic CONNECT); nothing to validate.
+        HttpFieldNormalization.ValidateExtendedConnect("GET", "https", "/", "a", protocol: null).ShouldBeNull();
+        HttpFieldNormalization.ValidateExtendedConnect("CONNECT", null, null, "a", protocol: null).ShouldBeNull();
+    }
+
+    [Fact]
+    public void ValidateExtendedConnect_WhenValid_ShouldReturnNull()
+    {
+        HttpFieldNormalization.ValidateExtendedConnect("CONNECT", "https", "/chat", "api.test", "websocket").ShouldBeNull();
+    }
+
+    [Fact]
+    public void ValidateExtendedConnect_WhenProtocolOnNonConnect_ShouldReturnError()
+    {
+        // RFC 8441 §4 — :protocol is only valid on CONNECT.
+        HttpFieldNormalization.ValidateExtendedConnect("GET", "https", "/", "api.test", "websocket").ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData(null, "/chat", "api.test")]   // missing :scheme
+    [InlineData("https", null, "api.test")]   // missing :path
+    [InlineData("https", "/chat", null)]      // missing :authority
+    public void ValidateExtendedConnect_WhenMissingRequiredPseudoHeader_ShouldReturnError(string? scheme, string? path, string? authority)
+    {
+        // RFC 8441 §4 — an extended CONNECT MUST include :scheme, :path, :authority.
+        HttpFieldNormalization.ValidateExtendedConnect("CONNECT", scheme, path, authority, "websocket").ShouldNotBeNull();
+    }
 }

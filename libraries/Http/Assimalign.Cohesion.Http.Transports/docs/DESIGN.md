@@ -497,6 +497,87 @@ and string primitives.
   bookkeeping behind the same `Http3PeerSettings` seam.
 - **Encoder Huffman coding.** Decode supports it; encode emits raw octets.
 
+## Extended CONNECT (`:protocol`)
+
+### What it is
+
+Extended CONNECT (RFC 8441 for HTTP/2, RFC 9220 for HTTP/3) lets a client
+bootstrap another protocol — most commonly WebSocket — over a single
+HTTP/2 or HTTP/3 stream by sending a `CONNECT` request that additionally
+carries the `:protocol` pseudo-header. Cohesion **recognizes and models**
+extended CONNECT explicitly so an application can detect it and respond
+deterministically.
+
+### The model: an explicit feature, not a baseline side effect
+
+A valid extended CONNECT installs an `IHttpExtendedConnectFeature` on the
+exchange's feature collection, exposing the requested `:protocol`. Ordinary
+requests carry no such feature, so `context.IsExtendedConnect` is `false`
+and `context.ExtendedConnect` is `null` for them. Modeling the transition
+as an opt-in feature — rather than, say, a flag baked into every request —
+keeps it an explicit extension surface (per the issue's framing) and means
+baseline request handling is unchanged for the common case.
+
+The feature contract (`IHttpExtendedConnectFeature`) and the
+`context.IsExtendedConnect` / `context.ExtendedConnect` ergonomics live in
+the core `Assimalign.Cohesion.Http` library; the transport produces the
+internal implementation. Recognition (`:protocol`), validation, and the
+`IsExtendedConnect` / `ValidateExtendedConnect` rules are shared between
+HTTP/2 and HTTP/3 via `HttpFieldNormalization` so both versions behave
+identically.
+
+### Deterministic validation (RFC 8441 §4 / RFC 9220)
+
+- `:protocol` on a **non-CONNECT** request is malformed.
+- An extended CONNECT (CONNECT + `:protocol`) MUST also carry `:scheme`,
+  `:path`, and `:authority`; a missing one is malformed.
+- `:protocol` MUST NOT appear more than once.
+
+A violation fails deterministically — never a silent downgrade. HTTP/2
+surfaces it as the same field-section failure the receive loop maps to a
+connection `PROTOCOL_ERROR` (GOAWAY); HTTP/3 drops the offending stream
+(the connection survives).
+
+### Advertising `SETTINGS_ENABLE_CONNECT_PROTOCOL`
+
+- **HTTP/2** advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` (id `0x8`)
+  in its initial SETTINGS (RFC 8441 §3), telling peers they may use
+  extended CONNECT.
+- **HTTP/3** does **not** yet advertise it. Doing so requires the server to
+  open its own *unidirectional* control stream and send a SETTINGS frame on
+  it, but the multiplex transport's `OpenOutboundAsync` opens a
+  connection-wide stream type (bidirectional for the HTTP server) with no
+  per-call direction. Exposing unidirectional outbound streams is a
+  Net-library API change beyond this scope. The omission is safe: a
+  conformant client will simply not initiate extended CONNECT over HTTP/3,
+  and if one does anyway, the request is still recognized, validated, and
+  modeled exactly as on HTTP/2 — there is no silent downgrade.
+
+### No tunnel — scope boundary
+
+The feature exposes the requested protocol; it does **not** surrender a
+tunnel stream or implement WebSocket framing. Cohesion does not retain a
+WebSocket transport/API surface, so per the issue's "implement only if the
+transport and API surface are intentionally retained" guidance, the actual
+WebSocket bootstrap (the post-2xx data tunnel) is out of scope. An
+application that wants to act on an extended CONNECT reads the feature and
+drives its own response; the framework neither fabricates a tunnel nor
+pretends one exists.
+
+### AOT posture
+
+No reflection or runtime codegen. Recognition is pseudo-header dispatch;
+validation is string comparison; the feature is a two-property record-like
+class resolved through the existing feature collection.
+
+### Non-goals
+
+- **WebSocket framing / the data tunnel.** See above.
+- **HTTP/3 advertisement.** Deferred pending unidirectional outbound stream
+  support in the multiplex transport.
+- **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
+  as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
+
 ## Scope decision: server push (de-scoped)
 
 Cohesion **does not implement HTTP/2 or HTTP/3 server push.** This is a

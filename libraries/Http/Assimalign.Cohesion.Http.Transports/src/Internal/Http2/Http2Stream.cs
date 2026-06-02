@@ -332,6 +332,22 @@ internal sealed class Http2Stream
             : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
 
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+
+        // RFC 8441 §4 — validate :protocol / extended CONNECT usage. A
+        // violation is a malformed request; surface it as the same field-section
+        // failure the receive loop maps to a PROTOCOL_ERROR (deterministic, no
+        // silent downgrade).
+        string? extendedConnectError = HttpFieldNormalization.ValidateExtendedConnect(
+            decodedHeaders.Method,
+            decodedHeaders.Scheme,
+            decodedHeaders.Path,
+            decodedHeaders.Authority,
+            decodedHeaders.Protocol);
+        if (extendedConnectError is not null)
+        {
+            throw new HPack.HPackDecodingException(extendedConnectError);
+        }
+
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
@@ -351,7 +367,16 @@ internal sealed class Http2Stream
             decodedHeaders.Headers,
             new MemoryStream(bodyBytes, writable: false));
 
-        return new Http2Context(this, request, new Http2Response(), connectionInfo, requestAborted, features);
+        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, features);
+
+        // RFC 8441 — model a valid extended CONNECT explicitly as a feature so
+        // the application can detect it; ordinary requests carry no feature.
+        if (HttpFieldNormalization.IsExtendedConnect(decodedHeaders.Method, decodedHeaders.Protocol))
+        {
+            context.Features.Set(new Internal.HttpExtendedConnectFeature(decodedHeaders.Protocol!));
+        }
+
+        return context;
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

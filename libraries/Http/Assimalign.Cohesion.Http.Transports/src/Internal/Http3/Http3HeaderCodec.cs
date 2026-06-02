@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 /// </summary>
 internal static class Http3HeaderCodec
 {
-    public static Http3Request DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock, HttpScheme fallbackScheme, byte[] bodyBytes)
+    public static Http3Request DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock, HttpScheme fallbackScheme, byte[] bodyBytes, out string? extendedConnectProtocol)
     {
         List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(headerBlock);
 
@@ -119,6 +119,15 @@ internal static class Http3HeaderCodec
             throw new InvalidDataException("HTTP/3 request is missing the :method pseudo-header (RFC 9114 §4.3.1).");
         }
 
+        // RFC 9220 / RFC 8441 §4 — validate :protocol / extended CONNECT usage
+        // before the per-method pseudo-header requirements. A violation is a
+        // malformed request; the receive loop drops the stream deterministically.
+        string? extendedConnectError = HttpFieldNormalization.ValidateExtendedConnect(method, schemeValue, pathValue, authority, protocol);
+        if (extendedConnectError is not null)
+        {
+            throw new InvalidDataException(extendedConnectError);
+        }
+
         bool isConnect = string.Equals(method, "CONNECT", StringComparison.Ordinal);
 
         if (!isConnect)
@@ -141,6 +150,10 @@ internal static class Http3HeaderCodec
         HttpScheme scheme = schemeValue is null
             ? fallbackScheme
             : string.Equals(schemeValue, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
+
+        // RFC 9220 — a valid extended CONNECT (CONNECT + :protocol) surfaces its
+        // protocol so the connection context can attach the explicit feature.
+        extendedConnectProtocol = HttpFieldNormalization.IsExtendedConnect(method, protocol) ? protocol : null;
 
         return new Http3Request(
             host,

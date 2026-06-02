@@ -255,6 +255,53 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "a")));
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should surface a valid extended CONNECT as a feature")]
+    public async Task Http3_OnExtendedConnect_ShouldSurfaceExtendedConnectFeature()
+    {
+        // RFC 9220 — CONNECT + :protocol with :scheme/:path/:authority is a
+        // valid extended CONNECT, modeled explicitly as a feature.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+
+        TestTransportConnectionContext streamContext = new(payload);
+        TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
+        httpContext.Request.Path.Value.ShouldBe("/chat");
+        httpContext.IsExtendedConnect.ShouldBeTrue();
+        httpContext.ExtendedConnect.ShouldNotBeNull();
+        httpContext.ExtendedConnect!.Protocol.ShouldBe("websocket");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop :protocol on a non-CONNECT request")]
+    public Task Http3_OnProtocolPseudoHeaderWithoutConnect_ShouldDropStream()
+        // RFC 8441 §4 / RFC 9220 — :protocol is only valid on a CONNECT request.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "GET"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test")));
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop an extended CONNECT missing :path")]
+    public Task Http3_OnExtendedConnectMissingPath_ShouldDropStream()
+        // RFC 9220 — an extended CONNECT MUST include :scheme, :path, :authority.
+        => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":authority", "api.test")));
+
     private static async Task AssertMalformedRequestIsDroppedAsync(byte[] requestPayload)
     {
         // A per-stream field-section failure drops the offending stream; with

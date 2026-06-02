@@ -145,6 +145,17 @@ quirks.
   field coalesces with `"; "` (RFC 9113 §8.2.3, RFC 9114 §4.2.1); `Set-Cookie`
   is never folded; other list fields combine as distinct values. Previously the
   HTTP/3 path combined cookies with a comma; now it matches HTTP/2.
+- **Extended CONNECT validation** (`IsExtendedConnect` +
+  `ValidateExtendedConnect`) — the `:protocol` pseudo-header (RFC 8441 / RFC
+  9220) is valid only on a `CONNECT` request, and an extended CONNECT MUST also
+  carry `:scheme`, `:path`, and `:authority`. HTTP/2 (`Http2Stream`) and HTTP/3
+  (`Http3HeaderCodec`) share the rule so both recognize and reject extended
+  CONNECT identically; the resulting `IHttpExtendedConnectFeature`
+  (`context.IsExtendedConnect` / `context.ExtendedConnect`) is the explicit,
+  opt-in surface an application reads. The transport-side modeling, the
+  deterministic failure modes, and the `SETTINGS_ENABLE_CONNECT_PROTOCOL`
+  advertisement (and the HTTP/3 advertisement deferral) are documented in the
+  transports `DESIGN.md`.
 
 ### Version-specific boundaries that must NOT cross
 

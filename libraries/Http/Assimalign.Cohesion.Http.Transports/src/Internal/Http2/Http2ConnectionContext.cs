@@ -1196,7 +1196,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             InitialWindowSize = Http2ConnectionSettings.InitialInitialWindowSize,
             MaxFrameSize = Http2ConnectionSettings.InitialMaxFrameSize,
             MaxHeaderListSize = 16_384,
-            EnableConnectProtocol = 0,
+            // RFC 8441 §3 — advertise support for the extended CONNECT protocol
+            // so peers may bootstrap WebSocket (and other protocols) over a
+            // single stream via CONNECT + :protocol.
+            EnableConnectProtocol = 1,
         };
     }
 
@@ -1218,6 +1221,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             (Http2SettingsParameter.SETTINGS_INITIAL_WINDOW_SIZE, _localSettings.InitialWindowSize),
             (Http2SettingsParameter.SETTINGS_MAX_FRAME_SIZE, _localSettings.MaxFrameSize),
             (Http2SettingsParameter.SETTINGS_MAX_HEADER_LIST_SIZE, _localSettings.MaxHeaderListSize),
+            // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 tells the peer
+            // it MAY use extended CONNECT (CONNECT + :protocol).
+            (Http2SettingsParameter.SETTINGS_ENABLE_CONNECT_PROTOCOL, _localSettings.EnableConnectProtocol),
         };
 
         byte[] payload = new byte[entries.Length * Http2FrameReader.SettingSize];
