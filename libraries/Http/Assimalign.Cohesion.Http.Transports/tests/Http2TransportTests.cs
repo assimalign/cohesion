@@ -312,6 +312,65 @@ public class Http2TransportTests
         await AssertGoAwayAsync(payload, Http2ErrorCode.ProtocolError);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a client-sent PUSH_PROMISE with PROTOCOL_ERROR")]
+    public async Task Http2_OnClientPushPromise_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §8.4 / §6.6 — only servers send PUSH_PROMISE; a client
+        // cannot push. A server MUST treat receipt of a PUSH_PROMISE as a
+        // connection error of type PROTOCOL_ERROR. Cohesion de-scopes server
+        // push entirely (see docs/DESIGN.md), so this is also the enforcement
+        // of that decision: a peer can never coax the server into a push flow.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        // PUSH_PROMISE (0x5) on stream 1 with a promised-stream-id + empty block.
+        byte[] pushPromise = Http2TestSettings.RawFrame(frameType: 0x5, flags: 0x4 /* END_HEADERS */, streamId: 1, payload: new byte[] { 0x00, 0x00, 0x00, 0x02 });
+        await AssertGoAwayAsync(Combine(preface, settings, pushPromise), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should advertise SETTINGS_ENABLE_PUSH = 0")]
+    public async Task Http2_OnConnect_ShouldAdvertisePushDisabled()
+    {
+        // Cohesion does not implement server push, so the server's initial
+        // SETTINGS MUST advertise ENABLE_PUSH = 0 (RFC 9113 §6.5.2) to tell the
+        // peer not to expect pushed streams.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+
+        TestTransportConnectionContext transportContext = new(Combine(preface, settings));
+        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        HttpConnectionListenerOptions options = new();
+        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Drain the receive loop to drive initialization — the server writes
+        // its initial SETTINGS during init. The payload is only preface +
+        // client SETTINGS (no request), so the loop initializes, ACKs, and
+        // completes at end-of-stream without yielding a context.
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+        }
+
+        byte[] output = await transportContext.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        byte[]? settingsPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 0x4)
+            {
+                settingsPayload = payload;
+                break;
+            }
+        }
+
+        settingsPayload.ShouldNotBeNull();
+        Dictionary<Http2TestSettings.Parameter, uint> serverSettings = Http2TestSettings.ReadSettings(settingsPayload!);
+        serverSettings.ContainsKey(Http2TestSettings.Parameter.EnablePush).ShouldBeTrue();
+        serverSettings[Http2TestSettings.Parameter.EnablePush].ShouldBe(0u);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
     public async Task Http2_OnFirstClientFrameNotSettings_ShouldGoAwayProtocolError()
     {

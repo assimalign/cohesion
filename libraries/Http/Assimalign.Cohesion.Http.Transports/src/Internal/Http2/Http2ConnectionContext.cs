@@ -409,7 +409,22 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             case Http2FrameType.GoAway:
                 ProcessGoAwayFrame(receivedFrame);
                 return null;
+            case Http2FrameType.PushPromise:
+                // RFC 9113 §8.4 / §6.6 — only servers send PUSH_PROMISE, and a
+                // client cannot push. A server MUST treat the receipt of a
+                // PUSH_PROMISE frame as a connection error of type
+                // PROTOCOL_ERROR. Cohesion does not implement server push
+                // (de-scoped; see docs/DESIGN.md), so rejecting it here is both
+                // the RFC requirement and the enforcement of that decision —
+                // without this case the frame would fall through and be
+                // silently ignored.
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    "PUSH_PROMISE received from the client; HTTP/2 servers do not accept pushed streams (RFC 9113 §8.4).");
             default:
+                // RFC 9113 §5.1 — frame types the endpoint does not recognise
+                // MUST be ignored. PRIORITY (0x2, deprecated) and any unknown
+                // extension frame land here.
                 return null;
         }
     }

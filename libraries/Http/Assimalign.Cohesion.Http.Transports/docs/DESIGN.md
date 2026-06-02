@@ -265,6 +265,42 @@ The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
 cooperative shutdown is unaffected.
 
+## Scope decision: server push (de-scoped)
+
+Cohesion **does not implement HTTP/2 or HTTP/3 server push.** This is a
+deliberate, recorded decision, not an implementation gap:
+
+- Server push has effectively failed in the field. Chromium disabled and
+  then removed HTTP/2 push (2022), and HTTP/3 push sees negligible
+  real-world client support. The complexity (push streams, `PUSH_PROMISE`,
+  `MAX_PUSH_ID` / `CANCEL_PUSH` bookkeeping, cache-state assumptions) buys
+  almost nothing for interoperability today, and `103 Early Hints` covers
+  the practical "warm the client early" use case without it.
+- The mechanism is optional for a compliant server: RFC 9113 §8.4 and
+  RFC 9114 §4.6 permit a server to simply never push.
+
+**Enforcement** (so the decision is real, not just documentation):
+
+- **HTTP/2** advertises `SETTINGS_ENABLE_PUSH = 0` in its initial SETTINGS
+  (a server's own ENABLE_PUSH is informational, but we state intent), never
+  emits `PUSH_PROMISE`, and **rejects an inbound `PUSH_PROMISE` as a
+  connection error of type `PROTOCOL_ERROR`** — which is also exactly what
+  RFC 9113 §8.4 requires of a server, since only servers may push and a
+  client therefore must never send one. Without the explicit rejection the
+  frame would fall through the dispatch and be silently ignored.
+- **HTTP/3** never opens a push stream and never sends `PUSH_PROMISE`. The
+  HTTP/3 stream engine rejects server-only frames (including `PUSH_PROMISE`)
+  arriving on a client-initiated request stream as `H3_FRAME_UNEXPECTED`
+  (enforced in the HTTP/3 stream/SETTINGS engine). A client's `MAX_PUSH_ID`
+  is harmless and ignored because the server never pushes.
+
+**Reversibility.** If a concrete consumer ever needs push, the frame types
+are already defined (`Http2FrameType.PushPromise`, `Http3FrameType.PushPromise`,
+`MaxPushId`); re-scoping would add a push-stream send path and flip the
+rejection into acceptance behind a configuration opt-in. The decision is
+documented here so a future reader does not mistake the absence for an
+oversight.
+
 ## Open questions / future work
 
 - A full design write-up covering the protocol context hierarchy
