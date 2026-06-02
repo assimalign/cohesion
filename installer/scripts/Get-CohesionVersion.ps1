@@ -61,7 +61,7 @@ function Get-XmlPropertyValue {
 $tfmPropsPath     = Join-Path $RepoRoot 'build/Targets/Build.TargetFramework.props'
 $versionPropsPath = Join-Path $RepoRoot 'build/Targets/Build.Version.props'
 
-$targetFramework = Get-XmlPropertyValue -Path $tfmPropsPath     -Property 'TargetFramework'
+$targetFramework = Get-XmlPropertyValue -Path $tfmPropsPath     -Property 'TargetFrameworkLatest'
 $cohesionMinor   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionMinorVersion'
 $cohesionPatch   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionPatchVersion'
 
