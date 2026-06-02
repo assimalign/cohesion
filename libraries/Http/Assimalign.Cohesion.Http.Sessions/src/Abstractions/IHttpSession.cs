@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Tasks;
 using System.Threading;
@@ -11,9 +12,22 @@ namespace Assimalign.Cohesion.Http;
 public interface IHttpSession
 {
     /// <summary>
+    /// Gets a value indicating whether the session has been loaded and is
+    /// ready for use. Backing stores that require an asynchronous load set
+    /// this to <see langword="true"/> only after <see cref="LoadAsync"/>
+    /// completes.
+    /// </summary>
+    bool IsAvailable { get; }
+
+    /// <summary>
     /// Gets the unique session identifier.
     /// </summary>
     string Id { get; }
+
+    /// <summary>
+    /// Gets the keys currently present in the session.
+    /// </summary>
+    IEnumerable<string> Keys { get; }
 
     /// <summary>
     /// Loads the session state from the backing store.

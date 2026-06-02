@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,9 +9,18 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Provides an in-memory HTTP session implementation.
 /// </summary>
+/// <remarks>
+/// The store is process-local and not persisted. <see cref="IsAvailable"/>
+/// follows the conventional <c>ISession</c> contract: it is
+/// <see langword="false"/> until <see cref="LoadAsync"/> has completed, after
+/// which the session is considered ready. The store itself imposes no load
+/// step, so reads and writes succeed before <see cref="LoadAsync"/> is called;
+/// <see cref="IsAvailable"/> simply reports whether a load has occurred.
+/// </remarks>
 public sealed class HttpSession : IHttpSession
 {
     private readonly Dictionary<string, byte[]> _values = new(StringComparer.Ordinal);
+    private bool _isAvailable;
 
     /// <summary>
     /// Initializes a new session.
@@ -24,12 +32,19 @@ public sealed class HttpSession : IHttpSession
     }
 
     /// <inheritdoc />
+    public bool IsAvailable => _isAvailable;
+
+    /// <inheritdoc />
     public string Id { get; }
+
+    /// <inheritdoc />
+    public IEnumerable<string> Keys => _values.Keys;
 
     /// <inheritdoc />
     public Task LoadAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        _isAvailable = true;
         return Task.CompletedTask;
     }
 
@@ -46,40 +61,12 @@ public sealed class HttpSession : IHttpSession
         return _values.TryGetValue(key, out value);
     }
 
-    /// <summary>
-    /// Attempts to retrieve a UTF-8 string value from the session.
-    /// </summary>
-    /// <param name="key">The session key.</param>
-    /// <param name="value">The resolved string value.</param>
-    /// <returns><see langword="true"/> when the value was found; otherwise <see langword="false"/>.</returns>
-    public bool TryGetString(string key, [NotNullWhen(true)] out string? value)
-    {
-        if (_values.TryGetValue(key, out byte[]? bytes))
-        {
-            value = Encoding.UTF8.GetString(bytes);
-            return true;
-        }
-
-        value = null;
-        return false;
-    }
-
     /// <inheritdoc />
     public void Set(string key, byte[] value)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(key);
         ArgumentNullException.ThrowIfNull(value);
         _values[key] = value;
-    }
-
-    /// <summary>
-    /// Stores a UTF-8 string value in the session.
-    /// </summary>
-    /// <param name="key">The session key.</param>
-    /// <param name="value">The string value.</param>
-    public void SetString(string key, string value)
-    {
-        Set(key, Encoding.UTF8.GetBytes(value));
     }
 
     /// <inheritdoc />
