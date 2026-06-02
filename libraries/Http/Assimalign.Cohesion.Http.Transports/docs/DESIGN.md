@@ -391,6 +391,112 @@ the peer-settings store is a plain dictionary.
 - **Flow control / stream limits.** QUIC-level flow control and
   `MAX_STREAMS` accounting live in the QUIC transport, not here.
 
+## QPACK field-section compression
+
+### What it is
+
+HTTP/3 carries header and trailer fields as QPACK-compressed *field
+sections* (RFC 9204). `Http3HeaderCodec` decodes inbound request field
+sections and encodes outbound response field sections; the QPACK
+primitives live under `Internal/Http3/QPack`:
+
+- `QPackStaticTable` — the 99-entry static table (RFC 9204 Appendix A),
+  with forward (index → field) and reverse (name → index, name+value →
+  index) lookups.
+- `QPackPrefixedInteger` — the N-bit prefixed integer (RFC 9204 §4.1.1),
+  shared by every representation.
+- `QPackStringCodec` — string literals (RFC 9204 §4.1.2), Huffman flag +
+  prefixed length + octets. Huffman decoding reuses the HPACK
+  `HPackHuffmanDecoder` because QPACK and HPACK share the RFC 7541
+  Appendix B Huffman code.
+- `QPackFieldSectionDecoder` / `QPackFieldSectionEncoder` — the field
+  section prefix plus the per-line representations.
+
+### The dynamic table is disabled — and why that is RFC-compliant
+
+The supported feature set runs with the **QPACK dynamic table disabled**:
+the server's `QPACK_MAX_TABLE_CAPACITY` is `0`. RFC 9204 §3.2.3 / §5
+explicitly permit this — a decoder that advertises capacity `0` simply
+forbids the encoder from ever inserting dynamic entries. It is the
+standards-blessed "static-only" QPACK profile, not a partial
+implementation.
+
+Disabling the dynamic table collapses several otherwise-hard problems:
+
+- **No blocked streams.** A stream blocks only when a field section
+  references dynamic entries not yet received (RFC 9204 §2.1.2). With the
+  table disabled, the Required Insert Count is always 0, so a field
+  section can never reference a not-yet-inserted entry — there is nothing
+  to block on. `QPACK_BLOCKED_STREAMS` is effectively 0. The decoder
+  enforces this by **rejecting any field section whose Required Insert
+  Count is non-zero** as a decompression failure (RFC 9204 §2.2).
+- **No encoder/decoder instruction processing.** The QPACK encoder and
+  decoder unidirectional streams (handled by the #334 stream engine)
+  carry only dynamic-table instructions, so with the table disabled they
+  carry nothing the server must act on.
+
+### Decoder representations
+
+`QPackFieldSectionDecoder` reads the Field Section Prefix (§4.5.1),
+requires Required Insert Count = 0, then walks the field lines:
+
+| First-byte pattern | Representation | Handling |
+|---|---|---|
+| `1Txxxxxx` | Indexed Field Line (§4.5.2) | `T=1` → resolve static index; `T=0` (dynamic) → reject |
+| `01NTxxxx` | Literal w/ Name Reference (§4.5.4) | `T=1` → static name + literal value; `T=0` → reject |
+| `001NHxxx` | Literal w/ Literal Name (§4.5.6) | literal name + literal value |
+| `0001xxxx` | Indexed w/ Post-Base (§4.5.3) | dynamic → reject |
+| `0000Nxxx` | Literal w/ Post-Base Name Ref (§4.5.5) | dynamic → reject |
+
+The never-indexed (`N`) bit is accepted and ignored — with no dynamic
+table there is no indexing decision to make. Every rejection throws a
+parse failure the receive loop isolates per-stream (the offending request
+stream is dropped; the connection survives).
+
+### Field-section rules (RFC 9114 §4.2 / §4.3)
+
+After QPACK decoding, `Http3HeaderCodec` enforces the HTTP/3 message
+rules:
+
+- **Pseudo-header set.** Only `:method`, `:scheme`, `:authority`,
+  `:path`, and `:protocol` (RFC 9220, recognized here, acted on by #339)
+  are valid request pseudo-headers; any other is malformed.
+- **Ordering.** All pseudo-headers MUST precede regular fields.
+- **Uniqueness.** A pseudo-header MUST NOT repeat.
+- **Required fields.** A non-CONNECT request MUST carry `:method`,
+  `:scheme`, and a non-empty `:path`.
+- **Lowercase names.** A regular field name with an uppercase character is
+  malformed.
+- **Connection-specific fields** are rejected, and `:authority`
+  supersedes `Host`, both via the shared `HttpFieldNormalization` (see
+  #336) so HTTP/2 and HTTP/3 stay byte-for-byte consistent.
+
+### Encoder
+
+`QPackFieldSectionEncoder` emits a zero Field Section Prefix and prefers,
+per field: an Indexed Field Line for an exact static name+value match
+(e.g. `:status: 200`), then a Literal with static Name Reference for a
+known name, then a Literal with Literal Name. Field names are lowercased
+on the wire. Huffman coding is **not** applied on the encode path — it is
+optional for an encoder (RFC 9204 §4.1.2) and raw octets keep the output
+deterministic and allocation-light. (The decode path fully supports
+Huffman.)
+
+### AOT posture
+
+No reflection, no runtime code generation, no dynamic dispatch. The
+static table is a constant array with dictionaries built at type init;
+encoding and decoding are span/stream arithmetic over the prefixed-integer
+and string primitives.
+
+### Non-goals
+
+- **QPACK dynamic table** (insertions, duplication, eviction, blocked
+  streams). Disabled by design as above; re-enabling would add a dynamic
+  table, encoder/decoder-stream instruction processing, and blocked-stream
+  bookkeeping behind the same `Http3PeerSettings` seam.
+- **Encoder Huffman coding.** Decode supports it; encode emits raw octets.
+
 ## Scope decision: server push (de-scoped)
 
 Cohesion **does not implement HTTP/2 or HTTP/3 server push.** This is a

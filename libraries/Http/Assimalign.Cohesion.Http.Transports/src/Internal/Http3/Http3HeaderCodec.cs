@@ -1,55 +1,82 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
+
+using Assimalign.Cohesion.Http.Transports.Internal.Http3.QPack;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
+/// <summary>
+/// Bridges QPACK field sections (RFC 9204) to the HTTP message model and
+/// enforces the HTTP/3 field-section rules (RFC 9114 §4.2 / §4.3): the
+/// pseudo-header set, pseudo-before-regular ordering, lowercase field
+/// names, connection-specific field prohibition, and required request
+/// pseudo-headers. The QPACK dynamic table is disabled, so encoding and
+/// decoding reference only the static table or literals.
+/// </summary>
 internal static class Http3HeaderCodec
 {
     public static Http3Request DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock, HttpScheme fallbackScheme, byte[] bodyBytes)
     {
+        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(headerBlock);
+
         HttpHeaderCollection headers = new();
         string? authority = null;
         string? method = null;
         string? pathValue = null;
         string? schemeValue = null;
-        int index = 0;
+        string? protocol = null;
+        bool seenRegularField = false;
 
-        QuicVariableLengthInteger.Decode(headerBlock, ref index);
-        QuicVariableLengthInteger.Decode(headerBlock, ref index);
-
-        while (index < headerBlock.Length)
+        foreach ((string name, string value) in fields)
         {
-            byte current = headerBlock[index];
-
-            if ((current & 0xF0) != 0x30)
+            if (name.Length == 0)
             {
-                throw new NotSupportedException("Only literal QPACK header fields without name references are supported by the rebuilt HTTP/3 transport.");
+                throw new InvalidDataException("HTTP/3 field section contains a zero-length field name.");
             }
-
-            string name = DecodeString(headerBlock, ref index, 3);
-            string value = DecodeString(headerBlock, ref index, 7);
 
             if (name[0] == ':')
             {
+                // RFC 9114 §4.3 — all pseudo-header fields MUST precede the
+                // regular fields.
+                if (seenRegularField)
+                {
+                    throw new InvalidDataException("HTTP/3 pseudo-header field appears after a regular field (RFC 9114 §4.3).");
+                }
+
                 switch (name)
                 {
-                    case ":authority":
-                        authority = value;
-                        break;
                     case ":method":
-                        method = value;
-                        break;
-                    case ":path":
-                        pathValue = value;
+                        AssignOncePseudoHeader(ref method, value, name);
                         break;
                     case ":scheme":
-                        schemeValue = value;
+                        AssignOncePseudoHeader(ref schemeValue, value, name);
                         break;
+                    case ":authority":
+                        AssignOncePseudoHeader(ref authority, value, name);
+                        break;
+                    case ":path":
+                        AssignOncePseudoHeader(ref pathValue, value, name);
+                        break;
+                    case ":protocol":
+                        // RFC 9220 extended CONNECT; recognized here so it is
+                        // not rejected as unknown. Acted on by #339.
+                        AssignOncePseudoHeader(ref protocol, value, name);
+                        break;
+                    default:
+                        throw new InvalidDataException($"HTTP/3 request contains an unknown pseudo-header field '{name}' (RFC 9114 §4.3.1).");
                 }
 
                 continue;
+            }
+
+            seenRegularField = true;
+
+            // RFC 9114 §4.2 — field names MUST be lowercase; an uppercase
+            // character makes the request malformed.
+            if (!IsLowercaseFieldName(name))
+            {
+                throw new InvalidDataException($"HTTP/3 field name '{name}' must be lowercase (RFC 9114 §4.2).");
             }
 
             HttpHeaderKey key = new(name);
@@ -84,6 +111,29 @@ internal static class Http3HeaderCodec
             }
         }
 
+        // RFC 9114 §4.3.1 — required request pseudo-headers. A CONNECT request
+        // omits :scheme and :path; all other methods MUST include exactly one
+        // of each.
+        if (method is null)
+        {
+            throw new InvalidDataException("HTTP/3 request is missing the :method pseudo-header (RFC 9114 §4.3.1).");
+        }
+
+        bool isConnect = string.Equals(method, "CONNECT", StringComparison.Ordinal);
+
+        if (!isConnect)
+        {
+            if (schemeValue is null)
+            {
+                throw new InvalidDataException("HTTP/3 request is missing the :scheme pseudo-header (RFC 9114 §4.3.1).");
+            }
+
+            if (string.IsNullOrEmpty(pathValue))
+            {
+                throw new InvalidDataException("HTTP/3 request is missing a non-empty :path pseudo-header (RFC 9114 §4.3.1).");
+            }
+        }
+
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
         // RFC 9114 §4.3.1 — :authority supersedes Host, resolved identically to
         // HTTP/2 via HttpFieldNormalization.
@@ -95,7 +145,7 @@ internal static class Http3HeaderCodec
         return new Http3Request(
             host,
             path,
-            HttpMethod.GetCanonicalizedValue(method ?? HttpMethod.Get.Value),
+            HttpMethod.GetCanonicalizedValue(method),
             scheme,
             query,
             headers,
@@ -111,10 +161,10 @@ internal static class Http3HeaderCodec
             headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        using MemoryStream buffer = new();
-        QuicVariableLengthInteger.Write(buffer, 0);
-        QuicVariableLengthInteger.Write(buffer, 0);
-        WriteLiteralHeader(buffer, ":status", ((int)context.Response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        List<(string Name, string Value)> fields =
+        [
+            (":status", ((int)context.Response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        ];
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
@@ -127,100 +177,42 @@ internal static class Http3HeaderCodec
                 {
                     if (!string.IsNullOrEmpty(value))
                     {
-                        WriteLiteralHeader(buffer, "set-cookie", value);
+                        fields.Add(("set-cookie", value));
                     }
                 }
             }
             else
             {
-                WriteLiteralHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
+                fields.Add((header.Key.Value, header.Value.Value));
             }
         }
 
-        return buffer.ToArray();
+        return QPackFieldSectionEncoder.Encode(fields);
     }
 
-    private static string DecodeString(ReadOnlySpan<byte> buffer, ref int index, int prefixLength)
+    private static void AssignOncePseudoHeader(ref string? slot, string value, string name)
     {
-        byte first = buffer[index];
-
-        if (((first >> prefixLength) & 0x1) != 0)
+        if (slot is not null)
         {
-            throw new NotSupportedException("Huffman encoded QPACK strings are not yet supported by the rebuilt HTTP/3 transport.");
+            // RFC 9114 §4.3.1 — a pseudo-header field MUST NOT appear more
+            // than once.
+            throw new InvalidDataException($"HTTP/3 request contains a duplicate pseudo-header field '{name}' (RFC 9114 §4.3.1).");
         }
 
-        int length = DecodePrefixedInteger(buffer, ref index, prefixLength);
-
-        if (index + length > buffer.Length)
-        {
-            throw new InvalidDataException("The QPACK string literal is incomplete.");
-        }
-
-        string value = Encoding.ASCII.GetString(buffer.Slice(index, length));
-        index += length;
-
-        return value;
+        slot = value;
     }
 
-    private static int DecodePrefixedInteger(ReadOnlySpan<byte> buffer, ref int index, int prefixLength)
+    private static bool IsLowercaseFieldName(string name)
     {
-        byte first = buffer[index++];
-        int mask = (1 << prefixLength) - 1;
-        int value = first & mask;
-
-        if (value < mask)
+        foreach (char c in name)
         {
-            return value;
-        }
-
-        int shift = 0;
-
-        while (index < buffer.Length)
-        {
-            byte next = buffer[index++];
-            value += (next & 0x7F) << shift;
-
-            if ((next & 0x80) == 0)
+            if (c is >= 'A' and <= 'Z')
             {
-                return value;
+                return false;
             }
-
-            shift += 7;
         }
 
-        throw new InvalidDataException("The QPACK integer is incomplete.");
-    }
-
-    private static void WriteLiteralHeader(Stream stream, string name, string value)
-    {
-        WritePrefixedInteger(stream, name.Length, 3, 0x30);
-        byte[] nameBytes = Encoding.ASCII.GetBytes(name);
-        stream.Write(nameBytes, 0, nameBytes.Length);
-        WritePrefixedInteger(stream, value.Length, 7, 0x00);
-        byte[] valueBytes = Encoding.ASCII.GetBytes(value);
-        stream.Write(valueBytes, 0, valueBytes.Length);
-    }
-
-    private static void WritePrefixedInteger(Stream stream, int value, int prefixLength, byte prefixMask)
-    {
-        int maxPrefixValue = (1 << prefixLength) - 1;
-
-        if (value < maxPrefixValue)
-        {
-            stream.WriteByte((byte)(prefixMask | value));
-            return;
-        }
-
-        stream.WriteByte((byte)(prefixMask | maxPrefixValue));
-        value -= maxPrefixValue;
-
-        while (value >= 128)
-        {
-            stream.WriteByte((byte)((value % 128) + 128));
-            value /= 128;
-        }
-
-        stream.WriteByte((byte)value);
+        return true;
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)
@@ -236,5 +228,4 @@ internal static class Http3HeaderCodec
         path = HttpPath.FromUriComponent(requestTarget);
         return new HttpQueryCollection();
     }
-
 }

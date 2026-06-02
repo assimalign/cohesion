@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
+using Assimalign.Cohesion.Http.Transports.Internal.Http3.QPack;
+
 namespace Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
 
 internal static class HttpProtocolPayloadFactory
@@ -119,6 +121,84 @@ internal static class HttpProtocolPayloadFactory
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Builds an HTTP/3 request HEADERS frame whose QPACK field section is
+    /// the supplied field lines, encoded verbatim as Literal Field Line With
+    /// Literal Name (RFC 9204 §4.5.6) — preserving the exact order and casing
+    /// passed in, with no validation. Used to drive malformed field-section
+    /// tests (uppercase names, mis-ordered or duplicate pseudo-headers).
+    /// </summary>
+    public static byte[] CreateHttp3RequestRaw(params (string Name, string Value)[] fields)
+        => CreateHttp3RequestRaw(huffman: false, fields);
+
+    /// <summary>
+    /// As <see cref="CreateHttp3RequestRaw(ValueTuple{string, string}[])"/>,
+    /// optionally Huffman-coding the literal name and value octets so the
+    /// decoder's Huffman path is exercised end to end.
+    /// </summary>
+    public static byte[] CreateHttp3RequestRaw(bool huffman, params (string Name, string Value)[] fields)
+    {
+        using MemoryStream section = new();
+        section.WriteByte(0x00); // Required Insert Count = 0
+        section.WriteByte(0x00); // S = 0, Delta Base = 0
+
+        foreach ((string name, string value) in fields)
+        {
+            WriteHttp3LiteralFieldLine(section, name, value, huffman);
+        }
+
+        using MemoryStream buffer = new();
+        WriteHttp3Frame(buffer, 0x1 /* HEADERS */, section.ToArray());
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Huffman-codes an ASCII string using the canonical HPACK/QPACK code
+    /// (RFC 7541 Appendix B), MSB-first with all-ones EOS padding.
+    /// </summary>
+    public static byte[] HuffmanEncode(string value)
+    {
+        using MemoryStream output = new();
+        ulong bits = 0;
+        int count = 0;
+
+        foreach (char c in value)
+        {
+            (uint code, byte length) = Internal.Http2.HPack.HPackHuffmanCodes.Table[(byte)c];
+            bits = (bits << length) | code;
+            count += length;
+
+            while (count >= 8)
+            {
+                count -= 8;
+                output.WriteByte((byte)(bits >> count));
+            }
+        }
+
+        if (count > 0)
+        {
+            int pad = 8 - count;
+            output.WriteByte((byte)((bits << pad) | ((1UL << pad) - 1)));
+        }
+
+        return output.ToArray();
+    }
+
+    private static void WriteHttp3LiteralFieldLine(Stream stream, string name, string value, bool huffman)
+    {
+        // §4.5.6 Literal Field Line With Literal Name: 0 0 1 N H len(3).
+        WriteHttp3StringLiteral(stream, name, prefixBits: 3, basePattern: 0b0010_0000, huffman);
+        WriteHttp3StringLiteral(stream, value, prefixBits: 7, basePattern: 0x00, huffman);
+    }
+
+    private static void WriteHttp3StringLiteral(Stream stream, string value, int prefixBits, byte basePattern, bool huffman)
+    {
+        byte huffmanFlag = huffman ? (byte)(1 << prefixBits) : (byte)0;
+        byte[] octets = huffman ? HuffmanEncode(value) : Encoding.ASCII.GetBytes(value);
+        QPackPrefixedInteger.Encode(stream, octets.Length, prefixBits, (byte)(basePattern | huffmanFlag));
+        stream.Write(octets, 0, octets.Length);
+    }
+
     public static IReadOnlyList<(long FrameType, byte[] Payload)> ParseHttp3Frames(byte[] payload)
     {
         List<(long FrameType, byte[] Payload)> frames = new();
@@ -172,16 +252,13 @@ internal static class HttpProtocolPayloadFactory
 
     public static Dictionary<string, string> DecodeLiteralHttp3Headers(byte[] headerBlock)
     {
+        // Delegate to the production QPACK decoder so this helper validates
+        // whatever representation the encoder actually emits (static indexed
+        // field lines, name references, or literals).
         Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
-        int index = 0;
 
-        DecodeQuicInteger(headerBlock, ref index);
-        DecodeQuicInteger(headerBlock, ref index);
-
-        while (index < headerBlock.Length)
+        foreach ((string name, string value) in QPackFieldSectionDecoder.Decode(headerBlock))
         {
-            string name = DecodePrefixedString(headerBlock, ref index, 3);
-            string value = DecodePrefixedString(headerBlock, ref index, 7);
             headers[name] = value;
         }
 
