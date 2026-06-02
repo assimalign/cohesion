@@ -309,3 +309,31 @@ oversight.
   in-flight multiplex-aware refactor proposal.
 - Async feature initialization (see "Non-goals" above) is worth
   revisiting once a concrete consumer appears that genuinely needs it.
+
+## Scope decision: HTTP datagrams and capsules (de-scoped)
+
+Cohesion **does not implement HTTP datagrams or the capsule protocol**
+(RFC 9297). This is a deliberate, recorded decision:
+
+- The capsule protocol and HTTP datagrams exist to carry non-HTTP payloads
+  inside an HTTP exchange — primarily for `CONNECT-UDP` (MASQUE,
+  RFC 9298), `CONNECT-IP` (RFC 9484), and WebTransport. All of those are
+  built **on top of** extended `CONNECT` (RFC 9220 / `:protocol`), so
+  datagrams are only meaningful once an extended-CONNECT consumer exists.
+- There is no concrete consumer in the Cohesion tree today. The issue's
+  own framing makes this explicitly later-wave, optional, extension-shaped
+  work ("only after the core HTTP/3 stack is stable and the project has a
+  concrete use case"). Shipping a datagram/capsule surface now would be
+  speculative API with no caller to validate it.
+- HTTP datagrams over HTTP/3 also depend on the QUIC `DATAGRAM` extension
+  (RFC 9221) being negotiated at the transport, which the QUIC transport
+  does not currently expose.
+
+**Extension seam for the future.** When a concrete consumer arrives (most
+likely WebTransport or a MASQUE proxy), the capsule protocol is a framing
+layer over the request/response body stream and the HTTP-datagram flow
+rides the extended-CONNECT stream established by #339. Neither requires
+changes to the baseline request/response model — they attach as an
+opt-in capability on an already-upgraded exchange — so de-scoping now does
+not paint the design into a corner. The decision is recorded here so the
+absence is understood as intentional rather than an oversight.
