@@ -54,9 +54,29 @@ internal static class Http3HeaderCodec
 
             HttpHeaderKey key = new(name);
 
+            // RFC 9114 §4.2 — connection-specific fields are forbidden in
+            // HTTP/3 (the same set as HTTP/2), and TE may only be "trailers".
+            // The rule is shared with HTTP/2 via HttpFieldNormalization. A
+            // malformed field section is rejected; the receive loop resets the
+            // offending stream without tearing down the connection.
+            if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
+            {
+                throw new InvalidDataException(
+                    $"Connection-specific header field '{name}' is forbidden in HTTP/3 (RFC 9114 §4.2).");
+            }
+
+            if (string.Equals(name, "te", StringComparison.OrdinalIgnoreCase)
+                && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
+            {
+                throw new InvalidDataException(
+                    $"HTTP/3 field 'TE' MUST carry only the value 'trailers'; got '{value}'.");
+            }
+
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))
             {
-                headers[key] = HttpHeaderValue.Concat(existingValue, value);
+                // RFC 9114 §4.2.1 — repeated-field combining (Cookie coalesces
+                // with "; ", other list fields combine) matches HTTP/2.
+                headers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
             }
             else
             {
@@ -65,11 +85,9 @@ internal static class Http3HeaderCodec
         }
 
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
-        HttpHost host = !string.IsNullOrWhiteSpace(authority)
-            ? new HttpHost(authority)
-            : headers.TryGetValue(HttpHeaderKey.Host, out HttpHeaderValue hostValue)
-                ? new HttpHost(hostValue.Value)
-                : HttpHost.Empty;
+        // RFC 9114 §4.3.1 — :authority supersedes Host, resolved identically to
+        // HTTP/2 via HttpFieldNormalization.
+        HttpHost host = HttpFieldNormalization.ResolveAuthority(authority, headers);
         HttpScheme scheme = schemeValue is null
             ? fallbackScheme
             : string.Equals(schemeValue, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
