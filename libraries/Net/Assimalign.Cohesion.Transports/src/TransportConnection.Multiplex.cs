@@ -12,44 +12,44 @@ public abstract class MultiplexTransportConnection : TransportConnection, IMulti
     /// Opens the inbound point to point connection.
     /// </summary>
     /// <returns></returns>
-    public virtual TransportConnectionContext OpenInbound() => OpenInboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    public virtual MultiplexTransportConnectionContext OpenInbound() => OpenInboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public abstract ValueTask<TransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexTransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    public virtual TransportConnectionContext OpenOutbound() => OpenOutboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    public virtual MultiplexTransportConnectionContext OpenOutbound() => OpenOutboundAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public abstract ValueTask<TransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default);
+    public abstract ValueTask<MultiplexTransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default);
 
-    ITransportConnectionContext IMultiplexTransportConnection.OpenInbound()
+    IMultiplexTransportConnectionContext IMultiplexTransportConnection.OpenInbound()
     {
         return OpenInbound();
     }
 
-    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
+    async ValueTask<IMultiplexTransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
     {
         return await OpenInboundAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    ITransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
+    IMultiplexTransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
     {
         return OpenOutbound();
     }
 
-    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
+    async ValueTask<IMultiplexTransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
     {
         return await OpenOutboundAsync(cancellationToken).ConfigureAwait(false);
     }

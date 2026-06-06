@@ -30,6 +30,9 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
         _pipeline = options.Pipeline;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
     public override TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
 
     /// <summary>
@@ -82,10 +85,13 @@ public sealed class TcpClientTransport : ClientTransport<TcpTransportConnection>
             {
                 TcpTransportConnection connection = new TcpTransportConnection(_settings);
 
-                _connections.Add(connection);
+                connection.ConnectionAborted.Register(con =>
+                {
+                    _connections.Remove((TcpTransportConnection)con!);
 
-                connection.OnOpen = () => _connections.Add(connection);
-                connection.OnDispose = () => _connections.Remove(connection);
+                }, connection);
+
+                _connections.Add(connection);
 
                 return connection;
             }

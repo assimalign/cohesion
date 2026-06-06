@@ -2,55 +2,33 @@
 using System.Net;
 using System.Threading;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
 public abstract class TransportConnectionContext : ITransportConnectionContext
 {
-    private readonly CancellationTokenSource _cancellationTokenSource;
-
-    protected TransportConnectionContext()
-    {
-        _cancellationTokenSource = new CancellationTokenSource();
-    }
-
-    /// <summary>
-    /// The local endpoint the connection is bound to.
-    /// </summary>
+    /// <inheritdoc />
     public abstract EndPoint LocalEndPoint { get; }
 
-    /// <summary>
-    /// The remote endpoint the connection is bound to.
-    /// </summary>
+    /// <inheritdoc />
     public abstract EndPoint RemoteEndPoint { get; }
 
-    /// <summary>
-    /// A pipe to send and receive data from either client or server.
-    /// </summary>
+    /// <inheritdoc />
     public abstract ITransportConnectionPipe Pipe { get; }
 
-    /// <summary>
-    /// 
-    /// </summary>
-    public virtual CancellationToken ConnectionCancelled => _cancellationTokenSource.Token;
-
-    /// <summary>
-    /// Gets a value indicating whether the stream this context represents is
-    /// bidirectional. Defaults to <see langword="true"/>; multiplex transports
-    /// that expose unidirectional streams (QUIC) override it.
-    /// </summary>
-    public virtual bool IsBidirectional => true;
-
-    /// <summary>
-    ///
-    /// </summary>
+    /// <inheritdoc />
     public virtual IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
 
-    /// <summary>
-    /// 
-    /// </summary>
-    public virtual void Cancel()
+    /// <inheritdoc />
+    public abstract CancellationToken ConnectionClosed { get; }
+
+    /// <inheritdoc />
+    public virtual void Close()
     {
-        _cancellationTokenSource.Cancel();
+        CloseAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
+
+    /// <inheritdoc />
+    public abstract ValueTask CloseAsync();
 }

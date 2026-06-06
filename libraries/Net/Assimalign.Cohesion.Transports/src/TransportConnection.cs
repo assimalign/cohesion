@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -9,41 +6,30 @@ namespace Assimalign.Cohesion.Transports;
 
 public abstract class TransportConnection : ITransportConnection
 {
-    /// <summary>
-    /// A unique connection id.
-    /// </summary>
+    /// <inheritdoc />
     public abstract ConnectionId Id { get; }
 
-    /// <summary>
-    /// Get the id of the transport in which the connection belongs to.
-    /// </summary>
+    /// <inheritdoc />
     public abstract TransportId TransportId { get; }
 
-    /// <summary>
-    /// The underlying network protocol of the transport connection.
-    /// </summary>
+    /// <inheritdoc />
     public abstract TransportProtocol Protocol { get; }
 
-    /// <summary>
-    /// Represents the current state of the pipeline.
-    /// </summary>
+    /// <inheritdoc />
     public abstract ConnectionState State { get; }
+
+    /// <inheritdoc />
+    public abstract CancellationToken ConnectionAborted { get; }
 
     /// <summary>
     /// 
     /// </summary>
     protected virtual TransportPipeline? Pipeline { get; }
 
-    /// <summary>
-    /// Aborts the connection.
-    /// </summary>
+    /// <inheritdoc />
     public virtual void Abort() => AbortAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
-    /// <summary>
-    /// Asynchronously aborts the connection.
-    /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <inheritdoc />
     public abstract ValueTask AbortAsync(CancellationToken cancellationToken = default);
 
     /// <inheritdoc />

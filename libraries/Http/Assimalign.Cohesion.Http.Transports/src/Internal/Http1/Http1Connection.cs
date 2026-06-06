@@ -2,23 +2,23 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
-
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
+
+using Assimalign.Cohesion.Transports;
 
 internal sealed class Http1Connection : HttpConnection
 {
     private readonly ISingleStreamTransportConnection _connection;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(
-        ISingleStreamTransportConnection connection,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
-        : base(connection, isSecure, createFeatures)
+
+    public Http1Connection(ISingleStreamTransportConnection connection, bool isSecure)
+        : base(connection, isSecure)
     {
         _connection = connection;
     }
+
+    public override CancellationToken ConnectionAborted => _connection.ConnectionAborted;
 
     public override HttpConnectionContext Open()
     {
@@ -40,7 +40,8 @@ internal sealed class Http1Connection : HttpConnection
         // effective value so HttpContext.ConnectionInfo.IsSecure reflects
         // the truth at request-read time.
         bool effectiveIsSecure = IsSecure || transportContext.IsSecure;
-        _openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure, CreateFeatures);
+        
+        _openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure);
 
         return _openContext;
     }

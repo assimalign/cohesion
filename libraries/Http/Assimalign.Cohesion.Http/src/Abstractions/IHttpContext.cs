@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -61,7 +62,49 @@ public interface IHttpContext : IAsyncDisposable
     IDictionary<string, object?> Items { get; }
 
     /// <summary>
-    /// Gets the cancellation token that signals when the request has been aborted.
+    /// Gets the cancellation token that signals when the request has been cancelled.
     /// </summary>
-    CancellationToken RequestAborted { get; }
+    CancellationToken RequestCancelled { get; }
+
+    /// <summary>
+    /// Requests cancellation of the current exchange at the protocol layer
+    /// without tearing down the underlying connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the application-/middleware-facing signal that says "abandon this
+    /// one exchange." It trips <see cref="RequestCancelled"/> and lets the
+    /// transport decide how to reject the exchange on the wire: HTTP/2 resets the
+    /// stream (<c>RST_STREAM</c>), HTTP/3 resets the request stream, and a
+    /// multiplexed connection stays alive for its other streams. A non-multiplexed
+    /// transport may have no finer-grained option than ending the exchange.
+    /// </para>
+    /// <para>
+    /// Implemented as a default interface member that does nothing, so existing
+    /// <see cref="IHttpContext"/> implementations are unaffected; transports that
+    /// can cancel a single exchange override it.
+    /// </para>
+    /// </remarks>
+    void Cancel();
+
+    /// <summary>
+    /// Asynchronously requests cancellation of the current exchange at the protocol layer
+    /// without tearing down the underlying connection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the application-/middleware-facing signal that says "abandon this
+    /// one exchange." It trips <see cref="RequestCancelled"/> and lets the
+    /// transport decide how to reject the exchange on the wire: HTTP/2 resets the
+    /// stream (<c>RST_STREAM</c>), HTTP/3 resets the request stream, and a
+    /// multiplexed connection stays alive for its other streams. A non-multiplexed
+    /// transport may have no finer-grained option than ending the exchange.
+    /// </para>
+    /// <para>
+    /// Implemented as a default interface member that does nothing, so existing
+    /// <see cref="IHttpContext"/> implementations are unaffected; transports that
+    /// can cancel a single exchange override it.
+    /// </para>
+    /// </remarks>
+    Task CancelAsync();
 }

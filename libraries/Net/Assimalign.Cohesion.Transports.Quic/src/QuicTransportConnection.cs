@@ -20,6 +20,7 @@ using Assimalign.Cohesion.Transports.Internal;
 [SupportedOSPlatform("osx")]
 public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicTransportContext>, IMultiplexTransportConnection
 {
+    private readonly CancellationTokenSource _connectionAborted = new CancellationTokenSource();
     private readonly QuicConnection _connection;
     private readonly TransportPipeline<QuicTransportContext>? _pipeline;
     private readonly QuicStreamType _outboundStreamType;
@@ -77,7 +78,8 @@ public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicT
     /// </summary>
     public EndPoint RemoteEndPoint => _connection.RemoteEndPoint;
 
-    internal Action? OnDispose { get; set; }
+    /// <inheritdoc />
+    public override CancellationToken ConnectionAborted => _connectionAborted.Token;
 
     /// <inheritdoc />
     public override async ValueTask<QuicTransportContext> OpenInboundAsync(CancellationToken cancellationToken = default)
@@ -115,22 +117,22 @@ public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicT
         return context;
     }
 
-    ITransportConnectionContext IMultiplexTransportConnection.OpenInbound()
+    IMultiplexTransportConnectionContext IMultiplexTransportConnection.OpenInbound()
     {
         return OpenInbound();
     }
 
-    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
+    async ValueTask<IMultiplexTransportConnectionContext> IMultiplexTransportConnection.OpenInboundAsync(CancellationToken cancellationToken)
     {
         return await OpenInboundAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    ITransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
+    IMultiplexTransportConnectionContext IMultiplexTransportConnection.OpenOutbound()
     {
         return OpenOutbound();
     }
 
-    async ValueTask<ITransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
+    async ValueTask<IMultiplexTransportConnectionContext> IMultiplexTransportConnection.OpenOutboundAsync(CancellationToken cancellationToken)
     {
         return await OpenOutboundAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -149,7 +151,6 @@ public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicT
             {
                 return;
             }
-
             _state = ConnectionState.Aborted;
         }
 
@@ -162,6 +163,10 @@ public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicT
         }
         catch (QuicException)
         {
+        }
+        finally
+        {
+            await _connectionAborted.CancelAsync();
         }
 
         await DisposeAllContextsAsync().ConfigureAwait(false);
@@ -185,14 +190,17 @@ public sealed class QuicTransportConnection : MultiplexTransportConnection<QuicT
         await AbortAsync().ConfigureAwait(false);
 
         await _connection.DisposeAsync().ConfigureAwait(false);
-        _streamOptions.Dispose();
 
-        OnDispose?.Invoke();
+        _streamOptions.Dispose();
     }
 
     private QuicTransportContext CreateContext(QuicStream stream)
     {
-        var context = new QuicTransportContext(this, stream, _streamOptions.ReaderOptions, _streamOptions.WriterOptions);
+        var context = new QuicTransportContext(
+            this, 
+            stream, 
+            _streamOptions.ReaderOptions, 
+            _streamOptions.WriterOptions);
 
         lock (_contextsLock)
         {

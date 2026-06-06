@@ -11,7 +11,6 @@ using System.Diagnostics;
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Transports.Internal;
-
 [DebuggerDisplay("{Protocol} [{Kind}] - {_connections.Count}")]
 public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 {
@@ -46,7 +45,7 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
     /// <summary>
     /// The number of connections that are open.
     /// </summary>
-    public IReadOnlyCollection<TcpTransportConnection> Connections => _connections.AsReadOnly();
+    public IReadOnlyCollection<TcpTransportConnection> Connections => _connections;
 
     /// <summary>
     /// 
@@ -106,8 +105,12 @@ public sealed class TcpServerTransport : ServerTransport<TcpTransportConnection>
 
                 TcpTransportConnection connection = new TcpTransportConnection(settings);
 
-                connection.OnOpen = () => _connections.Add(connection);
-                connection.OnDispose = () => _connections.Remove(connection);
+                connection.ConnectionAborted.Register(con =>
+                {
+                    _connections.Remove((TcpTransportConnection)con!);
+
+                }, connection);
+                _connections.Add(connection);
 
                 return connection;
             }

@@ -41,8 +41,8 @@ public class HttpConnectionListenerOptionsTests
 
         // Act
         options
-            .UseTransport(HttpProtocol.Http11, http1Transport)
-            .UseTransport(HttpProtocol.Http30, http3Transport, isSecure: true);
+            .UseHttp(HttpProtocol.Http11, http1Transport)
+            .UseHttp(HttpProtocol.Http30, http3Transport, isSecure: true);
 
         // Assert
         options.Protocols.ShouldBe(HttpProtocol.Http11 | HttpProtocol.Http30);

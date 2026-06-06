@@ -77,8 +77,12 @@ public sealed class QuicClientTransport : ClientTransport<QuicTransportConnectio
             await quicConnection.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+        // Add a callback to remove the connection from the list when it's aborted
+        connection.ConnectionAborted.Register(con =>
+        {
+            _connections.Remove((QuicTransportConnection)con!);
 
-        connection.OnDispose = () => _connections.Remove(connection);
+        }, connection);
 
         _connections.Add(connection);
 

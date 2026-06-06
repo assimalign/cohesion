@@ -80,7 +80,7 @@ public class TransportPipelineBuilderTests
         public override EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public override ITransportConnectionPipe Pipe { get; } = new TransportConnectionPipe(new System.IO.MemoryStream());
 
-        public override CancellationToken ConnectionCancelled => _cancellationTokenSource.Token;
+        public override CancellationToken PipelineCancelled => _cancellationTokenSource.Token;
 
         public new void Cancel() => _cancellationTokenSource.Cancel();
     }

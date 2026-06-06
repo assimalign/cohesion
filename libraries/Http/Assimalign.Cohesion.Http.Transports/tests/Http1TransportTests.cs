@@ -24,7 +24,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
@@ -75,7 +75,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -93,7 +93,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -114,7 +114,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -140,7 +140,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -163,7 +163,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -202,7 +202,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -227,7 +227,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -468,7 +468,7 @@ public class Http1TransportTests
         TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
 
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(
+        options.UseHttp(
             HttpProtocol.Http11,
             new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { badConn, goodConn }));
 
@@ -521,7 +521,7 @@ public class Http1TransportTests
         TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
 
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(
+        options.UseHttp(
             HttpProtocol.Http11,
             new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { badConn, goodConn }));
 
@@ -564,7 +564,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -592,7 +592,7 @@ public class Http1TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

@@ -1,35 +1,22 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
-
 namespace Assimalign.Cohesion.Http.Transports;
+
+using Assimalign.Cohesion.Transports;
 
 public abstract class HttpConnection : TransportConnection<HttpConnectionContext>, IHttpConnection
 {
-    internal HttpConnection(
-        ITransportConnection connection,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
+    internal HttpConnection(ITransportConnection connection, bool isSecure)
     {
         Connection = connection;
         IsSecure = isSecure;
-        CreateFeatures = createFeatures;
     }
 
     protected ITransportConnection Connection { get; }
-
     protected bool IsSecure { get; }
-
-    /// <summary>
-    /// Optional factory invoked once per <see cref="IHttpContext"/>
-    /// produced from this connection to create the request-scoped
-    /// <see cref="IHttpFeatureCollection"/>. <see langword="null"/> when
-    /// no <see cref="HttpConnectionListenerOptions.CreateFeatures"/>
-    /// hook was configured.
-    /// </summary>
-    protected Func<IHttpFeatureCollection>? CreateFeatures { get; }
 
     public override ConnectionId Id => Connection.Id;
     public override TransportId TransportId => Connection.TransportId;

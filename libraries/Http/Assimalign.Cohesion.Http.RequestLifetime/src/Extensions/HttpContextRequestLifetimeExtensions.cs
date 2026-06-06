@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The protocol core exposes a read-only <see cref="IHttpContext.RequestAborted"/>
+/// The protocol core exposes a read-only <see cref="IHttpContext.RequestCancelled"/>
 /// token. This package adds the <em>writable</em> side: an
 /// <see cref="IHttpRequestLifetime"/> whose <c>Abort()</c> can trigger the
 /// abort signal and whose <c>RequestAborted</c> token can be observed or
@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// Standalone scope: the lazily-installed lifetime is self-contained and is
 /// not automatically linked to the transport's
-/// <see cref="IHttpContext.RequestAborted"/>. Wiring the two together is a
+/// <see cref="IHttpContext.RequestCancelled"/>. Wiring the two together is a
 /// transport concern handled separately.
 /// </para>
 /// </remarks>

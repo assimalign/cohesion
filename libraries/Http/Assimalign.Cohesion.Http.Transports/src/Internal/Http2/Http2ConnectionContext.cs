@@ -51,11 +51,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    public Http2ConnectionContext(
-        ITransportConnectionContext transportContext,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
-        : base(transportContext, isSecure, createFeatures)
+    public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
+        : base(transportContext, isSecure)
     {
         _headerDecoder = new HPackDecoder();
         _streams = new Dictionary<int, Http2Stream>();
@@ -101,6 +98,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             ReceivedFrame received = read.Frame.Value;
 
             FrameProcessOutcome processed = await TryProcessFrameAsync(received, cancellationToken).ConfigureAwait(false);
+            
             if (processed.TerminateConnection)
             {
                 yield break;
@@ -281,6 +279,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         if (context is not Http2Context http2Context)
         {
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/2 connection.");
+        }
+
+        // RFC 9113 §8.1 — the application cancelled this exchange (via
+        // IHttpContext.Cancel, e.g. a rejected extended CONNECT). Reset the
+        // stream with CANCEL instead of writing a response; the connection and
+        // its other streams are unaffected. EmitRstStreamAsync takes the write
+        // lock itself, so this runs before we acquire it below.
+        if (http2Context.CancelRequested)
+        {
+            await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.Cancel, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
@@ -885,7 +894,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // the application's IHttpContext.
         try
         {
-            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(ConnectionInfo.IsSecure), CreateFeatures?.Invoke(), CancellationToken.None);
+            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None);
         }
         catch (HPack.HPackDecodingException error)
         {

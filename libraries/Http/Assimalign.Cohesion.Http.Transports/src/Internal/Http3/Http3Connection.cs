@@ -1,9 +1,9 @@
+using Assimalign.Cohesion.Transports;
 using System;
+using System.Collections.Generic;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Runtime.Versioning;
-
-using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
@@ -16,11 +16,8 @@ internal sealed class Http3Connection : HttpConnection
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(
-        IMultiplexTransportConnection connection,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
-        : base(connection, isSecure, createFeatures)
+    public Http3Connection(IMultiplexTransportConnection connection, bool isSecure)
+        : base(connection, isSecure)
     {
         _connection = connection;
     }
@@ -42,7 +39,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        _openContext = new Http3ConnectionContext(_connection, IsSecure, CreateFeatures);
+        _openContext = new Http3ConnectionContext(_connection, IsSecure);
 
         return _openContext;
     }

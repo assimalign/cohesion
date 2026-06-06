@@ -75,7 +75,11 @@ public sealed class QuicServerTransport : ServerTransport<QuicTransportConnectio
             throw;
         }
 
-        connection.OnDispose = () => _connections.Remove(connection);
+        connection.ConnectionAborted.Register(con =>
+        {
+            _connections.Remove((QuicTransportConnection)con!);
+
+        }, connection);
 
         _connections.Add(connection);
 

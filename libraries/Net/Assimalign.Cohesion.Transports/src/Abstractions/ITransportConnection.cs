@@ -30,9 +30,9 @@ public interface ITransportConnection : IDisposable, IAsyncDisposable
     ConnectionState State { get; }
 
     /// <summary>
-    /// 
+    /// Gets a <see cref="CancellationToken"/> specifying whether connection is aborted.
     /// </summary>
-    //ITransportPipeline Pipeline { get; }
+    CancellationToken ConnectionAborted { get; }
 
     /// <summary>
     /// Aborts the connection.

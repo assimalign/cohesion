@@ -33,9 +33,7 @@ internal sealed class NotSupportedHttpConnectionContext : IHttpConnectionContext
 
     public IDictionary<string, object?> Items => EmptyItems;
 
-    // No lifetime to signal — this context is a placeholder that throws on
-    // every operation; nothing ever runs that could be cancelled.
-    public CancellationToken ConnectionCancelled => default;
+
 
     public IAsyncEnumerable<IHttpContext> ReceiveAsync(CancellationToken cancellationToken = default)
     {

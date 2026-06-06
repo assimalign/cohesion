@@ -71,7 +71,7 @@ internal sealed class TestHttpContext : HttpContext
         ConnectionInfo = connectionInfo ?? HttpConnectionInfo.Empty;
         Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(StringComparer.Ordinal);
-        RequestAborted = requestAborted;
+        RequestCancelled = requestAborted;
 
         // Wire the back-references so request.HttpContext / response.HttpContext resolve to this context.
         request.AttachContext(this);
@@ -90,9 +90,19 @@ internal sealed class TestHttpContext : HttpContext
 
     public override IDictionary<string, object?> Items { get; }
 
-    public override CancellationToken RequestAborted { get; }
+    public override CancellationToken RequestCancelled { get; }
 
     public bool IsDisposed { get; private set; }
+
+    public override void Cancel()
+    {
+        
+    }
+
+    public override Task CancelAsync()
+    {
+        return Task.CompletedTask;
+    }
 
     public override ValueTask DisposeAsync()
     {

@@ -60,6 +60,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
         Context = new UdpTransportConnectionContext(
             socket.LocalEndPoint!,
             socket.RemoteEndPoint!,
+            this,
             new TransportConnectionPipe(_receivePipe.Reader, _sendPipe.Writer));
 
         TransportId = transportId;
@@ -95,6 +96,7 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
         Context = new UdpTransportConnectionContext(
             localEndPoint,
             remoteEndPoint,
+            this,
             new TransportConnectionPipe(_receivePipe.Reader, _sendPipe.Writer));
 
         TransportId = transportId;
@@ -120,13 +122,8 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
     /// </summary>
     public UdpTransportConnectionContext Context { get; }
 
-    internal Action? OnDispose { get; set; }
-
     /// <inheritdoc />
-    public override UdpTransportConnectionContext Open()
-    {
-        return OpenAsync().ConfigureAwait(false).GetAwaiter().GetResult();
-    }
+    public override CancellationToken ConnectionAborted => _shutdownTokenSource.Token;
 
     /// <inheritdoc />
     public override async ValueTask<UdpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
@@ -243,8 +240,6 @@ public sealed class UdpTransportConnection : SingleStreamTransportConnection<Udp
 
         _shutdownTokenSource.Dispose();
         _pipeOptions.Dispose();
-
-        OnDispose?.Invoke();
     }
 
     internal async ValueTask EnqueueInboundDatagramAsync(ReadOnlyMemory<byte> datagram, CancellationToken cancellationToken = default)

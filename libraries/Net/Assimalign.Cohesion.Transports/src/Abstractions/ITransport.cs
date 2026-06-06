@@ -23,7 +23,7 @@ public interface ITransport : IDisposable, IAsyncDisposable
     TransportId Id { get; }
 
     /// <summary>
-    /// Specifies whether the transport is a client or server.
+    /// Specifies whether the transport is a client, server or both.
     /// </summary>
     TransportKind Kind { get; }
 

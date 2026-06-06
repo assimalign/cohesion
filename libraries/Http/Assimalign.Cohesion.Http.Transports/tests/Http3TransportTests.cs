@@ -22,7 +22,7 @@ public class Http3TransportTests
         TestTransportConnectionContext streamContext = new(payload);
         TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -63,7 +63,7 @@ public class Http3TransportTests
         TestTransportConnectionContext secondStream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/two", "https", "a"));
         TestMultiplexTransportConnection connection = new(new[] { firstStream, secondStream }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -95,7 +95,7 @@ public class Http3TransportTests
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/c", "https", "a"));
         TestMultiplexTransportConnection connection = new(new[] { control, request }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -115,7 +115,7 @@ public class Http3TransportTests
             HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/q", "https", "a"));
         TestMultiplexTransportConnection connection = new(new[] { qpack, request }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -134,7 +134,7 @@ public class Http3TransportTests
         TestTransportConnectionContext second = new(HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x06, 8192)), isBidirectional: false);
         TestMultiplexTransportConnection connection = new(new[] { first, second }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -154,7 +154,7 @@ public class Http3TransportTests
             isBidirectional: false);
         TestMultiplexTransportConnection connection = new(new[] { badControl }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -173,7 +173,7 @@ public class Http3TransportTests
             isBidirectional: false);
         TestMultiplexTransportConnection connection = new(new[] { push }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -198,7 +198,7 @@ public class Http3TransportTests
         TestTransportConnectionContext streamContext = new(payload);
         TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -270,7 +270,7 @@ public class Http3TransportTests
         TestTransportConnectionContext streamContext = new(payload);
         TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -309,7 +309,7 @@ public class Http3TransportTests
         TestTransportConnectionContext streamContext = new(requestPayload);
         TestMultiplexTransportConnection connection = new(new[] { streamContext }, TransportProtocol.Quic);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http30, new TestServerTransport(TransportProtocol.Quic, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

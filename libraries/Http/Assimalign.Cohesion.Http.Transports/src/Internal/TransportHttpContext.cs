@@ -7,18 +7,23 @@ namespace Assimalign.Cohesion.Http.Transports.Internal;
 
 internal abstract class TransportHttpContext : HttpContext
 {
+    // Backs RequestAborted. Linked to the transport-supplied token so the
+    // exchange is aborted when the connection/stream is torn down, and can also
+    // be tripped locally by Cancel().
+    private readonly CancellationTokenSource _abortedSource;
+
     protected TransportHttpContext(
         HttpVersion version,
         TransportHttpRequest request,
         TransportHttpResponse response,
         HttpConnectionInfo connectionInfo,
-        CancellationToken requestAborted,
-        IHttpFeatureCollection? features = null)
+        CancellationToken requestAborted)
     {
         Version = version;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo;
+        _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // If the listener's HttpConnectionListenerOptions.CreateFeatures
         // factory returned a collection, wrap it as the defaults source for
         // the per-request collection so features the user supplied are
@@ -27,11 +32,8 @@ internal abstract class TransportHttpContext : HttpContext
         // disposal the effective collection (local + defaults) is walked
         // and every feature implementing IDisposable / IAsyncDisposable is
         // disposed, regardless of which layer it lives on.
-        Features = features is not null
-            ? new HttpFeatureCollection(features)
-            : new HttpFeatureCollection();
+        Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
-        RequestAborted = requestAborted;
 
         // Wire the back-references last so the request and response can resolve
         // their owning context from this point forward. Construction order in
@@ -43,18 +45,55 @@ internal abstract class TransportHttpContext : HttpContext
     }
 
     public override HttpVersion Version { get; }
-
     public override HttpRequest Request { get; }
-
     public override HttpResponse Response { get; }
-
     public override HttpConnectionInfo ConnectionInfo { get; }
-
     public override HttpFeatureCollection Features { get; }
-
     public override IDictionary<string, object?> Items { get; }
+    public override CancellationToken RequestCancelled => _abortedSource.Token;
 
-    public override CancellationToken RequestAborted { get; }
+    /// <summary>
+    /// Whether the application requested cancellation of this exchange via
+    /// <see cref="Cancel"/>. Each transport's response path observes this and
+    /// resets the single exchange (HTTP/2 <c>RST_STREAM</c>, HTTP/3 stream
+    /// reset) instead of writing a response, without tearing down the connection.
+    /// </summary>
+    public bool CancelRequested { get; private set; }
+
+    /// <summary>
+    /// Cancels this exchange: records the request and trips
+    /// <see cref="RequestCancelled"/> so in-flight handler work observes the
+    /// cancellation. The actual wire reset is performed by the transport's
+    /// response path on the next send for this exchange.
+    /// </summary>
+    public override void Cancel()
+    {
+        CancelRequested = true;
+
+        try
+        {
+            _abortedSource.Cancel();
+        }
+        catch (System.ObjectDisposedException)
+        {
+            // The exchange already completed/disposed; cancellation is moot.
+        }
+    }
+
+
+    public override async Task CancelAsync()
+    {
+        CancelRequested = true;
+
+        try
+        {
+            await _abortedSource.CancelAsync();
+        }
+        catch (System.ObjectDisposedException)
+        {
+            // The exchange already completed/disposed; cancellation is moot.
+        }
+    }
 
     /// <summary>
     /// Disposes the request, releasing its features (any
@@ -97,6 +136,7 @@ internal abstract class TransportHttpContext : HttpContext
 
         Request.Body.Dispose();
         Response.Body.Dispose();
+        _abortedSource.Dispose();
     }
 
     private static IHttpFeature[] ToArray(IEnumerable<IHttpFeature> features)

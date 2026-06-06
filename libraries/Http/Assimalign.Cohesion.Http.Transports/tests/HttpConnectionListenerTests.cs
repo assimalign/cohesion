@@ -20,7 +20,7 @@ public class HttpConnectionListenerTests
         TestSingleStreamTransportConnection connection = new(context, TransportProtocol.Tcp);
         TestServerTransport transport = new(TransportProtocol.Tcp, new TransportConnection[] { connection });
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, transport);
+        options.UseHttp(HttpProtocol.Http11, transport);
 
         await using HttpConnectionListener listener = new(options);
 
@@ -44,7 +44,7 @@ public class HttpConnectionListenerTests
         TestSingleStreamTransportConnection secondConnection = new(secondContext, TransportProtocol.Tcp);
         QueuedTestServerTransport transport = new(TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, transport);
+        options.UseHttp(HttpProtocol.Http11, transport);
         transport.Enqueue(firstConnection);
 
         await using HttpConnectionListener listener = new(options);

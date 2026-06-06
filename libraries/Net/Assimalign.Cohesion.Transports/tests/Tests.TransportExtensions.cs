@@ -186,6 +186,8 @@ public class TransportExtensionsTests
         public ConnectionState State { get; }
         public ITransportPipeline Pipeline { get; } = null!;
 
+        public CancellationToken ConnectionAborted => CancellationToken.None;
+
         public void Abort() { }
 
         public ValueTask AbortAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
@@ -200,8 +202,18 @@ public class TransportExtensionsTests
         public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public ITransportConnectionPipe Pipe { get; } = new TestPipe();
-        public CancellationToken ConnectionCancelled { get; } = CancellationToken.None;
+        public CancellationToken PipelineCancelled { get; } = CancellationToken.None;
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+
+        public void Cancel()
+        {
+           
+        }
+
+        public Task CancelAsync()
+        {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TestPipe : ITransportConnectionPipe
@@ -216,6 +228,6 @@ public class TransportExtensionsTests
         public PipeReader Input => _pipe.Reader;
         public PipeWriter Output => _pipe.Writer;
 
-        public Stream GetStream() => new PipeStream(this);
+        public Stream Stream => new PipeStream(this);
     }
 }

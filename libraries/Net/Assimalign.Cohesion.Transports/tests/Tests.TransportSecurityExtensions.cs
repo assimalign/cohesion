@@ -3,7 +3,7 @@ using System.IO;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
-
+using System.Threading.Tasks;
 using Xunit;
 
 namespace Assimalign.Cohesion.Transports.Tests;
@@ -76,8 +76,17 @@ public class TransportSecurityExtensionsTests
         public EndPoint LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public EndPoint RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 0);
         public ITransportConnectionPipe Pipe { get; } = new TestPipe();
-        public CancellationToken ConnectionCancelled { get; } = CancellationToken.None;
+        public CancellationToken PipelineCancelled { get; } = CancellationToken.None;
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+        public void Cancel()
+        {
+
+        }
+
+        public Task CancelAsync()
+        {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TestPipe : ITransportConnectionPipe
@@ -87,6 +96,6 @@ public class TransportSecurityExtensionsTests
         public PipeReader Input => _pipe.Reader;
         public PipeWriter Output => _pipe.Writer;
 
-        public Stream GetStream() => Stream.Null;
+        public Stream Stream => System.IO.Stream.Null;
     }
 }

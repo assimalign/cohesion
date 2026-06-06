@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
@@ -11,7 +12,7 @@ internal sealed class Http1Context : TransportHttpContext
         CancellationToken requestAborted,
         bool keepAlive,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted)
     {
         KeepAlive = keepAlive;
     }

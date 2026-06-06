@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Transports;
 
@@ -7,7 +8,8 @@ public sealed class TcpTransportConnectionContext : TransportConnectionContext
 {
     private ITransportConnectionPipe _pipe;
 
-    internal TcpTransportConnectionContext(TransportConnectionPipe pipe, EndPoint localEndPoint, EndPoint remoteEndPoint)
+    internal TcpTransportConnectionContext(
+        TransportConnectionPipe pipe, EndPoint localEndPoint, EndPoint remoteEndPoint)
     {
         _pipe = pipe;
         LocalEndPoint = localEndPoint;
@@ -22,6 +24,9 @@ public sealed class TcpTransportConnectionContext : TransportConnectionContext
 
     /// <inheritdoc />
     public override ITransportConnectionPipe Pipe => _pipe;
+
+    /// <inheritdoc />
+    public override CancellationToken ConnectionClosed { get; }
 
     /// <summary>
     /// Sets the connection pipe of the existing connection.

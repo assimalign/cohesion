@@ -1,5 +1,7 @@
 using System;
 using System.Net;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
@@ -8,12 +10,18 @@ namespace Assimalign.Cohesion.Transports;
 /// </summary>
 public sealed class UdpTransportConnectionContext : TransportConnectionContext
 {
+    private readonly UdpTransportConnection _connection;
     private ITransportConnectionPipe _pipe;
 
-    internal UdpTransportConnectionContext(EndPoint localEndPoint, EndPoint remoteEndPoint, ITransportConnectionPipe pipe)
+    internal UdpTransportConnectionContext(
+        EndPoint localEndPoint, 
+        EndPoint remoteEndPoint,
+        UdpTransportConnection connection,
+        ITransportConnectionPipe pipe)
     {
         LocalEndPoint = localEndPoint;
         RemoteEndPoint = remoteEndPoint;
+        _connection = connection;
         _pipe = pipe;
     }
 
@@ -25,6 +33,15 @@ public sealed class UdpTransportConnectionContext : TransportConnectionContext
 
     /// <inheritdoc />
     public override ITransportConnectionPipe Pipe => _pipe;
+
+    /// <inheritdoc />
+    public override CancellationToken ConnectionClosed => _connection.ConnectionAborted;
+
+    /// <inheritdoc />
+    public override ValueTask CloseAsync()
+    {
+        return _connection.AbortAsync();
+    }
 
 
     /// <summary>

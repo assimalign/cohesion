@@ -12,25 +12,25 @@ public interface IMultiplexTransportConnection : ITransportConnection
     /// Opens the inbound point to point connection.
     /// </summary>
     /// <returns></returns>
-    ITransportConnectionContext OpenInbound();
+    IMultiplexTransportConnectionContext OpenInbound();
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask<ITransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default);
+    ValueTask<IMultiplexTransportConnectionContext> OpenInboundAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 
     /// </summary>
     /// <returns></returns>
-    ITransportConnectionContext OpenOutbound();
+    IMultiplexTransportConnectionContext OpenOutbound();
 
     /// <summary>
     /// 
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    ValueTask<ITransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default);
+    ValueTask<IMultiplexTransportConnectionContext> OpenOutboundAsync(CancellationToken cancellationToken = default);
 }

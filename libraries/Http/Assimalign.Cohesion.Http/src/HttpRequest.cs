@@ -30,24 +30,16 @@ public abstract class HttpRequest : IHttpRequest
     /// <inheritdoc />
     public abstract HttpScheme Scheme { get; set; }
 
-    /// <summary>
-    /// Gets the parsed query-string values.
-    /// </summary>
+    /// <inheritdoc cref="IHttpRequest.Query" />
     public abstract HttpQueryCollection Query { get; }
 
-    /// <summary>
-    /// Gets the request headers.
-    /// </summary>
+    /// <inheritdoc cref="IHttpRequest.Headers" />
     public abstract HttpHeaderCollection Headers { get; }
 
-    /// <summary>
-    /// Gets the request trailer section (RFC 9110 §6.5). Defaults to the
-    /// shared unsupported (empty, read-only) collection; transports that
-    /// surface trailers override this with a supported collection.
-    /// </summary>
+    /// <inheritdoc cref="IHttpRequest.Trailers" />
     public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="IHttpRequest.HttpContext" />
     public abstract HttpContext HttpContext { get; }
 
     /// <inheritdoc />

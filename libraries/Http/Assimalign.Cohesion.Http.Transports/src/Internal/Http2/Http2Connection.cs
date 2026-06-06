@@ -1,21 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
-
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
+
+using Assimalign.Cohesion.Transports;
 
 internal sealed class Http2Connection : HttpConnection
 {
     private readonly ISingleStreamTransportConnection _connection;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(
-        ISingleStreamTransportConnection connection,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
-        : base(connection, isSecure, createFeatures)
+    public Http2Connection(ISingleStreamTransportConnection connection, bool isSecure)
+        : base(connection, isSecure)
     {
         _connection = connection;
     }
@@ -41,7 +39,8 @@ internal sealed class Http2Connection : HttpConnection
         // effective value so HttpContext.ConnectionInfo.IsSecure reflects
         // the truth at request-read time.
         bool effectiveIsSecure = IsSecure || context.IsSecure;
-        _context = new Http2ConnectionContext(context, effectiveIsSecure, CreateFeatures);
+
+        _context = new Http2ConnectionContext(context, effectiveIsSecure);
 
         return _context;
     }

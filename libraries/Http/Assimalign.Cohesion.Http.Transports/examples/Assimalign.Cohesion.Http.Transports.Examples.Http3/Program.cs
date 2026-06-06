@@ -121,7 +121,7 @@ internal static class Program
     {
         return HttpConnectionListener.Create(options =>
         {
-            options.UseTransport(
+            options.UseHttp(
                 HttpProtocol.Http30,
                 QuicServerTransport.Create(transport =>
                 {

@@ -2,13 +2,11 @@
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO.Pipelines;
-using System.Net;
 using System.Net.Sockets;
 
 namespace Assimalign.Cohesion.Transports;
 
 using Assimalign.Cohesion.Transports.Internal;
-
 
 public sealed class TcpTransportConnection : SingleStreamTransportConnection<TcpTransportConnectionContext>
 {
@@ -21,8 +19,6 @@ public sealed class TcpTransportConnection : SingleStreamTransportConnection<Tcp
     private readonly SocketPipeSenderPool _senderPool;
     private readonly Socket _socket;
 
-    private EndPoint _localEndPoint;
-    private EndPoint _remoteEndPoint;
     private Exception? _connectionError;
     private readonly Lock _lock = new();
     private readonly int _memoryPoolBlockSize;
@@ -66,15 +62,12 @@ public sealed class TcpTransportConnection : SingleStreamTransportConnection<Tcp
         _memoryPoolBlockSize = settings.PipeOptions.BlockSize;
     }
 
-
-    internal Action OnDispose { get; set; } = default!;
-    internal Action OnOpen { get; set; } = default!;
     public override ConnectionId Id { get; } = ConnectionId.New();
     public override TransportId TransportId { get; }
     public override TransportProtocol Protocol { get; } = TransportProtocol.Tcp;
     public override ConnectionState State => _state;
     protected override TransportPipeline<TcpTransportConnectionContext>? Pipeline { get; }
-
+    public override CancellationToken ConnectionAborted => _connectionClosedTokenSource.Token;
     public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
@@ -113,13 +106,11 @@ public sealed class TcpTransportConnection : SingleStreamTransportConnection<Tcp
     {
         if (_isSocketDisposed)
         {
-            throw new ObjectDisposedException(nameof(SocketTransportConnectionContext));
+            throw new ObjectDisposedException(nameof(TcpTransportConnection));
         }
         await AbortAsync().ConfigureAwait(false);
         _isSocketDisposed = true;
-        OnDispose.Invoke();
     }
-
     public override async ValueTask<TcpTransportConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
         if (_context is not null)
@@ -134,7 +125,10 @@ public sealed class TcpTransportConnection : SingleStreamTransportConnection<Tcp
 
         TransportEventSource.Log.TransportConnectionStart(Protocol, TransportId, Id);
 
-        _context = new TcpTransportConnectionContext(_pipe, _localEndPoint, _remoteEndPoint);
+        _context = new TcpTransportConnectionContext(
+            _pipe, 
+            _socket.LocalEndPoint!,
+            _socket.RemoteEndPoint!);
 
         Task? task = Pipeline?.ExecuteAsync(
             _context,
@@ -280,17 +274,12 @@ public sealed class TcpTransportConnection : SingleStreamTransportConnection<Tcp
                 {
                     var sender = _senderPool.Rent();
 
-                    sender.RemoteEndPoint ??= _remoteEndPoint;
-
                     var transferResult = default(SocketPipeResult);
 
                     switch (_socket.SocketType)
                     {
                         case SocketType.Stream: // Streams represent connection oriented sockets
                             transferResult = await sender.SendAsync(_socket, buffer);
-                            break;
-                        case SocketType.Dgram: // Dgrams represent connectionless sockets
-                            transferResult = await sender.SendToAsync(_socket, buffer);
                             break;
                         default:
                             throw new NotSupportedException();

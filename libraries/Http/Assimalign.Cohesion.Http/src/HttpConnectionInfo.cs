@@ -1,11 +1,13 @@
 using System.Net;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Provides concrete HTTP connection metadata.
 /// </summary>
-public sealed class HttpConnectionInfo : IHttpConnectionInfo
+public class HttpConnectionInfo : IHttpConnectionInfo
 {
     /// <summary>
     /// Gets an empty connection info instance.
@@ -18,11 +20,10 @@ public sealed class HttpConnectionInfo : IHttpConnectionInfo
     /// <param name="localEndPoint">The local endpoint.</param>
     /// <param name="remoteEndPoint">The remote endpoint.</param>
     /// <param name="isSecure">Indicates whether the connection is secured.</param>
-    public HttpConnectionInfo(EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null, bool isSecure = false)
+    public HttpConnectionInfo(EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null)
     {
         LocalEndPoint = localEndPoint;
         RemoteEndPoint = remoteEndPoint;
-        IsSecure = isSecure;
     }
 
     /// <inheritdoc />
@@ -44,5 +45,17 @@ public sealed class HttpConnectionInfo : IHttpConnectionInfo
     public int RemotePort => (RemoteEndPoint as IPEndPoint)?.Port ?? 0;
 
     /// <inheritdoc />
-    public bool IsSecure { get; init; }
+    public virtual CancellationToken ConnectionAborted { get; } = CancellationToken.None;
+
+    /// <inheritdoc />
+    public virtual void Abort()
+    {
+        AbortAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public virtual ValueTask AbortAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
 }

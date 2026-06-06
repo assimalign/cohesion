@@ -31,7 +31,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -78,7 +78,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -107,7 +107,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
 
@@ -152,7 +152,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(combined);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -281,7 +281,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -339,7 +339,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -382,7 +382,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -428,7 +428,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, headers));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -448,7 +448,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -597,7 +597,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -618,7 +618,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(payload);
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -742,7 +742,7 @@ public class Http2TransportTests
         transportContext = new(Combine(preface, settings, requestWithoutPreface, dataAfterClose));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -831,7 +831,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, windowUpdate, requestWithoutPreface));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -862,7 +862,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface, goAway));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -926,7 +926,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, requestWithoutPreface, rstStream));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -943,12 +943,12 @@ public class Http2TransportTests
 
         // Give the receive loop a moment to process RST_STREAM. The token
         // should fire because Http2Stream.ReceiveReset() triggers it.
-        for (int i = 0; i < 100 && !httpContext.RequestAborted.IsCancellationRequested; i++)
+        for (int i = 0; i < 100 && !httpContext.RequestCancelled.IsCancellationRequested; i++)
         {
             await Task.Delay(10);
         }
 
-        httpContext.RequestAborted.IsCancellationRequested.ShouldBeTrue();
+        httpContext.RequestCancelled.IsCancellationRequested.ShouldBeTrue();
 
         // Make sure the pumped MoveNext completes (it should return false
         // because the connection's input is finite).
@@ -1090,7 +1090,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, headers));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -1139,7 +1139,7 @@ public class Http2TransportTests
         TestTransportConnectionContext transportContext = new(Combine(preface, settings, headers));
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

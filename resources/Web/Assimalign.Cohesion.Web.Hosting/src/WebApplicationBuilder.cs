@@ -79,6 +79,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             return serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
         });
 
+
         _isBuilt = true;
 
         return app;
@@ -92,31 +93,10 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         return Build();
     }
-    //IWebApplicationBuilder IWebApplicationBuilder.UseServer(IWebApplicationServer server)
-    //{
-    //    ServerManager.UseServer(server);
-    //    return this;
-    //}
-    //IHostBuilder IHostBuilder.AddHostedService(IHostService service)
-    //{
-    //    ArgumentNullException.ThrowIfNull(service);
-
-    //    Services.AddSingleton(service);
-
-    //    return this;
-    //}
-    //IHostBuilder IHostBuilder.AddHostedService(Func<IHostContext, IHostService> configure)
-    //{
-    //    Services.AddSingleton(_ => configure.Invoke(_context));
-    //    return this;
-    //}
-
-    
-
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        Server.UseServer(server);
+        //Server.UseServer(server);
         return this;
     }
 

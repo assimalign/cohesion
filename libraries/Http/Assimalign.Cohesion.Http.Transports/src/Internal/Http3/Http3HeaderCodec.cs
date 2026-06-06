@@ -59,8 +59,10 @@ internal static class Http3HeaderCodec
                         AssignOncePseudoHeader(ref pathValue, value, name);
                         break;
                     case ":protocol":
-                        // RFC 9220 extended CONNECT; recognized here so it is
-                        // not rejected as unknown. Acted on by #339.
+                        // RFC 8441 / RFC 9220 extended CONNECT indicator;
+                        // recognized so it is not rejected as unknown, and
+                        // surfaced verbatim (see extendedConnectProtocol) for a
+                        // higher layer to model. The transport does not interpret it.
                         AssignOncePseudoHeader(ref protocol, value, name);
                         break;
                     default:
@@ -119,15 +121,6 @@ internal static class Http3HeaderCodec
             throw new InvalidDataException("HTTP/3 request is missing the :method pseudo-header (RFC 9114 §4.3.1).");
         }
 
-        // RFC 9220 / RFC 8441 §4 — validate :protocol / extended CONNECT usage
-        // before the per-method pseudo-header requirements. A violation is a
-        // malformed request; the receive loop drops the stream deterministically.
-        string? extendedConnectError = HttpFieldNormalization.ValidateExtendedConnect(method, schemeValue, pathValue, authority, protocol);
-        if (extendedConnectError is not null)
-        {
-            throw new InvalidDataException(extendedConnectError);
-        }
-
         bool isConnect = string.Equals(method, "CONNECT", StringComparison.Ordinal);
 
         if (!isConnect)
@@ -151,9 +144,10 @@ internal static class Http3HeaderCodec
             ? fallbackScheme
             : string.Equals(schemeValue, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
-        // RFC 9220 — a valid extended CONNECT (CONNECT + :protocol) surfaces its
-        // protocol so the connection context can attach the explicit feature.
-        extendedConnectProtocol = HttpFieldNormalization.IsExtendedConnect(method, protocol) ? protocol : null;
+        // Surface the raw :protocol pseudo-header (RFC 8441 / RFC 9220) so the
+        // connection context can stash it generically for a higher layer; the
+        // transport itself does not interpret extended CONNECT.
+        extendedConnectProtocol = protocol;
 
         return new Http3Request(
             host,

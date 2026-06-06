@@ -76,7 +76,11 @@ public sealed class UdpClientTransport : ClientTransport<UdpTransportConnection>
             throw;
         }
 
-        connection.OnDispose = () => _connections.Remove(connection);
+        connection.ConnectionAborted.Register(con =>
+        {
+            _connections.Remove((UdpTransportConnection)con!);
+
+        }, connection);
 
         _connections.Add(connection);
 

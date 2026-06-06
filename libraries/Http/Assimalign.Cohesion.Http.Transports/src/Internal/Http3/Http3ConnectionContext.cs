@@ -20,42 +20,28 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private static readonly ITransportConnectionPipe DisabledPipe = new TransportConnectionPipe(Stream.Null);
     private readonly IMultiplexTransportConnection _connection;
     private readonly Dictionary<string, object?> _items;
-    private readonly Func<IHttpFeatureCollection>? _createFeatures;
     private readonly bool _isSecure;
     private readonly Http3PeerSettings _peerSettings = new();
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
-    private EndPoint _localEndPoint;
-    private EndPoint _remoteEndPoint;
+    private EndPoint? _localEndPoint;
+    private EndPoint? _remoteEndPoint;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(
-        IMultiplexTransportConnection connection,
-        bool isSecure,
-        Func<IHttpFeatureCollection>? createFeatures)
+    public Http3ConnectionContext(IMultiplexTransportConnection connection, bool isSecure)
     {
         _connection = connection;
         _isSecure = isSecure;
         _items = new Dictionary<string, object?>(StringComparer.Ordinal);
-        _createFeatures = createFeatures;
-        _localEndPoint = connection is QuicTransportConnection quicConnection
-            ? quicConnection.LocalEndPoint
-            : new IPEndPoint(IPAddress.None, 0);
-        _remoteEndPoint = connection is QuicTransportConnection quicConnection2
-            ? quicConnection2.RemoteEndPoint
-            : new IPEndPoint(IPAddress.None, 0);
     }
 
-    public override EndPoint LocalEndPoint => _localEndPoint;
-
-    public override EndPoint RemoteEndPoint => _remoteEndPoint;
-
+    public override EndPoint? LocalEndPoint => _localEndPoint;
+    public override EndPoint? RemoteEndPoint => _remoteEndPoint;
     public override ITransportConnectionPipe Pipe => DisabledPipe;
-
     public override IDictionary<string, object?> Items => _items;
 
     /// <summary>
@@ -80,6 +66,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         while (!cancellationToken.IsCancellationRequested)
         {
             StreamAcceptOutcome accept = await TryAcceptInboundAsync(cancellationToken).ConfigureAwait(false);
+
             if (accept.TerminateConnection)
             {
                 yield break;
@@ -91,7 +78,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 continue;
             }
 
-            ITransportConnectionContext streamContext = accept.StreamContext;
+            IMultiplexTransportConnectionContext streamContext = accept.StreamContext;
+            
             _localEndPoint = streamContext.LocalEndPoint;
             _remoteEndPoint = streamContext.RemoteEndPoint;
 
@@ -332,7 +320,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     {
         try
         {
-            ITransportConnectionContext streamContext = await _connection.OpenInboundAsync(cancellationToken).ConfigureAwait(false);
+            IMultiplexTransportConnectionContext streamContext = await _connection.OpenInboundAsync(cancellationToken).ConfigureAwait(false);
             return new StreamAcceptOutcome(streamContext, terminate: false);
         }
         catch (OperationCanceledException)
@@ -418,13 +406,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     private readonly struct StreamAcceptOutcome
     {
-        public StreamAcceptOutcome(ITransportConnectionContext? streamContext, bool terminate)
+        public StreamAcceptOutcome(IMultiplexTransportConnectionContext? streamContext, bool terminate)
         {
             StreamContext = streamContext;
             TerminateConnection = terminate;
         }
 
-        public ITransportConnectionContext? StreamContext { get; }
+        public IMultiplexTransportConnectionContext? StreamContext { get; }
         public bool TerminateConnection { get; }
     }
 
@@ -435,7 +423,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
-        Stream stream = http3Context.StreamContext.Pipe.GetStream();
+        Stream stream = http3Context.StreamContext.Pipe.Stream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
 
@@ -451,7 +439,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     private async Task<Http3Context?> ReadRequestAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
     {
-        Stream stream = streamContext.Pipe.GetStream();
+        Stream stream = streamContext.Pipe.Stream();
         using MemoryStream requestBuffer = new();
         await stream.CopyToAsync(requestBuffer, cancellationToken).ConfigureAwait(false);
 
@@ -486,14 +474,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         byte[] bodyBytes = body.ToArray();
         Http3Request request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, _isSecure ? HttpScheme.Https : HttpScheme.Http, bodyBytes, out string? extendedConnectProtocol);
         Http3Response response = new();
-        HttpConnectionInfo connectionInfo = new(streamContext.LocalEndPoint, streamContext.RemoteEndPoint, _isSecure);
+        HttpConnectionInfo connectionInfo = new(streamContext.LocalEndPoint, streamContext.RemoteEndPoint);
 
-        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamContext, _createFeatures?.Invoke());
+        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamContext);
 
-        // RFC 9220 — model a valid extended CONNECT explicitly as a feature.
+        // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
+        // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model
+        // extended CONNECT without the transport interpreting it. Same Items key
+        // convention as the HTTP/2 transport.
         if (extendedConnectProtocol is not null)
         {
-            context.Features.Set(new HttpExtendedConnectFeature(extendedConnectProtocol));
+            context.Items[TransportItemKeys.Protocol] = extendedConnectProtocol;
         }
 
         return context;

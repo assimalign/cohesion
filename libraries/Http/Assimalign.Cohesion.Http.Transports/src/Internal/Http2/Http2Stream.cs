@@ -61,7 +61,7 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// A token that fires when this stream is reset (locally or by the
-    /// peer). Wired into <see cref="IHttpContext.RequestAborted"/> so
+    /// peer). Wired into <see cref="IHttpContext.RequestCancelled"/> so
     /// the application can observe peer cancellation.
     /// </summary>
     public CancellationToken RequestAborted => _abortedSource.Token;
@@ -315,7 +315,7 @@ internal sealed class Http2Stream
         }
     }
 
-    public Http2Context CreateContext(HPackDecoder decoder, HttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, IHttpFeatureCollection? features, CancellationToken connectionAborted)
+    public Http2Context CreateContext(HPackDecoder decoder, HttpConnectionInfo connectionInfo, HttpScheme fallbackScheme, CancellationToken connectionAborted)
     {
         if (!IsRequestReady)
         {
@@ -332,22 +332,6 @@ internal sealed class Http2Stream
             : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
 
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
-
-        // RFC 8441 §4 — validate :protocol / extended CONNECT usage. A
-        // violation is a malformed request; surface it as the same field-section
-        // failure the receive loop maps to a PROTOCOL_ERROR (deterministic, no
-        // silent downgrade).
-        string? extendedConnectError = HttpFieldNormalization.ValidateExtendedConnect(
-            decodedHeaders.Method,
-            decodedHeaders.Scheme,
-            decodedHeaders.Path,
-            decodedHeaders.Authority,
-            decodedHeaders.Protocol);
-        if (extendedConnectError is not null)
-        {
-            throw new HPack.HPackDecodingException(extendedConnectError);
-        }
-
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
@@ -367,13 +351,14 @@ internal sealed class Http2Stream
             decodedHeaders.Headers,
             new MemoryStream(bodyBytes, writable: false));
 
-        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, features);
+        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted);
 
-        // RFC 8441 — model a valid extended CONNECT explicitly as a feature so
-        // the application can detect it; ordinary requests carry no feature.
-        if (HttpFieldNormalization.IsExtendedConnect(decodedHeaders.Method, decodedHeaders.Protocol))
+        // Surface the :protocol pseudo-header (RFC 8441) generically so a
+        // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)
+        // can model extended CONNECT without the transport knowing about it.
+        if (decodedHeaders.Protocol is not null)
         {
-            context.Features.Set(new Internal.HttpExtendedConnectFeature(decodedHeaders.Protocol!));
+            context.Items[Internal.TransportItemKeys.Protocol] = decodedHeaders.Protocol;
         }
 
         return context;

@@ -293,7 +293,10 @@ public sealed class UdpServerTransport : ServerTransport<UdpTransportConnection>
                 throw;
             }
 
-            connection.OnDispose = () => RemoveConnection(peerKey, connection);
+            connection.ConnectionAborted.Register(() =>
+            {
+                RemoveConnection(peerKey, connection);
+            });
 
             _peerConnections.Add(peerKey, connection);
             _connections.Add(connection);

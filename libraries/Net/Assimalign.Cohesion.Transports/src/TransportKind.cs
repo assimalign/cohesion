@@ -1,8 +1,11 @@
-﻿namespace Assimalign.Cohesion.Transports;
+﻿using System;
+
+namespace Assimalign.Cohesion.Transports;
 
 /// <summary>
 /// Represents the type of transport being used.
 /// </summary>
+[Flags]
 public enum TransportKind
 {
     /// <summary>

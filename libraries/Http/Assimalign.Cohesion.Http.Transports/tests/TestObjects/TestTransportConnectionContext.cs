@@ -59,12 +59,12 @@ internal sealed class TestTransportConnectionContext : TransportConnectionContex
     /// Cancellation token signalled when the test driver simulates a
     /// connection close. Test code can wire this through to assertions
     /// that exercise the connection-lifetime hook on
-    /// <see cref="ITransportConnectionContext.ConnectionCancelled"/>.
+    /// <see cref="ITransportConnectionContext.PipelineCancelled"/>.
     /// </summary>
-    public override CancellationToken ConnectionCancelled => _connectionCancelledSource.Token;
+    public override CancellationToken PipelineCancelled => _connectionCancelledSource.Token;
 
     /// <summary>
-    /// Trips <see cref="ConnectionCancelled"/> so receive-loop tests can
+    /// Trips <see cref="PipelineCancelled"/> so receive-loop tests can
     /// drive the same lifetime signal a real transport would raise.
     /// </summary>
     public void CancelConnection() => _connectionCancelledSource.Cancel();

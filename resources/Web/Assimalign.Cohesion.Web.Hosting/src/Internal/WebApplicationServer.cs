@@ -4,12 +4,12 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
 
-public sealed class WebApplicationServer : IWebApplicationServer
+internal sealed class WebApplicationServer : IWebApplicationServer
 {
     private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 

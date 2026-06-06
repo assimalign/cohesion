@@ -1,22 +1,26 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Versioning;
 using System.Runtime.ExceptionServices;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Threading.Channels;
-
-using Assimalign.Cohesion.Http.Transports.Internal;
-using Assimalign.Cohesion.Transports;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Transports;
+
+using Assimalign.Cohesion.Http.Transports.Internal;
+using Assimalign.Cohesion.Http.Transports.Internal.Http1;
+using Assimalign.Cohesion.Http.Transports.Internal.Http2;
+using Assimalign.Cohesion.Http.Transports.Internal.Http3;
+using Assimalign.Cohesion.Transports;
 
 /// <summary>
 /// Accepts transport connections and adapts them into HTTP protocol connections.
 /// </summary>
 public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IHttpConnectionListener
 {
-    private readonly HttpConnectionFactory _factory;
-    private readonly List<HttpProtocolRegistration> _registrations;
+    private readonly List<HttpConnectionTransport> _transports;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
@@ -33,9 +37,8 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _factory = new HttpConnectionFactory(options.CreateFeatures);
-        _registrations = new List<HttpProtocolRegistration>(options.GetRegistrations());
-        _acceptLoops = new List<Task>(_registrations.Count);
+        _transports = options.Transports.Select(transport => transport.Invoke()).ToList();
+        _acceptLoops = new List<Task>(_transports.Count);
         _acceptedConnections = Channel.CreateBounded<HttpConnection>(new BoundedChannelOptions(options.BacklogCapacity)
         {
             SingleReader = false,
@@ -44,7 +47,7 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
         });
         _disposeCancellationTokenSource = new CancellationTokenSource();
         _acceptLoopLock = new Lock();
-        Protocols = options.Protocols;
+        Protocols = _transports.Aggregate(HttpProtocol.None, static (current, registration) => current | registration.HttpProtocols);
     }
 
     /// <summary>
@@ -60,7 +63,7 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
     {
         ObjectDisposedException.ThrowIf(_isDisposed, nameof(HttpConnectionListener));
 
-        if (_registrations.Count == 0)
+        if (_transports.Count == 0)
         {
             throw new InvalidOperationException("At least one transport must be configured before accepting HTTP connections.");
         }
@@ -101,9 +104,9 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
         _isDisposed = true;
         _disposeCancellationTokenSource.Cancel();
 
-        foreach (HttpProtocolRegistration registration in _registrations)
+        foreach (HttpConnectionTransport transport in _transports)
         {
-            await registration.Transport.DisposeAsync().ConfigureAwait(false);
+            await transport.DisposeAsync().ConfigureAwait(false);
         }
 
         Task[] acceptLoops;
@@ -148,7 +151,7 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
                 return;
             }
 
-            foreach (HttpProtocolRegistration registration in _registrations)
+            foreach (HttpConnectionTransport registration in _transports)
             {
                 _acceptLoops.Add(RunAcceptLoopAsync(registration));
             }
@@ -162,15 +165,37 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
         return await AcceptOrListenAsync(cancellationToken);
     }
 
-    private async Task RunAcceptLoopAsync(HttpProtocolRegistration registration)
+    private async Task RunAcceptLoopAsync(HttpConnectionTransport httpTransport)
     {
         try
         {
             while (!_disposeCancellationTokenSource.IsCancellationRequested)
             {
-                ITransport transport = registration.Transport;
-                ITransportConnection transportConnection = await transport.InitializeAsync(_disposeCancellationTokenSource.Token).ConfigureAwait(false);
-                HttpConnection connection = _factory.Create(registration, transportConnection);
+                ITransport transport = httpTransport;
+                ITransportConnection transportConnection = await transport
+                    .InitializeAsync(_disposeCancellationTokenSource.Token)
+                    .ConfigureAwait(false);
+
+                HttpConnection connection = httpTransport.HttpProtocols switch
+                {
+                    HttpProtocol.Http11 when transportConnection is ISingleStreamTransportConnection singleStreamConnection =>
+                        new Http1Connection(singleStreamConnection, httpTransport.IsSecure),
+
+                    HttpProtocol.Http20 when transportConnection is ISingleStreamTransportConnection singleStreamConnection =>
+                        new Http2Connection(singleStreamConnection, httpTransport.IsSecure),
+
+                    HttpProtocol.Http30 when transportConnection is IMultiplexTransportConnection multiplexTransportConnection =>
+                        CreateHttp3Connection(multiplexTransportConnection, httpTransport.IsSecure),
+
+                    HttpProtocol.Http11 or HttpProtocol.Http20 =>
+                        throw new InvalidOperationException("HTTP/1.1 and HTTP/2 require a single-stream transport connection."),
+
+                    HttpProtocol.Http30 =>
+                        throw new InvalidOperationException("HTTP/3 requires a multiplexed transport connection."),
+
+                    _ =>
+                        throw new InvalidOperationException($"The configured HTTP protocol '{httpTransport.Protocol}' is not supported.")
+                };
 
                 await _acceptedConnections.Writer.WriteAsync(connection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -189,5 +214,26 @@ public sealed class HttpConnectionListener : ServerTransport<HttpConnection>, IH
             _disposeCancellationTokenSource.Cancel();
             _acceptedConnections.Writer.TryComplete(exception);
         }
+    }
+
+
+    private static Http3Connection CreateHttp3Connection(IMultiplexTransportConnection connection, bool isSecure)
+    {
+        if (!IsHttp3SupportedPlatform())
+        {
+            throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
+        }
+
+        return new Http3Connection(connection, isSecure);
+    }
+
+    [SupportedOSPlatformGuard("windows")]
+    [SupportedOSPlatformGuard("linux")]
+    [SupportedOSPlatformGuard("macos")]
+    private static bool IsHttp3SupportedPlatform()
+    {
+        return OperatingSystem.IsWindows() ||
+            OperatingSystem.IsLinux() ||
+            OperatingSystem.IsMacOS();
     }
 }

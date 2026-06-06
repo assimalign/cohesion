@@ -87,7 +87,7 @@ public class HttpConnectionIsSecurePropagationTests
         transportContext.IsSecure = true;
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -117,7 +117,7 @@ public class HttpConnectionIsSecurePropagationTests
         transportContext.IsSecure = true;
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
+        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -143,7 +143,7 @@ public class HttpConnectionIsSecurePropagationTests
         // Explicitly leave transportContext.IsSecure unset (defaults to false).
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: true);
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: true);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -161,7 +161,7 @@ public class HttpConnectionIsSecurePropagationTests
         transportContext.IsSecure = transportIsSecure;
         TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
         HttpConnectionListenerOptions options = new();
-        options.UseTransport(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), registrationIsSecure);
+        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), registrationIsSecure);
 
         // The listener is intentionally returned along with the context so
         // it stays alive for the duration of the test method — disposing

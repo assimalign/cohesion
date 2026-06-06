@@ -1,6 +1,5 @@
 using System;
 using System.Net;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
@@ -101,7 +100,6 @@ public sealed class TcpServerTransportOptions
     /// The default options.
     /// </summary>
     public static TcpServerTransportOptions Default { get; } = new TcpServerTransportOptions();
-
 
     /// <summary>
     /// 

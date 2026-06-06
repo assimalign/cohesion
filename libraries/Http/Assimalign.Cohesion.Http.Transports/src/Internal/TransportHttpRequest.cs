@@ -28,19 +28,12 @@ internal abstract class TransportHttpRequest : HttpRequest
     }
 
     public override HttpHost Host { get; set; }
-
     public override HttpPath Path { get; set; }
-
     public override HttpMethod Method { get; set; }
-
     public override HttpScheme Scheme { get; set; }
-
     public override HttpQueryCollection Query { get; }
-
     public override HttpHeaderCollection Headers { get; }
-
     public override HttpTrailerCollection Trailers { get; }
-
     public override HttpContext HttpContext => _httpContext
         ?? throw new InvalidOperationException(
             "The HttpContext back-reference has not been attached. " +

@@ -15,9 +15,10 @@ namespace Assimalign.Cohesion.Transports;
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
 [SupportedOSPlatform("osx")]
-public sealed class QuicTransportContext : TransportConnectionContext
+public sealed class QuicTransportContext : MultiplexTransportConnectionContext
 {
     private ITransportConnectionPipe _pipe;
+    private readonly QuicStream _stream;
 
     internal QuicTransportContext(
         QuicTransportConnection connection,
@@ -26,9 +27,9 @@ public sealed class QuicTransportContext : TransportConnectionContext
         StreamPipeWriterOptions writerOptions)
     {
         Connection = connection;
-        Stream = stream;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
+        _stream = stream;
         _pipe = new TransportConnectionPipe(stream, readerOptions, writerOptions);
     }
 
@@ -36,11 +37,6 @@ public sealed class QuicTransportContext : TransportConnectionContext
     /// Gets the QUIC connection associated with this context.
     /// </summary>
     public QuicTransportConnection Connection { get; }
-
-    internal QuicStream Stream { get; }
-
-    /// <inheritdoc />
-    public override bool IsBidirectional => Stream.Type == QuicStreamType.Bidirectional;
 
     /// <inheritdoc />
     public override EndPoint LocalEndPoint { get; }
@@ -50,6 +46,9 @@ public sealed class QuicTransportContext : TransportConnectionContext
 
     /// <inheritdoc />
     public override ITransportConnectionPipe Pipe => _pipe;
+
+    /// <inheritdoc />
+    public override bool IsBidirectional => _stream.Type == QuicStreamType.Bidirectional;
 
     /// <summary>
     /// Replaces the active connection pipe with a custom implementation.
@@ -64,6 +63,6 @@ public sealed class QuicTransportContext : TransportConnectionContext
 
     internal ValueTask DisposeAsync()
     {
-        return Stream.DisposeAsync();
+        return _stream.DisposeAsync();
     }
 }

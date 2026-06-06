@@ -38,28 +38,7 @@ public static class TransportExtensions
         public bool IsOpen() => connection.State == ConnectionState.Open;
     }
 
-    extension(ITransportConnectionContext context)
-    {
-        public void AddItem<T>(string key, T value)
-        {
-            ArgumentNullException.ThrowIfNull(context);
-            ArgumentNullException.ThrowIfNullOrEmpty(key);
-
-            context.Items[key] = value;
-        }
-
-        public T? GetItem<T>(string key) where T : class
-        {
-            ArgumentNullException.ThrowIfNull(context);
-            ArgumentNullException.ThrowIfNullOrEmpty(key);
-
-            if (context.Items.TryGetValue(key, out var value))
-            {
-                return value as T;
-            }
-            return default;
-        }
-    }
+    
 
     extension(ITransportConnectionPipe pipe)
     {
@@ -116,6 +95,29 @@ public static class TransportExtensions
             var result = await pipe.Output.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
 
             return result;
+        }
+    }
+
+    extension(ITransportConnectionContext context)
+    {
+        public void AddItem<T>(string key, T value)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNullOrEmpty(key);
+
+            context.Items[key] = value;
+        }
+
+        public T? GetItem<T>(string key) where T : class
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNullOrEmpty(key);
+
+            if (context.Items.TryGetValue(key, out var value))
+            {
+                return value as T;
+            }
+            return default;
         }
     }
 }

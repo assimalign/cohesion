@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Transports" />
+		
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Internal\" />
 	</ItemGroup>
 </Project>

@@ -9,18 +9,15 @@ namespace Assimalign.Cohesion.Http;
 /// An extended CONNECT request is a <c>CONNECT</c> request that additionally
 /// carries the <c>:protocol</c> pseudo-header — the mechanism a client uses to
 /// bootstrap another protocol (most commonly WebSocket, <c>:protocol =
-/// websocket</c>) over a single HTTP/2 or HTTP/3 stream. The transport installs
-/// this feature only when a request is a valid extended CONNECT; its presence is
-/// the explicit, opt-in signal that the exchange is an extension transition
-/// rather than a normal request. Ordinary requests do not carry the feature, so
-/// <see cref="HttpFeatureCollectionExtensions.Get{TFeature}"/> returns
-/// <see langword="null"/> for them.
+/// websocket</c>) over a single HTTP/2 or HTTP/3 stream. The feature is surfaced
+/// by the <see cref="HttpExtendedConnectExtensions"/> members when a request is
+/// an extended CONNECT; ordinary requests do not carry it.
 /// </para>
 /// <para>
 /// This contract intentionally exposes only the requested protocol — it does not
-/// surrender a tunnel stream. Cohesion recognizes and models extended CONNECT
-/// (so an application can detect it and respond deterministically) but does not
-/// ship a WebSocket framing surface; see the transports <c>DESIGN.md</c> for the
+/// surrender a tunnel stream. This package recognizes and models extended
+/// CONNECT (so an application can detect it and respond deterministically) but
+/// does not ship a WebSocket framing surface; see <c>docs/DESIGN.md</c> for the
 /// scope decision.
 /// </para>
 /// </remarks>

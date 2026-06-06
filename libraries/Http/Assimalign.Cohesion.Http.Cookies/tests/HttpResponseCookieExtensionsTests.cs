@@ -102,7 +102,7 @@ public class HttpResponseCookieExtensionsTests
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
         public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
-        public CancellationToken RequestAborted => CancellationToken.None;
+        public CancellationToken RequestCancelled => CancellationToken.None;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

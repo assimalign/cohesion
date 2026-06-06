@@ -54,5 +54,5 @@ public sealed class TransportConnectionPipe : ITransportConnectionPipe
 
     public PipeReader Input => _input;
     public PipeWriter Output => _output;
-    public Stream GetStream() => _stream;
+    public Stream Stream => _stream;
 }

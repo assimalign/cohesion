@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.Reflection;
 using System.Text;
+
 namespace Assimalign.Cohesion.Http.Transports.Internal;
 
 [EventSource(Name = name)]

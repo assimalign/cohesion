@@ -1,8 +1,5 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipelines;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Transports;
 
@@ -15,8 +12,8 @@ namespace Assimalign.Cohesion.Transports;
 public interface ITransportConnectionPipe : IDuplexPipe
 {
     /// <summary>
-    /// Converts the <see cref="ITransportConnectionPipe"/> to a <see cref="Stream"/>.
+    /// Gets the <see cref="ITransportConnectionPipe"/> to a <see cref="System.IO.Stream"/>.
     /// </summary>
     /// <returns></returns>
-    Stream GetStream();
+    Stream Stream { get; }
 }
