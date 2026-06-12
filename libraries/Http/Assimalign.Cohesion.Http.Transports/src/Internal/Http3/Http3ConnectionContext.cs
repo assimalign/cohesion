@@ -9,40 +9,32 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Http.Transports.Internal.Http3.Frames;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
-using Assimalign.Cohesion.Http.Transports.Internal.Http3.Frames;
-
 internal sealed class Http3ConnectionContext : HttpConnectionContext
 {
-    private static readonly ITransportConnectionPipe DisabledPipe = new TransportConnectionPipe(Stream.Null);
-    private readonly IMultiplexTransportConnection _connection;
-    private readonly Dictionary<string, object?> _items;
+    private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
     private readonly Http3PeerSettings _peerSettings = new();
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
-    private EndPoint? _localEndPoint;
-    private EndPoint? _remoteEndPoint;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(IMultiplexTransportConnection connection, bool isSecure)
+    public Http3ConnectionContext(IMultiplexedConnection connection, bool isSecure)
     {
         _connection = connection;
         _isSecure = isSecure;
-        _items = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
-    public override EndPoint? LocalEndPoint => _localEndPoint;
-    public override EndPoint? RemoteEndPoint => _remoteEndPoint;
-    public override ITransportConnectionPipe Pipe => DisabledPipe;
-    public override IDictionary<string, object?> Items => _items;
+    public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
+    public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
 
     /// <summary>
     /// Yields HTTP/3 request contexts for the lifetime of this connection.
@@ -56,7 +48,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// connection-level header table to corrupt, so a bad request on one
     /// stream is harmless to the others). Connection-terminating failures —
     /// the QUIC connection itself going away
-    /// (<see cref="QuicException"/>), the multiplex transport being
+    /// (<see cref="QuicException"/> or a contract-level
+    /// <see cref="ConnectionException"/>), the multiplexed connection being
     /// disposed, or cancellation — exit the enumerable cleanly so the
     /// listener stays alive for the next peer.
     /// </para>
@@ -71,24 +64,21 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             {
                 yield break;
             }
-            if (accept.StreamContext is null)
+            if (accept.StreamConnection is null)
             {
                 // Non-terminating accept failure is not expected, but guard
                 // anyway: skip and try the next inbound.
                 continue;
             }
 
-            IMultiplexTransportConnectionContext streamContext = accept.StreamContext;
-            
-            _localEndPoint = streamContext.LocalEndPoint;
-            _remoteEndPoint = streamContext.RemoteEndPoint;
+            IConnection streamConnection = accept.StreamConnection;
 
             // RFC 9114 §6 — a bidirectional stream is a request stream; the
             // peer's unidirectional streams carry a type prefix (control,
             // QPACK encoder/decoder, push) and are demultiplexed separately.
-            if (!streamContext.IsBidirectional)
+            if (streamConnection.Direction != ConnectionDirection.Bidirectional)
             {
-                if (await TryHandleUnidirectionalStreamAsync(streamContext, cancellationToken).ConfigureAwait(false))
+                if (await TryHandleUnidirectionalStreamAsync(streamConnection, cancellationToken).ConfigureAwait(false))
                 {
                     // A control-stream protocol violation — duplicate control
                     // or QPACK stream, missing/!SETTINGS first frame, or a
@@ -100,7 +90,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 continue;
             }
 
-            Http3Context? context = await TryReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
+            Http3Context? context = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
 
             if (context is not null)
             {
@@ -117,14 +107,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// first control frame, or a client-created push stream); otherwise
     /// <see langword="false"/>.
     /// </summary>
-    private async Task<bool> TryHandleUnidirectionalStreamAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
+    private async Task<bool> TryHandleUnidirectionalStreamAsync(IConnection streamConnection, CancellationToken cancellationToken)
     {
-        // RFC 9114 §6.2 — read directly off the PipeReader rather than the
-        // Stream adapter. Unidirectional streams are processed incrementally
-        // (a varint stream-type prefix, then type-specific frames), which the
-        // buffered ReadOnlySequence model expresses directly without the
-        // adapter's read-size quirks.
-        PipeReader reader = streamContext.Pipe.Input;
+        // RFC 9114 §6.2 — read directly off the stream connection's PipeReader
+        // rather than the Stream adapter. Unidirectional streams are processed
+        // incrementally (a varint stream-type prefix, then type-specific
+        // frames), which the buffered ReadOnlySequence model expresses directly
+        // without the adapter's read-size quirks.
+        PipeReader reader = streamConnection.Input;
 
         long? streamType;
         try
@@ -310,39 +300,45 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Accepts the next inbound QUIC stream on this multiplex connection.
-    /// QUIC-level failures (peer aborted the connection, the multiplex was
-    /// disposed) and cancellation signal connection termination so the
-    /// receive loop exits without throwing into the caller's
-    /// <c>await foreach</c>.
+    /// Accepts the next inbound QUIC stream on this multiplexed connection.
+    /// QUIC-level failures (peer aborted the connection, the multiplexed
+    /// connection was disposed) and cancellation signal connection
+    /// termination so the receive loop exits without throwing into the
+    /// caller's <c>await foreach</c>.
     /// </summary>
     private async Task<StreamAcceptOutcome> TryAcceptInboundAsync(CancellationToken cancellationToken)
     {
         try
         {
-            IMultiplexTransportConnectionContext streamContext = await _connection.OpenInboundAsync(cancellationToken).ConfigureAwait(false);
-            return new StreamAcceptOutcome(streamContext, terminate: false);
+            IConnection streamConnection = await _connection.AcceptStreamAsync(cancellationToken).ConfigureAwait(false);
+            return new StreamAcceptOutcome(streamConnection, terminate: false);
         }
         catch (OperationCanceledException)
         {
-            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+            return new StreamAcceptOutcome(streamConnection: null, terminate: true);
         }
         catch (QuicException)
         {
             // The QUIC connection itself is gone — peer aborted, idle
             // timeout, or a transport-level error. No more streams will
             // arrive on this connection.
-            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+            return new StreamAcceptOutcome(streamConnection: null, terminate: true);
+        }
+        catch (ConnectionException)
+        {
+            // Contract-level abort/reset surfaced by the multiplexed
+            // connection (ConnectionAbortedException / ConnectionResetException).
+            return new StreamAcceptOutcome(streamConnection: null, terminate: true);
         }
         catch (ObjectDisposedException)
         {
-            // The underlying multiplex transport has been disposed
+            // The underlying multiplexed connection has been disposed
             // (cooperative shutdown raced this accept).
-            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+            return new StreamAcceptOutcome(streamConnection: null, terminate: true);
         }
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
-            return new StreamAcceptOutcome(streamContext: null, terminate: true);
+            return new StreamAcceptOutcome(streamConnection: null, terminate: true);
         }
     }
 
@@ -353,11 +349,11 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// returns <see langword="null"/>, signalling the caller to drop this
     /// stream and keep accepting more on the same QUIC connection.
     /// </summary>
-    private async Task<Http3Context?> TryReadRequestAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
+    private async Task<Http3Context?> TryReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
     {
         try
         {
-            return await ReadRequestAsync(streamContext, cancellationToken).ConfigureAwait(false);
+            return await ReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -375,7 +371,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Wire-level transport failures that can surface from
-    /// <c>OpenInboundAsync</c>: low-level <see cref="IOException"/>,
+    /// <c>AcceptStreamAsync</c>: low-level <see cref="IOException"/>,
     /// <see cref="System.Net.Sockets.SocketException"/>, and unexpected
     /// end-of-stream during the accept handshake. The QUIC connection is
     /// no longer usable when these fire.
@@ -406,13 +402,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     private readonly struct StreamAcceptOutcome
     {
-        public StreamAcceptOutcome(IMultiplexTransportConnectionContext? streamContext, bool terminate)
+        public StreamAcceptOutcome(IConnection? streamConnection, bool terminate)
         {
-            StreamContext = streamContext;
+            StreamConnection = streamConnection;
             TerminateConnection = terminate;
         }
 
-        public IMultiplexTransportConnectionContext? StreamContext { get; }
+        public IConnection? StreamConnection { get; }
         public bool TerminateConnection { get; }
     }
 
@@ -423,7 +419,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
-        Stream stream = http3Context.StreamContext.Pipe.Stream();
+        Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
 
@@ -437,9 +433,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<Http3Context?> ReadRequestAsync(ITransportConnectionContext streamContext, CancellationToken cancellationToken)
+    private async Task<Http3Context?> ReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
     {
-        Stream stream = streamContext.Pipe.Stream();
+        Stream stream = streamConnection.AsStream();
         using MemoryStream requestBuffer = new();
         await stream.CopyToAsync(requestBuffer, cancellationToken).ConfigureAwait(false);
 
@@ -474,9 +470,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         byte[] bodyBytes = body.ToArray();
         Http3Request request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, _isSecure ? HttpScheme.Https : HttpScheme.Http, bodyBytes, out string? extendedConnectProtocol);
         Http3Response response = new();
-        HttpConnectionInfo connectionInfo = new(streamContext.LocalEndPoint, streamContext.RemoteEndPoint);
+        HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
-        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamContext);
+        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection);
 
         // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
         // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model

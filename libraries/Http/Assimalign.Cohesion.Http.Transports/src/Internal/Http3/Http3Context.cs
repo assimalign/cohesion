@@ -1,6 +1,6 @@
 using System.Threading;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
@@ -11,12 +11,16 @@ internal sealed class Http3Context : TransportHttpContext
         Http3Response response,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        ITransportConnectionContext streamContext,
+        IConnection streamConnection,
         IHttpFeatureCollection? features = null)
         : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted)
     {
-        StreamContext = streamContext;
+        StreamConnection = streamConnection;
     }
 
-    public ITransportConnectionContext StreamContext { get; }
+    /// <summary>
+    /// The bidirectional QUIC stream this exchange arrived on; the response is written
+    /// back to its output.
+    /// </summary>
+    public IConnection StreamConnection { get; }
 }

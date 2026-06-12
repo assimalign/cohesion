@@ -5,6 +5,6 @@
 
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
-        <CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
     </ItemGroup>
 </Project>

@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Http.Transports;
 
 using Shouldly;
@@ -134,12 +135,14 @@ public class HttpFormIntegrationTests
             int port = GetAvailablePort();
             CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
 
+            TcpConnectionListener tcpListener = TcpConnectionListener.Create(transport =>
+            {
+                transport.EndPoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port);
+            });
+
             HttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
-                options.UseHttp1(transport =>
-                {
-                    transport.EndPoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port);
-                });
+                options.UseHttp1(tcpListener);
             });
 
             FormIntegrationServer server = new(listener, port, cts);

@@ -20,4 +20,8 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/refs/" >
+		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

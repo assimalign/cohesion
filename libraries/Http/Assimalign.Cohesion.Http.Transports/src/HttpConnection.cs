@@ -1,47 +1,60 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+
 namespace Assimalign.Cohesion.Http.Transports;
 
-using Assimalign.Cohesion.Transports;
-
-public abstract class HttpConnection : TransportConnection<HttpConnectionContext>, IHttpConnection
+/// <summary>
+/// Serves as the base for protocol-specific HTTP connections produced by
+/// <see cref="HttpConnectionListener"/>.
+/// </summary>
+/// <remarks>
+/// The base intentionally holds no transport reference of its own: HTTP/1.1 and HTTP/2
+/// connections wrap an <see cref="IConnection"/> while HTTP/3 wraps an
+/// <see cref="IMultiplexedConnection"/>, and each derived type forwards the identity and
+/// lifecycle members to the connection it owns.
+/// </remarks>
+public abstract class HttpConnection : IHttpConnection
 {
-    internal HttpConnection(ITransportConnection connection, bool isSecure)
+    internal HttpConnection(bool isSecure)
     {
-        Connection = connection;
         IsSecure = isSecure;
     }
 
-    protected ITransportConnection Connection { get; }
+    /// <summary>
+    /// Gets whether the underlying transport connection is secured (derived from the
+    /// producing listener's <see cref="ConnectionCapabilities.Security"/>).
+    /// </summary>
     protected bool IsSecure { get; }
 
-    public override ConnectionId Id => Connection.Id;
-    public override TransportId TransportId => Connection.TransportId;
-    public override TransportProtocol Protocol => TransportProtocol.Http;
-    public override ConnectionState State => Connection.State;
+    /// <inheritdoc />
+    public abstract ConnectionId Id { get; }
 
-    public override void Abort()
-    {
-        Connection.Abort();
-    }
+    /// <inheritdoc />
+    public abstract ConnectionState State { get; }
 
-    public override ValueTask AbortAsync(CancellationToken cancellationToken = default)
-    {
-        return Connection.AbortAsync(cancellationToken);
-    }
+    /// <inheritdoc />
+    public abstract CancellationToken ConnectionClosed { get; }
 
-    public override void Dispose()
-    {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
-    }
+    /// <inheritdoc />
+    public abstract void Abort(Exception? reason = null);
 
-    public abstract override ValueTask DisposeAsync();
+    /// <inheritdoc />
+    public abstract ValueTask DisposeAsync();
 
+    /// <summary>
+    /// Opens the HTTP connection context used to receive requests and send responses.
+    /// </summary>
+    /// <returns>The opened connection context.</returns>
     public abstract HttpConnectionContext Open();
 
+    /// <summary>
+    /// Opens the HTTP connection context used to receive requests and send responses.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token for the open operation.</param>
+    /// <returns>The opened connection context.</returns>
     public abstract ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default);
 
     IHttpConnectionContext IHttpConnection.Open()

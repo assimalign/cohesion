@@ -21,4 +21,7 @@
 	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.Hosting/tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Hosting/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

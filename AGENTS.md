@@ -836,6 +836,40 @@ public static class CacheExtensions
 }
 ```
 
+### Interface-First with a Guided Abstract Base
+
+Public APIs stay interface-first — the interface is the contract consumers depend on. In addition, ship a companion **public `abstract` base class that explicitly implements the interface** and forwards each member to a strongly-typed `protected`/`public abstract` member. The base guides implementers toward the intended shape (member signatures, return types, lifecycle) while the interface remains the canonical public surface.
+
+- The interface is the contract; consumers program against it.
+- The abstract base is the guided implementation path; concrete types derive from it and stay `internal` where possible.
+- Where the base can expose a richer, concrete-typed member (e.g., an `AcceptAsync` returning the concrete `Connection` instead of `IConnection`), implement that interface member **explicitly** (`ReturnType IFoo.Member(...)`) and forward to a strongly-typed `abstract`/`virtual` member the derived type overrides. Members without a richer counterpart are declared `public`/`protected abstract` directly. Explicit implementation keeps the interface the canonical surface while the base guides the implementer.
+
+```csharp
+// 1. Contract — what consumers depend on
+public interface IConnectionListener
+{
+    ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default);
+}
+
+// 2. Guided abstract base — explicit interface impl forwards to a strongly-typed member.
+//    Declare the typed member public so holders of the concrete type get the richer signature
+//    without casting to the interface.
+public abstract class ConnectionListener : IConnectionListener
+{
+    /// <summary>Implementers override this; the concrete return type guides the implementation.</summary>
+    public abstract ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default);
+
+    async ValueTask<IConnection> IConnectionListener.AcceptAsync(CancellationToken cancellationToken)
+        => await AcceptAsync(cancellationToken).ConfigureAwait(false);
+}
+
+// 3. Concrete implementation derives from the base
+internal sealed class TcpConnectionListener : ConnectionListener
+{
+    public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default) { /* ... */ }
+}
+```
+
 ### Async/Await Rules
 
 1. **Async methods MUST have `Async` suffix**

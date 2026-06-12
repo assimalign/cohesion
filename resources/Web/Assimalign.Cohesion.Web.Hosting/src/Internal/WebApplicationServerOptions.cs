@@ -5,9 +5,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
-using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
-using Assimalign.Cohesion.Transports;
 
 internal sealed class WebApplicationServerOptions
 {

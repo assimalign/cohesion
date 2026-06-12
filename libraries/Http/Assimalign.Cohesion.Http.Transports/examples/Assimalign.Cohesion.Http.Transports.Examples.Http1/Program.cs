@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
 
@@ -23,12 +24,17 @@ internal static class Program
         int port = LoopbackPortAllocator.AllocateTcpPort();
         Uri serverUri = new($"http://127.0.0.1:{port}/hello?name=http1");
 
+        // Plain (no TLS) HTTP/1.1: a TCP connection listener is composed
+        // directly into the HTTP listener. The TCP listener's capabilities
+        // (reliable, ordered byte stream) satisfy the HTTP/1.1 gate.
+        TcpConnectionListener tcpListener = TcpConnectionListener.Create(transport =>
+        {
+            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
+        });
+
         await using HttpConnectionListener listener = HttpConnectionListener.Create(options =>
         {
-            options.UseHttp1(transport =>
-            {
-                transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
-            });
+            options.UseHttp1(tcpListener);
         });
 
         Task serverTask = RunServerAsync(listener, cancellationToken);

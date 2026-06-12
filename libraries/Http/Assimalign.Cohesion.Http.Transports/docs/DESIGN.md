@@ -7,6 +7,103 @@ diffs. `DESIGN_SUGGESTION.md` in this same folder is a separate,
 forward-looking proposal for a multiplex-aware refactor; this file
 describes the surface as it ships today.
 
+## Transport seam: consuming `Assimalign.Cohesion.Connections`
+
+### What it is
+
+This package no longer carries (or inherits) any transport machinery of
+its own. The deleted `Assimalign.Cohesion.Transports` stack
+(`ITransport`, `ITransportConnection`, `ITransportConnectionContext`,
+`TransportConnectionPipe`, `ServerTransport<T>`, the `Items`/`IsSecure`
+extensions) has been replaced by consumption of the
+`Assimalign.Cohesion.Connections` contracts:
+
+- `IConnectionListener` produces live `IConnection`s — the connection
+  **is** the duplex pipe (`Input`/`Output` directly on it; there is no
+  separate "context" and no `OpenAsync` step on the transport).
+- `IMultiplexedConnectionListener` produces `IMultiplexedConnection`s
+  whose accepted/opened streams are themselves `IConnection`s with a
+  per-stream `Direction`.
+
+HTTP **consumes** these contracts; it never extends them. The HTTP-side
+contracts (`IHttpConnectionListener`, `IHttpConnection`,
+`IHttpConnectionContext`) are standalone interfaces that wrap a
+connection and project HTTP semantics over it.
+
+### Structural listener registration
+
+`HttpConnectionListenerOptions` binds concrete listeners to protocols
+with shape safety enforced at the seam:
+
+```csharp
+HttpConnectionListener listener = HttpConnectionListener.Create(options =>
+{
+    options.UseHttp1(tcpListener);                 // IConnectionListener
+    options.UseHttp2(tlsTcpListener);              // IConnectionListener (TLS pre-composed)
+    options.UseHttp3(quicListener);                // IMultiplexedConnectionListener
+});
+```
+
+- `UseHttp1` / `UseHttp2` accept an `IConnectionListener` (or a
+  `Func<IConnectionListener>` materialized when the
+  `HttpConnectionListener` is constructed) and **gate on capabilities,
+  never on protocol identity**: the listener's `ConnectionCapabilities`
+  must report `Delivery == Stream`, `IsReliable`, and `IsOrdered`, else
+  an `ArgumentException` describes the capability mismatch.
+  `ConnectionProtocol` is diagnostics-only and is never branched on.
+- `UseHttp3` accepts an `IMultiplexedConnectionListener` — the parameter
+  type itself is the shape gate, so no runtime capability check is
+  needed for stream multiplexing.
+
+`BacklogCapacity` retains its bounded-channel semantics: it caps how
+many accepted HTTP connections may buffer before the per-listener accept
+loops wait for `AcceptOrListenAsync` to drain them.
+
+### Accept loops and the live-connection model
+
+`HttpConnectionListener` runs one accept loop per registered listener.
+The HTTP/1.1 and HTTP/2 loops do `IConnection connection = await
+listener.AcceptAsync(token)` and wrap the result in
+`Http1Connection`/`Http2Connection`; the HTTP/3 loop accepts an
+`IMultiplexedConnection` (with the QUIC platform guard) and wraps it in
+`Http3Connection`. Because connections are already live when produced,
+`IHttpConnection.Open()`/`OpenAsync` is a synchronous projection — it
+constructs the protocol's connection context over the wrapped
+connection; there is no transport open step to await.
+
+The connection-is-the-pipe model shows up at three points:
+
+- Stream parsing (HTTP/1.1, HTTP/2) adapts the duplex pipe once via
+  `connection.AsStream()`.
+- Graceful teardown completes `connection.Output` directly (HTTP/2
+  GOAWAY drain, HTTP/1.1 response drain) before disposal.
+- HTTP/3 reads each accepted stream's `Input` (`PipeReader`) for
+  unidirectional streams and `AsStream()` for request streams.
+
+### Audited context surface
+
+`IHttpConnectionContext` declares only what the HTTP internals actually
+consume: the endpoints plus `ReceiveAsync`/`SendAsync`. The inherited
+members of the old transport context (`Pipe`, `Items`,
+`ConnectionClosed`, `Close…`) were plumbing and are gone. Contexts that
+have no connection-level byte stream — the HTTP/3 connection context
+(whose bytes live on per-request streams) and
+`NotSupportedHttpConnectionContext` — no longer fabricate a fake pipe
+over `Stream.Null`; the member simply does not exist.
+
+### TLS is a pre-composed layer, not an HTTP concern
+
+TLS never happens inside this package. The composition root layers it
+onto the listener before registration (`listener.UseTls(options)` /
+`listener.Use(layer)` from the security/connections libraries), and the
+layered listener's `Capabilities.Security` reports `ConnectionSecurity.Tls`.
+HTTP derives its per-connection `isSecure` flag from exactly that:
+`listener.Capabilities.Security == ConnectionSecurity.Tls`, captured once
+per accept loop. There is no registration-time `isSecure` parameter, no
+`Items`-backed handshake probe, and no OR-promotion rule — the
+capability is the single source of truth, and the scheme
+(`http`/`https`) flows from it.
+
 ## Per-request feature injection
 
 ### What it is
@@ -143,10 +240,11 @@ delegate invocation and the feature lookup chains through
 
 - **Connection-scoped state.** If a feature genuinely needs to live for
   the lifetime of the connection (a TLS handshake projection, for
-  example), it belongs in the application layer's own connection map
-  keyed on `IHttpConnectionContext.Items` or a sidecar dictionary —
-  *not* on the request's feature collection. This package does not
-  surface a connection-feature collection at all.
+  example), it belongs in the application layer's own sidecar map keyed
+  on the connection (e.g. by `IHttpConnection.Id`) — *not* on the
+  request's feature collection. This package does not surface a
+  connection-feature collection (or a connection-level `Items` bag)
+  at all.
 - **Multiple registered factories.** A pipeline of feature contributors
   can be composed by the caller — the single `CreateFeatures` slot can
   invoke any number of internal helpers.
@@ -154,95 +252,53 @@ delegate invocation and the feature lookup chains through
   per-request async feature setup emerges, the factory signature can be
   widened without breaking existing callers.
 
-## IsSecure propagation from transport middleware
+## IsSecure: capability-derived, single-source
 
 ### What it is
 
-`HttpContext.ConnectionInfo.IsSecure` reports whether the underlying
-transport carrying this request is currently secured. Two signals
-combine to produce that value:
-
-1. **Registration-time hint.** When a transport is registered with
-   `HttpConnectionListenerOptions.UseTransport(..., isSecure: true)` (or
-   via the convenience `UseHttp3` which always sets it true), that hint
-   is captured on `HttpProtocolRegistration.IsSecure`. This is the
-   "operator knows up-front" path &#8212; TLS terminated at an upstream
-   load balancer, QUIC's always-on encryption, mTLS provisioned outside
-   the process.
-
-2. **Transport-pipeline signal.** Transport-level middleware that
-   establishes a secure session at runtime (e.g. `SslStream` wrapping
-   a raw TCP socket) records the fact via the typed
-   `ITransportConnectionContext.IsSecure` extension shipped in
-   `Assimalign.Cohesion.Transports`. The middleware writes
-   `context.IsSecure = true;` after a successful handshake.
-
-The HTTP layer's effective value is `registrationHint || transportReports`.
-The OR is deliberate: a registration that is explicitly secure stays
-secure even when the transport never sets the flag (no down-negotiation),
-and a transport that newly reports secure promotes the connection even
-when the registration was left as the default `false`.
-
-### Where the probe runs
-
-The probe lives in each protocol's `*Connection.OpenAsync`
-(`Http1Connection`, `Http2Connection`), at the single point where the
-HTTP connection context is constructed:
+`HttpContext.ConnectionInfo` reports the request scheme
+(`http`/`https`) from a single per-connection `isSecure` flag derived
+at the transport seam:
 
 ```csharp
-ITransportConnectionContext transportContext = await _connection.OpenAsync(token);
-bool effectiveIsSecure = IsSecure || transportContext.IsSecure;
-_openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure, CreateFeatures);
+bool isSecure = listener.Capabilities.Security == ConnectionSecurity.Tls;
 ```
 
-This timing is correct because the transport pipeline (where TLS
-middleware runs) executes *inside* `_connection.OpenAsync`. By the time
-the `await` returns, every middleware on the connection has run and
-the transport context's `Items` are fully populated. There is no race
-between the probe and the handshake.
+captured once per accept loop in `HttpConnectionListener` and passed
+down to the protocol connection (`Http1Connection`, `Http2Connection`,
+`Http3Connection`) as a constructor argument.
 
-The effective value is then baked into `HttpConnectionInfo.IsSecure`
-and carried into every per-request `HttpContext.ConnectionInfo` on the
-connection &#8212; the probe runs once per connection, not once per
-request.
+### Why a capability, not a hint + probe
 
-### Why the extension lives in Assimalign.Cohesion.Transports
+A previous iteration combined a registration-time `isSecure` boolean
+with a runtime probe of an `Items`-backed
+`ITransportConnectionContext.IsSecure` extension
+(`effective = registrationHint || transportReports`). Both signals are
+gone, replaced by the listener's declared `ConnectionCapabilities`:
 
-The `IsSecure` extension is a transport-layer concern, not an
-HTTP-layer concern: any future consumer of a transport (HTTP, RPC,
-WebSocket, custom protocol) needs to know whether the connection
-beneath them is secured, and any transport-level middleware (TLS,
-mTLS, peer-authentication proxies) needs a typed way to record that
-without depending on a higher protocol library. Placing the extension
-in the abstractions library keeps the dependency direction correct.
-
-Storage is the existing `ITransportConnectionContext.Items` dictionary
-under the `TransportSecurityExtensions.IsSecureItemKey` constant; the
-extension property handles the cast and missing-key path so consumers
-do not reach into the dictionary directly.
-
-### HTTP/3
-
-`Http3Connection` does not run this probe because HTTP/3 is always
-secured (QUIC requires TLS 1.3 by construction). The
-`UseHttp3(...)` registration helper pins `isSecure: true` and the
-`Http3ConnectionContext` flows that through unchanged.
+- TLS is composed onto the listener **before** it is handed to HTTP
+  (`listener.UseTls(...)` / `listener.Use(layer)`), and the layering
+  machinery rewrites `Capabilities.Security` to `ConnectionSecurity.Tls`
+  for both the listener and the connections it produces. The capability
+  *is* the handshake's outcome at the only point HTTP can observe it.
+- An operator hint can contradict reality (declared secure, plaintext
+  transport); a capability cannot — it is asserted by the layer that
+  actually performs the handshake. Removing the OR rule removes the
+  possibility of the two signals disagreeing.
+- QUIC's always-on TLS needs no special case: a QUIC listener simply
+  reports `Security = Tls` like any other secured listener, and HTTP/3
+  derives the same way HTTP/1.1 and HTTP/2 do.
 
 ### Non-goals
 
-- **Mid-connection upgrade (STARTTLS / `Upgrade: TLS/1.0`).** Once the
-  connection's effective `IsSecure` is computed at `OpenAsync` time it
-  stays for the lifetime of the connection. The transport probe runs
-  once; per-request flipping is not supported. RFC 2817 in-band TLS
-  upgrade over HTTP/1.1 would require a separate, explicit
-  re-construction of the connection context and is intentionally out
-  of scope.
-- **Down-negotiation.** A registration that declared `isSecure: true`
-  cannot be demoted by a transport that fails to set the flag. The OR
-  rule guarantees this in both directions.
+- **Mid-connection upgrade (STARTTLS / `Upgrade: TLS/1.0`).** The flag
+  is captured per accept loop and fixed for the connection's lifetime.
+  RFC 2817 in-band TLS upgrade over HTTP/1.1 would require explicit
+  re-construction of the connection and is intentionally out of scope.
 - **Rich TLS metadata** (client certificate, ALPN, cipher suite).
-  Future work; the same `Items`-backed pattern accommodates additional
-  typed extensions next to `IsSecure` without changing this design.
+  Future work; it belongs on the connections/security layer (where the
+  handshake runs), surfaced through a typed seam rather than through
+  HTTP-transport plumbing.
 
 ## Receive-loop failure isolation
 
@@ -265,6 +321,16 @@ The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
 cooperative shutdown is unaffected.
 
+Accept-loop failures sit outside this isolation model. If a transport
+listener's `AcceptAsync` itself faults, the failure is fatal to the
+`HttpConnectionListener`: the accept loop completes the backlog channel
+with the listener's exception *before* cancelling the internal dispose
+token (the ordering is load-bearing — a pending `AcceptOrListenAsync`
+must observe the faulted channel, not the cancellation) and records the
+exception so accepts that begin after cancellation rethrow it too. The
+host therefore sees the transport's root-cause exception from
+`AcceptOrListenAsync`, never a bare `ObjectDisposedException`.
+
 ## HTTP/3 stream model and SETTINGS engine
 
 ### What it is
@@ -286,9 +352,9 @@ accept inbound QUIC stream
        other             → abandon (unknown types are not an error)
 ```
 
-The stream direction is reported by the transport via the
-`ITransportConnectionContext.IsBidirectional` signal (see below); the
-HTTP layer never inspects QUIC stream IDs directly.
+The stream direction is reported by the transport via
+`IConnection.Direction` on each accepted stream (see below); the HTTP
+layer never inspects QUIC stream IDs directly.
 
 ### Control stream and SETTINGS
 
@@ -324,12 +390,31 @@ A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
 — only a server may push, and Cohesion does not push (see "server push
 (de-scoped)" below). The engine treats it as a connection error.
 
+### Connection teardown — critical streams and close ordering
+
+The accepted control and QPACK streams stay open for the connection's
+lifetime; RFC 9114 §6.2.1 and RFC 9204 §4.2 make them *critical*
+streams — a peer that observes one of them terminate (FIN, RESET, or a
+STOP_SENDING request) before the connection close MUST fail the whole
+connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is therefore
+connection-first: `Http3Connection.DisposeAsync` delegates to the
+multiplexed connection, whose dispose completes bidirectional (request)
+streams — delivering any in-flight response data — then closes the QUIC
+connection (`CONNECTION_CLOSE` with the transport's configured close
+code, `H3_NO_ERROR` by default on the QUIC driver's options), and only
+then releases the inbound unidirectional streams locally, after the
+close means no stream-level frames can reach the peer. The ordering
+lives in the QUIC driver (`QuicMultiplexedConnection`), not here: any
+multiplexed protocol with long-lived unidirectional control channels
+needs the same discipline. A `GOAWAY`-announced graceful drain ahead of
+the close remains future work (see Non-goals).
+
 ### Incremental reads off the PipeReader
 
-The unidirectional-stream handlers read directly off the transport's
-`PipeReader` (`ITransportConnectionPipe.Input`) using a buffered
-`ReadOnlySequence<byte>` model, **not** the `Stream` adapter that the
-request path uses. Two reasons:
+The unidirectional-stream handlers read directly off the accepted
+stream connection's `PipeReader` (`IConnection.Input`) using a buffered
+`ReadOnlySequence<byte>` model, **not** the `AsStream()` adapter that
+the request path uses. Two reasons:
 
 1. **Correct incremental framing.** Control data arrives as a varint
    stream-type prefix followed by length-delimited frames. A varint's
@@ -358,20 +443,20 @@ how many bytes it consumed so the loop can advance the reader precisely.
 > value of 8192) exposed it. Fixed to `(first >> 6) switch { … }` in
 > `Decode`, `ReadAsync`, and `TryDecode`.
 
-### Why `IsBidirectional` lives on the transport abstraction
+### Why stream direction lives on the connection abstraction
 
 Demultiplexing request streams from control/QPACK/push streams requires
 knowing a stream's direction, and only the transport knows it. The
-signal is therefore a member on `ITransportConnectionContext` in
-`Assimalign.Cohesion.Transports`, defined as a default interface member
-returning `true` so every existing single-stream context (TCP, ordinary
-request streams) is unaffected. Only a multiplex transport that exposes
-unidirectional streams overrides it: the QUIC transport's
-`QuicTransportContext` returns
-`Stream.Type == QuicStreamType.Bidirectional`. Keeping the signal in the
-transport abstraction — rather than inferring direction in the HTTP
-layer — preserves the dependency direction and lets any future protocol
-over QUIC reuse it.
+signal is `IConnection.Direction` in `Assimalign.Cohesion.Connections`:
+stream transports always report `Bidirectional`, while a multiplexed
+transport's unidirectional streams report `ReadOnly` (inbound; the
+output throws) or `WriteOnly` (outbound; the input is pre-completed).
+The HTTP/3 engine checks
+`streamConnection.Direction == ConnectionDirection.Bidirectional` to
+route request streams and treats everything else as a typed
+unidirectional stream. Keeping the signal on the connection contract —
+rather than inferring direction in the HTTP layer — preserves the
+dependency direction and lets any future protocol over QUIC reuse it.
 
 ### AOT posture
 
@@ -545,10 +630,11 @@ connection `PROTOCOL_ERROR` (GOAWAY); HTTP/3 drops the offending stream
   extended CONNECT.
 - **HTTP/3** does **not** yet advertise it. Doing so requires the server to
   open its own *unidirectional* control stream and send a SETTINGS frame on
-  it, but the multiplex transport's `OpenOutboundAsync` opens a
-  connection-wide stream type (bidirectional for the HTTP server) with no
-  per-call direction. Exposing unidirectional outbound streams is a
-  Net-library API change beyond this scope. The omission is safe: a
+  it. The connection contract now supports exactly that —
+  `IMultiplexedConnection.OpenStreamAsync(ConnectionDirection.WriteOnly)`
+  opens an outbound unidirectional stream — so the former API obstacle is
+  gone; emitting the server control stream is simply not yet implemented
+  (future work alongside GOAWAY-driven drain). The omission is safe: a
   conformant client will simply not initiate extended CONNECT over HTTP/3,
   and if one does anyway, the request is still recognized, validated, and
   modeled exactly as on HTTP/2 — there is no silent downgrade.

@@ -18,4 +18,7 @@
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
 	</Folder>
+	<Folder Name="/ApplicationModel/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

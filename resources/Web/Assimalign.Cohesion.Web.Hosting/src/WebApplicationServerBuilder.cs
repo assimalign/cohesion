@@ -6,8 +6,6 @@ using System.Text;
 namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Transports;
-using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
@@ -29,24 +27,6 @@ public sealed class WebApplicationServerBuilder
                 {
                     action.Invoke(serviceProvider, options);
                 }
-
-                options.UseFeatures()
-
-                //options.ConfigureFeatures()
-
-                options.CreateFeatures = () =>
-                {
-                    IServiceScope serviceScope = serviceProvider.CreateAsyncScope();
-
-                    IEnumerable<IHttpFeature> features = serviceScope.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
-                    IHttpFeatureCollection collection = new HttpFeatureCollection(features.Count());
-
-                    foreach (IHttpFeature feature in features)
-                    {
-                        collection.Set(feature);
-                    }
-                    return collection;
-                };
             });
 
             IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();

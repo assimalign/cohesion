@@ -99,4 +99,8 @@
 	<Folder Name="/Resilience/Assimalign.Cohesion.Resilience.Timeout/tests/">
 		<Project Path="Assimalign.Cohesion.Resilience.Timeout/tests/Assimalign.Cohesion.Resilience.Timeout.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Resilience/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../ObjectPool/Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
+	</Folder>
 </Solution>

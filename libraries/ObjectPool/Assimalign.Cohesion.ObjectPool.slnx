@@ -21,4 +21,7 @@
 	<Folder Name="/ObjectPool/Assimalign.Cohesion.ObjectPool/tests/">
 		<Project Path="Assimalign.Cohesion.ObjectPool/tests/Assimalign.Cohesion.ObjectPool.Tests.csproj" />
 	</Folder>
+	<Folder Name="/ObjectPool/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

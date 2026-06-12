@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <Description>Reliable, ordered, multiplexed QUIC driver implementing the Cohesion connection contracts.</Description>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+    </ItemGroup>
+</Project>

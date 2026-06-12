@@ -6,14 +6,14 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
-    public Http1ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
-        : base(transportContext, isSecure)
+    public Http1ConnectionContext(IConnection connection, bool isSecure)
+        : base(connection, isSecure)
     {
     }
 

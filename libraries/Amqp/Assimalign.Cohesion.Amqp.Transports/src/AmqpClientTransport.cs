@@ -1,69 +1,124 @@
 using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Amqp.Transports.Internal;
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Transports;
 
 /// <summary>
-/// Represents an AMQP client transport layered on top of a carrier client transport.
+/// Establishes AMQP connections over carrier connections produced by a lower-level connection factory.
 /// </summary>
-public sealed class AmqpClientTransport : ClientTransport<AmqpConnection>
+/// <remarks>
+/// <para>
+/// The client transport consumes the carrier by capability: the factory must produce reliable,
+/// ordered byte streams (<see cref="ConnectionDelivery.Stream"/> with
+/// <see cref="ConnectionCapabilities.IsReliable"/> and <see cref="ConnectionCapabilities.IsOrdered"/>).
+/// </para>
+/// <para>
+/// For a single-stream carrier each established <see cref="IConnection"/> backs one AMQP connection.
+/// For a multiplexed carrier each established <see cref="IMultiplexedConnection"/> backs one AMQP
+/// connection whose bidirectional carrier stream is opened when the connection context is opened.
+/// </para>
+/// </remarks>
+public sealed class AmqpClientTransport : IAsyncDisposable
 {
-    private readonly ITransport _transport;
+    private readonly IConnectionFactory? _factory;
+    private readonly IMultiplexedConnectionFactory? _multiplexedFactory;
+    private readonly EndPoint _endPoint;
     private readonly AmqpTransportOptions _options;
     private readonly List<AmqpConnection> _connections;
     private bool _isDisposed;
 
     /// <summary>
-    /// Initializes a new AMQP client transport.
+    /// Initializes a new AMQP client transport over a single-stream carrier factory.
     /// </summary>
-    /// <param name="transport">The lower-level carrier transport.</param>
+    /// <param name="factory">The carrier connection factory.</param>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
     /// <param name="options">The AMQP transport options.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="transport"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when the carrier transport is not a client transport.</exception>
-    public AmqpClientTransport(ITransport transport, AmqpTransportOptions? options = null)
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> or <paramref name="endPoint"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
+    public AmqpClientTransport(IConnectionFactory factory, EndPoint endPoint, AmqpTransportOptions? options = null)
     {
-        ArgumentNullException.ThrowIfNull(transport);
+        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(endPoint);
 
-        if (transport.Kind != TransportKind.Client)
-        {
-            throw new ArgumentException("The AMQP client transport requires a carrier transport configured as a client.", nameof(transport));
-        }
+        factory.Capabilities.ThrowIfNotAmqpCarrier(nameof(factory));
 
-        _transport = transport;
+        _factory = factory;
+        _endPoint = endPoint;
         _options = options ?? new AmqpTransportOptions();
         _connections = new List<AmqpConnection>();
     }
 
-    /// <inheritdoc />
-    public override TransportProtocol Protocol => TransportProtocol.Amqp;
+    /// <summary>
+    /// Initializes a new AMQP client transport over a multiplexed carrier factory.
+    /// </summary>
+    /// <param name="factory">The multiplexed carrier connection factory.</param>
+    /// <param name="endPoint">The remote endpoint to connect to.</param>
+    /// <param name="options">The AMQP transport options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> or <paramref name="endPoint"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
+    public AmqpClientTransport(IMultiplexedConnectionFactory factory, EndPoint endPoint, AmqpTransportOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(endPoint);
+
+        factory.Capabilities.ThrowIfNotAmqpCarrier(nameof(factory));
+
+        _multiplexedFactory = factory;
+        _endPoint = endPoint;
+        _options = options ?? new AmqpTransportOptions();
+        _connections = new List<AmqpConnection>();
+    }
+
+    /// <summary>
+    /// Gets the remote endpoint the transport connects to.
+    /// </summary>
+    public EndPoint EndPoint => _endPoint;
 
     /// <summary>
     /// Gets the active AMQP connections opened by this transport.
     /// </summary>
     public IReadOnlyCollection<AmqpConnection> Connections => _connections.AsReadOnly();
 
-    /// <inheritdoc />
-    public override async Task<AmqpConnection> ConnectAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Establishes a new AMQP connection to the configured remote endpoint.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token for the connect operation.</param>
+    /// <returns>The established AMQP connection.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the transport has been disposed.</exception>
+    public async ValueTask<AmqpConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, nameof(AmqpClientTransport));
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        ITransportConnection connection = await _transport.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        AmqpTransportConnection amqpConnection = new(connection, Id, Kind, _options);
+        AmqpTransportConnection connection;
 
-        amqpConnection.OnDispose = () => _connections.Remove(amqpConnection);
+        if (_factory is not null)
+        {
+            IConnection carrier = await _factory.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
-        _connections.Add(amqpConnection);
+            connection = new AmqpSingleStreamTransportConnection(carrier, _options);
+        }
+        else
+        {
+            IMultiplexedConnection carrier = await _multiplexedFactory!.ConnectAsync(_endPoint, cancellationToken).ConfigureAwait(false);
 
-        return amqpConnection;
+            connection = new AmqpMultiplexedTransportConnection(carrier, opensCarrierStream: true, _options);
+        }
+
+        connection.OnDispose = () => _connections.Remove(connection);
+
+        _connections.Add(connection);
+
+        return connection;
     }
 
     /// <inheritdoc />
-    public override async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_isDisposed)
         {
@@ -78,7 +133,5 @@ public sealed class AmqpClientTransport : ClientTransport<AmqpConnection>
         }
 
         _connections.Clear();
-
-        await _transport.DisposeAsync().ConfigureAwait(false);
     }
 }

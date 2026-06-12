@@ -4,7 +4,7 @@ Import-Module Assimalign.Cohesion.DevScripts -Force
 
 
 $Solutions = @(
-    "$BasePath\Assimalign.Cohesion.slnx" ,
+    # "$BasePath\Assimalign.Cohesion.slnx",
     "$BasePath\frameworks\Assimalign.Cohesion.Frameworks.slnx",
     "$BasePath\libraries\Assimalign.Cohesion.Libraries.slnx",
     "$BasePath\resources\Assimalign.Cohesion.Resources.slnx",
@@ -47,22 +47,21 @@ $Solutions | ForEach-Object {
         -Verbose
 }
 
-
-New-CohesionDotnetSolution `
-        -SolutionPath "C:\Source\repos\assimalign\cohesion\resources\Web\Assimalign.Cohesion.Web.slnx" `
-        -IgnorePaths @(
-            "$BasePath\_out"
-            "$BasePath\.claude"
-            "$BasePath\.vscode"
-            "$BasePath\.dotnet-cli-home"
-            "**\sdks\Assimalign.Cohesion.Sdk*\**\*.props"
-            "**\sdks\Assimalign.Cohesion.Sdk*\**\*.targets"
-            "**\build\Targets\**"
-            "**\build\Build.props"
-            "**\build\Build.targets"
-        ) `
-        -IncludeReferences `
-        -Force `
-        -Verbose
+# New-CohesionDotnetSolution `
+#         -SolutionPath "C:\Source\repos\assimalign\cohesion\resources\Web\Assimalign.Cohesion.Web.slnx" `
+#         -IgnorePaths @(
+#             "$BasePath\_out"
+#             "$BasePath\.claude"
+#             "$BasePath\.vscode"
+#             "$BasePath\.dotnet-cli-home"
+#             "**\sdks\Assimalign.Cohesion.Sdk*\**\*.props"
+#             "**\sdks\Assimalign.Cohesion.Sdk*\**\*.targets"
+#             "**\build\Targets\**"
+#             "**\build\Build.props"
+#             "**\build\Build.targets"
+#         ) `
+#         -IncludeReferences `
+#         -Force `
+#         -Verbose
 
 

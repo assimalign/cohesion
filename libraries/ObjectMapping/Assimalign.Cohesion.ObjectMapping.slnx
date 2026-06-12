@@ -15,6 +15,10 @@
 		<File Path="Assimalign.Cohesion.ObjectMapping/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.ObjectMapping/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/samples/" />
+	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/samples/Assimalign.Cohesion.ObjectMapping.AotSample/">
+		<Project Path="Assimalign.Cohesion.ObjectMapping/samples/Assimalign.Cohesion.ObjectMapping.AotSample/Assimalign.Cohesion.ObjectMapping.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/">
 		<Project Path="Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj" />
 	</Folder>

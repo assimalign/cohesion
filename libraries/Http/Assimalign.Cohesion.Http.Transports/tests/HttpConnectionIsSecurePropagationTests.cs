@@ -1,9 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
-using Assimalign.Cohesion.Transports;
 
 using Shouldly;
 
@@ -12,161 +11,104 @@ using Xunit;
 namespace Assimalign.Cohesion.Http.Transports.Tests;
 
 /// <summary>
-/// Exercises the registration-hint + transport-probe rule for IsSecure on
-/// the HTTP connection layer. The effective value visible on
-/// <see cref="IHttpContext.ConnectionInfo"/> is
-/// <c>registrationHint || transportContext.IsSecure</c>, so transport
-/// middleware that establishes a secure session post-accept
-/// (TLS over TCP via SslStream, etc.) flips the HTTP layer's view
-/// without the listener registration having to know in advance.
+/// Exercises the capability-derived security rule on the HTTP connection
+/// layer. TLS is composed onto the connection listener before registration
+/// (for example via the security library's <c>UseTls</c> layer), and the
+/// layered listener reports <see cref="ConnectionSecurity.Tls"/> on its
+/// <see cref="IConnectionListener.Capabilities"/>; the HTTP layer derives
+/// its effective scheme from that capability rather than from a
+/// registration-time hint.
 /// </summary>
 public class HttpConnectionIsSecurePropagationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 with registration=false and transport=false should be insecure")]
-    public async Task IsSecure_OnHttp1WithBothFalse_ShouldExposeFalse()
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 over a listener without transport security should expose the http scheme")]
+    public async Task IsSecure_OnHttp1WithoutTlsCapability_ShouldExposeHttpScheme()
     {
-        IHttpContext context = await DriveSingleHttp1RequestAsync(
-            registrationIsSecure: false,
-            transportIsSecure: false);
+        // Arrange + Act
+        IHttpContext context = await DriveSingleHttp1RequestAsync(ConnectionSecurity.None);
 
-        context.ConnectionInfo.IsSecure.ShouldBeFalse();
+        // Assert
         context.Request.Scheme.ShouldBe(HttpScheme.Http);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 with registration=true should remain secure even without transport signal")]
-    public async Task IsSecure_OnHttp1WithRegistrationTrueOnly_ShouldExposeTrue()
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 over a TLS-capability listener should expose the https scheme")]
+    public async Task IsSecure_OnHttp1WithTlsCapability_ShouldExposeHttpsScheme()
     {
-        // The registration hint stays authoritative for transports that
-        // were configured up-front as secured (terminated TLS at an
-        // upstream load balancer, for example).
-        IHttpContext context = await DriveSingleHttp1RequestAsync(
-            registrationIsSecure: true,
-            transportIsSecure: false);
+        // Arrange + Act — the listener (e.g. tcp.UseTls(...)) reports
+        // Security = Tls; every accepted connection is secured.
+        IHttpContext context = await DriveSingleHttp1RequestAsync(ConnectionSecurity.Tls);
 
-        context.ConnectionInfo.IsSecure.ShouldBeTrue();
+        // Assert
         context.Request.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 with registration=false and transport=true should be promoted to secure")]
-    public async Task IsSecure_OnHttp1WithTransportPromotion_ShouldExposeTrue()
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 keep-alive — every request on a TLS-capability connection should observe https")]
+    public async Task IsSecure_OnHttp1KeepAliveRequestsOverTls_ShouldFlowToEveryRequest()
     {
-        // This is the new path: registration starts as insecure (the
-        // listener doesn't know up-front), then a transport-level
-        // middleware (e.g. SslStream over TCP) reports the connection
-        // is secured by setting context.IsSecure = true. The HTTP layer
-        // reads it post-OpenAsync and promotes the effective value.
-        IHttpContext context = await DriveSingleHttp1RequestAsync(
-            registrationIsSecure: false,
-            transportIsSecure: true);
-
-        context.ConnectionInfo.IsSecure.ShouldBeTrue();
-        context.Request.Scheme.ShouldBe(HttpScheme.Https);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 with registration=true and transport=true should be secure")]
-    public async Task IsSecure_OnHttp1WithBothTrue_ShouldExposeTrue()
-    {
-        IHttpContext context = await DriveSingleHttp1RequestAsync(
-            registrationIsSecure: true,
-            transportIsSecure: true);
-
-        context.ConnectionInfo.IsSecure.ShouldBeTrue();
-        context.Request.Scheme.ShouldBe(HttpScheme.Https);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 keep-alive — every request on the connection should see the same effective IsSecure")]
-    public async Task IsSecure_OnHttp1KeepAliveRequests_ShouldFlowToEveryRequest()
-    {
-        // The probe runs once when the connection context is constructed,
-        // so every subsequent request on the same connection should see
-        // the same effective IsSecure.
+        // Arrange — the security capability is evaluated once per listener,
+        // so every request on the same connection sees the same scheme.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /first HTTP/1.1\r\nHost: api.test\r\n\r\n" +
             "GET /second HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        transportContext.IsSecure = true;
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
+        TestConnectionListener transportListener = new(
+            TestConnection.DefaultCapabilities with { Security = ConnectionSecurity.Tls },
+            connection);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
+        options.UseHttp1(transportListener);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
 
-        List<bool> isSecureFlags = new();
+        // Act
+        List<HttpScheme> schemes = new();
         await foreach (IHttpContext httpContext in httpConnectionContext.ReceiveAsync())
         {
-            isSecureFlags.Add(httpContext.ConnectionInfo.IsSecure);
+            schemes.Add(httpContext.Request.Scheme);
         }
 
-        isSecureFlags.Count.ShouldBe(2);
-        isSecureFlags.ShouldAllBe(secure => secure);
+        // Assert
+        schemes.Count.ShouldBe(2);
+        schemes.ShouldAllBe(scheme => scheme == HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http2 multiplexed streams should all observe the same effective IsSecure")]
-    public async Task IsSecure_OnHttp2MultiplexedStreams_ShouldFlowToEveryStream()
+    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http2 streams over a TLS-capability listener should observe https")]
+    public async Task IsSecure_OnHttp2StreamsOverTls_ShouldExposeHttpsScheme()
     {
-        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
-        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
-        byte[] secondWithoutPreface = new byte[second.Length - 24];
-        Array.Copy(second, 24, secondWithoutPreface, 0, secondWithoutPreface.Length);
-        byte[] payload = new byte[first.Length + secondWithoutPreface.Length];
-        Buffer.BlockCopy(first, 0, payload, 0, first.Length);
-        Buffer.BlockCopy(secondWithoutPreface, 0, payload, first.Length, secondWithoutPreface.Length);
-
-        TestTransportConnectionContext transportContext = new(payload);
-        transportContext.IsSecure = true;
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        // Arrange
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
+        TestConnection connection = new(payload);
+        TestConnectionListener transportListener = new(
+            TestConnection.DefaultCapabilities with { Security = ConnectionSecurity.Tls },
+            connection);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http20, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: false);
+        options.UseHttp2(transportListener);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
-        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
-        (await enumerator.MoveNextAsync()).ShouldBeTrue();
-        bool firstIsSecure = enumerator.Current.ConnectionInfo.IsSecure;
-        (await enumerator.MoveNextAsync()).ShouldBeTrue();
-        bool secondIsSecure = enumerator.Current.ConnectionInfo.IsSecure;
-
-        firstIsSecure.ShouldBeTrue();
-        secondIsSecure.ShouldBeTrue();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Transport reporting false should not downgrade a registration of true")]
-    public async Task IsSecure_OnRegistrationTrueAndTransportFalse_ShouldRemainTrue()
-    {
-        // Defensive: an explicitly secure registration must not be
-        // demoted by a transport that simply never set the flag. The
-        // effective rule is OR, not transport-overrides-registration.
-        TestTransportConnectionContext transportContext = new(HttpProtocolPayloadFactory.CreateHttp1Request(
-            "GET / HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n"));
-        // Explicitly leave transportContext.IsSecure unset (defaults to false).
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
-        HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), isSecure: true);
-
-        await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        // Act
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
-        transportContext.IsSecure.ShouldBeFalse();
-        httpContext.ConnectionInfo.IsSecure.ShouldBeTrue();
+        // Assert
+        httpContext.Request.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    private static async Task<IHttpContext> DriveSingleHttp1RequestAsync(bool registrationIsSecure, bool transportIsSecure)
+    private static async Task<IHttpContext> DriveSingleHttp1RequestAsync(ConnectionSecurity security)
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        transportContext.IsSecure = transportIsSecure;
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
+        TestConnectionListener transportListener = new(
+            TestConnection.DefaultCapabilities with { Security = security },
+            connection);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }), registrationIsSecure);
+        options.UseHttp1(transportListener);
 
-        // The listener is intentionally returned along with the context so
-        // it stays alive for the duration of the test method — disposing
-        // it would also dispose the listener while we're still reading
-        // assertions off the context.
+        // The listener is intentionally not disposed here so it stays alive
+        // for the duration of the test method — disposing it would tear the
+        // accepted connection's backing state down while assertions still
+        // read off the context.
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
         return await ReadSingleContextAsync(httpConnectionContext);

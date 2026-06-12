@@ -1,16 +1,25 @@
 using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-
-using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports;
 
 /// <summary>
 /// Represents the active HTTP connection context used to receive exchanges and write responses.
 /// </summary>
-public interface IHttpConnectionContext : ITransportConnectionContext
+public interface IHttpConnectionContext
 {
+    /// <summary>
+    /// Gets the local endpoint the underlying connection is bound to, or <see langword="null"/> when not applicable.
+    /// </summary>
+    EndPoint? LocalEndPoint { get; }
+
+    /// <summary>
+    /// Gets the remote endpoint the underlying connection is connected to, or <see langword="null"/> when not applicable.
+    /// </summary>
+    EndPoint? RemoteEndPoint { get; }
+
     /// <summary>
     /// Receives HTTP exchanges from the underlying connection.
     /// </summary>

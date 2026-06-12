@@ -1,72 +1,46 @@
-﻿using Assimalign.Cohesion.Http.Transports;
-using Assimalign.Cohesion.Transports;
 using System;
-using System.Collections.Generic;
-using System.Runtime.Versioning;
-using System.Text;
+
+using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Http.Transports;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
-using Internal;
-
+/// <summary>
+/// Provides hosting convenience extension members for <see cref="HttpConnectionListenerOptions"/>.
+/// </summary>
+/// <remarks>
+/// HTTP/3 has no callback-based overload here because QUIC listeners bind asynchronously
+/// (<c>QuicConnectionListener.CreateAsync</c>); create the listener first and register it through
+/// <see cref="HttpConnectionListenerOptions.UseHttp3(Assimalign.Cohesion.Connections.IMultiplexedConnectionListener)"/>.
+/// </remarks>
 public static class WebHostingExtensions
 {
     extension(HttpConnectionListenerOptions options)
     {
         /// <summary>
-        /// Adds a TCP transport configured for HTTP/1.1.
+        /// Serves HTTP/1.1 over a TCP connection listener configured by the supplied callback.
         /// </summary>
-        /// <param name="configure">The transport configuration callback.</param>
+        /// <param name="configure">The TCP listener configuration callback.</param>
         /// <returns>The current options instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
-        public HttpConnectionListenerOptions UseHttp1(Action<TcpServerTransportOptions> configure)
+        public HttpConnectionListenerOptions UseHttp1(Action<TcpConnectionListenerOptions> configure)
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp(() =>
-            {
-                return new WebApplicationServerTransport(
-                    TcpServerTransport.Create(configure),
-                    HttpProtocol.Http11);
-            });
+            return options.UseHttp1(() => TcpConnectionListener.Create(configure));
         }
 
         /// <summary>
-        /// Adds a TCP transport configured for prior-knowledge HTTP/2.
+        /// Serves prior-knowledge HTTP/2 over a TCP connection listener configured by the supplied callback.
         /// </summary>
-        /// <param name="configure">The transport configuration callback.</param>
+        /// <param name="configure">The TCP listener configuration callback.</param>
         /// <returns>The current options instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
-        public HttpConnectionListenerOptions UseHttp2(Action<TcpServerTransportOptions> configure)
+        public HttpConnectionListenerOptions UseHttp2(Action<TcpConnectionListenerOptions> configure)
         {
             ArgumentNullException.ThrowIfNull(configure);
 
-            return options.UseHttp(() =>
-            {
-                return new WebApplicationServerTransport(
-                    TcpServerTransport.Create(configure),
-                    HttpProtocol.Http20);
-            });
-        }
-
-        /// <summary>
-        /// Adds a QUIC transport configured for HTTP/3.
-        /// </summary>
-        /// <param name="configure">The transport configuration callback.</param>
-        /// <returns>The current options instance.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
-        [SupportedOSPlatform("windows")]
-        [SupportedOSPlatform("linux")]
-        [SupportedOSPlatform("macos")]
-        [SupportedOSPlatform("osx")]
-        public HttpConnectionListenerOptions UseHttp3(Action<QuicServerTransportOptions> configure)
-        {
-            ArgumentNullException.ThrowIfNull(configure);
-
-            return options.UseHttp(() =>
-            {
-                return new WebApplicationServerTransport(QuicServerTransport.Create(configure));
-            });
+            return options.UseHttp2(() => TcpConnectionListener.Create(configure));
         }
     }
 }

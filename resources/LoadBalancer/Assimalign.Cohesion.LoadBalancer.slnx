@@ -12,4 +12,8 @@
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
 		<Project Path="Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
 	</Folder>
+	<Folder Name="/LoadBalancer/refs/" >
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

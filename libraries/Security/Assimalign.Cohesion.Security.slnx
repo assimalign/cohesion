@@ -8,6 +8,17 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security/" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security/docs/">
+		<File Path="Assimalign.Cohesion.Security/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Security/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security/src/">
+		<Project Path="Assimalign.Cohesion.Security/src/Assimalign.Cohesion.Security.csproj" />
+	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security/tests/">
+		<Project Path="Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/">
 		<File Path="Assimalign.Cohesion.Security.Cryptography/README.md" />
 	</Folder>
@@ -20,5 +31,9 @@
 	</Folder>
 	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/tests/">
 		<Project Path="Assimalign.Cohesion.Security.Cryptography/tests/Assimalign.Cohesion.Security.Cryptography.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Security/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 	</Folder>
 </Solution>

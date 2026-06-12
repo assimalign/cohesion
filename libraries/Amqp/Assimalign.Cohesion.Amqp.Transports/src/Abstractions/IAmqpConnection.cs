@@ -1,15 +1,37 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Transports;
 
 /// <summary>
-/// Represents an AMQP connection layered on top of a lower-level carrier transport connection.
+/// Represents an AMQP connection layered on top of a carrier connection produced by a lower-level transport.
 /// </summary>
-public interface IAmqpConnection : ITransportConnection
+public interface IAmqpConnection : IAsyncDisposable
 {
+    /// <summary>
+    /// Gets the unique identifier of the underlying carrier connection.
+    /// </summary>
+    ConnectionId Id { get; }
+
+    /// <summary>
+    /// Gets the current lifecycle state of the underlying carrier connection.
+    /// </summary>
+    ConnectionState State { get; }
+
+    /// <summary>
+    /// Gets a token that is signaled when the underlying carrier connection is closed or aborted.
+    /// </summary>
+    CancellationToken ConnectionClosed { get; }
+
+    /// <summary>
+    /// Aborts the underlying carrier connection immediately, discarding any in-flight data.
+    /// </summary>
+    /// <param name="reason">An optional exception describing why the connection was aborted.</param>
+    void Abort(Exception? reason = null);
+
     /// <summary>
     /// Opens the AMQP connection context used to negotiate the protocol header and exchange frames.
     /// </summary>

@@ -4,8 +4,8 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
 	</ItemGroup>
 
 </Project>

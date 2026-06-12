@@ -340,4 +340,8 @@
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Types/src/">
 		<Project Path="Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
 	</Folder>
+	<Folder Name="/Database/refs/" >
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+	</Folder>
 </Solution>

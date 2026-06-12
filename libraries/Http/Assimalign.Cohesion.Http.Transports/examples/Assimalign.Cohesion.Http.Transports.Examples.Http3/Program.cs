@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Quic;
+using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -9,9 +10,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Quic;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Transports;
-using Assimalign.Cohesion.Transports;
 
 using ClientHttpMethod = System.Net.Http.HttpMethod;
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -35,7 +36,7 @@ internal static class Program
         Uri serverUri = new($"https://127.0.0.1:{port}/hello?name=http3");
         using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
 
-        await using HttpConnectionListener listener = CreateListener(port, certificate);
+        await using HttpConnectionListener listener = await CreateListenerAsync(port, certificate, cancellationToken).ConfigureAwait(false);
 
         Task serverTask = RunServerAsync(listener, cancellationToken);
 
@@ -117,19 +118,21 @@ internal static class Program
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
-    private static HttpConnectionListener CreateListener(int port, X509Certificate2 certificate)
+    private static async Task<HttpConnectionListener> CreateListenerAsync(int port, X509Certificate2 certificate, CancellationToken cancellationToken)
     {
+        // HTTP/3 over QUIC: the QUIC listener is inherently TLS-secured (its
+        // capabilities report Security = Tls) and multiplexed, so it plugs
+        // into the HTTP listener through the dedicated UseHttp3 registration.
+        QuicConnectionListener quicListener = await QuicConnectionListener.CreateAsync(transport =>
+        {
+            transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
+            transport.ServerAuthenticationOptions.ServerCertificate = certificate;
+            transport.ServerAuthenticationOptions.ApplicationProtocols = [SslApplicationProtocol.Http3];
+        }, cancellationToken).ConfigureAwait(false);
+
         return HttpConnectionListener.Create(options =>
         {
-            options.UseHttp(
-                HttpProtocol.Http30,
-                QuicServerTransport.Create(transport =>
-                {
-                    transport.EndPoint = new IPEndPoint(IPAddress.Loopback, port);
-                    transport.OutboundStreamType = QuicStreamType.Unidirectional;
-                    transport.ServerAuthenticationOptions.ServerCertificate = certificate;
-                }),
-                isSecure: true);
+            options.UseHttp3(quicListener);
         });
     }
 

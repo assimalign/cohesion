@@ -21,4 +21,7 @@
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/">
 		<Project Path="Assimalign.Cohesion.NotificationHub.Client/tests/Assimalign.Cohesion.NotificationHub.Client.Tests.csproj" />
 	</Folder>
+	<Folder Name="/NotificationHub/refs/" >
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

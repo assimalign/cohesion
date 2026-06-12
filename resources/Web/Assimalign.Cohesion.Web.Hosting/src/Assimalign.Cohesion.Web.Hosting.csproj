@@ -6,7 +6,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Transports" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Transports.Tcp" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Transports.Quic" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 	</ItemGroup>
 </Project>

@@ -7,13 +7,13 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Transports.Internal;
 
 internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 {
-    private readonly ITransportConnectionContext _context;
+    private readonly IConnection _connection;
     private readonly AmqpTransportOptions _options;
     private readonly SemaphoreSlim _protocolLock;
     private readonly SemaphoreSlim _writeLock;
@@ -21,9 +21,9 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
     private AmqpProtocolHeader _localProtocolHeader;
     private AmqpProtocolHeader? _remoteProtocolHeader;
 
-    public AmqpTransportConnectionContext(ITransportConnectionContext context, AmqpTransportOptions options)
+    public AmqpTransportConnectionContext(IConnection connection, AmqpTransportOptions options)
     {
-        _context = context;
+        _connection = connection;
         _options = options;
         _localProtocolHeader = options.InitialProtocolHeader;
         _protocolLock = new SemaphoreSlim(1, 1);
@@ -34,13 +34,13 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 
     public override AmqpProtocolHeader? RemoteProtocolHeader => _remoteProtocolHeader;
 
-    public override EndPoint LocalEndPoint => _context.LocalEndPoint;
+    public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
 
-    public override EndPoint RemoteEndPoint => _context.RemoteEndPoint;
+    public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
 
-    public override ITransportConnectionPipe Pipe => _context.Pipe;
+    public override PipeReader Input => _connection.Input;
 
-    public override IDictionary<string, object?> Items => _context.Items;
+    public override PipeWriter Output => _connection.Output;
 
     public override async ValueTask<AmqpProtocolHeader> NegotiateAsync(CancellationToken cancellationToken = default)
     {
@@ -95,7 +95,7 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
     {
         await EnsureNegotiatedAsync(cancellationToken).ConfigureAwait(false);
 
-        PipeReader reader = Pipe.Input;
+        PipeReader reader = Input;
 
         while (true)
         {
@@ -136,8 +136,8 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 
         try
         {
-            await Pipe.Output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-            await Pipe.Output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await Output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+            await Output.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -168,8 +168,8 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 
         try
         {
-            await Pipe.Output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-            await Pipe.Output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await Output.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+            await Output.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -179,7 +179,7 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 
     private async ValueTask<AmqpProtocolHeader> ReadProtocolHeaderAsync(CancellationToken cancellationToken)
     {
-        PipeReader reader = Pipe.Input;
+        PipeReader reader = Input;
 
         while (true)
         {

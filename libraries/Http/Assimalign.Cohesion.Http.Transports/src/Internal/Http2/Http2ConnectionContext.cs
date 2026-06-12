@@ -7,8 +7,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Transports.Internal.Http2.HPack;
-using Assimalign.Cohesion.Transports;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http2;
 
@@ -51,8 +51,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    public Http2ConnectionContext(ITransportConnectionContext transportContext, bool isSecure)
-        : base(transportContext, isSecure)
+    public Http2ConnectionContext(IConnection connection, bool isSecure)
+        : base(connection, isSecure)
     {
         _headerDecoder = new HPackDecoder();
         _streams = new Dictionary<int, Http2Stream>();
@@ -1261,9 +1261,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// <remarks>
     /// <para>
     /// Closes the gap identified by #686: previously, <see cref="Http2Connection.DisposeAsync"/>
-    /// invoked <c>ITransportConnection.DisposeAsync</c> directly, which
+    /// invoked <c>IConnection.DisposeAsync</c> directly, which
     /// aborts the socket immediately and can race the send task's
-    /// in-flight <c>Socket.SendAsync</c>. Completing the pipe writer
+    /// in-flight <c>Socket.SendAsync</c>. Completing the output writer
     /// here lets the send task drain naturally; the caller then waits
     /// for the connection state to transition out of <c>Open</c> before
     /// declaring the close complete.
@@ -1303,12 +1303,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     {
         try
         {
-            // RFC 9113 §6.8 — completing the pipe writer signals the
-            // transport's send loop that no further bytes will be queued.
-            // The send loop processes its remaining backlog (one final
-            // Socket.SendAsync, which waits for the kernel to ACK) and
-            // then exits — closing the socket cleanly.
-            return Pipe.Output.CompleteAsync();
+            // RFC 9113 §6.8 — completing the connection's output writer
+            // signals the transport's send loop that no further bytes will
+            // be queued. The send loop processes its remaining backlog (one
+            // final Socket.SendAsync, which waits for the kernel to ACK)
+            // and then exits — closing the socket cleanly.
+            return Connection.Output.CompleteAsync();
         }
         catch
         {

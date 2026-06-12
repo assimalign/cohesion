@@ -91,4 +91,8 @@
 	<Folder Name="/Content/Assimalign.Cohesion.Content.Text/src/">
 		<Project Path="Assimalign.Cohesion.Content.Text/src/Assimalign.Cohesion.Content.Text.csproj" />
 	</Folder>
+	<Folder Name="/Content/refs/" >
+		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

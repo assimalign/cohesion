@@ -99,7 +99,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Transports" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectMapping" />

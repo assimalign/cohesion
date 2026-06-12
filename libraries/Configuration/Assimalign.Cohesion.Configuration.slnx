@@ -110,4 +110,10 @@
 	<Folder Name="/Configuration/Assimalign.Cohesion.Configuration.Xml/tests/">
 		<Project Path="Assimalign.Cohesion.Configuration.Xml/tests/Assimalign.Cohesion.Configuration.Xml.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Configuration/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
+	</Folder>
 </Solution>

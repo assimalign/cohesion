@@ -7,9 +7,14 @@
 	<Folder Name="/OpenApi/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/">
 		<File Path="Assimalign.Cohesion.OpenApi/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/src/">
 		<Project Path="Assimalign.Cohesion.OpenApi/src/Assimalign.Cohesion.OpenApi.csproj" />
@@ -17,14 +22,26 @@
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi/tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/" />
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/">
+		<File Path="Assimalign.Cohesion.OpenApi.Serialization/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Serialization/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Serialization/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/src/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Serialization/src/Assimalign.Cohesion.OpenApi.Serialization.csproj" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Serialization/tests/Assimalign.Cohesion.OpenApi.Serialization.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/" />
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/">
+		<File Path="Assimalign.Cohesion.OpenApi.Validation/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Validation/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Validation/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/src/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Validation/src/Assimalign.Cohesion.OpenApi.Validation.csproj" />
 	</Folder>

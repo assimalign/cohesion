@@ -2,48 +2,42 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
+using Assimalign.Cohesion.Connections;
 
-using Assimalign.Cohesion.Transports;
+namespace Assimalign.Cohesion.Http.Transports.Internal.Http1;
 
 internal sealed class Http1Connection : HttpConnection
 {
-    private readonly ISingleStreamTransportConnection _connection;
+    private readonly IConnection _connection;
     private Http1ConnectionContext? _openContext;
 
-
-    public Http1Connection(ISingleStreamTransportConnection connection, bool isSecure)
-        : base(connection, isSecure)
+    public Http1Connection(IConnection connection, bool isSecure)
+        : base(isSecure)
     {
         _connection = connection;
     }
 
-    public override CancellationToken ConnectionAborted => _connection.ConnectionAborted;
+    public override ConnectionId Id => _connection.Id;
+
+    public override ConnectionState State => _connection.State;
+
+    public override CancellationToken ConnectionClosed => _connection.ConnectionClosed;
+
+    public override void Abort(Exception? reason = null)
+    {
+        _connection.Abort(reason);
+    }
 
     public override HttpConnectionContext Open()
     {
-        return OpenAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        // The wrapped connection is already live (connections are produced live by the
+        // listener), so opening the HTTP context is a synchronous projection.
+        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure);
     }
 
-    public override async ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
-        if (_openContext is not null)
-        {
-            return _openContext;
-        }
-
-        ITransportConnectionContext transportContext = await _connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        // The registration-time isSecure is a hint; the transport pipeline
-        // may have established a secure session in the meantime (TLS
-        // middleware wrapping the raw socket in SslStream, for example) and
-        // recorded that via context.IsSecure. Promote either signal to the
-        // effective value so HttpContext.ConnectionInfo.IsSecure reflects
-        // the truth at request-read time.
-        bool effectiveIsSecure = IsSecure || transportContext.IsSecure;
-        
-        _openContext = new Http1ConnectionContext(transportContext, effectiveIsSecure);
-
-        return _openContext;
+        return new ValueTask<HttpConnectionContext>(Open());
     }
 
     /// <summary>
@@ -51,7 +45,7 @@ internal sealed class Http1Connection : HttpConnection
     /// </summary>
     /// <remarks>
     /// <list type="number">
-    ///   <item><description>Complete the transport pipe's output writer.
+    ///   <item><description>Complete the connection's output writer.
     ///   That signals the underlying transport's send loop that no further
     ///   bytes will be queued; the send loop drains its remaining backlog
     ///   (one final <c>Socket.SendAsync</c>, which waits for the kernel to
@@ -61,19 +55,19 @@ internal sealed class Http1Connection : HttpConnection
     ///   the socket in its own <c>finally</c> after the final
     ///   <c>Socket.SendAsync</c> completes; that state transition is our
     ///   signal that all queued response bytes are on the wire.</description></item>
-    ///   <item><description>Dispose the underlying transport to release
+    ///   <item><description>Dispose the underlying connection to release
     ///   socket / pool resources (idempotent after the transport's own
     ///   drain).</description></item>
     /// </list>
     /// <para>
     /// Mirrors the HTTP/2 fix (#686) for the same race: previously this
-    /// method called <c>Connection.DisposeAsync()</c> directly, which
-    /// aborts the socket immediately and can race the send task's
-    /// in-flight <c>Socket.SendAsync</c>. The result was an HTTP/1.1
-    /// client seeing "response ended prematurely" on the bytes the server
-    /// had just committed via <c>WriteResponseAsync</c>. The graceful
-    /// close + state-drain wait closes that gap so the response bytes are
-    /// durably on the wire before the socket is torn down.
+    /// method disposed the connection directly, which aborts the socket
+    /// immediately and can race the send task's in-flight
+    /// <c>Socket.SendAsync</c>. The result was an HTTP/1.1 client seeing
+    /// "response ended prematurely" on the bytes the server had just
+    /// committed via <c>WriteResponseAsync</c>. The graceful close +
+    /// state-drain wait closes that gap so the response bytes are durably
+    /// on the wire before the socket is torn down.
     /// </para>
     /// </remarks>
     public override async ValueTask DisposeAsync()
@@ -82,7 +76,7 @@ internal sealed class Http1Connection : HttpConnection
         {
             try
             {
-                await CompleteOutputAsync(_openContext.Pipe).ConfigureAwait(false);
+                await CompleteOutputAsync(_connection).ConfigureAwait(false);
                 await WaitForTransportDrainAsync(_connection).ConfigureAwait(false);
             }
             catch
@@ -94,16 +88,16 @@ internal sealed class Http1Connection : HttpConnection
         await _connection.DisposeAsync().ConfigureAwait(false);
     }
 
-    private static async ValueTask CompleteOutputAsync(ITransportConnectionPipe pipe)
+    private static async ValueTask CompleteOutputAsync(IConnection connection)
     {
         try
         {
-            // Completing the pipe's writer signals the transport's send
-            // loop that no further bytes will be queued. The send loop
+            // Completing the connection's output writer signals the transport's
+            // send loop that no further bytes will be queued. The send loop
             // processes its remaining backlog (one final Socket.SendAsync,
             // which waits for the kernel to commit the bytes) and exits
             // cleanly. Idempotent — repeated completions are no-ops.
-            await pipe.Output.CompleteAsync().ConfigureAwait(false);
+            await connection.Output.CompleteAsync().ConfigureAwait(false);
         }
         catch
         {
@@ -112,7 +106,7 @@ internal sealed class Http1Connection : HttpConnection
         }
     }
 
-    private static async ValueTask WaitForTransportDrainAsync(ITransportConnection connection, int timeoutMs = 200)
+    private static async ValueTask WaitForTransportDrainAsync(IConnection connection, int timeoutMs = 200)
     {
         using CancellationTokenSource cts = new(timeoutMs);
 

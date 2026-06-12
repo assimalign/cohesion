@@ -23,4 +23,8 @@
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/">
 		<Project Path="Assimalign.Cohesion.Amqp.Transports/tests/Assimalign.Cohesion.Amqp.Transports.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Amqp/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+	</Folder>
 </Solution>

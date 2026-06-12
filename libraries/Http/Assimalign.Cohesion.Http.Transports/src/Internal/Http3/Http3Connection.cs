@@ -1,33 +1,39 @@
-using Assimalign.Cohesion.Transports;
 using System;
-using System.Collections.Generic;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Transports.Internal.Http3;
 
 internal sealed class Http3Connection : HttpConnection
 {
-    private readonly IMultiplexTransportConnection _connection;
+    private readonly IMultiplexedConnection _connection;
     private Http3ConnectionContext? _openContext;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(IMultiplexTransportConnection connection, bool isSecure)
-        : base(connection, isSecure)
+    public Http3Connection(IMultiplexedConnection connection, bool isSecure)
+        : base(isSecure)
     {
         _connection = connection;
     }
 
-    public override HttpConnectionContext Open()
+    public override ConnectionId Id => _connection.Id;
+
+    public override ConnectionState State => _connection.State;
+
+    public override CancellationToken ConnectionClosed => _connection.ConnectionClosed;
+
+    public override void Abort(Exception? reason = null)
     {
-        return OpenAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        _connection.Abort(reason);
     }
 
-    public override async ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    public override HttpConnectionContext Open()
     {
         if (_openContext is not null)
         {
@@ -39,14 +45,17 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        _openContext = new Http3ConnectionContext(_connection, IsSecure);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure);
+    }
 
-        return _openContext;
+    public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    {
+        return new ValueTask<HttpConnectionContext>(Open());
     }
 
     public override ValueTask DisposeAsync()
     {
-        return Connection.DisposeAsync();
+        return _connection.DisposeAsync();
     }
 
     [SupportedOSPlatformGuard("windows")]

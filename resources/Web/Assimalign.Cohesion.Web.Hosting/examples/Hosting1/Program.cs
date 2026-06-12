@@ -23,19 +23,6 @@ AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport
 builder.Server
     .UseServer((serviceProvider, options) =>
     {
-        options.CreateFeatures = () =>
-        {
-            IEnumerable<IHttpFeature> features = serviceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
-
-            var collection = new HttpFeatureCollection(features.Count());
-
-            foreach (var feature in features)
-            {
-                collection.Set(feature);
-            }
-
-            return collection;
-        };
         options.UseHttp1(tcp =>
         {
 

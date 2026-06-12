@@ -5,7 +5,6 @@ using System.Text;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Transports.Tests.TestObjects;
-using Assimalign.Cohesion.Transports;
 
 using Shouldly;
 
@@ -21,10 +20,9 @@ public class Http1TransportTests
         // Arrange
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /widgets?id=42 HTTP/1.1\r\nHost: api.test\r\nCookie: session=abc; theme=light\r\nUser-Agent: tests\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
@@ -46,7 +44,7 @@ public class Http1TransportTests
         httpContext.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes("created"));
         await httpConnectionContext.SendAsync(httpContext);
 
-        string responseText = Encoding.ASCII.GetString(await transportContext.ReadOutputAsync());
+        string responseText = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
 
         // Assert response
         responseText.ShouldContain("HTTP/1.1 201 Created");
@@ -72,10 +70,9 @@ public class Http1TransportTests
             "0\r\n" +
             "X-Checksum: abc123\r\n" +
             "\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -90,10 +87,9 @@ public class Http1TransportTests
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -111,10 +107,9 @@ public class Http1TransportTests
         // The authority component of the target supersedes any Host header.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET https://upstream.example.com:8443/widgets?id=42 HTTP/1.1\r\nHost: lying-host-header.test\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -137,10 +132,9 @@ public class Http1TransportTests
         // RFC 9112 §3.2.3 — authority-form, reserved for CONNECT.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "CONNECT origin.example.com:443 HTTP/1.1\r\nHost: origin.example.com:443\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -160,10 +154,9 @@ public class Http1TransportTests
         // RFC 9112 §3.2.4 — asterisk-form, reserved for OPTIONS *.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "OPTIONS * HTTP/1.1\r\nHost: api.test\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -199,10 +192,9 @@ public class Http1TransportTests
         // the urlencoded payload reaches the application untouched.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /submit HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 14\r\n\r\nname=alice&x=1");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -224,10 +216,9 @@ public class Http1TransportTests
         // Arrange
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /one HTTP/1.1\r\nHost: api.test\r\n\r\nGET /two HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n");
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -462,15 +453,11 @@ public class Http1TransportTests
         byte[] healthy = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /healthy HTTP/1.1\r\nHost: api.test\r\n\r\n");
 
-        TestTransportConnectionContext badContext = new(truncated);
-        TestSingleStreamTransportConnection badConn = new(badContext, TransportProtocol.Tcp);
-        TestTransportConnectionContext goodContext = new(healthy);
-        TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
+        TestConnection badConn = new(truncated);
+        TestConnection goodConn = new(healthy);
 
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(
-            HttpProtocol.Http11,
-            new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { badConn, goodConn }));
+        options.UseHttp1(new TestConnectionListener(badConn, goodConn));
 
         await using HttpConnectionListener listener = new(options);
 
@@ -515,15 +502,11 @@ public class Http1TransportTests
         byte[] healthy = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /healthy HTTP/1.1\r\nHost: api.test\r\n\r\n");
 
-        TestTransportConnectionContext badContext = new(tlsClientHelloPrefix);
-        TestSingleStreamTransportConnection badConn = new(badContext, TransportProtocol.Tcp);
-        TestTransportConnectionContext goodContext = new(healthy);
-        TestSingleStreamTransportConnection goodConn = new(goodContext, TransportProtocol.Tcp);
+        TestConnection badConn = new(tlsClientHelloPrefix);
+        TestConnection goodConn = new(healthy);
 
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(
-            HttpProtocol.Http11,
-            new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { badConn, goodConn }));
+        options.UseHttp1(new TestConnectionListener(badConn, goodConn));
 
         await using HttpConnectionListener listener = new(options);
 
@@ -561,10 +544,9 @@ public class Http1TransportTests
 
     private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload)
     {
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -589,10 +571,9 @@ public class Http1TransportTests
     /// </summary>
     private static async Task AssertConnectionDroppedAsync(byte[] payload)
     {
-        TestTransportConnectionContext transportContext = new(payload);
-        TestSingleStreamTransportConnection connection = new(transportContext, TransportProtocol.Tcp);
+        TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp(HttpProtocol.Http11, new TestServerTransport(TransportProtocol.Tcp, new TransportConnection[] { connection }));
+        options.UseHttp1(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

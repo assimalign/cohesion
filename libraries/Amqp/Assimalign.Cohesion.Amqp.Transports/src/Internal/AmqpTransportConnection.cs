@@ -2,45 +2,41 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Transports;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Transports.Internal;
 
-internal sealed class AmqpTransportConnection : AmqpConnection
+/// <summary>
+/// Shared base for AMQP connections layered over a carrier: caches the opened context,
+/// negotiates the protocol header when configured, and signals the owning transport on disposal.
+/// Carrier acquisition and teardown are modeled explicitly per carrier kind by the derived types.
+/// </summary>
+internal abstract class AmqpTransportConnection : AmqpConnection
 {
-    private readonly ITransportConnection _connection;
-    private readonly TransportKind _transportKind;
     private readonly AmqpTransportOptions _options;
     private AmqpTransportConnectionContext? _context;
 
-    public AmqpTransportConnection(
-        ITransportConnection connection,
-        TransportId transportId,
-        TransportKind transportKind,
-        AmqpTransportOptions options)
-        : base(connection, transportId)
+    protected AmqpTransportConnection(AmqpTransportOptions options)
     {
-        _connection = connection;
-        _transportKind = transportKind;
         _options = options;
     }
 
     internal Action? OnDispose { get; set; }
 
-    public override AmqpConnectionContext Open()
+    public sealed override AmqpConnectionContext Open()
     {
         return OpenAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
-    public override async ValueTask<AmqpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
+    public sealed override async ValueTask<AmqpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
     {
         if (_context is not null)
         {
             return _context;
         }
 
-        ITransportConnectionContext transportContext = await OpenCarrierContextAsync(cancellationToken).ConfigureAwait(false);
-        AmqpTransportConnectionContext context = new(transportContext, _options);
+        IConnection carrier = await AcquireCarrierAsync(cancellationToken).ConfigureAwait(false);
+        AmqpTransportConnectionContext context = new(carrier, _options);
 
         if (_options.AutoNegotiateProtocolHeader)
         {
@@ -52,26 +48,20 @@ internal sealed class AmqpTransportConnection : AmqpConnection
         return context;
     }
 
-    public override async ValueTask DisposeAsync()
+    public sealed override async ValueTask DisposeAsync()
     {
-        await _connection.DisposeAsync().ConfigureAwait(false);
+        await DisposeCarrierAsync().ConfigureAwait(false);
         OnDispose?.Invoke();
     }
 
-    private async ValueTask<ITransportConnectionContext> OpenCarrierContextAsync(CancellationToken cancellationToken)
-    {
-        return _connection switch
-        {
-            ISingleStreamTransportConnection singleStreamConnection =>
-                await singleStreamConnection.OpenAsync(cancellationToken).ConfigureAwait(false),
+    /// <summary>
+    /// Acquires the carrier connection that backs the AMQP connection context. A single-stream
+    /// carrier is already live; a multiplexed carrier opens or accepts its AMQP stream here.
+    /// </summary>
+    protected abstract ValueTask<IConnection> AcquireCarrierAsync(CancellationToken cancellationToken);
 
-            IMultiplexTransportConnection multiplexConnection when _transportKind == TransportKind.Client =>
-                await multiplexConnection.OpenOutboundAsync(cancellationToken).ConfigureAwait(false),
-
-            IMultiplexTransportConnection multiplexConnection =>
-                await multiplexConnection.OpenInboundAsync(cancellationToken).ConfigureAwait(false),
-
-            _ => throw new InvalidOperationException("The AMQP transport requires a carrier connection that can provide an ordered duplex stream.")
-        };
-    }
+    /// <summary>
+    /// Disposes the carrier resources owned by this AMQP connection.
+    /// </summary>
+    protected abstract ValueTask DisposeCarrierAsync();
 }
