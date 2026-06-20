@@ -5,7 +5,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <CohesionProjectReference Include="Assimalign.Cohesion.Amqp.Transports" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Amqp.Connections" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
         <CohesionPackageReference Include="coverlet.collector" />
         <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

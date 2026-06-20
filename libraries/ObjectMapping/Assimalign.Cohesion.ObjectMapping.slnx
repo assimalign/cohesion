@@ -26,6 +26,7 @@
 		<Project Path="Assimalign.Cohesion.ObjectMapping/tests/Assimalign.Cohesion.ObjectMapping.Tests.csproj" />
 	</Folder>
 	<Folder Name="/ObjectMapping/refs/" >
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj" />
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
 </Solution>

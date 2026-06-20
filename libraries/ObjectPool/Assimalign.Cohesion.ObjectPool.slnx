@@ -23,5 +23,6 @@
 	</Folder>
 	<Folder Name="/ObjectPool/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
 	</Folder>
 </Solution>

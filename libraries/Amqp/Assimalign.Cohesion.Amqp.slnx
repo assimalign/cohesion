@@ -17,6 +17,10 @@
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/">
 		<File Path="Assimalign.Cohesion.Amqp.Transports/README.md" />
 	</Folder>
+	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/docs/">
+		<File Path="Assimalign.Cohesion.Amqp.Transports/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Amqp.Transports/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Transports/src/">
 		<Project Path="Assimalign.Cohesion.Amqp.Transports/src/Assimalign.Cohesion.Amqp.Transports.csproj" />
 	</Folder>
@@ -26,5 +30,6 @@
 	<Folder Name="/Amqp/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
 	</Folder>
 </Solution>

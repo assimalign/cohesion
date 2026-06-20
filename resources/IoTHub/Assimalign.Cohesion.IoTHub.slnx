@@ -16,4 +16,8 @@
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/IoTHub/refs/" >
+		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Http.Transports;
+using Assimalign.Cohesion.Http.Connections;
 
 using Shouldly;
 

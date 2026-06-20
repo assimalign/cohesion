@@ -90,5 +90,11 @@
 	</Folder>
 	<Folder Name="/FileSystem/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Aggregate/src/Assimalign.Cohesion.FileSystem.Aggregate.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Globbing/src/Assimalign.Cohesion.FileSystem.Globbing.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem.IsolatedStorage/src/Assimalign.Cohesion.FileSystem.IsolatedStorage.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 	</Folder>
 </Solution>

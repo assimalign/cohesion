@@ -21,4 +21,7 @@
 	<Folder Name="/ObjectValidation/Assimalign.Cohesion.ObjectValidation/tests/">
 		<Project Path="Assimalign.Cohesion.ObjectValidation/tests/Assimalign.Cohesion.ObjectValidation.Tests.csproj" />
 	</Folder>
+	<Folder Name="/ObjectValidation/refs/" >
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
+	</Folder>
 </Solution>

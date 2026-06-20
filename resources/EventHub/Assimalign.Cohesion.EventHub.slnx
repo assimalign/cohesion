@@ -12,4 +12,8 @@
 	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub/src/">
 		<Project Path="Assimalign.Cohesion.EventHub/src/Assimalign.Cohesion.EventHub.csproj" />
 	</Folder>
+	<Folder Name="/EventHub/refs/" >
+		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

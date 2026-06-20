@@ -7,6 +7,7 @@
 	<Folder Name="/Connections/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections/" />
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections/docs/">
@@ -20,6 +21,10 @@
 		<Project Path="Assimalign.Cohesion.Connections/tests/Assimalign.Cohesion.Connections.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Quic/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/src/">
 		<Project Path="Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
 	</Folder>
@@ -42,5 +47,9 @@
 	</Folder>
 	<Folder Name="/Connections/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Connections/Assimalign.Cohesion.Connections.Udp/src/Assimalign.Cohesion.Connections.Udp.csproj" />
 	</Folder>
 </Solution>

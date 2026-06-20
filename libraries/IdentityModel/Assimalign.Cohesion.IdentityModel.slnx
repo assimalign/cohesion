@@ -33,4 +33,10 @@
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token.Saml/tests/Assimalign.Cohesion.IdentityModel.Token.Saml.Tests.csproj" />
 	</Folder>
+	<Folder Name="/IdentityModel/refs/" >
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.csproj" />
+		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/src/Assimalign.Cohesion.IdentityModel.Token.Saml.csproj" />
+	</Folder>
 </Solution>
