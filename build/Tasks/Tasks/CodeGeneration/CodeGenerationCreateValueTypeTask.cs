@@ -121,9 +121,9 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
         public string? FileName { get; set; }
         public string? FileDirectory { get; set; }
         public string? FilePath { get; set; }
-        public required string ObjectName { get; set; }
-        public required string ObjectNamespace { get; set; }
-        public required ObjectRuntimeType ObjectRuntimeType { get; set; }
+        public string ObjectName { get; set; } = string.Empty;
+        public string ObjectNamespace { get; set; } = string.Empty;
+        public ObjectRuntimeType ObjectRuntimeType { get; set; }
         public ObjectKind ObjectKind { get; set; }
         public ObjectAccessModifier ObjectAccessModifier { get; set; }
         public bool ObjectHasIsValidMethod { get; set; }
@@ -171,11 +171,7 @@ public class CodeGenerationCreateValueTypeTask : CodeGenerationTask
             basePath.Create();
         }
 
-        IEnumerable<FileInfo> files = basePath.EnumerateFiles("*.cs", new EnumerationOptions()
-        {
-            IgnoreInaccessible = true,
-            RecurseSubdirectories = true,
-        });
+        IEnumerable<FileInfo> files = basePath.EnumerateFiles("*.cs", SearchOption.AllDirectories);
 
         foreach (var file in files)
         {

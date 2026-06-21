@@ -25,7 +25,7 @@ internal static class BuildExtensions
             {
                 try
                 {
-                    if (type.IsAssignableTo(typeof(bool)))
+                    if (typeof(bool).IsAssignableFrom(type))
                     {
                         cast = bool.Parse(meta);
                     }
@@ -33,7 +33,7 @@ internal static class BuildExtensions
                     {
                         cast = Enum.Parse(type, meta, true);
                     }
-                    else if (type.IsAssignableTo(typeof(int)))
+                    else if (typeof(int).IsAssignableFrom(type))
                     {
                         cast = int.Parse(meta);
                     }
