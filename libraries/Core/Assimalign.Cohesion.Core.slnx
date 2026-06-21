@@ -27,7 +27,4 @@
 	<Folder Name="/Core/Assimalign.Cohesion.Core/tests/">
 		<Project Path="Assimalign.Cohesion.Core/tests/Assimalign.Cohesion.Core.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Core/refs/" >
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-	</Folder>
 </Solution>
