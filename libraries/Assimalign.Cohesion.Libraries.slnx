@@ -27,10 +27,10 @@
 		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
-		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connectionss.csproj" />
+		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/tests/">
-		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/tests/Assimalign.Cohesion.Amqp.Connectionss.Tests.csproj" />
+		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/tests/Assimalign.Cohesion.Amqp.Connections.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/ApplicationModel/">
 		<File Path="ApplicationModel/Directory.Build.props" />
@@ -622,18 +622,6 @@
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
-	</Folder>
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/">
-		<File Path="Http/Assimalign.Cohesion.Http.RequestLifetime/README.md" />
-	</Folder>
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/docs/">
-		<File Path="Http/Assimalign.Cohesion.Http.RequestLifetime/docs/DESIGN.md" />
-	</Folder>
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/src/">
-		<Project Path="Http/Assimalign.Cohesion.Http.RequestLifetime/src/Assimalign.Cohesion.Http.RequestLifetime.csproj" />
-	</Folder>
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.RequestLifetime/tests/">
-		<Project Path="Http/Assimalign.Cohesion.Http.RequestLifetime/tests/Assimalign.Cohesion.Http.RequestLifetime.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Sessions/">
 		<File Path="Http/Assimalign.Cohesion.Http.Sessions/README.md" />

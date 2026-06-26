@@ -56,6 +56,16 @@ internal sealed class TestHttpContext : IHttpContext
         Features.Set<IHttpFormFeature>(new TestFormFeature(form));
     }
 
+    public void Cancel()
+    {
+        
+    }
+
+    public Task CancelAsync()
+    {
+        return Task.CompletedTask;
+    }
+
     private sealed class TestHttpRequest : IHttpRequest
     {
         public TestHttpRequest(IHttpContext context, HttpMethod method)

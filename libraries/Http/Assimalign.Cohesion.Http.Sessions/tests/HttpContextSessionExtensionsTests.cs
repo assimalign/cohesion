@@ -174,6 +174,17 @@ public class HttpContextSessionExtensionsTests
         public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public CancellationToken RequestCancelled => CancellationToken.None;
+
+        public void Cancel()
+        {
+            
+        }
+
+        public Task CancelAsync()
+        {
+            return Task.CompletedTask;
+        }
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

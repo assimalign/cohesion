@@ -173,6 +173,16 @@ public class HttpRequestCookieExtensionsTests
         public CancellationToken RequestCancelled => CancellationToken.None;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+        public void Cancel()
+        {
+            
+        }
+
+        public Task CancelAsync()
+        {
+            return Task.CompletedTask;
+        }
+
         /// <summary>Direct handle to the request's mutable header collection so tests can install a Cookie header.</summary>
         public IHttpHeaderCollection RequestHeaders => Request.Headers;
     }

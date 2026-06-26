@@ -1,5 +1,5 @@
 using System;
-
+using Assimalign.Cohesion.Http.Internal;
 using Shouldly;
 
 using Xunit;
@@ -48,6 +48,6 @@ public class HttpMethodTests
         Action action = () => _ = new HttpMethod(method);
 
         // Assert
-        action.ShouldThrow<HttpException>().Code.ShouldBe(HttpErrorCode.InvalidMethod);
+        action.ShouldThrow<ArgumentException>();
     }
 }

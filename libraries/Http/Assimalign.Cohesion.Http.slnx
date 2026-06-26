@@ -53,13 +53,13 @@
 		<File Path="Assimalign.Cohesion.Http.Connections/examples/README.md" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/">
-		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Connections.Examples.Http1.csproj" />
+		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Transports.Examples.Http1.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/">
-		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Connections.Examples.Http2.csproj" />
+		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Transports.Examples.Http2.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/">
-		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Connections.Examples.Http3.csproj" />
+		<Project Path="Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Transports.Examples.Http3.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Connections/src/">
 		<Project Path="Assimalign.Cohesion.Http.Connections/src/Assimalign.Cohesion.Http.Connections.csproj" />
@@ -134,4 +134,4 @@
 		<Project Path="../Security/Assimalign.Cohesion.Security/src/Assimalign.Cohesion.Security.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
 	</Folder>
-</Solution>.Connections.Connections
+</Solution>
