@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class Http1TransportTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse request metadata and serialize the response")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse request metadata and serialize the response")]
     public async Task Http1_OnRequest_ShouldParseRequestMetadataAndSerializeResponse()
     {
         // Arrange
@@ -53,7 +53,7 @@ public class Http1TransportTests
         responseText.ShouldContain("created");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should surface chunked request trailers on request.Trailers")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface chunked request trailers on request.Trailers")]
     public async Task Http1_OnChunkedRequestWithTrailers_ShouldSurfaceTrailers()
     {
         // RFC 9112 §7.1.2 — a chunked request may carry a trailer section after
@@ -82,7 +82,7 @@ public class Http1TransportTests
         httpContext.Request.Trailers["X-Checksum"].Value.ShouldBe("abc123");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should expose an unsupported trailer section for a non-chunked request")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should expose an unsupported trailer section for a non-chunked request")]
     public async Task Http1_OnNonChunkedRequest_ShouldExposeUnsupportedTrailers()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
@@ -100,7 +100,7 @@ public class Http1TransportTests
         httpContext.Request.Trailers.Count.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse absolute-form request targets")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse absolute-form request targets")]
     public async Task Http1_OnAbsoluteFormRequest_ShouldParsePathAndQuery()
     {
         // RFC 9112 §3.2.2 — absolute-form, used when a proxy forwards a request.
@@ -126,7 +126,7 @@ public class Http1TransportTests
         httpContext.Request.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse authority-form CONNECT targets")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse authority-form CONNECT targets")]
     public async Task Http1_OnAuthorityFormConnectRequest_ShouldExtractHostAndPort()
     {
         // RFC 9112 §3.2.3 — authority-form, reserved for CONNECT.
@@ -148,7 +148,7 @@ public class Http1TransportTests
         httpContext.Request.Path.ShouldBe(HttpPath.Root);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should parse asterisk-form OPTIONS targets")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse asterisk-form OPTIONS targets")]
     public async Task Http1_OnAsteriskFormOptionsRequest_ShouldExposeAsteriskPath()
     {
         // RFC 9112 §3.2.4 — asterisk-form, reserved for OPTIONS *.
@@ -171,7 +171,7 @@ public class Http1TransportTests
         httpContext.Request.Host.Value.ShouldBe("api.test");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed request-targets")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed request-targets")]
     [InlineData("CONNECT /path HTTP/1.1\r\nHost: api.test\r\n\r\n")]          // CONNECT requires authority-form
     [InlineData("GET * HTTP/1.1\r\nHost: api.test\r\n\r\n")]                  // asterisk-form is OPTIONS-only
     [InlineData("GET example.com:80 HTTP/1.1\r\nHost: api.test\r\n\r\n")]     // authority-form on non-CONNECT
@@ -184,7 +184,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver URL encoded request body intact to the application layer")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should deliver URL encoded request body intact to the application layer")]
     public async Task Http1_OnUrlEncodedPost_ShouldDeliverBodyIntact()
     {
         // Form parsing is an application-layer concern (Assimalign.Cohesion.Http.Forms);
@@ -210,7 +210,7 @@ public class Http1TransportTests
         body.ShouldBe("name=alice&x=1");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should yield pipelined requests in order")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should yield pipelined requests in order")]
     public async Task Http1_OnPipelinedRequests_ShouldYieldRequestsInOrder()
     {
         // Arrange
@@ -236,7 +236,7 @@ public class Http1TransportTests
         secondPath.ShouldBe("/two");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should deliver Content-Length framed body intact")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should deliver Content-Length framed body intact")]
     public async Task Http1_OnContentLengthBody_ShouldDeliverBodyIntact()
     {
         // RFC 9112 §6.2 — Content-Length is the second framing strategy.
@@ -250,7 +250,7 @@ public class Http1TransportTests
         body.ShouldBe(bodyText);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should accept repeated Content-Length headers with the same value")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should accept repeated Content-Length headers with the same value")]
     public async Task Http1_OnRepeatedContentLengthSameValue_ShouldAcceptBody()
     {
         // RFC 9112 §6.3 — repeated Content-Length values are only rejected when they differ.
@@ -264,7 +264,7 @@ public class Http1TransportTests
         (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject inconsistent Content-Length values")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject inconsistent Content-Length values")]
     public async Task Http1_OnConflictingContentLength_ShouldThrow()
     {
         // RFC 9112 §6.3 — conflicting Content-Length values are a smuggling vector and MUST
@@ -275,7 +275,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject coexisting Content-Length and Transfer-Encoding")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject coexisting Content-Length and Transfer-Encoding")]
     public async Task Http1_OnContentLengthAndTransferEncoding_ShouldThrow()
     {
         // RFC 9112 §6.3 — the canonical request-smuggling vector. A message that declares
@@ -286,7 +286,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed Content-Length values")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed Content-Length values")]
     [InlineData("abc")]    // non-digit
     [InlineData("-5")]     // negative
     [InlineData("+5")]     // explicit sign
@@ -304,7 +304,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject non-chunked Transfer-Encoding")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject non-chunked Transfer-Encoding")]
     public async Task Http1_OnNonChunkedTransferEncoding_ShouldThrow()
     {
         // RFC 9112 §7.4 — the final coding of Transfer-Encoding MUST be 'chunked' for an
@@ -316,7 +316,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reassemble chunked body across multiple chunks")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reassemble chunked body across multiple chunks")]
     public async Task Http1_OnChunkedBody_ShouldReassembleBody()
     {
         // RFC 9112 §7.1 — chunked transfer coding. Chunks are concatenated in order to
@@ -332,7 +332,7 @@ public class Http1TransportTests
         (await reader.ReadToEndAsync()).ShouldBe("hello, world");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should strip chunk extensions from the assembled body")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should strip chunk extensions from the assembled body")]
     public async Task Http1_OnChunkedBodyWithExtensions_ShouldStripExtensions()
     {
         // RFC 9112 §7.1.1 — chunk-ext is optional and a recipient MAY ignore it. We strip
@@ -347,7 +347,7 @@ public class Http1TransportTests
         (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should consume trailers without leaking into headers")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should consume trailers without leaking into headers")]
     public async Task Http1_OnChunkedBodyWithTrailers_ShouldNotLeakIntoHeaders()
     {
         // RFC 9112 §7.1.2 — trailers follow the last chunk and are terminated by an empty
@@ -365,7 +365,7 @@ public class Http1TransportTests
         httpContext.Request.Headers.ContainsKey(new HttpHeaderKey("X-Trace-Id")).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject trailers that contain framing-related headers")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject trailers that contain framing-related headers")]
     public async Task Http1_OnChunkedBodyWithForbiddenTrailer_ShouldThrow()
     {
         // RFC 9112 §7.1.2 — Content-Length, Transfer-Encoding, and Host are forbidden as
@@ -378,7 +378,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject malformed chunk sizes")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed chunk sizes")]
     [InlineData("xyz")]    // non-hex
     [InlineData("-1")]     // signed
     [InlineData(" 5")]     // leading whitespace
@@ -393,7 +393,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunked body that ends before the terminating zero chunk")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunked body that ends before the terminating zero chunk")]
     public async Task Http1_OnChunkedBodyTruncatedBeforeFinalChunk_ShouldThrow()
     {
         // RFC 9112 §7.1 — a chunked body MUST end with a zero chunk. Truncation before the
@@ -406,7 +406,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject a chunk that ends before its declared size is reached")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunk that ends before its declared size is reached")]
     public async Task Http1_OnChunkTruncatedMidChunk_ShouldThrow()
     {
         // RFC 9112 §7.1 — chunk-data must contain chunk-size octets followed by CRLF.
@@ -418,7 +418,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should reject Content-Length declarations exceeding the body size cap")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject Content-Length declarations exceeding the body size cap")]
     public async Task Http1_OnContentLengthExceedingCap_ShouldThrow()
     {
         // DoS guard — a peer that claims Content-Length: 10 GB would otherwise force a
@@ -431,7 +431,7 @@ public class Http1TransportTests
         await AssertConnectionDroppedAsync(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should drop a connection that closes mid-request-line and keep the listener accepting")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should drop a connection that closes mid-request-line and keep the listener accepting")]
     public async Task Http1_OnTruncatedRequestLine_ShouldDropConnectionAndContinueListening()
     {
         // The host-crash repro: a client opens a connection, writes a
@@ -485,7 +485,7 @@ public class Http1TransportTests
         await conn2.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http1: Should drop a connection that opens with TLS handshake bytes and keep the listener accepting")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should drop a connection that opens with TLS handshake bytes and keep the listener accepting")]
     public async Task Http1_OnTlsHandshakeBytesOverPlainHttp_ShouldDropConnectionAndContinueListening()
     {
         // Realistic foot-gun: a client points its HTTPS scheme at a

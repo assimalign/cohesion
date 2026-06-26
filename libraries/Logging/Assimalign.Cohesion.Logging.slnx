@@ -75,8 +75,5 @@
 	</Folder>
 	<Folder Name="/Logging/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Logging/Assimalign.Cohesion.Logging.Console/src/Assimalign.Cohesion.Logging.Console.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Logging/Assimalign.Cohesion.Logging.Debug/src/Assimalign.Cohesion.Logging.Debug.csproj" />
 	</Folder>
 </Solution>

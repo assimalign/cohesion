@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Http.Transports;
+using Assimalign.Cohesion.Http.Connections;
 
 internal sealed class WebApplicationServer : IWebApplicationServer
 {

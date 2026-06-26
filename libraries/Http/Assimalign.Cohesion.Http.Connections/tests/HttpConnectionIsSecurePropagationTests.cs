@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </summary>
 public class HttpConnectionIsSecurePropagationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 over a listener without transport security should expose the http scheme")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - IsSecure: Http1 over a listener without transport security should expose the http scheme")]
     public async Task IsSecure_OnHttp1WithoutTlsCapability_ShouldExposeHttpScheme()
     {
         // Arrange + Act
@@ -31,7 +31,7 @@ public class HttpConnectionIsSecurePropagationTests
         context.Request.Scheme.ShouldBe(HttpScheme.Http);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 over a TLS-capability listener should expose the https scheme")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - IsSecure: Http1 over a TLS-capability listener should expose the https scheme")]
     public async Task IsSecure_OnHttp1WithTlsCapability_ShouldExposeHttpsScheme()
     {
         // Arrange + Act — the listener (e.g. tcp.UseTls(...)) reports
@@ -42,7 +42,7 @@ public class HttpConnectionIsSecurePropagationTests
         context.Request.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http1 keep-alive — every request on a TLS-capability connection should observe https")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - IsSecure: Http1 keep-alive — every request on a TLS-capability connection should observe https")]
     public async Task IsSecure_OnHttp1KeepAliveRequestsOverTls_ShouldFlowToEveryRequest()
     {
         // Arrange — the security capability is evaluated once per listener,
@@ -72,7 +72,7 @@ public class HttpConnectionIsSecurePropagationTests
         schemes.ShouldAllBe(scheme => scheme == HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - IsSecure: Http2 streams over a TLS-capability listener should observe https")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - IsSecure: Http2 streams over a TLS-capability listener should observe https")]
     public async Task IsSecure_OnHttp2StreamsOverTls_ShouldExposeHttpsScheme()
     {
         // Arrange

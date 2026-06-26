@@ -86,7 +86,7 @@ enumeration.
 
 ## How the transports stay decoupled from cookie semantics
 
-`Assimalign.Cohesion.Http.Transports` depends on this package, but
+`Assimalign.Cohesion.Http.Connections` depends on this package, but
 only for the type identity (the `HttpCookie.ToString()` serialization
 and the feature lookup). The transports do not parse the `Cookie`
 header themselves (that's the request extension's job), and they do
@@ -128,7 +128,7 @@ real consumers prove the looser shape is a footgun.
 | Package | Role | Dependencies |
 |---------|------|---------------|
 | `Assimalign.Cohesion.Http.Cookies` | Typed cookie model + request/response features + extensions | `Assimalign.Cohesion.Http` |
-| `Assimalign.Cohesion.Http.Transports` | Wire-level HTTP/1.1, HTTP/2, HTTP/3 readers + writers | `Assimalign.Cohesion.Http.Cookies` (for `Set-Cookie` emission) |
+| `Assimalign.Cohesion.Http.Connections` | Wire-level HTTP/1.1, HTTP/2, HTTP/3 readers + writers | `Assimalign.Cohesion.Http.Cookies` (for `Set-Cookie` emission) |
 | Future: `&hellip;Http.Cookies.Signing` | Signed-cookie middleware | This package |
 | Future: `&hellip;Web.Authentication.Cookie` | Cookie-scheme auth handler | This package + Web.Authentication |
 

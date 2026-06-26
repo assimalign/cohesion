@@ -94,10 +94,5 @@
 	<Folder Name="/Content/refs/" >
 		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Content/Assimalign.Cohesion.Content/src/Assimalign.Cohesion.Content.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Content/Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Content/Assimalign.Cohesion.Content.Ebml/src/Assimalign.Cohesion.Content.Ebml.csproj" />
 	</Folder>
 </Solution>

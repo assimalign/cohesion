@@ -8,7 +8,7 @@ This library is the QUIC **driver** for the Connections contracts in
 `MultiplexedConnectionFactory` shapes and nothing more. It carries no
 application-protocol semantics — no HTTP/3 framing, no ALPN-specific
 behavior switches, no stream-type interpretation. Protocols (HTTP/3 in
-`Assimalign.Cohesion.Http.Transports`, and any future QUIC-borne
+`Assimalign.Cohesion.Http.Connections`, and any future QUIC-borne
 protocol) consume the contracts by capability and own their own wire
 rules.
 

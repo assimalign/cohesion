@@ -72,7 +72,7 @@
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp.Transports" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Amqp.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Configuration" />
@@ -148,7 +148,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Transports" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

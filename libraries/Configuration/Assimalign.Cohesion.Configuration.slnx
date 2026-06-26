@@ -112,15 +112,8 @@
 	</Folder>
 	<Folder Name="/Configuration/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.CommandLine/src/Assimalign.Cohesion.Configuration.CommandLine.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.EnvironmentVariables/src/Assimalign.Cohesion.Configuration.EnvironmentVariables.csproj" />
 		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.FileSystem/src/Assimalign.Cohesion.Configuration.FileSystem.csproj" />
 		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
 		<Project Path="../FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.Ini/src/Assimalign.Cohesion.Configuration.Ini.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.Json/src/Assimalign.Cohesion.Configuration.Json.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Configuration/Assimalign.Cohesion.Configuration.Xml/src/Assimalign.Cohesion.Configuration.Xml.csproj" />
 	</Folder>
 </Solution>

@@ -46,7 +46,6 @@
 	</Folder>
 	<Folder Name="/Scheduler/refs/" >
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/resources/Scheduler/Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
 		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />

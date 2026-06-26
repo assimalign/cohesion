@@ -1,5 +1,5 @@
-﻿using Assimalign.Cohesion.Http.Transports;
-using Assimalign.Cohesion.Transports;
+﻿using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Connections;
 using System;
 using System.Collections.Generic;
 using System.Runtime.Versioning;

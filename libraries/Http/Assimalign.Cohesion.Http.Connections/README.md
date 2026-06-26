@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.Http.Transports
+# Assimalign.Cohesion.Http.Connections
 
 HTTP/1.1, HTTP/2, and HTTP/3 server transports for the Cohesion
 HTTP family. Each transport translates wire-level frames / streams

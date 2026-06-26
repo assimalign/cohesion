@@ -48,9 +48,4 @@
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Validation/tests/Assimalign.Cohesion.OpenApi.Validation.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenApi/refs/" >
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/OpenApi/Assimalign.Cohesion.OpenApi/src/Assimalign.Cohesion.OpenApi.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/src/Assimalign.Cohesion.OpenApi.Serialization.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation/src/Assimalign.Cohesion.OpenApi.Validation.csproj" />
-	</Folder>
 </Solution>

@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class Http2TransportTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should parse request headers and write response frames")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should parse request headers and write response frames")]
     public async Task Http2_OnRequest_ShouldParseHeadersAndWriteResponseFrames()
     {
         // Arrange
@@ -59,7 +59,7 @@ public class Http2TransportTests
         Encoding.UTF8.GetString(frames[3].Payload).ShouldBe("{\"ok\":true}");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should yield multiple streams in sequence")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should yield multiple streams in sequence")]
     public async Task Http2_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {
         // Arrange
@@ -88,7 +88,7 @@ public class Http2TransportTests
         secondPath.ShouldBe("/two");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should emit a graceful GOAWAY on connection disposal")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should emit a graceful GOAWAY on connection disposal")]
     public async Task Http2_OnDispose_ShouldEmitGracefulGoAway()
     {
         // RFC 9113 §6.8 — a server initiating an orderly connection close MUST
@@ -126,7 +126,7 @@ public class Http2TransportTests
         lastStreamId.ShouldBe(1u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should serialize concurrent SendAsync writes without frame interleaving")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should serialize concurrent SendAsync writes without frame interleaving")]
     public async Task Http2_OnConcurrentSendAsync_ShouldNotInterleaveFrames()
     {
         // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave on
@@ -187,7 +187,7 @@ public class Http2TransportTests
         dataPayloads.ShouldContain(secondBody);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should advertise explicit server SETTINGS after the preface")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise explicit server SETTINGS after the preface")]
     public async Task Http2_OnInitialization_ShouldEmitExplicitServerSettings()
     {
         // RFC 9113 §3.4 — the server's first frame after the preface MUST be a
@@ -218,7 +218,7 @@ public class Http2TransportTests
         declared[Http2TestSettings.Parameter.MaxFrameSize].ShouldBe(16384u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject an invalid connection preface with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an invalid connection preface with PROTOCOL_ERROR")]
     public async Task Http2_OnInvalidPreface_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §3.4 — a preface mismatch is a connection error and MUST
@@ -228,7 +228,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(payload, Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a client-sent PUSH_PROMISE with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a client-sent PUSH_PROMISE with PROTOCOL_ERROR")]
     public async Task Http2_OnClientPushPromise_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.4 / §6.6 — only servers send PUSH_PROMISE; a client
@@ -243,7 +243,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, pushPromise), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should advertise SETTINGS_ENABLE_PUSH = 0")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_ENABLE_PUSH = 0")]
     public async Task Http2_OnConnect_ShouldAdvertisePushDisabled()
     {
         // Cohesion does not implement server push, so the server's initial
@@ -286,7 +286,7 @@ public class Http2TransportTests
         serverSettings[Http2TestSettings.Parameter.EnablePush].ShouldBe(0u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should advertise SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")]
     public async Task Http2_OnConnect_ShouldAdvertiseConnectProtocolEnabled()
     {
         // RFC 8441 §3 — a server willing to accept extended CONNECT advertises
@@ -323,7 +323,7 @@ public class Http2TransportTests
         serverSettings[Http2TestSettings.Parameter.EnableConnectProtocol].ShouldBe(1u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should surface a valid extended CONNECT via the :protocol item")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should surface a valid extended CONNECT via the :protocol item")]
     public async Task Http2_OnExtendedConnect_ShouldSurfaceProtocolItem()
     {
         // RFC 8441 §4 — CONNECT + :protocol with :scheme/:path/:authority is a
@@ -355,7 +355,7 @@ public class Http2TransportTests
         httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: A normal request carries no :protocol item")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request carries no :protocol item")]
     public async Task Http2_OnNormalRequest_ShouldNotSurfaceProtocolItem()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
@@ -371,7 +371,7 @@ public class Http2TransportTests
     }
 
     [Fact(
-        DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR",
+        DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR",
         Skip = "Product gap (src/Internal/Http2/Http2Stream.cs:356): :protocol is surfaced via IHttpContext.Items without enforcing RFC 8441 §4 (:protocol is CONNECT-only). Repro: HEADERS with :method GET + :protocol is accepted instead of GOAWAY PROTOCOL_ERROR. Re-enable when the validation lands.")]
     public async Task Http2_OnProtocolPseudoHeaderWithoutConnect_ShouldGoAway()
     {
@@ -392,7 +392,7 @@ public class Http2TransportTests
     }
 
     [Fact(
-        DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR",
+        DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR",
         Skip = "Product gap (src/Internal/Http2/Http2Stream.cs:356): extended CONNECT is not validated per RFC 8441 §4 (MUST include :scheme/:path/:authority). Repro: CONNECT + :protocol without :path is accepted instead of GOAWAY PROTOCOL_ERROR. Re-enable when the validation lands.")]
     public async Task Http2_OnExtendedConnectMissingPath_ShouldGoAway()
     {
@@ -411,7 +411,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a non-SETTINGS first client frame with PROTOCOL_ERROR")]
     public async Task Http2_OnFirstClientFrameNotSettings_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §3.4 — the first client frame after the preface MUST be a
@@ -421,7 +421,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, pingFrame), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject SETTINGS on a non-zero stream with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject SETTINGS on a non-zero stream with PROTOCOL_ERROR")]
     public async Task Http2_OnSettingsOnNonZeroStream_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.5.1 — SETTINGS frames MUST be sent on stream 0.
@@ -430,7 +430,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settingsOnStream1), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a SETTINGS ACK that carries a payload with FRAME_SIZE_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a SETTINGS ACK that carries a payload with FRAME_SIZE_ERROR")]
     public async Task Http2_OnSettingsAckWithPayload_ShouldGoAwayFrameSizeError()
     {
         // RFC 9113 §6.5 — an ACK SETTINGS frame MUST have an empty payload.
@@ -440,7 +440,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, ackWithPayload), Http2ErrorCode.FrameSizeError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject SETTINGS payload not a multiple of 6 with FRAME_SIZE_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject SETTINGS payload not a multiple of 6 with FRAME_SIZE_ERROR")]
     public async Task Http2_OnSettingsPayloadNotMultipleOfSix_ShouldGoAwayFrameSizeError()
     {
         // RFC 9113 §6.5.1 — each setting is 6 octets (16-bit id + 32-bit value).
@@ -450,7 +450,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.FrameSizeError);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject MAX_FRAME_SIZE outside [2^14, 2^24-1] with PROTOCOL_ERROR")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject MAX_FRAME_SIZE outside [2^14, 2^24-1] with PROTOCOL_ERROR")]
     [InlineData(16_383u)]      // one below minimum (2^14 = 16384)
     [InlineData(16_777_216u)]  // one above maximum (2^24 - 1 = 16777215)
     [InlineData(0u)]
@@ -463,7 +463,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject INITIAL_WINDOW_SIZE above 2^31-1 with FLOW_CONTROL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject INITIAL_WINDOW_SIZE above 2^31-1 with FLOW_CONTROL_ERROR")]
     public async Task Http2_OnInvalidInitialWindowSize_ShouldGoAwayFlowControlError()
     {
         // RFC 9113 §6.5.2 — a value greater than 2^31-1 is a FLOW_CONTROL_ERROR.
@@ -473,7 +473,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.FlowControlError);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject ENABLE_PUSH not in {0,1} with PROTOCOL_ERROR")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject ENABLE_PUSH not in {0,1} with PROTOCOL_ERROR")]
     [InlineData(2u)]
     [InlineData(uint.MaxValue)]
     public async Task Http2_OnInvalidEnablePush_ShouldGoAwayProtocolError(uint value)
@@ -484,7 +484,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject ENABLE_CONNECT_PROTOCOL not in {0,1} with PROTOCOL_ERROR")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject ENABLE_CONNECT_PROTOCOL not in {0,1} with PROTOCOL_ERROR")]
     [InlineData(2u)]
     [InlineData(uint.MaxValue)]
     public async Task Http2_OnInvalidEnableConnectProtocol_ShouldGoAwayProtocolError(uint value)
@@ -496,7 +496,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should silently ignore unknown SETTINGS parameters")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should silently ignore unknown SETTINGS parameters")]
     public async Task Http2_OnUnknownSettingsParameter_ShouldIgnore()
     {
         // RFC 9113 §6.5.2 — an endpoint MUST ignore unknown setting identifiers
@@ -552,7 +552,7 @@ public class Http2TransportTests
         Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on stream 0 with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject HEADERS on stream 0 with PROTOCOL_ERROR")]
     public async Task Http2_OnHeadersOnStreamZero_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §5.1.1 — stream 0 is reserved for connection-control
@@ -563,7 +563,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headersOnStreamZero), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on an even stream ID with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject HEADERS on an even stream ID with PROTOCOL_ERROR")]
     public async Task Http2_OnHeadersOnEvenStreamId_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §5.1.1 — client-initiated streams MUST use odd
@@ -576,7 +576,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headersOnEvenId), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject HEADERS on a stream id lower than the highest previously seen")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject HEADERS on a stream id lower than the highest previously seen")]
     public async Task Http2_OnHeadersOnDecreasingStreamId_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §5.1.1 — newly opened client streams MUST use a
@@ -589,7 +589,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(firstRequest, lowerIdHeaders), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject DATA on stream 0 with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject DATA on stream 0 with PROTOCOL_ERROR")]
     public async Task Http2_OnDataOnStreamZero_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.1 — DATA frames MUST be associated with a non-zero
@@ -600,7 +600,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, dataOnStreamZero), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject DATA on an unknown/idle stream with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject DATA on an unknown/idle stream with PROTOCOL_ERROR")]
     public async Task Http2_OnDataOnIdleStream_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §5.1 — DATA on an idle stream (no HEADERS observed) is
@@ -611,7 +611,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, dataOnIdle), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject RST_STREAM on stream 0 with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject RST_STREAM on stream 0 with PROTOCOL_ERROR")]
     public async Task Http2_OnRstStreamOnStreamZero_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.4 — RST_STREAM frames MUST be associated with a
@@ -622,7 +622,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, rstOnStreamZero), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject RST_STREAM on an idle stream with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject RST_STREAM on an idle stream with PROTOCOL_ERROR")]
     public async Task Http2_OnRstStreamOnIdleStream_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.4 — RST_STREAM on a stream that has never been
@@ -633,7 +633,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, rstOnIdle), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reset a stream that receives DATA after END_STREAM")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reset a stream that receives DATA after END_STREAM")]
     public async Task Http2_OnDataAfterEndStream_ShouldEmitRstStream()
     {
         // RFC 9113 §5.1 — DATA on a stream that has already had its remote
@@ -687,7 +687,7 @@ public class Http2TransportTests
         foundRstStream.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE with increment 0 on stream 0 with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject WINDOW_UPDATE with increment 0 on stream 0 with PROTOCOL_ERROR")]
     public async Task Http2_OnWindowUpdateConnectionZeroIncrement_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.9 — a WINDOW_UPDATE on stream 0 with an increment of
@@ -698,7 +698,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE with wrong payload length")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject WINDOW_UPDATE with wrong payload length")]
     public async Task Http2_OnWindowUpdateWrongPayloadLength_ShouldGoAwayFrameSizeError()
     {
         // RFC 9113 §6.9 — WINDOW_UPDATE MUST carry exactly 4 octets of payload.
@@ -708,7 +708,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.FrameSizeError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject WINDOW_UPDATE that overflows the connection send window")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject WINDOW_UPDATE that overflows the connection send window")]
     public async Task Http2_OnWindowUpdateOverflowingConnectionWindow_ShouldGoAwayFlowControlError()
     {
         // RFC 9113 §6.9.1 — a WINDOW_UPDATE that would push the window past
@@ -722,7 +722,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, windowUpdate), Http2ErrorCode.FlowControlError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should accept a valid WINDOW_UPDATE on stream 0")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept a valid WINDOW_UPDATE on stream 0")]
     public async Task Http2_OnValidWindowUpdate_ShouldAcceptWithoutError()
     {
         // Sanity check that the happy path through ProcessWindowUpdateFrame
@@ -748,7 +748,7 @@ public class Http2TransportTests
         httpContext.Request.Path.Value.ShouldBe("/");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should accept inbound GOAWAY without faulting the connection")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept inbound GOAWAY without faulting the connection")]
     public async Task Http2_OnInboundGoAway_ShouldNotFaultConnection()
     {
         // RFC 9113 §6.8 — a peer's GOAWAY is a unidirectional close signal;
@@ -779,7 +779,7 @@ public class Http2TransportTests
         httpContext.Request.Path.Value.ShouldBe("/");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject GOAWAY on a non-zero stream with PROTOCOL_ERROR")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject GOAWAY on a non-zero stream with PROTOCOL_ERROR")]
     public async Task Http2_OnGoAwayOnNonZeroStream_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §6.8 — GOAWAY MUST be sent on stream 0.
@@ -790,7 +790,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, goAwayOnStream1), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should fire RequestAborted when peer resets the stream")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should fire RequestAborted when peer resets the stream")]
     public async Task Http2_OnRstStream_ShouldFireRequestAbortedOnApplicationContext()
     {
         // RFC 9113 §5.4.2 — RST_STREAM aborts the application's view of the
@@ -841,7 +841,7 @@ public class Http2TransportTests
         await pump;
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject a request with the response-only :status pseudo-header")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a request with the response-only :status pseudo-header")]
     public async Task Http2_OnStatusPseudoHeaderInRequest_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.3 — :status is a response pseudo-header. Receiving
@@ -860,7 +860,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject pseudo-headers that appear after regular fields")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject pseudo-headers that appear after regular fields")]
     public async Task Http2_OnPseudoHeaderAfterRegularField_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.3 — pseudo-header fields MUST appear in the field
@@ -879,7 +879,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject an unknown pseudo-header field")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an unknown pseudo-header field")]
     public async Task Http2_OnUnknownPseudoHeader_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.3 — pseudo-header names that aren't defined for the
@@ -897,7 +897,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject duplicate pseudo-header fields")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject duplicate pseudo-header fields")]
     public async Task Http2_OnDuplicatePseudoHeader_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.3 — each pseudo-header MUST appear at most once.
@@ -914,7 +914,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject connection-specific header fields")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject connection-specific header fields")]
     [InlineData("connection", "close")]
     [InlineData("proxy-connection", "keep-alive")]
     [InlineData("keep-alive", "timeout=5")]
@@ -938,7 +938,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject TE field with value other than 'trailers'")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject TE field with value other than 'trailers'")]
     public async Task Http2_OnTeFieldNotTrailers_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.2.2 — TE MAY appear with the single value
@@ -956,7 +956,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should accept TE: trailers")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept TE: trailers")]
     public async Task Http2_OnTeFieldTrailers_ShouldAcceptRequest()
     {
         // RFC 9113 §8.2.2 — TE: trailers is the single legal form. The
@@ -984,7 +984,7 @@ public class Http2TransportTests
         httpContext.Request.Headers[new HttpHeaderKey("te")].Value.ShouldBe("trailers");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should reject field names with uppercase letters")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject field names with uppercase letters")]
     public async Task Http2_OnUppercaseFieldName_ShouldGoAwayProtocolError()
     {
         // RFC 9113 §8.2.1 — HTTP/2 field names MUST be lowercase. The
@@ -1003,7 +1003,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Should coalesce multiple Cookie fields into one with '; ' separator")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should coalesce multiple Cookie fields into one with '; ' separator")]
     public async Task Http2_OnMultipleCookieFields_ShouldCoalesceWithSeparator()
     {
         // RFC 9113 §8.2.3 — multiple Cookie field-lines in an HTTP/2 field
@@ -1032,7 +1032,7 @@ public class Http2TransportTests
         httpContext.Request.Headers[HttpHeaderKey.Cookie].Value.ShouldBe("a=1; b=2");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Transports] - Http2: HPackHuffmanDecoder should decode RFC 7541 §C.4 example strings")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: HPackHuffmanDecoder should decode RFC 7541 §C.4 example strings")]
     // RFC 7541 §C.4.2 — `cache-control: no-cache`
     [InlineData(new byte[] { 0xa8, 0xeb, 0x10, 0x64, 0x9c, 0xbf }, "no-cache")]
     // RFC 7541 §C.4.1 — `:authority: www.example.com`
@@ -1049,7 +1049,7 @@ public class Http2TransportTests
         Encoding.ASCII.GetString(decoded).ShouldBe(expected);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: HPackHuffmanDecoder should reject embedded EOS")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: HPackHuffmanDecoder should reject embedded EOS")]
     public void Http2_HPackHuffmanDecoder_ShouldRejectEmbeddedEos()
     {
         // RFC 7541 §5.2 — the EOS symbol (30 bits of 1) MUST NOT appear in
@@ -1059,7 +1059,7 @@ public class Http2TransportTests
         Should.Throw<HPackDecodingException>(() => HPackHuffmanDecoder.Decode(encoded));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryConsume should drain to zero and refuse underflow")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2FlowControlWindow.TryConsume should drain to zero and refuse underflow")]
     public void Http2_FlowControlWindow_TryConsume_RefusesUnderflow()
     {
         Http2FlowControlWindow window = new(100);
@@ -1073,7 +1073,7 @@ public class Http2TransportTests
         window.Available.ShouldBe(0L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryReplenish should refuse 0 increments and overflow")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2FlowControlWindow.TryReplenish should refuse 0 increments and overflow")]
     public void Http2_FlowControlWindow_TryReplenish_RefusesZeroAndOverflow()
     {
         Http2FlowControlWindow window = new(65_535);
@@ -1091,7 +1091,7 @@ public class Http2TransportTests
         window.Available.ShouldBe((long)int.MaxValue);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http2: Http2FlowControlWindow.TryAdjustInitialWindow should allow negative windows")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2FlowControlWindow.TryAdjustInitialWindow should allow negative windows")]
     public void Http2_FlowControlWindow_TryAdjustInitialWindow_AllowsNegative()
     {
         // RFC 9113 §6.9.2 — a SETTINGS_INITIAL_WINDOW_SIZE reduction can

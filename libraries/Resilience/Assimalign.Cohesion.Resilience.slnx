@@ -102,12 +102,5 @@
 	<Folder Name="/Resilience/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../ObjectPool/Assimalign.Cohesion.ObjectPool/src/Assimalign.Cohesion.ObjectPool.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience/src/Assimalign.Cohesion.Resilience.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.CircuitBreaker/src/Assimalign.Cohesion.Resilience.CircuitBreaker.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.Fallback/src/Assimalign.Cohesion.Resilience.Fallback.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.Hedging/src/Assimalign.Cohesion.Resilience.Hedging.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/Assimalign.Cohesion.Resilience.RateLimiting.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.Retry/src/Assimalign.Cohesion.Resilience.Retry.csproj" />
-		<Project Path="../../.claude/worktrees/net-transport-redesign/libraries/Resilience/Assimalign.Cohesion.Resilience.Timeout/src/Assimalign.Cohesion.Resilience.Timeout.csproj" />
 	</Folder>
 </Solution>

@@ -12,7 +12,7 @@
 		<Project Path="../Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 		<Project Path="../../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 		<Project Path="../../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../../../libraries/Http/Assimalign.Cohesion.Http.Transports/src/Assimalign.Cohesion.Http.Transports.csproj" />
+		<Project Path="../../../libraries/Http/Assimalign.Cohesion.Http.Connections/src/Assimalign.Cohesion.Http.Connections.csproj" />
 		<Project Path="../../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 		<Project Path="../../../libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
 		<Project Path="../../../libraries/Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />

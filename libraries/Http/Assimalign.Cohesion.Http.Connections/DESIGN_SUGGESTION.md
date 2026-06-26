@@ -30,7 +30,7 @@ This keeps HTTP/1.1 clean while allowing HTTP/2 and HTTP/3 to model concurrent l
 ## Suggested Interfaces
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpConnection : ITransportConnection
 {
@@ -40,7 +40,7 @@ public interface IHttpConnection : ITransportConnection
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpSingleStreamConnection : IHttpConnection
 {
@@ -52,7 +52,7 @@ public interface IHttpSingleStreamConnection : IHttpConnection
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpMultiplexConnection : IHttpConnection
 {
@@ -64,7 +64,7 @@ public interface IHttpMultiplexConnection : IHttpConnection
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpSingleStreamConnectionContext : ITransportConnectionContext
 {
@@ -78,7 +78,7 @@ public interface IHttpSingleStreamConnectionContext : ITransportConnectionContex
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpMultiplexConnectionContext : ITransportConnectionContext
 {
@@ -88,7 +88,7 @@ public interface IHttpMultiplexConnectionContext : ITransportConnectionContext
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public interface IHttpStreamContext : IAsyncDisposable
 {
@@ -102,7 +102,7 @@ public interface IHttpStreamContext : IAsyncDisposable
 ```
 
 ```csharp
-namespace Assimalign.Cohesion.Http.Transports;
+namespace Assimalign.Cohesion.Http.Connections;
 
 public readonly record struct HttpStreamId(long Value);
 ```

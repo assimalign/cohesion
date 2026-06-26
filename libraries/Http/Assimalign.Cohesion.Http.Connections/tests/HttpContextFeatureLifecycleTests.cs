@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </remarks>
 public class HttpContextFeatureLifecycleTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Features: Should expose an empty per-request feature collection by default")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose an empty per-request feature collection by default")]
     public async Task Features_OnRequest_ShouldExposeEmptyCollection()
     {
         // Arrange + Act
@@ -36,7 +36,7 @@ public class HttpContextFeatureLifecycleTests
         enumerator.MoveNext().ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Features: IDisposable feature should be disposed when the request disposes")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: IDisposable feature should be disposed when the request disposes")]
     public async Task DisposeAsync_OnDisposableFeature_ShouldDisposeFeature()
     {
         // Arrange
@@ -54,7 +54,7 @@ public class HttpContextFeatureLifecycleTests
         feature.DisposeCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Features: IAsyncDisposable feature should be disposed asynchronously when the request disposes")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: IAsyncDisposable feature should be disposed asynchronously when the request disposes")]
     public async Task DisposeAsync_OnAsyncDisposableFeature_ShouldPreferAsyncDisposal()
     {
         // Arrange
@@ -70,7 +70,7 @@ public class HttpContextFeatureLifecycleTests
         feature.SyncDisposeCount.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Features: A throwing feature should not prevent other features from disposing")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: A throwing feature should not prevent other features from disposing")]
     public async Task DisposeAsync_OnThrowingFeature_ShouldContinueDisposingRemainingFeatures()
     {
         // Arrange — three features; the middle one throws on disposal. The

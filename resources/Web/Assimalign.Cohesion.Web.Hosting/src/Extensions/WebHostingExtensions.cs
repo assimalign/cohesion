@@ -1,7 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Http.Transports;
+using Assimalign.Cohesion.Http.Connections;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 

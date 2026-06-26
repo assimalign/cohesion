@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class HttpConnectionListenerTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should accept and adapt an HTTP/1.1 transport connection")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should accept and adapt an HTTP/1.1 transport connection")]
     public async Task AcceptOrListenAsync_OnQueuedHttp1Connection_ShouldAdaptConnection()
     {
         // Arrange
@@ -36,7 +36,7 @@ public class HttpConnectionListenerTests
         httpConnectionContext.RemoteEndPoint.ShouldBe(connection.RemoteEndPoint);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should re-arm transport accepts and backlog connections")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should re-arm transport accepts and backlog connections")]
     public async Task AcceptOrListenAsync_OnSequentialAccepts_ShouldBacklogConnections()
     {
         // Arrange
@@ -61,7 +61,7 @@ public class HttpConnectionListenerTests
         transportListener.AcceptCount.ShouldBeGreaterThanOrEqualTo(2);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should map an HTTP/1.1 registration to HTTP/1.1 connections")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should map an HTTP/1.1 registration to HTTP/1.1 connections")]
     public async Task AcceptOrListenAsync_OnHttp1Registration_ShouldYieldHttp11Contexts()
     {
         // Arrange
@@ -79,7 +79,7 @@ public class HttpConnectionListenerTests
         httpContext.Version.ShouldBe(HttpVersion.Http11);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should map an HTTP/2 registration to HTTP/2 connections")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should map an HTTP/2 registration to HTTP/2 connections")]
     public async Task AcceptOrListenAsync_OnHttp2Registration_ShouldYieldHttp20Contexts()
     {
         // Arrange
@@ -97,7 +97,7 @@ public class HttpConnectionListenerTests
         httpContext.Version.ShouldBe(HttpVersion.Http20);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should aggregate the configured protocols")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should aggregate the configured protocols")]
     public void Protocols_OnMultipleRegistrations_ShouldAggregateConfiguredProtocols()
     {
         // Arrange
@@ -114,7 +114,7 @@ public class HttpConnectionListenerTests
         listener.Protocols.ShouldBe(HttpProtocol.Http11 | HttpProtocol.Http20 | HttpProtocol.Http30);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should reject accepting when no listener is configured")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should reject accepting when no listener is configured")]
     public async Task AcceptOrListenAsync_OnNoConfiguredListeners_ShouldThrowInvalidOperationException()
     {
         // Arrange
@@ -124,7 +124,7 @@ public class HttpConnectionListenerTests
         await Should.ThrowAsync<InvalidOperationException>(() => listener.AcceptOrListenAsync());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should throw ObjectDisposedException for accepts after disposal")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should throw ObjectDisposedException for accepts after disposal")]
     public async Task AcceptOrListenAsync_AfterDispose_ShouldThrowObjectDisposedException()
     {
         // Arrange
@@ -139,7 +139,7 @@ public class HttpConnectionListenerTests
         await Should.ThrowAsync<ObjectDisposedException>(() => listener.AcceptOrListenAsync());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should fault a pending accept with ObjectDisposedException on disposal")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should fault a pending accept with ObjectDisposedException on disposal")]
     public async Task AcceptOrListenAsync_OnDisposeWhilePending_ShouldThrowObjectDisposedException()
     {
         // Arrange — no queued connections, so the accept parks on the backlog.
@@ -156,7 +156,7 @@ public class HttpConnectionListenerTests
         await Should.ThrowAsync<ObjectDisposedException>(() => pendingAccept.WaitAsync(TimeSpan.FromSeconds(2)));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should observe caller cancellation on a pending accept")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should observe caller cancellation on a pending accept")]
     public async Task AcceptOrListenAsync_OnCallerCancellation_ShouldThrowOperationCanceledException()
     {
         // Arrange
@@ -174,7 +174,7 @@ public class HttpConnectionListenerTests
         await Should.ThrowAsync<OperationCanceledException>(() => pendingAccept.WaitAsync(TimeSpan.FromSeconds(2)));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should dispose the registered connection listeners on disposal")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should dispose the registered connection listeners on disposal")]
     public async Task DisposeAsync_OnRegisteredListeners_ShouldDisposeEveryListener()
     {
         // Arrange
@@ -193,7 +193,7 @@ public class HttpConnectionListenerTests
         multiplexedListener.IsDisposed.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Should surface an accept-loop failure to the caller")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should surface an accept-loop failure to the caller")]
     public async Task AcceptOrListenAsync_OnAcceptLoopFailure_ShouldRethrowListenerException()
     {
         // Arrange — the transport listener fails its accept outright; the
@@ -211,13 +211,13 @@ public class HttpConnectionListenerTests
         observed.Message.ShouldBe(failure.Message);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Create should reject a null configuration callback")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Create should reject a null configuration callback")]
     public void Create_OnNullConfigure_ShouldThrowArgumentNullException()
     {
         Should.Throw<ArgumentNullException>(() => HttpConnectionListener.Create(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - HttpConnectionListener: Constructor should reject null options")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Constructor should reject null options")]
     public void Constructor_OnNullOptions_ShouldThrowArgumentNullException()
     {
         Should.Throw<ArgumentNullException>(() => new HttpConnectionListener(null!));

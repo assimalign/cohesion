@@ -87,7 +87,7 @@ collection for any implementation, not just the package's default.
 
 **Type contracts and an in-memory model ship today.** The actual
 multipart / urlencoded parser is staged for a follow-up PR &mdash;
-the prior implementation lived inside `Assimalign.Cohesion.Http.Transports`'s
+the prior implementation lived inside `Assimalign.Cohesion.Http.Connections`'s
 per-version message readers and was removed together with the dead
 `IHttpRequest.Form` property when the protocol/web boundary moved.
 Until the parser lands, `ReadFormAsync` returns an empty collection

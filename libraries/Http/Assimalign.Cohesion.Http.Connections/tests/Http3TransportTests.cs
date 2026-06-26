@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class Http3TransportTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should parse a request stream and write response frames")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a request stream and write response frames")]
     public async Task Http3_OnRequest_ShouldParseRequestStreamAndWriteResponseFrames()
     {
         // Arrange
@@ -56,7 +56,7 @@ public class Http3TransportTests
         Encoding.UTF8.GetString(frames[1].Payload).ShouldBe("quic");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should yield multiple inbound request streams")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should yield multiple inbound request streams")]
     public async Task Http3_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {
         // Arrange
@@ -82,7 +82,7 @@ public class Http3TransportTests
         secondPath.ShouldBe("/two");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should accept a control stream + SETTINGS and still process the request")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should accept a control stream + SETTINGS and still process the request")]
     public async Task Http3_OnControlStreamThenRequest_ShouldProcessRequest()
     {
         // RFC 9114 §6.2.1 / §7.2.4 — the peer opens a unidirectional control
@@ -106,7 +106,7 @@ public class Http3TransportTests
         httpContext.Request.Path.Value.ShouldBe("/c");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should accept a QPACK encoder stream and still process the request")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should accept a QPACK encoder stream and still process the request")]
     public async Task Http3_OnQPackStreamThenRequest_ShouldProcessRequest()
     {
         TestConnection qpack = new(
@@ -126,7 +126,7 @@ public class Http3TransportTests
         httpContext.Request.Path.Value.ShouldBe("/q");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should terminate on a duplicate control stream")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate on a duplicate control stream")]
     public async Task Http3_OnDuplicateControlStream_ShouldTerminate()
     {
         // RFC 9114 §6.2.1 — only one control stream per peer; a second is
@@ -144,7 +144,7 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should terminate when the control stream's first frame is not SETTINGS")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate when the control stream's first frame is not SETTINGS")]
     public async Task Http3_OnControlStreamMissingSettings_ShouldTerminate()
     {
         // RFC 9114 §6.2.1 — the first control frame MUST be SETTINGS. A control
@@ -164,7 +164,7 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should terminate on a client-created push stream")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate on a client-created push stream")]
     public async Task Http3_OnClientPushStream_ShouldTerminate()
     {
         // RFC 9114 §6.2.2 — a client MUST NOT create a push stream (type 0x01);
@@ -183,7 +183,7 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should decode a Huffman-coded request field section")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should decode a Huffman-coded request field section")]
     public async Task Http3_OnHuffmanEncodedRequest_ShouldParseFields()
     {
         // RFC 9204 §4.1.2 — names and values may be Huffman-coded. The whole
@@ -211,7 +211,7 @@ public class Http3TransportTests
         httpContext.Request.Headers[HttpHeaderKey.Accept].Value.ShouldBe("application/json");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with an uppercase field name")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop a stream with an uppercase field name")]
     public Task Http3_OnUppercaseFieldName_ShouldDropStream()
         // RFC 9114 §4.2 — uppercase field names are malformed.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -221,7 +221,7 @@ public class Http3TransportTests
             (":authority", "a"),
             ("X-Bad", "v")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with a pseudo-header after a regular field")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop a stream with a pseudo-header after a regular field")]
     public Task Http3_OnPseudoHeaderAfterRegularField_ShouldDropStream()
         // RFC 9114 §4.3 — pseudo-headers MUST precede regular fields.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -230,7 +230,7 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":path", "/")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with a duplicate pseudo-header")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop a stream with a duplicate pseudo-header")]
     public Task Http3_OnDuplicatePseudoHeader_ShouldDropStream()
         // RFC 9114 §4.3.1 — a pseudo-header MUST NOT appear more than once.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -239,7 +239,7 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":path", "/")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream with an unknown pseudo-header")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop a stream with an unknown pseudo-header")]
     public Task Http3_OnUnknownPseudoHeader_ShouldDropStream()
         // RFC 9114 §4.3.1 — an unknown request pseudo-header is malformed.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -248,7 +248,7 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":path", "/")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop a stream missing the :path pseudo-header")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop a stream missing the :path pseudo-header")]
     public Task Http3_OnMissingPathPseudoHeader_ShouldDropStream()
         // RFC 9114 §4.3.1 — a non-CONNECT request MUST include :path.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -256,7 +256,7 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "a")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Transports] - Http3: Should surface a valid extended CONNECT via the :protocol item")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should surface a valid extended CONNECT via the :protocol item")]
     public async Task Http3_OnExtendedConnect_ShouldSurfaceProtocolItem()
     {
         // RFC 9220 — CONNECT + :protocol with :scheme/:path/:authority is a
@@ -286,7 +286,7 @@ public class Http3TransportTests
     }
 
     [Fact(
-        DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop :protocol on a non-CONNECT request",
+        DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop :protocol on a non-CONNECT request",
         Skip = "Product gap (src/Internal/Http3/Http3ConnectionContext.cs:477): :protocol is surfaced via IHttpContext.Items without enforcing RFC 9220 (:protocol is CONNECT-only). Repro: request with :method GET + :protocol is accepted instead of the stream being dropped. Re-enable when the validation lands.")]
     public Task Http3_OnProtocolPseudoHeaderWithoutConnect_ShouldDropStream()
         // RFC 8441 §4 / RFC 9220 — :protocol is only valid on a CONNECT request.
@@ -298,7 +298,7 @@ public class Http3TransportTests
             (":authority", "api.test")));
 
     [Fact(
-        DisplayName = "Cohesion Test [Http.Transports] - Http3: Should drop an extended CONNECT missing :path",
+        DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop an extended CONNECT missing :path",
         Skip = "Product gap (src/Internal/Http3/Http3ConnectionContext.cs:477): extended CONNECT is not validated per RFC 9220 (MUST include :scheme/:path/:authority). Repro: CONNECT + :protocol without :path is accepted instead of the stream being dropped. Re-enable when the validation lands.")]
     public Task Http3_OnExtendedConnectMissingPath_ShouldDropStream()
         // RFC 9220 — an extended CONNECT MUST include :scheme, :path, :authority.

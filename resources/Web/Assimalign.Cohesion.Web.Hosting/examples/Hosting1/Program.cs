@@ -1,4 +1,4 @@
-﻿using Assimalign.Cohesion.Http.Transports;
+﻿using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Configuration;

@@ -15,7 +15,7 @@ DNS-over-HTTPS-style transport.
 | `Assimalign.Cohesion.Http.Sessions` | Per-exchange session state (application layer). |
 | `Assimalign.Cohesion.Http.Forms` | Form-body model (server-side application layer). |
 | `Assimalign.Cohesion.Http.ClientFactory` | Lifecycle wrapper around `System.Net.Http.HttpClient`. |
-| `Assimalign.Cohesion.Http.Transports` | HTTP/1.1, HTTP/2, HTTP/3 server transports. |
+| `Assimalign.Cohesion.Http.Connections` | HTTP/1.1, HTTP/2, HTTP/3 server transports. |
 
 The protocol core deliberately omits application-layer features so
 non-server consumers (clients, the DoH DNS transport, proxies) can

@@ -6,7 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.Http.Transports" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
   </ItemGroup>

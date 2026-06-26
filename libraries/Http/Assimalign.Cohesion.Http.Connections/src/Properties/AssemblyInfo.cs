@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("Assimalign.Cohesion.Http.Transports.Tests")]
+[assembly: InternalsVisibleTo("Assimalign.Cohesion.Http.Connections.Tests")]

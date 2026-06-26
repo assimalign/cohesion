@@ -19,18 +19,18 @@
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp/tests/">
 		<Project Path="Amqp/Assimalign.Cohesion.Amqp/tests/Assimalign.Cohesion.Amqp.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/">
-		<File Path="Amqp/Assimalign.Cohesion.Amqp.Transports/README.md" />
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/">
+		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/README.md" />
 	</Folder>
-	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/docs/">
-		<File Path="Amqp/Assimalign.Cohesion.Amqp.Transports/docs/DESIGN.md" />
-		<File Path="Amqp/Assimalign.Cohesion.Amqp.Transports/docs/OVERVIEW.md" />
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/">
+		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
+		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/src/">
-		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Transports/src/Assimalign.Cohesion.Amqp.Transports.csproj" />
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
+		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connectionss.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Transports/tests/">
-		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Transports/tests/Assimalign.Cohesion.Amqp.Transports.Tests.csproj" />
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/tests/">
+		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/tests/Assimalign.Cohesion.Amqp.Connectionss.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/ApplicationModel/">
 		<File Path="ApplicationModel/Directory.Build.props" />
@@ -573,13 +573,13 @@
 		<File Path="Http/Assimalign.Cohesion.Http.Connections/examples/README.md" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/">
-		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Transports.Examples.Http1.csproj" />
+		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Connections.Examples.Http1.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/">
-		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Transports.Examples.Http2.csproj" />
+		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Connections.Examples.Http2.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/">
-		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Transports.Examples.Http3.csproj" />
+		<Project Path="Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Connections.Examples.Http3.csproj" />
 	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Connections/src/">
 		<Project Path="Http/Assimalign.Cohesion.Http.Connections/src/Assimalign.Cohesion.Http.Connections.csproj" />
