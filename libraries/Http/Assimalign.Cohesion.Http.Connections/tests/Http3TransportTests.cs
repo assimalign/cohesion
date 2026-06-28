@@ -285,9 +285,33 @@ public class Http3TransportTests
         httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
     }
 
-    [Fact(
-        DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop :protocol on a non-CONNECT request",
-        Skip = "Product gap (src/Internal/Http3/Http3ConnectionContext.cs:477): :protocol is surfaced via IHttpContext.Items without enforcing RFC 9220 (:protocol is CONNECT-only). Repro: request with :method GET + :protocol is accepted instead of the stream being dropped. Re-enable when the validation lands.")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A valid extended CONNECT exposes the ExtendedConnect feature")]
+    public async Task Http3_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
+    {
+        // The transport surfaces :protocol via IHttpContext.Items; the
+        // Http.ExtendedConnect package models it as a typed feature.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+
+        TestConnection stream = new(payload);
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.IsExtendedConnect.ShouldBeTrue();
+        httpContext.ExtendedConnect.ShouldNotBeNull();
+        httpContext.ExtendedConnect!.Protocol.ShouldBe("websocket");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop :protocol on a non-CONNECT request")]
     public Task Http3_OnProtocolPseudoHeaderWithoutConnect_ShouldDropStream()
         // RFC 8441 §4 / RFC 9220 — :protocol is only valid on a CONNECT request.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
@@ -297,9 +321,7 @@ public class Http3TransportTests
             (":path", "/"),
             (":authority", "api.test")));
 
-    [Fact(
-        DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop an extended CONNECT missing :path",
-        Skip = "Product gap (src/Internal/Http3/Http3ConnectionContext.cs:477): extended CONNECT is not validated per RFC 9220 (MUST include :scheme/:path/:authority). Repro: CONNECT + :protocol without :path is accepted instead of the stream being dropped. Re-enable when the validation lands.")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drop an extended CONNECT missing :path")]
     public Task Http3_OnExtendedConnectMissingPath_ShouldDropStream()
         // RFC 9220 — an extended CONNECT MUST include :scheme, :path, :authority.
         => AssertMalformedRequestIsDroppedAsync(HttpProtocolPayloadFactory.CreateHttp3RequestRaw(

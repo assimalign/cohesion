@@ -355,6 +355,51 @@ public class Http2TransportTests
         httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A valid extended CONNECT exposes the ExtendedConnect feature")]
+    public async Task Http2_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
+    {
+        // The transport surfaces :protocol via IHttpContext.Items; the
+        // Http.ExtendedConnect package models it as a typed feature.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "CONNECT"),
+            (":protocol", "websocket"),
+            (":scheme", "https"),
+            (":path", "/chat"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.IsExtendedConnect.ShouldBeTrue();
+        httpContext.ExtendedConnect.ShouldNotBeNull();
+        httpContext.ExtendedConnect!.Protocol.ShouldBe("websocket");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request exposes no ExtendedConnect feature")]
+    public async Task Http2_OnNormalRequest_ShouldNotExposeExtendedConnectFeature()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.IsExtendedConnect.ShouldBeFalse();
+        httpContext.ExtendedConnect.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request carries no :protocol item")]
     public async Task Http2_OnNormalRequest_ShouldNotSurfaceProtocolItem()
     {
@@ -370,9 +415,7 @@ public class Http2TransportTests
         httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeFalse();
     }
 
-    [Fact(
-        DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR",
-        Skip = "Product gap (src/Internal/Http2/Http2Stream.cs:356): :protocol is surfaced via IHttpContext.Items without enforcing RFC 8441 §4 (:protocol is CONNECT-only). Repro: HEADERS with :method GET + :protocol is accepted instead of GOAWAY PROTOCOL_ERROR. Re-enable when the validation lands.")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR")]
     public async Task Http2_OnProtocolPseudoHeaderWithoutConnect_ShouldGoAway()
     {
         // RFC 8441 §4 — :protocol is only valid on CONNECT; on any other method
@@ -391,9 +434,7 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(
-        DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR",
-        Skip = "Product gap (src/Internal/Http2/Http2Stream.cs:356): extended CONNECT is not validated per RFC 8441 §4 (MUST include :scheme/:path/:authority). Repro: CONNECT + :protocol without :path is accepted instead of GOAWAY PROTOCOL_ERROR. Re-enable when the validation lands.")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an extended CONNECT missing :path with PROTOCOL_ERROR")]
     public async Task Http2_OnExtendedConnectMissingPath_ShouldGoAway()
     {
         // RFC 8441 §4 — an extended CONNECT MUST include :scheme, :path, and

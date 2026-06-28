@@ -136,6 +136,19 @@ internal static class Http3HeaderCodec
             }
         }
 
+        // RFC 8441 §4 / RFC 9220 §3 — validate extended CONNECT (the :protocol
+        // pseudo-header): it is only valid on a CONNECT, and an extended CONNECT
+        // MUST also carry :scheme, :path, and :authority. A violation is a
+        // malformed request (RFC 9114 §4.1.2); the receive loop drops the
+        // offending stream without tearing down the connection. The cross-field
+        // rule is shared with HTTP/2 via HttpFieldNormalization.
+        string? extendedConnectViolation = HttpFieldNormalization.ValidateExtendedConnect(
+            method, schemeValue, pathValue, authority, protocol);
+        if (extendedConnectViolation is not null)
+        {
+            throw new InvalidDataException(extendedConnectViolation);
+        }
+
         HttpQueryCollection query = ParseQuery(pathValue ?? "/", out HttpPath path);
         // RFC 9114 §4.3.1 — :authority supersedes Host, resolved identically to
         // HTTP/2 via HttpFieldNormalization.

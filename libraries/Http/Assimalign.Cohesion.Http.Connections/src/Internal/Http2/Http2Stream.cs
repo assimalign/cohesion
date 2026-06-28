@@ -332,6 +332,24 @@ internal sealed class Http2Stream
             : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
 
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+
+        // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
+        // the request: the :protocol pseudo-header is only valid on a CONNECT, and
+        // an extended CONNECT MUST also carry :scheme, :path, and :authority. A
+        // violation is a malformed request, which RFC 9113 §8.1.1 treats as a
+        // connection-level PROTOCOL_ERROR (GOAWAY). The cross-field rule is shared
+        // with HTTP/3 via HttpFieldNormalization so both versions reject the same set.
+        string? extendedConnectViolation = HttpFieldNormalization.ValidateExtendedConnect(
+            decodedHeaders.Method,
+            decodedHeaders.Scheme,
+            decodedHeaders.Path,
+            decodedHeaders.Authority,
+            decodedHeaders.Protocol);
+        if (extendedConnectViolation is not null)
+        {
+            throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
+        }
+
         byte[] bodyBytes = _body.ToArray();
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared

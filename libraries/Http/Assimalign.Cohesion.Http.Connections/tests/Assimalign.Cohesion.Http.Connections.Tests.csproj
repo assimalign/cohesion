@@ -6,6 +6,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionPackageReference Include="coverlet.collector" />
