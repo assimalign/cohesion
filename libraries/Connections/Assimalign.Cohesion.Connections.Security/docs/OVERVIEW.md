@@ -1,9 +1,10 @@
-# Assimalign.Cohesion.Security
+# Assimalign.Cohesion.Connections.Security
 
 ## Summary
 
 TLS for Cohesion connections. Wraps an established `IConnection` (itself an `IDuplexPipe`) in a TLS
-session and returns a new, secured `IConnection` whose `Input` / `Output` pipes are encrypted.
+session and returns a new, secured `IConnection` whose `Input` / `Output` pipes are encrypted. Lives
+in the Connections area because it composes directly over the connection contracts.
 
 ## Dependencies
 

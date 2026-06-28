@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Security.Internal;
+namespace Assimalign.Cohesion.Connections.Security.Internal;
 
 /// <summary>
 /// An <see cref="IConnection"/> decorator that secures an inner connection with a TLS session.

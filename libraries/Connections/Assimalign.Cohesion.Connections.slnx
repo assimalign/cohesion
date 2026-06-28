@@ -31,6 +31,17 @@
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/tests/">
 		<Project Path="Assimalign.Cohesion.Connections.Quic/tests/Assimalign.Cohesion.Connections.Quic.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Security/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Security/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/src/">
+		<Project Path="Assimalign.Cohesion.Connections.Security/src/Assimalign.Cohesion.Connections.Security.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/" />
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/src/">
 		<Project Path="Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />

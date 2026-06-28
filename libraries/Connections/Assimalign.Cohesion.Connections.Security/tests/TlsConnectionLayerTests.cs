@@ -10,7 +10,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Security.Tests;
+namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
 {

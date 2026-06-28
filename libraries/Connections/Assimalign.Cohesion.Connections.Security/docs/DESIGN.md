@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.Security Design
+# Assimalign.Cohesion.Connections.Security Design
 
 ## Design Intent
 
@@ -6,19 +6,17 @@ Provides TLS as a *connection layer*: given an established, plaintext `IConnecti
 `IConnection` whose duplex pipe is TLS-encrypted. An `IConnection` *is* an `IDuplexPipe` — the
 consumer reads bytes received from the peer off `Input` and writes bytes to send to `Output` — so
 securing a connection means substituting those pipes with encrypted ones, not attaching a side
-property. This is the connection-filtering capability the removed transport "pipeline" was reaching
-for, implemented so the secured connection actually transforms the byte stream the consumer reads
-and writes.
+property. This library lives in the Connections area because it composes directly over the
+connection contracts; it does not depend on (or pull in) the Security area's certificate tooling.
 
 ## Why a Layer, Not Middleware
 
 The previous transport pipeline ran a callback once, after the connection's duplex pipe was already
 constructed and wired to the socket. It could observe the connection but could not *substitute* the
-pipe, so it could never secure the bytes the consumer read — the documented `SslStream` middleware
-example was non-functional. A connection layer avoids this by returning a *new* `IConnection`: the
-inner (plaintext) connection is wrapped in an `SslStream`, and the secured connection exposes the
-encrypted stream as its `Input` / `Output`. The consumer reads and writes plaintext transparently;
-the encryption happens in between.
+pipe, so it could never secure the bytes the consumer read. A connection layer avoids this by
+returning a *new* `IConnection`: the inner (plaintext) connection is wrapped in an `SslStream`, and
+the secured connection exposes the encrypted stream as its `Input` / `Output`. The consumer reads
+and writes plaintext transparently; the encryption happens in between.
 
 ## Public Surface
 
@@ -58,8 +56,6 @@ Two composition styles, both backed by the same decorator:
 
 ## Composition
 
-TLS is applied at the composition root, after accepting or connecting:
-
 ```csharp
 // Server: secure every accepted connection.
 IConnectionListener secured = listener.UseTls(serverOptions);
@@ -81,8 +77,9 @@ NativeAOT compatible.
 ## Non-Goals
 
 - Not a general-purpose connection/application middleware pipeline.
-- Does not source certificates; certificates and authentication settings are supplied via options.
-  Callers may use `Assimalign.Cohesion.Security.Cryptography` to obtain certificates.
+- Does not source or manage certificates; certificates and authentication settings are supplied via
+  options. A platform-agnostic certificate manager is the responsibility of the Security area
+  (tracked separately).
 - Does not implement cryptography; it delegates to the platform TLS stack via `SslStream`.
 
 ## Relationships
@@ -90,5 +87,6 @@ NativeAOT compatible.
 - **`Assimalign.Cohesion.Connections`** — the `IConnection` / `IConnectionLayer` contracts, the
   `UseTls` composition points (`IConnectionListener` / `IConnectionFactory`), and the
   `DuplexPipeStream` adapter.
-- **`Assimalign.Cohesion.Security.Cryptography`** — certificate management that can supply
-  certificates for the TLS options.
+- **Security area (certificate management)** — supplies certificates for the TLS options. The
+  platform-agnostic certificate manager is owned by the Security area and is intentionally not a
+  dependency of this layer.

@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Security;
+using Assimalign.Cohesion.Connections.Security;
 
 using ClientHttpMethod = System.Net.Http.HttpMethod;
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;

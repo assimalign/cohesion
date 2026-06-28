@@ -22,7 +22,8 @@ jobs:
             "Assimalign.Cohesion.Connections",
             "Assimalign.Cohesion.Connections.Tcp",
             "Assimalign.Cohesion.Connections.Udp",
-            "Assimalign.Cohesion.Connections.Quic"
+            "Assimalign.Cohesion.Connections.Quic",
+            "Assimalign.Cohesion.Connections.Security"
           ]
     steps:
       - uses: actions/checkout@v4

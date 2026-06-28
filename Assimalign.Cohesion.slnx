@@ -1029,6 +1029,13 @@
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Quic/tests/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Quic/tests/Assimalign.Cohesion.Connections.Quic.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Security/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Security/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Security/src/Assimalign.Cohesion.Connections.Security.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Security/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/" />
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
@@ -1228,16 +1235,6 @@
 		<File Path="libraries/Security/README.md" />
 		<File Path="libraries/Security/Directory.Build.props" />
 		<File Path="libraries/Security/Directory.Build.targets" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security/docs/">
-		<File Path="libraries/Security/Assimalign.Cohesion.Security/docs/DESIGN.md" />
-		<File Path="libraries/Security/Assimalign.Cohesion.Security/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security/src/">
-		<Project Path="libraries/Security/Assimalign.Cohesion.Security/src/Assimalign.Cohesion.Security.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security/tests/">
-		<Project Path="libraries/Security/Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Security/Assimalign.Cohesion.Security.Cryptography/">
 		<File Path="libraries/Security/Assimalign.Cohesion.Security.Cryptography/README.md" />

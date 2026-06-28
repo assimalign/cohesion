@@ -1,7 +1,7 @@
 using System;
 using System.Net.Security;
 
-namespace Assimalign.Cohesion.Security;
+namespace Assimalign.Cohesion.Connections.Security;
 
 /// <summary>
 /// Options that control a client-side TLS connection upgrade.

@@ -3,9 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Security.Internal;
+using Assimalign.Cohesion.Connections.Security.Internal;
 
-namespace Assimalign.Cohesion.Security;
+namespace Assimalign.Cohesion.Connections.Security;
 
 /// <summary>
 /// A <see cref="IConnectionLayer"/> that secures connections with TLS.

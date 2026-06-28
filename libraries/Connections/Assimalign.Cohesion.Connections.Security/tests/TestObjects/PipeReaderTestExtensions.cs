@@ -4,7 +4,7 @@ using System.IO.Pipelines;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Security.Tests;
+namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
 /// Provides test helper extension members for <see cref="PipeReader"/>.

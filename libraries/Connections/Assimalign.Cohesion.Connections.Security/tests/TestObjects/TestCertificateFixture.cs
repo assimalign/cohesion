@@ -2,7 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Assimalign.Cohesion.Security.Tests;
+namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
 /// An xUnit class fixture that creates a single ephemeral self-signed RSA certificate

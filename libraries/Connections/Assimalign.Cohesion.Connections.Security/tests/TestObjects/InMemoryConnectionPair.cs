@@ -3,7 +3,7 @@ using System.Net;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Security.Tests;
+namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
 /// Creates a connected in-memory pair of <see cref="TestPipeConnection"/> instances cross-wired

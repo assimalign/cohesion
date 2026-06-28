@@ -9,17 +9,6 @@
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
 	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security/" />
-	<Folder Name="/Security/Assimalign.Cohesion.Security/docs/">
-		<File Path="Assimalign.Cohesion.Security/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Security/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security/src/">
-		<Project Path="Assimalign.Cohesion.Security/src/Assimalign.Cohesion.Security.csproj" />
-	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security/tests/">
-		<Project Path="Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
-	</Folder>
 	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/">
 		<File Path="Assimalign.Cohesion.Security.Cryptography/README.md" />
 	</Folder>

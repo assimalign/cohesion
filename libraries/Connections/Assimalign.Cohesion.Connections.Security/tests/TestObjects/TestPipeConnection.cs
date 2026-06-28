@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Security.Tests;
+namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 /// <summary>
 /// An in-memory <see cref="Connection"/> double over a supplied reader/writer pair, used by
