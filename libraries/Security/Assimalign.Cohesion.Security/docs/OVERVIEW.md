@@ -2,8 +2,8 @@
 
 ## Summary
 
-TLS connection-upgrade for Cohesion connections. Wraps an established `IConnection` in a TLS
-session and returns a new, secured `IConnection` whose transport is encrypted.
+TLS for Cohesion connections. Wraps an established `IConnection` (itself an `IDuplexPipe`) in a TLS
+session and returns a new, secured `IConnection` whose `Input` / `Output` pipes are encrypted.
 
 ## Dependencies
 
@@ -12,11 +12,17 @@ session and returns a new, secured `IConnection` whose transport is encrypted.
 
 ## Key Types
 
-- `TlsConnectionExtensions` — `UpgradeToTlsAsync(TlsServerOptions)` / `UpgradeToTlsAsync(TlsClientOptions)` on `IConnection`.
-- `TlsServerOptions` / `TlsClientOptions` — wrap the BCL `Ssl*AuthenticationOptions` plus a handshake timeout.
+- `TlsConnectionLayer` — an `IConnectionLayer` that secures connections with TLS (server or client),
+  composed onto a listener or factory.
+- `TlsConnectionExtensions` — `IConnectionListener.UseTls(TlsServerOptions)` /
+  `IConnectionFactory.UseTls(TlsClientOptions)` to compose the layer, and
+  `IConnection.UpgradeToTlsAsync(…)` to upgrade a single connection.
+- `TlsServerOptions` / `TlsClientOptions` — wrap the BCL `Ssl*AuthenticationOptions` (as
+  `AuthenticationOptions`) plus a `HandshakeTimeout`.
 
 ## Source Layout
 
-- `src/` — options types.
-- `src/Extensions` — `IConnection` TLS-upgrade extension members.
-- `src/Internal` — `TlsConnection` decorator and the pipe/stream adapters that back `SslStream`.
+- `src/` — `TlsConnectionLayer` and the options types.
+- `src/Extensions` — TLS composition/upgrade extension members on `IConnection`,
+  `IConnectionListener`, and `IConnectionFactory`.
+- `src/Internal` — the `TlsConnection` decorator backed by `SslStream` over a `DuplexPipeStream`.
