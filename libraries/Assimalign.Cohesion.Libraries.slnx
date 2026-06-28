@@ -603,6 +603,9 @@
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="Http/Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Forms/">
 		<File Path="Http/Assimalign.Cohesion.Http.Forms/README.md" />
 	</Folder>

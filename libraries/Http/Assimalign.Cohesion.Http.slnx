@@ -83,6 +83,9 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
+		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/">
 		<File Path="Assimalign.Cohesion.Http.Forms/README.md" />
 	</Folder>
