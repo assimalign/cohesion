@@ -94,9 +94,7 @@ public class AmqpConnectionContextTests
         open.ChannelMax.ShouldBe((ushort)32);
     }
 
-    [Fact(
-        DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should decode a frame that arrives coalesced with the protocol header",
-        Skip = "Product bug: AmqpTransportConnectionContext.ReadProtocolHeaderAsync (src/Internal/AmqpTransportConnectionContext.cs:192) advances the examined position to buffer.End while consuming only the 8 header bytes. When the peer's protocol header arrives in the same buffer as subsequent bytes (TCP coalescing), the next PipeReader.ReadAsync never completes because the buffered remainder is already marked examined, so ReceiveAsync/SwitchProtocolAsync hang until new bytes arrive — a deadlock for lock-step exchanges such as SASL (header + sasl-mechanisms sent in one write). Fix: AdvanceTo(buffer.GetPosition(8)) so examined == consumed.")]
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should decode a frame that arrives coalesced with the protocol header")]
     public async Task ReceiveAsync_OnHeaderCoalescedWithFrame_ShouldDecodeOpenPerformative()
     {
         // Arrange

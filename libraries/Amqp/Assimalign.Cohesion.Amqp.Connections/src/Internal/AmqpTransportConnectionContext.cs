@@ -189,7 +189,15 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
             if (buffer.Length >= 8)
             {
                 byte[] headerBytes = buffer.Slice(0, 8).ToArray();
-                reader.AdvanceTo(buffer.GetPosition(8), buffer.End);
+                // Mark examined == consumed (single-arg AdvanceTo): we consumed
+                // exactly the 8 protocol-header bytes. If the peer coalesced the
+                // header with the following frame bytes into a single write (TCP),
+                // the next ReadAsync must surface that buffered remainder
+                // immediately. Passing examined=buffer.End would instead make
+                // ReadAsync wait for *new* bytes beyond what is already buffered,
+                // deadlocking lock-step exchanges such as SASL (header +
+                // sasl-mechanisms sent in one write).
+                reader.AdvanceTo(buffer.GetPosition(8));
                 return AmqpEncoding.DecodeProtocolHeader(headerBytes);
             }
 
