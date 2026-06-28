@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Platform-agnostic X.509 certificate management for Cohesion: loads certificates from PKCS#12/PFX and PEM sources.</Description>
+	</PropertyGroup>
+</Project>

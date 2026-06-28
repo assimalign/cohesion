@@ -130,7 +130,7 @@
         <!-- WIP / not yet building - uncomment as each library comes online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.Cryptography" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security" />
         -->
     </ItemGroup>
 
