@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web;
@@ -26,16 +27,9 @@ public static class WebApplicationPipelineBuilderExtensions
             ArgumentNullException.ThrowIfNull(middleware);
             IWebApplicationContext context = builder.Context;
 
-            IHttpFeatureCollection? features = context.Features;
+            IRouterFeature? feature = context.Features.OfType<IRouterFeature>().FirstOrDefault();
 
-            if (features is null)
-            {
-                throw new InvalidOperationException("No HTTP Features are available.");
-            }
-
-            IRouterFeature? feature = features.Get<IRouterFeature>();
-
-            if (feature is null ||  feature.Builder is null)
+            if (feature is null || feature.Builder is null)
             {
                 throw new InvalidOperationException("No router builder was not registered");
             }

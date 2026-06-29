@@ -22,7 +22,7 @@ public static class RoutingExtensions
 
             builder.Use(async (context, next) =>
             {
-                using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+                using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
                 
                 CancellationToken cancellationToken = cancellationTokenSource.Token;
 
@@ -53,7 +53,7 @@ public static class RoutingExtensions
     {
         public IWebApplicationBuilder AddRouting()
         {
-            return builder.AddFeature<IHttpFeature>(new RouterFeature());
+            return builder.AddFeature(new RouterFeature());
         }
     }
 

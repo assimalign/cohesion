@@ -28,5 +28,4 @@ public static partial class WebApplicationBuilderExtensions
 
 
 
-    public static IHostBuilder ConfigureWebApplication(this IHostBuilder builder, Func<WebApplicationBuilder>)
 }
