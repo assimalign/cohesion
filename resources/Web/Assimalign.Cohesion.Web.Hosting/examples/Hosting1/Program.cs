@@ -1,4 +1,4 @@
-﻿using Assimalign.Cohesion.Http.Transports;
+﻿using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Configuration;
@@ -23,19 +23,6 @@ AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport
 builder.Server
     .UseServer((serviceProvider, options) =>
     {
-        options.CreateFeatures = () =>
-        {
-            IEnumerable<IHttpFeature> features = serviceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
-
-            var collection = new HttpFeatureCollection(features.Count());
-
-            foreach (var feature in features)
-            {
-                collection.Set(feature);
-            }
-
-            return collection;
-        };
         options.UseHttp1(tcp =>
         {
 

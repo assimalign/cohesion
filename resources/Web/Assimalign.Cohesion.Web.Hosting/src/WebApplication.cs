@@ -26,8 +26,6 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         _context = context;
         _options = options;
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
-
-        Init();
     }
 
 

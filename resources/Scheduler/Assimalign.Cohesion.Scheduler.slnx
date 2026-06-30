@@ -44,4 +44,12 @@
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/tests/">
 		<Project Path="Assimalign.Cohesion.Scheduler.Timer/tests/Assimalign.Cohesion.Scheduler.Timer.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Scheduler/refs/" >
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
+		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
+		<Project Path="../../libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
+		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+	</Folder>
 </Solution>

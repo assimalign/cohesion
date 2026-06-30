@@ -91,7 +91,12 @@ public class HttpContextFormExtensionsTests
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
         public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
-        public CancellationToken RequestAborted => CancellationToken.None;
+        public CancellationToken RequestCancelled => CancellationToken.None;
+        public void Cancel()
+        {
+            // Bare double: form parsing never cancels the exchange.
+        }
+        public Task CancelAsync() => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

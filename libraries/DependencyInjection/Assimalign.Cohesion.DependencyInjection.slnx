@@ -21,4 +21,7 @@
 	<Folder Name="/DependencyInjection/Assimalign.Cohesion.DependencyInjection/tests/">
 		<Project Path="Assimalign.Cohesion.DependencyInjection/tests/Assimalign.Cohesion.DependencyInjection.Tests.csproj" />
 	</Folder>
+	<Folder Name="/DependencyInjection/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

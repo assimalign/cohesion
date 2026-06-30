@@ -1,15 +1,15 @@
-﻿using Assimalign.Cohesion.Http;
-using System;
+﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Transports;
-using Assimalign.Cohesion.Http.Transports;
+using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
+
 
 public sealed class WebApplicationServerBuilder
 {
@@ -40,15 +40,10 @@ public sealed class WebApplicationServerBuilder
     /// </summary>
     /// <param name="server"></param>
     /// <returns></returns>
-    public WebApplicationServerBuilder UseServer(IWebApplicationServer server)
+    public WebApplicationServerBuilder UseServer<TServer>(TServer server) where TServer : IWebApplicationServer, IHostService
     {
         ArgumentNullException.ThrowIfNull(server);
-
-        var service = new WebApplicationServer(server);
-
-        _builder.Services.AddSingleton<IWebApplicationServer>(service);
-        _builder.Services.AddSingleton<IHostService>(service);
-
+        _builder.Services.AddSingleton<IHostService>(server);
         return this;
     }
 
@@ -57,21 +52,16 @@ public sealed class WebApplicationServerBuilder
     /// </summary>
     /// <param name="factory"></param>
     /// <returns></returns>
-    public WebApplicationServerBuilder UseServer(Func<IServiceProvider, IWebApplicationServer> factory)
+    public WebApplicationServerBuilder UseServer<TServer>(Func<IServiceProvider, TServer> factory) where TServer : IWebApplicationServer, IHostService
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        Func<IServiceProvider, WebApplicationServer> factory2 = serviceProvider =>
+        _builder.Services.AddSingleton<IHostService>(serviceProvider =>
         {
-            IWebApplicationServer server = factory.Invoke(serviceProvider);
+            IHostService service = factory.Invoke(serviceProvider);
 
-            ArgumentNullException.ThrowIfNull(server);
-
-            return new WebApplicationServer(server);
-        };
-
-        _builder.Services.AddSingleton<IWebApplicationServer>(factory2);
-        _builder.Services.AddSingleton<IHostService>(factory2);
+            return service;
+        });
 
         return this;
     }

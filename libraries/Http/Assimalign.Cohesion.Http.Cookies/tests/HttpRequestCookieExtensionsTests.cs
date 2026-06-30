@@ -170,8 +170,18 @@ public class HttpRequestCookieExtensionsTests
         public IHttpConnectionInfo ConnectionInfo => HttpConnectionInfo.Empty;
         public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
         public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
-        public CancellationToken RequestAborted => CancellationToken.None;
+        public CancellationToken RequestCancelled => CancellationToken.None;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public void Cancel()
+        {
+            
+        }
+
+        public Task CancelAsync()
+        {
+            return Task.CompletedTask;
+        }
 
         /// <summary>Direct handle to the request's mutable header collection so tests can install a Cookie header.</summary>
         public IHttpHeaderCollection RequestHeaders => Request.Headers;

@@ -1,0 +1,167 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.Http.Connections.Internal;
+
+internal abstract class TransportHttpContext : HttpContext
+{
+    // Backs RequestAborted. Linked to the transport-supplied token so the
+    // exchange is aborted when the connection/stream is torn down, and can also
+    // be tripped locally by Cancel().
+    private readonly CancellationTokenSource _abortedSource;
+
+    protected TransportHttpContext(
+        HttpVersion version,
+        TransportHttpRequest request,
+        TransportHttpResponse response,
+        HttpConnectionInfo connectionInfo,
+        CancellationToken requestAborted)
+    {
+        Version = version;
+        Request = request;
+        Response = response;
+        ConnectionInfo = connectionInfo;
+        _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        // If the listener's HttpConnectionListenerOptions.CreateFeatures
+        // factory returned a collection, wrap it as the defaults source for
+        // the per-request collection so features the user supplied are
+        // visible via Get/iteration, but middleware Set calls land on the
+        // local layer (they do not mutate the factory's collection). On
+        // disposal the effective collection (local + defaults) is walked
+        // and every feature implementing IDisposable / IAsyncDisposable is
+        // disposed, regardless of which layer it lives on.
+        Features = new HttpFeatureCollection();
+        Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
+
+        // Wire the back-references last so the request and response can resolve
+        // their owning context from this point forward. Construction order in
+        // the transports is request -> response -> context, so the
+        // HttpContext back-reference can only be installed after the context
+        // itself exists.
+        request.AttachContext(this);
+        response.AttachContext(this);
+    }
+
+    public override HttpVersion Version { get; }
+    public override HttpRequest Request { get; }
+    public override HttpResponse Response { get; }
+    public override HttpConnectionInfo ConnectionInfo { get; }
+    public override HttpFeatureCollection Features { get; }
+    public override IDictionary<string, object?> Items { get; }
+    public override CancellationToken RequestCancelled => _abortedSource.Token;
+
+    /// <summary>
+    /// Whether the application requested cancellation of this exchange via
+    /// <see cref="Cancel"/>. Each transport's response path observes this and
+    /// resets the single exchange (HTTP/2 <c>RST_STREAM</c>, HTTP/3 stream
+    /// reset) instead of writing a response, without tearing down the connection.
+    /// </summary>
+    public bool CancelRequested { get; private set; }
+
+    /// <summary>
+    /// Cancels this exchange: records the request and trips
+    /// <see cref="RequestCancelled"/> so in-flight handler work observes the
+    /// cancellation. The actual wire reset is performed by the transport's
+    /// response path on the next send for this exchange.
+    /// </summary>
+    public override void Cancel()
+    {
+        CancelRequested = true;
+
+        try
+        {
+            _abortedSource.Cancel();
+        }
+        catch (System.ObjectDisposedException)
+        {
+            // The exchange already completed/disposed; cancellation is moot.
+        }
+    }
+
+
+    public override async Task CancelAsync()
+    {
+        CancelRequested = true;
+
+        try
+        {
+            await _abortedSource.CancelAsync();
+        }
+        catch (System.ObjectDisposedException)
+        {
+            // The exchange already completed/disposed; cancellation is moot.
+        }
+    }
+
+    /// <summary>
+    /// Disposes the request, releasing its features (any
+    /// <see cref="IAsyncDisposable"/> or <see cref="IDisposable"/> feature
+    /// in <see cref="Features"/> is disposed), then disposing the request
+    /// and response body streams. The contract is request-scoped: a
+    /// feature whose state needs deterministic cleanup at request end
+    /// implements one of the disposal interfaces and is wired up at
+    /// construction time via the
+    /// <see cref="HttpConnectionListenerOptions.CreateFeatures"/> factory
+    /// (or attached by middleware).
+    /// </summary>
+    public override async ValueTask DisposeAsync()
+    {
+        // Snapshot the enumeration before disposing so a feature's
+        // DisposeAsync that mutates the collection cannot break iteration.
+        IHttpFeature[] snapshot = ToArray(Features);
+
+        foreach (IHttpFeature feature in snapshot)
+        {
+            try
+            {
+                if (feature is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (feature is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+            catch
+            {
+                // Feature disposal is best-effort: one feature throwing
+                // must not prevent the rest of the request from being
+                // torn down, otherwise the response body / request body
+                // stream below would leak.
+            }
+        }
+
+        Request.Body.Dispose();
+        Response.Body.Dispose();
+        _abortedSource.Dispose();
+    }
+
+    private static IHttpFeature[] ToArray(IEnumerable<IHttpFeature> features)
+    {
+        // Enumerate once to size the array, then copy. Avoids an
+        // allocation-heavy ToList/ToArray when the collection is empty,
+        // which is the common case for requests that did not configure a
+        // feature factory.
+        int count = 0;
+        foreach (IHttpFeature _ in features)
+        {
+            count++;
+        }
+
+        if (count == 0)
+        {
+            return Array.Empty<IHttpFeature>();
+        }
+
+        IHttpFeature[] result = new IHttpFeature[count];
+        int index = 0;
+        foreach (IHttpFeature feature in features)
+        {
+            result[index++] = feature;
+        }
+        return result;
+    }
+}

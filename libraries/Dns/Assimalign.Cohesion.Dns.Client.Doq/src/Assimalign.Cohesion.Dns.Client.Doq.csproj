@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Dns</RootNamespace>
-		<Description>DNS-over-QUIC (DoQ, RFC 9250) transport for the Cohesion DNS family. Placeholder package — implementation deferred until Assimalign.Cohesion.Transports ships a QUIC client transport; see docs/REQUIREMENTS.md for the implementation contract.</Description>
+		<Description>DNS-over-QUIC (DoQ, RFC 9250) transport for the Cohesion DNS family. Placeholder package — implementation deferred until Assimalign.Cohesion.Connections ships a QUIC client transport; see docs/REQUIREMENTS.md for the implementation contract.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Dns.Client" />

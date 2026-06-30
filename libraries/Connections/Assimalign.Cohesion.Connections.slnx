@@ -1,0 +1,62 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Connections/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections/docs/">
+		<File Path="Assimalign.Cohesion.Connections/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections/src/">
+		<Project Path="Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections/tests/">
+		<Project Path="Assimalign.Cohesion.Connections/tests/Assimalign.Cohesion.Connections.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Quic/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/src/">
+		<Project Path="Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.Quic/tests/Assimalign.Cohesion.Connections.Quic.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Security/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Security/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/src/">
+		<Project Path="Assimalign.Cohesion.Connections.Security/src/Assimalign.Cohesion.Connections.Security.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Security/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/src/">
+		<Project Path="Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.Tcp/tests/Assimalign.Cohesion.Connections.Tcp.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/src/">
+		<Project Path="Assimalign.Cohesion.Connections.Udp/src/Assimalign.Cohesion.Connections.Udp.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.Udp/tests/Assimalign.Cohesion.Connections.Udp.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Connections/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
+</Solution>

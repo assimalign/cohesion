@@ -5,7 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Transports" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

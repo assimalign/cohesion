@@ -49,4 +49,7 @@
 	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/tests/">
 		<Project Path="Assimalign.Cohesion.Caching.InMemory/tests/Assimalign.Cohesion.Caching.InMemory.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Cache/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

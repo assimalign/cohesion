@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+  </ItemGroup>
+</Project>

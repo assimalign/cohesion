@@ -1,8 +1,12 @@
 <Project>
+    <!--
+        The task assembly targets netstandard2.0 and loads in-process under both Framework MSBuild
+        (Visual Studio) and Core MSBuild (dotnet). Do NOT add Runtime="NET" here: that forces a
+        .NET task host and reintroduces MSB4216/MSB4027 under Visual Studio.
+    -->
     <UsingTask
 		TaskName="Assimalign.Cohesion.Build.Tasks.CodeGenerationCreateValueTypeTask"
-		AssemblyFile="$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\$(TargetFramework)\Assimalign.Cohesion.Build.Tasks.dll"
-		Runtime="NET" />
+		AssemblyFile="$(MSBuildThisFileDirectory)..\Tasks\bin\$(Configuration)\netstandard2.0\Assimalign.Cohesion.Build.Tasks.dll" />
 
 	<PropertyGroup>
         <_CohesionCodeGenPath>$(_CohesionIntermediateOutputPath)CodeGeneration\</_CohesionCodeGenPath>

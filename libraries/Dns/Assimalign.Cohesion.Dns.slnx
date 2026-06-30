@@ -62,4 +62,7 @@
 	<Folder Name="/Dns/Assimalign.Cohesion.Dns.Client.Dot/src/">
 		<Project Path="Assimalign.Cohesion.Dns.Client.Dot/src/Assimalign.Cohesion.Dns.Client.Dot.csproj" />
 	</Folder>
+	<Folder Name="/Dns/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

@@ -6,6 +6,7 @@
 # AI & Note generation
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees
 *.obsidian
 .linqpad
 .dotnet-cli-home

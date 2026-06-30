@@ -16,7 +16,7 @@ public class HttpConnectionInfoTests
         IPEndPoint remote = new(IPAddress.Parse("192.168.1.20"), 52341);
 
         // Act
-        HttpConnectionInfo info = new(local, remote, isSecure: true);
+        HttpConnectionInfo info = new(local, remote);
 
         // Assert
         info.LocalEndPoint.ShouldBe(local);
@@ -25,6 +25,5 @@ public class HttpConnectionInfoTests
         info.RemoteIp.ShouldBe(remote.Address);
         info.LocalPort.ShouldBe(8080);
         info.RemotePort.ShouldBe(52341);
-        info.IsSecure.ShouldBeTrue();
     }
 }

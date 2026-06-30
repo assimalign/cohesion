@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -13,16 +13,15 @@ public static class CookiePolicyExtensions
     {
         public IWebApplicationPipelineBuilder UseCookiePolicy(Action<CookiePolicyOptions> configure)
         {
+            ArgumentNullException.ThrowIfNull(configure);
+
             return builder.Use(async (context, next) =>
             {
-                // Get the feature
-                IHttpFeatureCollection features = context.Features;
-                IHttpRequestCookieFeature? feature = features.Get<IHttpRequestCookieFeature>();
-
-                if (feature is null)
-                {
-                    features.Set<IHttpRequestCookieFeature>(new HttpRequestCookieFeature());
-                }
+                // Cookies are surfaced by Assimalign.Cohesion.Http.Cookies through the
+                // request/response cookie extensions, so no manual feature install is
+                // required here. Cookie-policy enforcement is part of the web
+                // application-model work and is not yet applied.
+                await next.Invoke(context).ConfigureAwait(false);
             });
         }
     }

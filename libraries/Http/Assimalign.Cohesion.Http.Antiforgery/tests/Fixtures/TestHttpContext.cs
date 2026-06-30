@@ -32,7 +32,7 @@ internal sealed class TestHttpContext : IHttpContext
 
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
 
-    public CancellationToken RequestAborted => CancellationToken.None;
+    public CancellationToken RequestCancelled => CancellationToken.None;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
@@ -54,6 +54,16 @@ internal sealed class TestHttpContext : IHttpContext
         HttpFormCollection form = new();
         form.Add(name, value);
         Features.Set<IHttpFormFeature>(new TestFormFeature(form));
+    }
+
+    public void Cancel()
+    {
+        
+    }
+
+    public Task CancelAsync()
+    {
+        return Task.CompletedTask;
     }
 
     private sealed class TestHttpRequest : IHttpRequest

@@ -1,0 +1,16 @@
+<Table Name="Users" Schema="Admin">
+    <Column Name="Id" Type="Ulid" Nullable="false" />
+    <Column Name="FirstName" Type="Varchar" Nullable="false" />
+    <Column Name="LastName" Type="Varchar" Nullable="false" />
+    <Column Name="MiddleName" Type="Varchar" Nullable="true" />
+    <Column Name="Email" Type="Varchar" Nullable="true" />
+    <PrimaryKey Name="PrimaryKeyUserId">
+        <ColumnReference Name="" />
+    </PrimaryKey>
+    <ForeignKey Name="">
+        <Reference Name="" Schema="" />
+    </ForeignKey>
+    <UniqueIndex Name="UniqueEmailIndex">
+        <Reference Name="Email" />
+    </UniqueIndex>
+</Table>

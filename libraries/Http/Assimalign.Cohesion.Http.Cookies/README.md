@@ -72,7 +72,7 @@ signals that cookie handling has been observed for this exchange.
 ## How the transports plug in
 
 The wire-level transports
-(`Assimalign.Cohesion.Http.Transports.Http1MessageReader`,
+(`Assimalign.Cohesion.Http.Connections.Http1MessageReader`,
 `Http2Stream`, `Http3HeaderCodec`) never touch cookie types on the
 read path &mdash; they hand the request over with the raw `Cookie`
 header on `request.Headers`, and the extension property tokenizes on

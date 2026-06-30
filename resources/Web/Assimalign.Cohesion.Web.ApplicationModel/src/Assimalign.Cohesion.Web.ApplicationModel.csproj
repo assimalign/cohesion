@@ -5,8 +5,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Transports" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Transports" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />

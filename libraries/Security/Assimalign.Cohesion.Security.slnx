@@ -7,18 +7,21 @@
 	<Folder Name="/Security/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/">
-		<File Path="Assimalign.Cohesion.Security.Cryptography/README.md" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security/" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security/docs/">
+		<File Path="Assimalign.Cohesion.Security/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Security/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/docs/">
-		<File Path="Assimalign.Cohesion.Security.Cryptography/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security/src/">
+		<Project Path="Assimalign.Cohesion.Security/src/Assimalign.Cohesion.Security.csproj" />
 	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/src/">
-		<Project Path="Assimalign.Cohesion.Security.Cryptography/src/Assimalign.Cohesion.Security.Cryptography.csproj" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security/tests/">
+		<Project Path="Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Security/Assimalign.Cohesion.Security.Cryptography/tests/">
-		<Project Path="Assimalign.Cohesion.Security.Cryptography/tests/Assimalign.Cohesion.Security.Cryptography.Tests.csproj" />
+	<Folder Name="/Security/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 	</Folder>
 </Solution>

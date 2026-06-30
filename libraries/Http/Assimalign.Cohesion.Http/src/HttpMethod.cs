@@ -3,8 +3,6 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-using Assimalign.Cohesion.Http.Internal;
-
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
@@ -23,16 +21,9 @@ public readonly struct HttpMethod : IEquatable<HttpMethod>
     public HttpMethod(string? value)
     {
         ArgumentNullException.ThrowIfNullOrEmpty(value);
+        ArgumentException.ThrowIf(value.Length > MaximumLength, $"The method is too long. It must be {MaximumLength} characters or fewer.");
+        ArgumentException.ThrowIf(value.AsSpan().ContainsAnyExcept(AllowedCharacters), $"The provided method is invalid: '{value}'.");
 
-        if (value.Length > MaximumLength)
-        {
-            throw new ArgumentException($"The method is too long. It must be {MaximumLength} characters or fewer.", nameof(value));
-        }
-
-        if (value.AsSpan().ContainsAnyExcept(AllowedCharacters))
-        {
-            throw new HttpInvalidMethodException($"The provided method is invalid: '{value}'.");
-        }
 
         Value = value.ToUpperInvariant();
     }

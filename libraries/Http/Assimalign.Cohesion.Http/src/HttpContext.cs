@@ -46,7 +46,13 @@ public abstract class HttpContext : IHttpContext
     public abstract IDictionary<string, object?> Items { get; }
 
     /// <inheritdoc />
-    public abstract CancellationToken RequestAborted { get; }
+    public abstract CancellationToken RequestCancelled { get; }
+
+    /// <inheritdoc />
+    public abstract void Cancel();
+
+    /// <inheritdoc />
+    public abstract Task CancelAsync();
 
     /// <inheritdoc />
     public abstract ValueTask DisposeAsync();

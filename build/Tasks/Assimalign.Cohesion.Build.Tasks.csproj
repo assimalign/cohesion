@@ -1,6 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<!--
+			Target netstandard2.0 so this MSBuild task assembly loads IN-PROCESS under BOTH the
+			.NET Framework MSBuild that Visual Studio uses and the .NET (Core) MSBuild that
+			'dotnet build' uses. A Core TFM (net10.0) forced VS's Framework MSBuild to spawn a
+			.NET task host (UsingTask Runtime="NET"), which fails on some VS/SDK combinations
+			(MSB4216 "could not create or connect to a task host" / MSB4027). netstandard2.0
+			removes the task host requirement entirely.
+		-->
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>preview</LangVersion>
+		<EnablePreviewFeatures>false</EnablePreviewFeatures>
 		<DebugType>embedded</DebugType>
 		<IsPackable>true</IsPackable>
 		<Nullable>enable</Nullable>
