@@ -3,7 +3,7 @@
 > Layer-2a of the ApplicationModel stack: the **control-plane base** plus the default
 > **LocalGateway**. The full multi-package architecture (declarative contracts, the
 > Kubernetes build-override + self-hosted registry, resource manifest packages) lives in the
-> repository-root `ApplicationModel.Design.md`, and the Layer-1 contract library's own design
+> ApplicationModel area-root `../../DESIGN.md`, and the Layer-1 contract library's own design
 > record is at `../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md`.
 
 ## What this library is

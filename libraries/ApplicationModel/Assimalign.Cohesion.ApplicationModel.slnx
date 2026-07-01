@@ -8,6 +8,7 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 		<File Path="REAME.md" />
+		<File Path="DESIGN.md" />
 	</Folder>
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.ApplicationModel/README.md" />

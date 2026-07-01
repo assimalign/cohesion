@@ -3,7 +3,7 @@
 > This is the per-library design record for the **Layer 1** ApplicationModel
 > contract package. The full multi-package architecture (gateways, the Kubernetes
 > build-override + self-hosted registry, resource manifest packages, MSBuild
-> codegen) lives in the repository-root `ApplicationModel.Design.md`. Read that for
+> codegen) lives in the ApplicationModel area-root `../../DESIGN.md`. Read that for
 > the whole picture; read this for why *this* package looks the way it does.
 
 ## What this library is
@@ -99,7 +99,7 @@ application name (AOT-safe, with a literal fallback). The generated value types 
 are also AOT-gated, but `…Gateway.Kubernetes` is a **documented AOT exception**
 because `KubernetesClient` pulls `YamlDotNet` and serializes via runtime reflection.
 That exception is scoped to the Kubernetes gateway package and does not affect this
-contract library. See root `ApplicationModel.Design.md` §13.
+contract library. See the area-root `../../DESIGN.md` §13.
 
 ## Family relationships
 
