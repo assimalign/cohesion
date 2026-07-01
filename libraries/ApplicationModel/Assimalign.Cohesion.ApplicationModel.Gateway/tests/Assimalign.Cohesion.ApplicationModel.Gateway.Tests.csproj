@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
   </ItemGroup>
 
 </Project>
