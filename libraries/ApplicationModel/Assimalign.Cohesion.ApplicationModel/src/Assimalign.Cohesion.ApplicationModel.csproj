@@ -9,9 +9,21 @@
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
 			ObjectAccessModifier="public" 
 			ObjectHasImplicitOperators="true" />
-		<CohesionValueType 
+		<CohesionValueType
 			Include="ValueTypes\ResourceId.cs"
 			ObjectRuntimeType="Guid"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
+		<CohesionValueType
+			Include="ValueTypes\ApplicationName.cs"
+			ObjectRuntimeType="String"
+			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
+			ObjectAccessModifier="public"
+			ObjectHasImplicitOperators="true" />
+		<CohesionValueType
+			Include="ValueTypes\EnvironmentName.cs"
+			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />

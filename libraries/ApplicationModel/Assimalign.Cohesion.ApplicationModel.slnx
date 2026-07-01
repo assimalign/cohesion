@@ -12,11 +12,24 @@
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.ApplicationModel/README.md" />
 	</Folder>
+	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/">
 		<Project Path="Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
 	</Folder>
 	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/" />
+	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/">
+		<File Path="Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/">
+		<Project Path="Assimalign.Cohesion.ApplicationModel.Gateway/src/Assimalign.Cohesion.ApplicationModel.Gateway.csproj" />
+	</Folder>
+	<Folder Name="/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/">
+		<Project Path="Assimalign.Cohesion.ApplicationModel.Gateway/tests/Assimalign.Cohesion.ApplicationModel.Gateway.Tests.csproj" />
 	</Folder>
 	<Folder Name="/ApplicationModel/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
