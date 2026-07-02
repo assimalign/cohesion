@@ -63,6 +63,10 @@ public interface IServiceExecutor
 
 It is intentionally not shipped until a configuration-varying launch actually exists; do not introduce it for cases the menu already covers.
 
+### Nesting hosts
+
+`Host.AsService()` adapts a host into an `IHostService` so one host can run inside another (the splithost / multiservice composition). The wrapper starts the wrapped host, then parks - without polling - on the context's stopped signal (`HostContext.WhenStoppedAsync()`, completed on the transition to `HostState.Stopped`, reset on a later start), so an idle nested host consumes no CPU. When the outer host stops the service, the wrapper stops the wrapped host with a fresh token so it receives its own shutdown budget (the outer token is already cancelled on that path); when the wrapped host stops on its own, the wrapper's work completes so the outer host's accounting reflects it. The signal is keyed to the explicit `Stopped` transition, never to the `HostState.Running`/`Started` alias.
+
 ### Non-goals
 
 - No threading knob or strategy on `Host<TContext>`. The host imposes no execution model; the per-service bases above are the seam.
