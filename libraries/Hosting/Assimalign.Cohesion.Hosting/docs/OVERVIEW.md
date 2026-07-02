@@ -7,7 +7,7 @@ Defines the hosting abstractions, lifecycle orchestration, environment and conte
 ## Current Evaluation
 
 - Status: Active
-- Production source files: 16; key type candidates discovered: 8; test files discovered: 6.
+- Production source files: 17; key type candidates discovered: 9; test files discovered: 9.
 - Project references: Assimalign.Cohesion.Core
 - Package references: None
 - NotImplementedException markers: 0
@@ -16,11 +16,13 @@ Defines the hosting abstractions, lifecycle orchestration, environment and conte
 
 - Host<TContext> is the lifecycle coordinator that starts, stops, and tracks hosted services.
 - HostContext and IHostEnvironment isolate runtime state from the host implementation itself.
-- BackgroundService is the convenience base class for long-running units of work inside a host.
+- BackgroundService is the pool-scheduled base class for long-running units of asynchronous work inside a host.
+- DedicatedThreadService is the base class for synchronous, blocking units of work that own a dedicated background OS thread.
 
 ## Key Types
 
 - BackgroundService
+- DedicatedThreadService
 - Host
 - HostContext
 - HostEnvironment

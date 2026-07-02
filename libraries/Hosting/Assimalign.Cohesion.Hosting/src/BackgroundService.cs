@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Hosting;
 /// <remarks>
 /// Use this base for asynchronous I/O loops such as accepting connections, timer ticks, or
 /// queue polling. A synchronous blocking loop that must own an OS thread for its entire
-/// life should not block a thread-pool thread here; it belongs on a dedicated thread.
+/// life should use <see cref="DedicatedThreadService"/> instead of blocking a thread-pool
+/// thread here.
 /// </remarks>
 public abstract class BackgroundService : IHostService, IDisposable
 {
@@ -39,6 +40,12 @@ public abstract class BackgroundService : IHostService, IDisposable
     /// </summary>
     /// <param name="cancellationToken">Signaled when <see cref="StopAsync"/> is called.</param>
     /// <returns>A task that represents the long-running work.</returns>
+    /// <remarks>
+    /// The body is pool-scheduled: it runs synchronously on the starting thread until its
+    /// first await, and its continuations run on thread-pool threads thereafter. Do not
+    /// block in the body (no <see cref="Thread.Sleep(int)"/>, no synchronous I/O waits) -
+    /// blocking work starves the pool and belongs on <see cref="DedicatedThreadService"/>.
+    /// </remarks>
     protected abstract Task ExecuteAsync(CancellationToken cancellationToken);
 
     /// <summary>
