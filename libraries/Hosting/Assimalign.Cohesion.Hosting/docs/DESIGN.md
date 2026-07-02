@@ -6,9 +6,9 @@ The package splits host runtime concerns into explicit contracts: a host orchest
 
 ## Architecture
 
-- Host<TContext> is the lifecycle coordinator that starts, stops, and tracks hosted services.
+- Host<TContext> is the lifecycle coordinator that starts, stops, and tracks hosted services. It is threading-neutral: starting and stopping are pure await state machines that spawn no threads and install no SynchronizationContext or TaskScheduler.
 - HostContext and IHostEnvironment isolate runtime state from the host implementation itself.
-- BackgroundService is the convenience base class for long-running units of work inside a host.
+- BackgroundService is the convenience base class for long-running units of *asynchronous* work inside a host. It is pool-scheduled: `StartAsync` launches `ExecuteAsync` directly and stores the real work task (no `Task.Factory.StartNew` wrapper, no `LongRunning`), so `StopAsync` cancels and then joins that exact task within the caller's shutdown budget, and any fault thrown by `ExecuteAsync` surfaces to the host (synchronous faults during start, post-yield faults on stop) instead of being swallowed. A cooperative cancellation exit is treated as a clean stop.
 
 ## Layout Example
 
