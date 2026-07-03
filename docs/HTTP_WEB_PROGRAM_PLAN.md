@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-03 | #774 | (this PR) | Stage 1 · Lane C — new `libraries/Security/Assimalign.Cohesion.Security.DataProtection`: purpose-bound protector (AES-256-GCM + HKDF-SHA256, versioned key-id header), rotating key ring with grace-period unprotect, file-system `IKeyRepository`. Rewired `Http.Antiforgery` onto a pluggable `IHttpAntiforgeryProtector` seam (no Security dependency). Follow-ups filed: #806 (SecretStore repo/escrow), #807 (at-rest key encryption), #808 (cross-service sharing); Web.Hosting builder-time wiring stays gated on #762. Unblocks #790. |
+| 2026-07-03 | #774 | [#809](https://github.com/assimalign/cohesion/pull/809) | Stage 1 · Lane C — new `libraries/Security/Assimalign.Cohesion.Security.DataProtection`: purpose-bound protector (AES-256-GCM + HKDF-SHA256, versioned key-id header), rotating key ring with grace-period unprotect, file-system `IKeyRepository`. Rewired `Http.Antiforgery` onto a pluggable `IHttpAntiforgeryProtector` seam (no Security dependency). Follow-ups filed: #806 (SecretStore repo/escrow), #807 (at-rest key encryption), #808 (cross-service sharing); Web.Hosting builder-time wiring stays gated on #762. Unblocks #790. |
 
 ---
 
