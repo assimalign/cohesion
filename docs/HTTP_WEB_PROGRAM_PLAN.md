@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #748 | [#802](https://github.com/assimalign/cohesion/pull/802) (open) | Stage 1 / Lane A. HTTP/3 server control stream: SETTINGS emission (`ENABLE_CONNECT_PROTOCOL=1`, QPACK cap=0), critical-stream / connection-first teardown, inbound post-SETTINGS drain (GOAWAY / MAX_PUSH_ID parse-and-discard). **On merge, unblocks** the h3 half of #749, plus #758, #767, and WebSocket-over-h3 #382. |
 
 ---
 
