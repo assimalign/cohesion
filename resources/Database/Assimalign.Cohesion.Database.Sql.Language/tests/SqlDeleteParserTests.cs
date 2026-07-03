@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Language.Sql.Tests;
@@ -12,14 +12,14 @@ public class SqlDeleteParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "DELETE FROM Users WHERE Id = 1;");
-        var delete = statement.SqlExpression.Should().BeOfType<SqlDeleteExpression>().Subject;
+        var delete = statement.SqlExpression.ShouldBeOfType<SqlDeleteExpression>();
 
-        delete.CommandType.Should().Be(SqlQueryCommandType.Delete);
-        delete.Table.TableName.Should().Be("Users");
-        delete.Where.Should().NotBeNull();
+        delete.CommandType.ShouldBe(SqlQueryCommandType.Delete);
+        delete.Table.TableName.ShouldBe("Users");
+        delete.Where.ShouldNotBeNull();
 
-        var binary = delete.Where.Should().BeOfType<SqlBinaryExpression>().Subject;
-        binary.Operator.Should().Be(SqlBinaryOperator.Equal);
+        var binary = delete.Where.ShouldBeOfType<SqlBinaryExpression>();
+        binary.Operator.ShouldBe(SqlBinaryOperator.Equal);
     }
 
     [Fact]
@@ -27,10 +27,10 @@ public class SqlDeleteParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "DELETE FROM Users;");
-        var delete = statement.SqlExpression.Should().BeOfType<SqlDeleteExpression>().Subject;
+        var delete = statement.SqlExpression.ShouldBeOfType<SqlDeleteExpression>();
 
-        delete.Table.TableName.Should().Be("Users");
-        delete.Where.Should().BeNull();
+        delete.Table.TableName.ShouldBe("Users");
+        delete.Where.ShouldBeNull();
     }
 
     [Fact]
@@ -38,9 +38,9 @@ public class SqlDeleteParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "DELETE FROM dbo.Users WHERE Id = 1;");
-        var delete = statement.SqlExpression.Should().BeOfType<SqlDeleteExpression>().Subject;
+        var delete = statement.SqlExpression.ShouldBeOfType<SqlDeleteExpression>();
 
-        delete.Table.SchemaName.Should().Be("dbo");
-        delete.Table.TableName.Should().Be("Users");
+        delete.Table.SchemaName.ShouldBe("dbo");
+        delete.Table.TableName.ShouldBe("Users");
     }
 }

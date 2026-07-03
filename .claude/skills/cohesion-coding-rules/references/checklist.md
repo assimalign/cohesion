@@ -54,7 +54,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Test class named `{Feature}Tests`
 - [ ] Test methods named `{Method}_{Scenario}_{ExpectedBehavior}`
 - [ ] Tests follow AAA pattern (Arrange / Act / Assert)
-- [ ] Assertions use Shouldly or FluentAssertions, not traditional `Assert.*`
+- [ ] Assertions use Shouldly — not FluentAssertions (v8+ commercial license; removed from the repo) and not traditional `Assert.*`
 - [ ] Test fixtures live under `tests/TestObjects/`
 
 ## Documentation

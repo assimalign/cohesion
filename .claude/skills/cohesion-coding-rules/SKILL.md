@@ -112,7 +112,7 @@ Read these on demand when the task touches their area. They contain the full rul
 
 - `references/general-rules.md` — full required/forbidden patterns, naming conventions, code organization, access modifiers, async/await, exception handling
 - `references/build-system.md` — Framework + SDK architecture, MSBuild conventions, props/targets layering, version management, the dev loop
-- `references/testing.md` — test naming, AAA pattern, Shouldly/FluentAssertions
+- `references/testing.md` — test naming, AAA pattern, Shouldly assertions
 - `references/documentation.md` — XML doc requirements, project-level docs (`OVERVIEW.md`, `DESIGN.md`, `docs/Assembly/`), area README requirements
 - `references/checklist.md` — pre-completion verification checklist
 

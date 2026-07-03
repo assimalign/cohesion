@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Language.Sql.Tests;
@@ -19,8 +19,8 @@ public class SqlQueryParserTests
 
         var statement = (SqlQueryStatement)parser.Parse(sql);
 
-        statement.SqlExpression.CommandType.Should().Be(commandType);
-        statement.Diagnostics.Should().NotContain(x => x.Code == "SQL0002");
+        statement.SqlExpression.CommandType.ShouldBe(commandType);
+        statement.Diagnostics.ShouldNotContain(x => x.Code == "SQL0002");
     }
 
     [Fact]
@@ -30,8 +30,8 @@ public class SqlQueryParserTests
 
         var statement = (SqlQueryStatement)parser.Parse("   \r\n  ");
 
-        statement.SqlExpression.CommandType.Should().Be(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.Should().Contain(x => x.Code == "SQL0001");
+        statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
+        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0001");
     }
 
     [Fact]
@@ -41,8 +41,8 @@ public class SqlQueryParserTests
 
         var statement = (SqlQueryStatement)parser.Parse("MERGE INTO dbo.Users u USING dbo.Users2 u2 ON u.Id = u2.Id;");
 
-        statement.SqlExpression.CommandType.Should().Be(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.Should().Contain(x => x.Code == "SQL0002");
+        statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
+        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0002");
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class SqlQueryParserTests
 
         var statement = (SqlQueryStatement)parser.Parse("SELECT Id FROM dbo.Users");
 
-        statement.SqlExpression.CommandType.Should().Be(SqlQueryCommandType.Select);
-        statement.Diagnostics.Should().Contain(x => x.Code == "SQL0100");
+        statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Select);
+        statement.Diagnostics.ShouldContain(x => x.Code == "SQL0100");
     }
 }

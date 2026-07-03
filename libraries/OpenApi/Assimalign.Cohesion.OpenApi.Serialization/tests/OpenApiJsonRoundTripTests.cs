@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Serialization.Tests;
@@ -16,28 +16,29 @@ public class OpenApiJsonRoundTripTests
         var json = document.ToJson(version);
         var round = OpenApiJson.Parse(json);
 
-        round.SpecVersion.Should().Be(version);
-        round.Info.Title.Should().Be("Pets API");
-        round.Info.Version.Should().Be("1.0.0");
+        round.SpecVersion.ShouldBe(version);
+        round.Info.Title.ShouldBe("Pets API");
+        round.Info.Version.ShouldBe("1.0.0");
 
-        round.Paths.Should().NotBeNull();
-        round.Paths!.Items.Should().ContainKey("/pets/{id}");
+        round.Paths.ShouldNotBeNull();
+        round.Paths!.Items.ShouldContainKey("/pets/{id}");
 
         var operation = round.Paths.Items["/pets/{id}"].Operations[OperationType.Get];
-        operation.OperationId.Should().Be("getPet");
-        operation.Parameters.Should().ContainSingle();
-        operation.Parameters[0].Name.Should().Be("id");
-        operation.Parameters[0].In.Should().Be(ParameterLocation.Path);
-        operation.Parameters[0].Required.Should().BeTrue();
+        operation.OperationId.ShouldBe("getPet");
+        operation.Parameters.ShouldHaveSingleItem();
+        operation.Parameters[0].Name.ShouldBe("id");
+        operation.Parameters[0].In.ShouldBe(ParameterLocation.Path);
+        operation.Parameters[0].Required.ShouldBeTrue();
 
-        operation.Responses.Should().NotBeNull();
-        operation.Responses!.Items.Should().ContainKey("200");
-        operation.Responses.Items["200"].Description.Should().Be("A single pet.");
+        operation.Responses.ShouldNotBeNull();
+        operation.Responses!.Items.ShouldContainKey("200");
+        operation.Responses.Items["200"].Description.ShouldBe("A single pet.");
 
-        round.Components.Should().NotBeNull();
-        round.Components!.Schemas.Should().ContainKey("Pet");
-        round.Components.Schemas["Pet"].Properties.Should().ContainKeys("id", "name");
-        round.Components.Schemas["Pet"].Required.Should().Contain("id");
+        round.Components.ShouldNotBeNull();
+        round.Components!.Schemas.ShouldContainKey("Pet");
+        round.Components.Schemas["Pet"].Properties.ShouldContainKey("id");
+        round.Components.Schemas["Pet"].Properties.ShouldContainKey("name");
+        round.Components.Schemas["Pet"].Required.ShouldContain("id");
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - RoundTrip: internal $ref preserved")]
@@ -48,11 +49,11 @@ public class OpenApiJsonRoundTripTests
         var round = OpenApiJson.Parse(document.ToJson(OpenApiSpecVersion.V3_1));
 
         var content = round.Paths!.Items["/pets/{id}"].Operations[OperationType.Get].Responses!.Items["200"].Content;
-        content.Should().ContainKey("application/json");
+        content.ShouldContainKey("application/json");
         var schema = content["application/json"].Schema;
-        schema.Should().NotBeNull();
-        schema!.Reference.Should().NotBeNull();
-        schema.Reference!.Ref.Should().Be("#/components/schemas/Pet");
+        schema.ShouldNotBeNull();
+        schema!.Reference.ShouldNotBeNull();
+        schema.Reference!.Ref.ShouldBe("#/components/schemas/Pet");
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - RoundTrip: specification extensions preserved")]
@@ -63,8 +64,8 @@ public class OpenApiJsonRoundTripTests
 
         var round = OpenApiJson.Parse(document.ToJson(OpenApiSpecVersion.V3_1));
 
-        round.Extensions.Should().ContainKey("x-vendor-id");
-        ((OpenApiValueNode)round.Extensions["x-vendor-id"]).GetString().Should().Be("acme");
+        round.Extensions.ShouldContainKey("x-vendor-id");
+        ((OpenApiValueNode)round.Extensions["x-vendor-id"]).GetString().ShouldBe("acme");
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - RoundTrip: security requirement preserved")]
@@ -74,10 +75,10 @@ public class OpenApiJsonRoundTripTests
 
         var round = OpenApiJson.Parse(document.ToJson(OpenApiSpecVersion.V3_1));
 
-        round.Security.Should().ContainSingle();
-        round.Security[0].Schemes.Should().ContainKey("api_key");
-        round.Components!.SecuritySchemes.Should().ContainKey("api_key");
-        round.Components.SecuritySchemes["api_key"].Type.Should().Be(SecuritySchemeType.ApiKey);
+        round.Security.ShouldHaveSingleItem();
+        round.Security[0].Schemes.ShouldContainKey("api_key");
+        round.Components!.SecuritySchemes.ShouldContainKey("api_key");
+        round.Components.SecuritySchemes["api_key"].Type.ShouldBe(SecuritySchemeType.ApiKey);
     }
 
     private static OpenApiDocument BuildSampleDocument(OpenApiSpecVersion version)

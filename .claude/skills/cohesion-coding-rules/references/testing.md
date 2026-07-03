@@ -33,7 +33,9 @@ public void Cache_OnMiss_ShouldReturnNull()
 }
 ```
 
-## Assertions — Shouldly or FluentAssertions
+## Assertions — Shouldly
+
+Shouldly is the single assertion library for the repo.
 
 ```csharp
 // ✅ Shouldly
@@ -41,17 +43,15 @@ result.ShouldNotBeNull();
 result.Count.ShouldBe(5);
 result.ShouldContain(x => x.Id == "123");
 
-// ✅ FluentAssertions
+// ❌ FluentAssertions — forbidden (v8+ moved to a paid commercial license; migrated out 2026-07)
 result.Should().NotBeNull();
-result.Count.Should().Be(5);
-result.Should().Contain(x => x.Id == "123");
 
 // ❌ Avoid traditional Assert
 Assert.NotNull(result);
 Assert.Equal(5, result.Count);
 ```
 
-Pick one library per project and stay consistent within that project.
+Caveat: Shouldly's string `ShouldContain`/`ShouldNotContain` default to case-INSENSITIVE comparison. Pass `Case.Sensitive` when asserting exact fragments (e.g., serialized JSON).
 
 ## Test folder layout
 

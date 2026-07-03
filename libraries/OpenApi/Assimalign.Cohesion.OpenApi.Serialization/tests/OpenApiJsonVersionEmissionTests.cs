@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Serialization.Tests;
@@ -12,8 +12,8 @@ public class OpenApiJsonVersionEmissionTests
 
         var json = document.ToJson(OpenApiSpecVersion.V3_0, indented: false);
 
-        json.Should().Contain("\"type\":\"string\"");
-        json.Should().Contain("\"nullable\":true");
+        json.ShouldContain("\"type\":\"string\"", Case.Sensitive);
+        json.ShouldContain("\"nullable\":true", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: 3.1 nullable uses a type array")]
@@ -23,8 +23,8 @@ public class OpenApiJsonVersionEmissionTests
 
         var json = document.ToJson(OpenApiSpecVersion.V3_1, indented: false);
 
-        json.Should().Contain("\"type\":[\"string\",\"null\"]");
-        json.Should().NotContain("nullable");
+        json.ShouldContain("\"type\":[\"string\",\"null\"]", Case.Sensitive);
+        json.ShouldNotContain("nullable", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: 3.0 exclusive bounds use the boolean form")]
@@ -34,8 +34,8 @@ public class OpenApiJsonVersionEmissionTests
 
         var json = document.ToJson(OpenApiSpecVersion.V3_0, indented: false);
 
-        json.Should().Contain("\"maximum\":10");
-        json.Should().Contain("\"exclusiveMaximum\":true");
+        json.ShouldContain("\"maximum\":10", Case.Sensitive);
+        json.ShouldContain("\"exclusiveMaximum\":true", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: 3.1 exclusive bounds use the numeric form")]
@@ -45,8 +45,8 @@ public class OpenApiJsonVersionEmissionTests
 
         var json = document.ToJson(OpenApiSpecVersion.V3_1, indented: false);
 
-        json.Should().Contain("\"exclusiveMaximum\":10");
-        json.Should().NotContain("\"exclusiveMaximum\":true");
+        json.ShouldContain("\"exclusiveMaximum\":10", Case.Sensitive);
+        json.ShouldNotContain("\"exclusiveMaximum\":true", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: 3.0 omits info.summary")]
@@ -55,8 +55,8 @@ public class OpenApiJsonVersionEmissionTests
         var document = Minimal(OpenApiSpecVersion.V3_0);
         document.Info.Summary = "Short summary";
 
-        document.ToJson(OpenApiSpecVersion.V3_0, indented: false).Should().NotContain("\"summary\"");
-        document.ToJson(OpenApiSpecVersion.V3_1, indented: false).Should().Contain("\"summary\":\"Short summary\"");
+        document.ToJson(OpenApiSpecVersion.V3_0, indented: false).ShouldNotContain("\"summary\"", Case.Sensitive);
+        document.ToJson(OpenApiSpecVersion.V3_1, indented: false).ShouldContain("\"summary\":\"Short summary\"", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: 3.0 omits webhooks")]
@@ -65,8 +65,8 @@ public class OpenApiJsonVersionEmissionTests
         var document = Minimal(OpenApiSpecVersion.V3_0);
         document.Webhooks["onData"] = new OpenApiPathItem();
 
-        document.ToJson(OpenApiSpecVersion.V3_0, indented: false).Should().NotContain("webhooks");
-        document.ToJson(OpenApiSpecVersion.V3_1, indented: false).Should().Contain("\"webhooks\"");
+        document.ToJson(OpenApiSpecVersion.V3_0, indented: false).ShouldNotContain("webhooks", Case.Sensitive);
+        document.ToJson(OpenApiSpecVersion.V3_1, indented: false).ShouldContain("\"webhooks\"", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Serialization] - Emit: openapi field is the canonical version string")]
@@ -74,7 +74,7 @@ public class OpenApiJsonVersionEmissionTests
     {
         var document = Minimal(OpenApiSpecVersion.V3_2);
 
-        document.ToJson(OpenApiSpecVersion.V3_2, indented: false).Should().Contain("\"openapi\":\"3.2.0\"");
+        document.ToJson(OpenApiSpecVersion.V3_2, indented: false).ShouldContain("\"openapi\":\"3.2.0\"", Case.Sensitive);
     }
 
     private static OpenApiDocument Minimal(OpenApiSpecVersion version) => new()
