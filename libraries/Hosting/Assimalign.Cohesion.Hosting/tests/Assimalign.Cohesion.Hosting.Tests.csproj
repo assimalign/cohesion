@@ -8,6 +8,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />

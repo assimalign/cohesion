@@ -19,12 +19,12 @@ public static partial class HostExtensions
         /// <summary>
         /// Converts a <see cref="IHost"/> to run as a <see cref="IHostService"/>.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>A service that starts the host and stops it when the service is stopped.</returns>
         public IHostService AsService()
         {
             ArgumentNullException.ThrowIfNull(host);
 
-            return new HostToServiceWrapper(host);
+            return new HostToServiceWrapper(host, host.Context);
         }
     }
 
