@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-03 | #762 | _pending_ | Stage 1 · Lane D · P001. `WebApplicationServer` rewritten: per-connection dispatch (idle keep-alive no longer starves others), application-exception isolation, connection+context disposal, graceful `StopAsync` drain, optional `MaxConcurrentConnections`. Web.Hosting `docs/DESIGN.md` added. **Unblocks most of Lane E** (#763, #776–#781, #783–#785, #793–#794). |
+| 2026-07-03 | #762 | [#803](https://github.com/assimalign/cohesion/pull/803) | Stage 1 · Lane D · P001. `WebApplicationServer` rewritten: per-connection dispatch (idle keep-alive no longer starves others), application-exception isolation, connection+context disposal, graceful `StopAsync` drain, optional `MaxConcurrentConnections`. Web.Hosting `docs/DESIGN.md` added. **Unblocks most of Lane E** (#763, #776–#781, #783–#785, #793–#794). |
 
 ---
 
