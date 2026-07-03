@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-03 | #760 | _PR pending_ | Stage 0 · Lane B. Http.Forms trued up: README rewritten to match the shipped parsers; `context.ReadFormAsync(...)` + `request.Form` setter added; urlencoded charset parameter honored (AOT-safe allow-list); unused `BufferBody`/`BufferBodyLengthLimit` options removed and `MultipartBoundaryLengthLimit` enforced; `docs/DESIGN.md` created; `Web.Forms` `UseForms()` middleware tests added. |
+| 2026-07-03 | #760 | [#801](https://github.com/assimalign/cohesion/pull/801) | Stage 0 · Lane B. Http.Forms trued up: README rewritten to match the shipped parsers; `context.ReadFormAsync(...)` + `request.Form` setter added; urlencoded charset parameter honored (AOT-safe allow-list); unused `BufferBody`/`BufferBodyLengthLimit` options removed and `MultipartBoundaryLengthLimit` enforced; `docs/DESIGN.md` created; `Web.Forms` `UseForms()` middleware tests added. |
 
 ---
 
