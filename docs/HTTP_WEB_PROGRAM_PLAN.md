@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #761 | [#799](https://github.com/assimalign/cohesion/pull/799) | Stage 0 · Lane D — deleted dead pre-redesign `Web.ApplicationModel/src`; csproj + slnx preserved for the Phase-4 Layer-3d manifest rebuild (`libraries/ApplicationModel/DESIGN.md` §9.4). No `Assimalign.Cohesion.Transports` code references remain. |
 
 ---
 
