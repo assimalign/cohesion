@@ -1,16 +1,20 @@
-﻿using Assimalign.Cohesion.Hosting;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Net.LoadBalancer;
+namespace Assimalign.Cohesion.LoadBalancer;
+
+using Assimalign.Cohesion.Hosting;
 
 public static class HostBuilderExtensions
 {
-    public static IHostBuilder AddLoadBalancer(this IHostBuilder builder)
+    extension(IHostBuilder builder)
     {
-        return builder;
+        /// <summary>
+        /// Adds the load balancer resource to the host.
+        /// </summary>
+        /// <returns>The host builder for chaining.</returns>
+        public IHostBuilder AddLoadBalancer()
+        {
+            return builder;
+        }
     }
 }

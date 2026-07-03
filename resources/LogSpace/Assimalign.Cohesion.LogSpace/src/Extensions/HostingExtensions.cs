@@ -1,15 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.LogSpace;
+
+using Assimalign.Cohesion.Hosting;
 
 public static class HostingExtensions
 {
-    public static IHostBuilder AddLogSpace(this IHostBuilder builder)
+    extension(IHostBuilder builder)
     {
-        return builder;
+        /// <summary>
+        /// Adds the LogSpace resource to the host.
+        /// </summary>
+        /// <returns>The host builder for chaining.</returns>
+        public IHostBuilder AddLogSpace()
+        {
+            return builder;
+        }
     }
 }
