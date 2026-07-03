@@ -6,4 +6,4 @@ through the core `IHttpRequestInterceptor` seam — observe the effective cap an
 per request before the body is read, with the wire-level enforcement staying in the transport.
 
 - `docs/OVERVIEW.md` — purpose, dependencies, usage
-- `docs/DESIGN.md` — design rationale and migration plan
+- `docs/DESIGN.md` — design rationale and transport integration

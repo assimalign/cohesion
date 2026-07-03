@@ -166,34 +166,75 @@ and must not be normalized away:
 Pure logic over the existing collections — no reflection, no codegen. Fully
 AOT/trim safe.
 
-## Typed request-limit features
+## Request-parse interception seam
 
-### `IHttpMaxRequestBodySizeFeature`
+### What it is
 
-The maximum request body size a server will accept is a per-request concern:
-the connection-wide default is a deployment policy, but an endpoint that
-legitimately accepts large uploads (or one that must reject anything but a tiny
-payload) needs to raise or lower the cap for *its* requests only. Rather than
-bake a mutable knob into `IHttpRequest`, the cap is exposed as a typed feature
-on `IHttpContext.Features` — the established extensibility seam (the same shape
-as sessions, auth, extended CONNECT).
+`IHttpRequestInterceptor` + `HttpRequestInterceptorContext` +
+`HttpRequestRejectedException` form the server-side seam that lets feature
+packages participate while a request is being **parsed** — before it is
+dispatched — without the server transport referencing any feature package:
 
-- `MaxRequestBodySize` is a `long?` (octets, `null` = unbounded).
-- `IsReadOnly` flips to `true` once the transport begins reading the body, after
-  which assigning `MaxRequestBodySize` throws. This mirrors Kestrel's
-  `IHttpMaxRequestBodySizeFeature` lifecycle so consumers can rely on the same
-  contract: adjust the cap *before* the body is read, observe it any time.
+- `OnRequestHead(context)` runs after the head is parsed and before the body is
+  surfaced: attach typed features, adjust the body-size knob, or throw the
+  typed rejection.
+- `Stream OnRequestBody(context, body)` runs after the body stream is
+  materialized: return the stream unchanged or a wrapper (read-only decorators,
+  digest hashing, decompression). Wrappers own what they wrap.
 
-The contract lives here in the core so it is version-neutral (any transport can
-implement it); the implementation is transport-internal. In the HTTP/1.1
-transport today the body is fully buffered before the request is dispatched, so
-the transport seeds the feature with the connection-wide default, reads the body
-under that cap, and then marks the feature read-only — the writable pre-read
-window that lets middleware adjust the cap opens up once the streaming-body
-rework (a deferred follow-up) moves the read after dispatch. Even today the
-feature is the honest source of the *effective* cap for the exchange.
+Both members are default-implemented, following this library's recorded
+"interface evolution via a default member" practice — implementers override
+only the hook they need, and future hook points (a trailer hook is the known
+candidate; an async variant is the known escape hatch) are added the same way
+without breaking anyone.
+
+### Why the seam is core and the features are not
+
+This is the same taxonomy as `IHttpFeature` vs. the feature packages: **seams
+live in core, features live in packages**. The interceptor contract is generic
+infrastructure every parse-time feature shares (`Http.RequestLimits` today;
+digest fields and request decompression are the designed next consumers), so it
+sits here; the concrete `IHttpMaxRequestBodySizeFeature` was deliberately moved
+*out* of this core into `Assimalign.Cohesion.Http.RequestLimits`. Registration
+is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
+`Http.Connections`) because *when* hooks run is a transport decision; *what*
+they can do is defined here.
+
+Unlike the ExtendedConnect Items-key bridge (one-way, post-parse, no shared
+symbol), this seam is a compile-time contract — justified specifically by
+mutation the transport must enforce mid-parse, pre-dispatch feature attachment,
+and stream replacement, none of which a loosely-typed key can express. New
+capabilities that only need one-way post-parse publication should still prefer
+the Items-key bridge.
+
+### Contract details that are load-bearing
+
+- **`Headers` is a read-only view** (`HttpHeaderCollection.AsReadOnly()`, a
+  shared-store view with fail-loud mutation). The transport derives framing,
+  keep-alive, and host resolution from the same collection after hooks run;
+  a mutable view would be a self-inflicted request-smuggling primitive.
+- **The context is the body-size cell.** `MaxRequestBodySize` (validated,
+  `null` = unbounded) is the value the transport enforces;
+  `FreezeMaxRequestBodySize()` / `IsMaxRequestBodySizeReadOnly` are the
+  transport-owned freeze. Write-through features project this knob rather than
+  copying it, so when the streaming-body rework moves the freeze from
+  buffered-materialization to first-byte-read, no feature contract changes.
+  The transport keeps the context alive until the body is consumed — the
+  documented lifetime is "until the request body is consumed or the exchange
+  completes", not "until dispatch".
+- **Interceptor instances are shared across all connections/requests** and must
+  be stateless; per-request state goes in `Features`. Hooks are CPU-only.
+- **Rejection is typed.** `HttpRequestRejectedException` carries a 4xx/5xx
+  status the transport answers before closing. It exists because an untyped
+  `IOException`/`InvalidDataException` thrown from a hook is indistinguishable
+  from a wire failure and would be silently swallowed by the transport's
+  failure classifier.
+- **Evolution rules:** v1 context members are `required` (init-only, except the
+  deliberately-mutable body-size knob); all future members must be optional
+  with defaults so existing construction sites (including test fakes — the
+  context is deliberately constructible in tests) keep compiling.
 
 ### AOT posture
 
-A plain interface resolved through the existing `IHttpFeatureCollection`
-dictionary lookup — no reflection, no codegen.
+Interface dispatch plus the existing dictionary-backed feature lookup — no
+reflection, no codegen.

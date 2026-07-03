@@ -1,11 +1,5 @@
 # Assimalign.Cohesion.Http.RequestLimits — Design
 
-> **Status: scaffold.** The package and the core interception seam it consumes are scaffolded
-> and unit-tested, but the server transport does not invoke interceptors yet and
-> `IHttpMaxRequestBodySizeFeature` still lives in core `Assimalign.Cohesion.Http`. The
-> "Migration plan" section below is the implementation contract for finishing the move; this
-> banner is deleted when that lands.
-
 Per-request limit features for the Cohesion HTTP server, starting with the typed
 max-request-body-size feature. The package owns the feature contract and its implementation and
 references only core `Assimalign.Cohesion.Http` — the transport never references this package.
@@ -73,10 +67,11 @@ bridge.
 
 Register this package's interceptor **first**. Its head hook attaches the feature; later
 interceptors' head hooks may then look it up (or simply write the context knob — same store).
-The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every request carries
-the typed feature, preserving the behavior the transport shipped when it seeded the feature
-itself; the raw transport remains lean (zero interceptors ⇒ no per-request context or feature
-allocation).
+The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every HTTP/1.1
+request carries the typed feature — matching the protocol coverage of the transport-seeded
+predecessor, since h1 is the only parse path that invokes interceptors today (see "Protocol
+coverage" below); the raw transport remains lean (zero interceptors ⇒ no per-request context or
+feature allocation).
 
 ## Feature identity
 
@@ -84,31 +79,33 @@ allocation).
 transport historically used, because the string is the feature collection's dictionary key and
 any name-keyed consumer would otherwise silently miss.
 
-## Migration plan (implementation contract for the un-scaffolded half)
+## Transport integration (as implemented)
 
-1. **Move the contract**: relocate `IHttpMaxRequestBodySizeFeature` from
-   `Assimalign.Cohesion.Http/src/Abstractions/` into this package's `src/`. Both assemblies use
-   the `Assimalign.Cohesion.Http` namespace (recorded csproj deviation), so the move is
-   source-compatible for consumers; only project references change.
-2. **Rewire the transport** (`Http.Connections`): delete its internal
-   `HttpMaxRequestBodySizeFeature` and all seeding in `Http1MessageReader` (create/attach/
-   freeze); add `HttpConnectionListenerOptions.Interceptors`, snapshotted to an array when the
-   listener is constructed (post-start mutation must not race the accept loops); build the
-   `HttpRequestInterceptorContext` per request (read-only `Headers` view via `AsReadOnly()`),
-   run head hooks after the head parse, enforce `context.MaxRequestBodySize` (413), freeze the
-   knob at body consumption, chain body hooks over the materialized stream, and flow the
-   feature collection into the context through the already-present-but-unused `features`
-   constructor parameters. Catch `HttpRequestRejectedException` ahead of the wire-failure
-   classifier and answer via the minimal-status-response writer. Zero registered interceptors
-   must keep the exact pre-seam fast path (no context, no feature, no hook dispatch).
-3. **Clean the stale artifacts**: the `CreateFeatures` comment in `TransportHttpContext`
-   (lines 27–34), the dangling `<see cref="HttpConnectionListenerOptions.CreateFeatures"/>` at
-   its `DisposeAsync` doc, and the Connections `DESIGN.md` "Per-request feature injection"
-   section — all describe a factory that never shipped; interceptors supersede it.
-4. **Web.Hosting**: register `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` first on
-   the options by default.
-5. **Tests**: transport-level tests move from "transport seeds the feature" to "interceptor
-   attaches the feature"; keep the h1 limit-rejection suite intact (enforcement is unchanged).
+The migration from the original in-core placement is complete; the pieces sit as follows:
+
+1. **Contract here.** `IHttpMaxRequestBodySizeFeature` lives in this package's `src/`. Both
+   assemblies use the `Assimalign.Cohesion.Http` namespace (recorded csproj deviation), so the
+   move was source-compatible for consumers; only project references changed.
+2. **Transport enforces, never seeds.** `Http.Connections` carries no body-size feature of its
+   own: `HttpConnectionListenerOptions.Interceptors` is snapshotted to an array when the
+   listener is constructed (post-construction registrations are inert — no racing the accept
+   loops); the h1 parser builds one `HttpRequestInterceptorContext` per request (read-only
+   `Headers` view via `AsReadOnly()`), runs head hooks after the head parse, freezes the knob,
+   enforces whatever cap remains (413), chains body hooks over the materialized stream, and
+   flows the hook-populated feature collection into the exchange through the context
+   constructors' `features` parameters. `HttpRequestRejectedException` is caught ahead of the
+   wire-failure classifier and answered via the minimal-status-response writer. Zero registered
+   interceptors keeps the exact pre-seam fast path (no context, no feature, no hook dispatch).
+3. **Stale artifacts cleaned.** The never-shipped `CreateFeatures` factory references in
+   `TransportHttpContext` and the Connections `DESIGN.md` were replaced by the interceptor
+   documentation.
+4. **Web.Hosting installs by default.** `WebApplicationServerBuilder` registers
+   `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` ahead of all user configuration,
+   so it holds interceptor slot 0.
+5. **Tests.** The transport suite exercises the seam with local doubles (attach / cap-raise /
+   cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip / snapshot inertness);
+   this package's suite covers the feature contract; the h1 limit-rejection suite is unchanged
+   because enforcement never moved.
 
 ## Protocol coverage (honest gaps)
 
@@ -118,8 +115,9 @@ any name-keyed consumer would otherwise silently miss.
   decode), so on those protocols a head hook runs before the body is *exposed*, not before it is
   *received* — and no body-size cap is enforced there today at all. h2/h3 abuse limits are
   tracked separately (#764, #750); wiring the hook invocation into their context-construction
-  sites is part of the implementation follow-ups. Nothing in this package's docs should be read
-  as implying h2/h3 body protection exists yet.
+  sites is tracked follow-up work (the seam is h1-only at runtime, matching the pre-seam
+  behavior). Nothing in this package's docs should be read as implying h2/h3 body protection
+  exists yet.
 - Data-rate limits and the middleware-visible pre-read override window depend on the
   streaming-body rework (#810).
 

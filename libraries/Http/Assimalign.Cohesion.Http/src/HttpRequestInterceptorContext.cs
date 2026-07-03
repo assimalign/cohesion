@@ -21,9 +21,10 @@ namespace Assimalign.Cohesion.Http;
 /// primitive). Interceptors publish derived values through <see cref="Features"/> instead.
 /// </para>
 /// <para>
-/// All required members are init-only and set by the transport. Members added in future
-/// versions will be optional with sensible defaults so existing construction sites (including
-/// test fakes) keep compiling.
+/// All required members are set by the transport at construction; every one is init-only except
+/// <see cref="MaxRequestBodySize"/>, whose continued mutability is the point of the knob.
+/// Members added in future versions will be optional with sensible defaults so existing
+/// construction sites (including test fakes) keep compiling.
 /// </para>
 /// </remarks>
 public sealed class HttpRequestInterceptorContext

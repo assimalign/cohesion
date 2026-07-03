@@ -81,3 +81,35 @@ the transport's streaming-body rework.
 No reflection, no codegen, no dynamic activation. The binder is straight-line
 `GetValue` / `TryParse` calls; endpoints are wired through the already-AOT-safe
 TCP convenience overloads.
+
+## Default request-parse interceptors
+
+### What it is
+
+When the web host composes the `HttpConnectionListener`, it installs the
+default request-parse interceptors **before** any user `UseServer`
+configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
+Today that is one interceptor: `Http.RequestLimits`'
+max-request-body-size interceptor, which occupies slot 0 of the interceptor
+order so every HTTP/1.1 request carries the typed
+`IHttpMaxRequestBodySizeFeature` and user-registered interceptors' head hooks
+can observe it. HTTP/1.1 is currently the only protocol whose parse path
+invokes interceptors — HTTP/2 and HTTP/3 exchanges do not carry the feature
+yet (see the transport's protocol-coverage notes); wiring those paths is
+tracked follow-up work.
+
+### Why default-on, and why here
+
+The transport itself stays lean — with zero interceptors it allocates no
+per-request interception state at all — so the "h1 requests always have the
+typed feature" guarantee is a *hosting* policy, not a transport one. It lives
+here because this is the composition root: apps that want a leaner pipeline can
+inspect or clear `HttpConnectionListenerOptions.Interceptors` in their own
+`UseServer` callback (user configurations run after the defaults), which keeps
+the default overridable without a dedicated opt-out knob.
+
+### Non-goals
+
+No other interceptor ships by default. Parse-time features under design
+(digest fields, request decompression) register through the same seam when
+their packages land, but each is an explicit opt-in.

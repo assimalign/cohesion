@@ -41,6 +41,25 @@ public sealed class HttpConnectionListenerOptions
     public HttpServerLimits Limits { get; } = new HttpServerLimits();
 
     /// <summary>
+    /// Gets the ordered list of request-parse interceptors invoked while each request is being
+    /// read, before it is dispatched to the application. See
+    /// <see cref="IHttpRequestInterceptor"/> for the hook contract.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;
+    /// mutations after that point have no effect on the listener. A registered instance is shared
+    /// across every connection and request the listener serves, so implementations must be
+    /// stateless and thread-safe — per-request state belongs in the exchange's feature collection.
+    /// </para>
+    /// <para>
+    /// When the list is empty the transport takes a fast path with no per-request interception
+    /// state allocated at all.
+    /// </para>
+    /// </remarks>
+    public IList<IHttpRequestInterceptor> Interceptors { get; } = new List<IHttpRequestInterceptor>();
+
+    /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
     /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.

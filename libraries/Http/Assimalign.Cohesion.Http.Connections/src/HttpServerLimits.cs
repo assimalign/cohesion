@@ -87,8 +87,10 @@ public sealed class HttpServerLimits
     /// to leave the body size unbounded. A request whose <c>Content-Length</c> declaration (or
     /// accumulated chunked body) exceeds this bound is rejected with <c>413 Content Too Large</c>
     /// (RFC 9110 §15.5.14). Defaults to <c>30000000</c> (~28.6 MB). This is the connection-wide
-    /// default; an endpoint or middleware may raise or lower it per request through the typed
-    /// <see cref="Assimalign.Cohesion.Http.IHttpMaxRequestBodySizeFeature"/>.
+    /// default, seeded into each request's parse context; a registered
+    /// <see cref="Assimalign.Cohesion.Http.IHttpRequestInterceptor"/> may raise or lower the cap
+    /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
+    /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>).
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is negative.</exception>
     public long? MaxRequestBodySize

@@ -6,8 +6,9 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transport seeds this feature on every request with the connection-wide default
-/// (the listener's configured maximum request body size). An endpoint or middleware can read
+/// The max-request-body-size interceptor (<see cref="HttpRequestLimits"/>) attaches this feature
+/// on every request as a write-through view over the parse context's body-size knob — the value
+/// the transport actually enforces. An endpoint or middleware can read
 /// <see cref="MaxRequestBodySize"/> to discover the effective cap, or assign it &#8212; to raise
 /// the cap for an endpoint that legitimately accepts large uploads, or lower it for one that
 /// must not &#8212; provided the request body has not yet begun to be read
@@ -15,7 +16,7 @@ namespace Assimalign.Cohesion.Http;
 /// </para>
 /// <para>
 /// A value of <see langword="null"/> means the body size is unbounded for this request. Once the
-/// transport begins reading the request body it makes the feature read-only, after which assigning
+/// transport begins reading the request body the feature becomes read-only, after which assigning
 /// <see cref="MaxRequestBodySize"/> throws; this mirrors Kestrel's
 /// <c>IHttpMaxRequestBodySizeFeature</c> contract so callers can rely on the same lifecycle.
 /// </para>

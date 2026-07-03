@@ -114,29 +114,6 @@ public class Http1ServerLimitsTests
         httpContext.Request.Path.Value.ShouldBe("/widgets");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should attach a read-only max-request-body-size feature seeded with the effective cap")]
-    public async Task Http1_OnRequest_ShouldAttachMaxRequestBodySizeFeature()
-    {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
-            "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 1234;
-
-        TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
-
-        await using HttpConnectionListener listener = new(options);
-        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
-        IHttpContext httpContext = await ReadSingleContextAsync(context);
-
-        IHttpMaxRequestBodySizeFeature? feature = httpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
-        feature.ShouldNotBeNull();
-        feature!.MaxRequestBodySize.ShouldBe(1234);
-        // The body has already been buffered, so the effective cap is fixed for the exchange.
-        feature.IsReadOnly.ShouldBeTrue();
-        Should.Throw<InvalidOperationException>(() => feature.MaxRequestBodySize = 5);
-    }
-
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Timeouts: Should reclaim a slow-header (Slowloris) connection with 408")]
     public async Task Http1_OnSlowHeaders_ShouldRespond408AndDrop()
     {

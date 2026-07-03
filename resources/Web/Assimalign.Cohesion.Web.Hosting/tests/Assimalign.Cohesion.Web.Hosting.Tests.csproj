@@ -6,7 +6,9 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 	</ItemGroup>
 	<ItemGroup>

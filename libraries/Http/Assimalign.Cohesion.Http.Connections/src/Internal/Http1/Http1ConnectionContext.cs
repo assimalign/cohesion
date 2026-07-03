@@ -13,11 +13,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
     private readonly HttpServerLimits _limits;
+    private readonly IHttpRequestInterceptor[] _interceptors;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
         : base(connection, isSecure)
     {
         _limits = limits;
+        _interceptors = interceptors;
     }
 
     /// <summary>
@@ -94,6 +96,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 ConnectionInfo,
                 GetScheme(),
                 _limits,
+                _interceptors,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);
 
@@ -104,6 +107,16 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // RFC 9110 §15.5 — a request that violates a configured limit gets the matching
             // status response (414 / 431 / 413) before the connection is closed, rather than a
             // silent drop, so a conformant client learns why.
+            await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (HttpRequestRejectedException rejection)
+        {
+            // A request-parse interceptor rejected the request. Caught explicitly — ahead of the
+            // wire-level classifier — so a rejection is always answered with its 4xx/5xx status
+            // rather than being silently swallowed. The connection is not reused afterwards: the
+            // request's remaining wire state is indeterminate, so keep-alive would desynchronize
+            // the framing.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
             return null;
         }

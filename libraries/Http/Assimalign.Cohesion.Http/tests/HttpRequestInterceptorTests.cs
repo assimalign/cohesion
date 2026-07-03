@@ -83,6 +83,31 @@ public class HttpRequestInterceptorTests
         view.AsReadOnly().ShouldBeSameAs(view);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - Headers: Multi-valued header arrays escaping a read-only view should be defensive copies")]
+    public void Headers_EscapedArrays_ShouldBeDefensiveCopies()
+    {
+        // Repeated field lines are folded into an array-backed value (as the h1 header parser
+        // does). If ToArray()/the implicit conversion returned the live backing array, a caller
+        // holding only the read-only view could rewrite header values in place, bypassing the
+        // fail-loud guard — a framing-desync primitive.
+        HttpHeaderKey key = new("X-Multi");
+        HttpHeaderCollection headers = new();
+        headers[key] = "first";
+        headers[key] = HttpHeaderValue.Concat(headers[key], "second");
+
+        HttpHeaderCollection view = headers.AsReadOnly();
+
+        string?[] escaped = view[key].ToArray();
+        escaped.Length.ShouldBe(2);
+        escaped[1] = "tampered";
+        headers[key].ToArray()[1].ShouldBe("second");
+
+        string?[]? viaImplicit = view[key];
+        viaImplicit.ShouldNotBeNull();
+        viaImplicit![0] = "tampered";
+        headers[key].ToArray()[0].ShouldBe("first");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - RejectedException: Should accept only error statuses")]
     [InlineData(400)]
     [InlineData(431)]

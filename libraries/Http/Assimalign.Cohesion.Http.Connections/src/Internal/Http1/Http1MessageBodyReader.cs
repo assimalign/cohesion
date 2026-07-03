@@ -31,8 +31,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 ///   <item><description>Chunk-ext fields are stripped per RFC 9112 §7.1.1 (a recipient
 ///   MAY ignore them). They are not surfaced to the application layer.</description></item>
 ///   <item><description>The body is capped at the effective per-request maximum body size
-///   (<c>maxBodySize</c>, sourced from <see cref="HttpServerLimits.MaxRequestBodySize"/> and the
-///   per-request <see cref="Assimalign.Cohesion.Http.IHttpMaxRequestBodySizeFeature"/>) so a
+///   (<c>maxBodySize</c>, seeded from <see cref="HttpServerLimits.MaxRequestBodySize"/> and
+///   adjustable by request-parse interceptors via
+///   <see cref="HttpRequestInterceptorContext.MaxRequestBodySize"/>) so a
 ///   malicious peer cannot send Content-Length: 2^63 and exhaust the heap. A <see langword="null"/>
 ///   cap leaves the body unbounded; an exceeded cap is rejected with 413.</description></item>
 /// </list>
