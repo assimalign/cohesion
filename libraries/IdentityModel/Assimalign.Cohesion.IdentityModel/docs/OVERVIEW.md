@@ -25,14 +25,22 @@ Epic `[L01.01.12]` (#105) is in delivery. Currently shipped:
 - Family design, namespace map, ownership boundaries, and dependency rules
   (`docs/DESIGN.md`), enforced by architecture tests in
   `Assimalign.Cohesion.IdentityModel.Tests`.
-- Legacy thin identity markers (`IIdentityObject`, `IUserIdentityObject`,
-  `IApplicationIdentityObject`, `IdentityKind`) — replaced by the canonical
-  domain model as feature `[L01.01.12.02]` lands.
+- The canonical identity domain model (`[L01.01.12.02]`), replacing the
+  legacy thin markers: `IIdentitySubject`/`IdentitySubject` with actor
+  delegation chains, `SubjectIdentifier` + `SubjectIdentifierFormats`,
+  `IdentityKind` (with an honest `Unknown` default), the typed claim layer
+  (`IIdentityClaim`, `IdentityClaimValue` + `IdentityValueKind`,
+  `IdentityClaimProvenance`, `IIdentityClaimCollection`,
+  `IdentityAttribute`, `IdentityClaimTypes`), credentials
+  (`IdentityCredential` + kind/state), and the authentication layer
+  (`AuthenticationProtocol`, `AuthenticationContext`,
+  `AuthenticationSession`, `AuthenticationResult`, `AuthenticationFailure`),
+  plus the `IdentityModelException` area root and claim-collection
+  `extension(…)` accessors.
 
-Remaining features land in dependency order: canonical domain model, shared
-protocol abstractions, OIDC branch, SAML branch, then token-package
-alignment and cross-protocol normalization. See the delivery roadmap table
-in `docs/DESIGN.md`.
+Remaining features land in dependency order: shared protocol abstractions,
+OIDC branch, SAML branch, then token-package alignment and cross-protocol
+normalization. See the delivery roadmap table in `docs/DESIGN.md`.
 
 ## Scope
 
@@ -64,6 +72,12 @@ None (BCL only). The rest of the family depends one-way on this package:
 - `IdentityModelNamespaceAlignmentTests` — every public type in every family
   assembly lives under its assembly-name namespace, keeping the documented
   namespace map honest.
+- Domain-model suites — claim value shapes, snapshot/defensive-copy and
+  depth-cap invariants, subject kind differentiation and actor chains,
+  identifier equality semantics, credential and session lifecycle validity,
+  result invariants, and `CanonicalModelFidelityTests` proving the same
+  principal maps from OIDC-shaped and SAML-shaped data with provenance
+  intact.
 
-Domain-model, protocol-contract, and compliance-fixture suites are added by
-the features that introduce those surfaces.
+Protocol-contract and compliance-fixture suites are added by the features
+that introduce those surfaces.

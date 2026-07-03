@@ -115,16 +115,26 @@ every family assembly lives under its assembly-name namespace.
 
 ## Modeling conventions
 
-- **Interface-first public surface.** Consumer-facing contracts are
-  interfaces (`IIdentitySubject`, `IIdentityClaim`, …) with `internal` or
-  `sealed` implementations, following the repo-wide pattern. Data-shaped
-  protocol types (metadata documents, message contracts) may be sealed
-  immutable classes when there is exactly one meaningful shape and an
-  interface would add ceremony without a second implementation ever existing.
+- **Interface-first public surface, with a deliberate carve-out.** Contracts
+  where a second implementation is plausible are interfaces
+  (`IIdentitySubject`, `IIdentityClaim`, `IIdentityClaimCollection` — lazy
+  token-backed implementations are realistic for the token packages).
+  Data-shaped types with exactly one meaningful shape ship as **sealed
+  immutable classes with no interface** (`AuthenticationResult`,
+  `AuthenticationContext`, `AuthenticationSession`, `AuthenticationFailure`,
+  `IdentityCredential`, `IdentityAttribute`): an interface there would make
+  every future member addition a breaking change for implementers, while a
+  sealed class grows additively. This is the growth policy for the family —
+  new members land on sealed classes freely; interface members are
+  one-way doors and get scrutinized accordingly.
 - **Descriptor → immutable model.** Non-trivial models follow the existing
   token pattern: a mutable descriptor for construction, an immutable model
   that snapshots the descriptor. Mutation after construction never leaks into
-  a materialized model.
+  a materialized model — including nested content (`IdentityClaimValue`
+  factories defensively copy arrays, objects, and binary content, which also
+  makes cyclic value graphs unconstructible). Materialization invariant
+  violations throw `IdentityModelException`; malformed direct arguments throw
+  the standard `Argument*` exceptions.
 - **Validation failures are values, not exceptions.** Protocol validation
   produces `…ValidationResult` values carrying normalized diagnostics
   (severity, code, message) rich enough for compliance testing. Exceptions —
@@ -135,6 +145,130 @@ every family assembly lives under its assembly-name namespace.
   (claim names, scopes, NameID formats, binding URIs, status codes) ship as
   constant classes in the owning protocol branch so consumers never
   hand-spell spec values.
+- **Naming.** Family-owned nouns that would collide with neighboring areas
+  carry the `Identity` prefix (`IdentityCredential`, not `Credential` — the
+  Security area is the natural next owner of a credential-shaped type).
+  `Authentication*` and `SubjectIdentifier` are unambiguous domain terms and
+  stay unprefixed.
+
+## Canonical domain model decisions
+
+Feature `[L01.01.12.02]` replaced the thin identity markers with the canonical
+model. The decisions below were stress-tested against OIDC Core / RFC 8693 /
+SAML Core semantics before implementation and are load-bearing; changing any
+of them is a breaking design change, not a refactor.
+
+- **Canonical claim vocabulary = IANA JWT short names.** `IdentityClaimTypes`
+  uses the IANA-registered names (`sub`, `email`, `given_name`, `roles`, …) —
+  the only registry-governed cross-vendor vocabulary. SAML attribute names
+  map onto them during normalization, with originals preserved in
+  `IdentityClaimProvenance` (`OriginalType`, `OriginalNameFormat`,
+  `OriginalValueType`, `OriginalFriendlyName` are distinct fields because
+  real attributes carry them simultaneously). `cnf` is the canonical landing
+  spot for proof-of-possession bindings (OIDC `cnf` / SAML holder-of-key).
+- **Multi-value data canonically = duplicate claims.** One claim type, many
+  claims. `IdentityValueKind.Array` is reserved for genuinely structured
+  single values (for example the OIDC `address` object). Because wire data
+  arrives in both shapes, `IIdentityClaimCollection.GetValues` flattens
+  array-valued claims one level so consumers cannot tell the shapes apart —
+  the fidelity tests pin this. `IdentityAttribute` is a standalone carrier
+  constructed explicitly by protocol branches; the collection deliberately
+  has no lossy claims→attributes grouping (it would merge cross-issuer
+  provenance).
+- **Both `Double` and `Decimal` value kinds exist from day one.** JSON claim
+  numbers live in IEEE-754 double's domain (a valid JWT can carry `1e300`,
+  which overflows `decimal`); SAML `xs:decimal` requires exactness double
+  cannot give. `IdentityValueKind` ordinals are pinned by test because
+  consumers switch exhaustively over them. Normalization rule: integral wire
+  numbers → `Integer`, fractional JSON numbers → `Double`, exact decimal wire
+  values → `Decimal`; `DateTime` is reserved for source-typed dates, never
+  numeric epoch timestamps.
+- **`SubjectIdentifier` equality = (Value, Format, Issuer,
+  RelyingPartyQualifier), ordinal.** This is the SAML Core §8.3 matching
+  scope for persistent identifiers and covers OIDC pairwise sector scoping;
+  omitting the relying-party qualifier would conflate per-SP pseudonyms — a
+  cross-relying-party identity collision. `Issuer` carries the SAML
+  `NameQualifier` (defaulting to the assertion issuer) / OIDC `iss`;
+  `SPProvidedID` is spec-defined as non-matching and rides in `Properties`,
+  which never participates in equality. Absent formats normalize to the
+  `Unspecified` constant at construction so matching is normalization-path
+  independent.
+- **One sealed `IdentitySubject`; kind is data.** `IdentityKind` gained
+  `Unknown = 0` (the honest default): RFC 8693 `act` claims and SAML
+  delegation entries identify actors without declaring user-vs-application,
+  so normalizers must never fabricate a kind. Per-kind subject classes were
+  rejected — they would make every future `IdentityKind` member a new public
+  type and break generic materialization in the token-normalization feature.
+- **Actor chains are single recursive pointers with pinned direction.**
+  `Actor` is the current acting party, acting on behalf of the subject that
+  carries it; `Actor.Actor` is the *prior* actor — the party that previously
+  acted for the same subject before delegation passed on (RFC 8693 nested
+  `act` history-trail semantics: deepest = least recent, informational).
+  Chains are depth-capped at materialization
+  (`IdentitySubject.MaxActorDepth`), which also terminates walks over cyclic
+  third-party `IIdentitySubject` implementations *as seen at construction*.
+  The snapshot guarantee is scoped honestly: descriptor collections and
+  family-owned types are copied, but interface-typed inputs (a foreign
+  `IIdentitySubject` actor, a foreign `IIdentityClaim`) own their own
+  immutability — a hostile implementation that mutates after materialization
+  is its author's defect, and consumers walking untrusted chains should bound
+  their walks with the same depth cap. Per-link delegation metadata (SAML
+  `DelegationInstant`, confirmation method) is represented as claims on the
+  acting subject with provenance.
+- **Sessions correlate; they do not own the principal.**
+  `AuthenticationSession` holds the subject's `SubjectIdentifier` + kind, not
+  the full subject graph — session stores persist and rehydrate sessions, and
+  snapshotted claims would go stale. Single logout is the shaping scenario:
+  a session carries `Protocol`, `Issuer`, and **plural** `ProviderSessionIds`
+  (SAML allows several `SessionIndex` values per session; OIDC `sid` is the
+  single-element case), because provider session ids are only unique per
+  issuer.
+- **`AuthenticationResult` is the platform seam, so it is audit-complete.**
+  It carries provenance (`Protocol`, `Issuer`, `Audience`), evidence linkage
+  (`EvidenceId` = JWT `jti` / SAML assertion id as a string — never a token
+  type, which would invert the family dependency), credential linkage
+  (`CredentialId`), and on failures the `AttemptedSubject` plus the original
+  wire error (`AuthenticationFailure.OriginalCode`, `ErrorUri`). The
+  success/failure invariant (exactly one of `Subject`/`Failure`) is enforced
+  at materialization and surfaced to nullable flow analysis via
+  `[MemberNotNullWhen]`. Provider session data flows through
+  `AuthenticationContext` (`ProviderSessionIds`, `SessionExpiresAt`,
+  `AuthenticatingAuthorities`) so IdentityHub can build the session from the
+  result without side channels.
+- **Expiry is computed, never stored — and states fail closed.** Neither
+  `IdentityCredentialState` nor `AuthenticationSessionState` has an
+  `Expired` member; `IsUsable(at)` / `IsActive(at)` combine administrative
+  state with the temporal window, so there is a single source of truth.
+  Both enums pin `Unknown = 0` as never-usable/never-active — a forgotten
+  state assignment (or a store rehydration that fails to map state) cannot
+  produce a live credential or session. Temporal cross-field guards differ
+  deliberately: a credential's `NotBefore`/`ExpiresAt` come from one source
+  (the credential itself), so a backwards window is a data invariant and
+  materialization rejects it; a session's `ExpiresAt` may be wire-sourced
+  from the *provider's* clock (SAML `SessionNotOnOrAfter`) while `CreatedAt`
+  is local, so an at-or-before-creation expiry is legal, materializes
+  normally, and is simply never active.
+- **`AuthenticationProtocol` is an open vocabulary struct**, not an enum:
+  new protocols must not break the family. Names normalize to trimmed
+  lowercase at construction; `default` is a fully-functional `Unknown` whose
+  `Name` is never null. Well-known values: `oidc`, `oauth2`
+  (client-credentials and other OAuth-only events), `saml2`.
+- **Claim lookup vocabulary is `Contains` / `TryGet` / `GetAll` /
+  `GetValues`.** The token package's `TryGetClaim`/`GetClaims` members adopt
+  this vocabulary verbatim when feature `[L01.01.12.06]` aligns it to the
+  root model, so the family ships one spelling for "find claims by type".
+  Convenience accessors (`GetString`, `HasClaim`) are `extension(…)` members,
+  not interface members.
+- **Aggregated/distributed OIDC claims.** `IIdentityClaim.Issuer` is the
+  canonical carrier for *resolved* third-party-asserted claims. Unresolved
+  `_claim_names`/`_claim_sources` references never enter the canonical
+  collection as claims; the OIDC branch owns their representation.
+- **Properties bags are `IReadOnlyDictionary<string, IdentityClaimValue>`**
+  on models (`AuthenticationResult`, `AuthenticationSession`,
+  `AuthenticationContext`, `IdentityCredential`) — the typed union avoids
+  string-smuggling structured data. `SubjectIdentifier.Properties` is
+  deliberately `string→string`: it carries wire qualifier leftovers only and
+  keeps identifier equality trivially cheap.
 
 ## Error model
 
@@ -239,4 +373,4 @@ a decision recorded here:
 | `[L01.01.12.06]` #604 | Token normalization alignment with the root model. |
 | `[L01.01.12.07]` #608 | JWT package to OIDC grade. |
 | `[L01.01.12.08]` #612 | SAML token package to assertion grade. |
-| `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence. |
+| `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence, and the family's `docs/Assembly/` API reference pages (deferred from earlier features so the reference is written once against the settled surface). |
