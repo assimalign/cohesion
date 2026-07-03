@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #771 | [#805](https://github.com/assimalign/cohesion/pull/805) | Stage 1 / Lane B fan-out prerequisite. `HttpMediaType` + `HttpQuality`, `HttpAcceptParser` (Accept family), `HttpContentNegotiation` (media-type / token / encoding), and the `HttpContentTypes` FrozenDictionary. **In review** — unblocks #149, #746, #777, #779 on merge. |
 
 ---
 
