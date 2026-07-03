@@ -25,6 +25,7 @@ sibling except through the model.
 | `Assimalign.Cohesion.OpenApi.Attributes` | Attribute metadata model | model | Planned (Wave 2) |
 | `Assimalign.Cohesion.OpenApi.SourceGeneration` | AOT-safe attribute discovery → descriptors | attributes, model | Planned (Wave 2) |
 | `Assimalign.Cohesion.OpenApi.Generation` | Generation orchestration | model, serialization, attributes | Planned (Wave 2) |
+| `Assimalign.Cohesion.OpenApi.Compliance.Tests` | Official example corpus, schema-backed conformance, upgrade fixtures | serialization, validation | Planned (Wave 3) |
 
 These boundaries are advisory architecture guidance. They exist to preserve, respectively: additive
 format support (YAML and beyond) without touching the model; source-generator-first, reflection-free
@@ -36,6 +37,11 @@ Web/ApiManager integration seam.
 Supports OpenAPI 3.0.4, 3.1.2, and 3.2.0 with version-aware authoring, serialization, and validation.
 Where schema files and specification text disagree, the specification text is authoritative per the
 OpenAPI Initiative publications.
+
+The **version capability matrix** — which model surface applies to which OpenAPI line — is published in
+[`Assimalign.Cohesion.OpenApi/docs/DESIGN.md`](./Assimalign.Cohesion.OpenApi/docs/DESIGN.md) and enforced
+by `OpenApiVersionCapabilities`, the single source of truth consumed by both serialization (field
+emission) and validation (field placement).
 
 ## Status and roadmap
 

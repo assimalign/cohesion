@@ -32,6 +32,12 @@ the **same** matrix the serializer uses to gate emission. This guarantees the wr
 agree on what each line allows — if a field is omitted on write for a version, using it in that version
 is flagged on validate, from one source of truth.
 
+The rule covers document-level fields, servers, tags, path items (the 3.2 `query` operation and
+`additionalOperations`), every operation reached through `OpenApiOperationWalker` (parameter locations
+and styles, response summaries, media-type streaming fields, content-map references, example
+`dataValue`/`serializedValue`), component security schemes, and the top level of component schemas
+(type arrays, boolean forms, `$ref` siblings, and the 2020-12 keyword vocabulary).
+
 ## Official-schema stage as an extension point
 
 The acceptance criteria call for an official-schema validation stage. A full JSON Schema 2020-12
@@ -50,5 +56,6 @@ Pure model traversal — no reflection, no dynamic code. Trimming- and NativeAOT
 - A JSON Schema conformance engine (extension point only).
 - Cross-document `$ref` resolution. Reference *shape* and internal security-scheme references are
   checked; full external reference resolution is a later concern.
-- Deep version-placement traversal of every nested inline schema. Document-level, component-level, tag,
-  and security-scheme placements are validated; recursive whole-graph schema placement is a follow-up.
+- Deep version-placement traversal of every nested inline schema. Document-level, operation-level,
+  component-level, tag, and security-scheme placements are validated; recursive descent into nested
+  schema graphs (e.g. a gated keyword three properties deep) is a follow-up.

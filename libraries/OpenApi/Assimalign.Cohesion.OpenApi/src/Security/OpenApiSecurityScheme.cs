@@ -32,8 +32,14 @@ public sealed class OpenApiSecurityScheme : IOpenApiReferenceable, IOpenApiExten
     /// <summary>Gets or sets the OAuth flow configurations. Required for <see cref="SecuritySchemeType.OAuth2"/>.</summary>
     public OpenApiOAuthFlows? Flows { get; set; }
 
+    /// <summary>Gets or sets the URL of the OAuth2 authorization server metadata document (RFC 8414). Used with <see cref="SecuritySchemeType.OAuth2"/> (OpenAPI 3.2+).</summary>
+    public string? OAuth2MetadataUrl { get; set; }
+
     /// <summary>Gets or sets the OpenID Connect discovery URI. Required for <see cref="SecuritySchemeType.OpenIdConnect"/>.</summary>
     public string? OpenIdConnectUrl { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the security scheme is deprecated (OpenAPI 3.2+).</summary>
+    public bool Deprecated { get; set; }
 
     /// <inheritdoc/>
     public IDictionary<string, OpenApiNode> Extensions { get; } = new Dictionary<string, OpenApiNode>();

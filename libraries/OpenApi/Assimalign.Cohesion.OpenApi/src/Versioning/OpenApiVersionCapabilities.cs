@@ -35,7 +35,10 @@ public static class OpenApiVersionCapabilities
             or OpenApiFeature.SchemaTypeArray
             or OpenApiFeature.SchemaNumericExclusiveBounds
             or OpenApiFeature.SchemaConst
-            or OpenApiFeature.SchemaExamples => version is OpenApiSpecVersion.V3_1 or OpenApiSpecVersion.V3_2,
+            or OpenApiFeature.SchemaExamples
+            or OpenApiFeature.SchemaExtendedVocabulary
+            or OpenApiFeature.SchemaReferenceSiblingKeywords
+            or OpenApiFeature.SchemaBooleanForm => version is OpenApiSpecVersion.V3_1 or OpenApiSpecVersion.V3_2,
 
         // 3.0-only.
         OpenApiFeature.SchemaNullableKeyword => version is OpenApiSpecVersion.V3_0,
@@ -44,7 +47,21 @@ public static class OpenApiVersionCapabilities
         OpenApiFeature.PathItemAdditionalOperations
             or OpenApiFeature.DocumentSelf
             or OpenApiFeature.TagExtendedMetadata
-            or OpenApiFeature.OAuthDeviceAuthorizationFlow => version is OpenApiSpecVersion.V3_2,
+            or OpenApiFeature.OAuthDeviceAuthorizationFlow
+            or OpenApiFeature.ServerName
+            or OpenApiFeature.PathItemQueryOperation
+            or OpenApiFeature.ParameterQuerystringLocation
+            or OpenApiFeature.ParameterCookieStyle
+            or OpenApiFeature.MediaTypeStreamingFields
+            or OpenApiFeature.MediaTypeReference
+            or OpenApiFeature.ResponseSummary
+            or OpenApiFeature.ExampleDataAndSerializedValues
+            or OpenApiFeature.DiscriminatorDefaultMapping
+            or OpenApiFeature.XmlNodeType
+            or OpenApiFeature.SecuritySchemeOAuth2MetadataUrl
+            or OpenApiFeature.SecuritySchemeDeprecated
+            or OpenApiFeature.ComponentsMediaTypes
+            or OpenApiFeature.SecurityRequirementUriReference => version is OpenApiSpecVersion.V3_2,
 
         _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "Unknown OpenAPI feature.")
     };

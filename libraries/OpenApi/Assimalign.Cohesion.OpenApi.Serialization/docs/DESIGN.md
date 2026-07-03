@@ -47,6 +47,20 @@ path) that is a deliberate and acceptable trade for the format independence.
   fields (e.g. `double? Maximum`) are unaffected because they read integers as numbers; only arbitrary
   `OpenApiNode` values (examples/defaults) can observe the kind change.
 
+### Version-gated schema forms
+
+The 3.1 full-JSON-Schema surfaces get explicit down-level treatment rather than best-effort emission:
+
+- **Boolean schemas** (`BooleanValue`) emit the literals `true`/`false` for 3.1+; a 3.0 target gets the
+  structural equivalents `{}` (true) and `{"not": {}}` (false), since 3.0 has no boolean form.
+- **`$ref` siblings** are kept for 3.1+ and dropped for 3.0, where consumers would ignore them anyway;
+  the validator (not the writer) is responsible for diagnosing the combination on a 3.0 document.
+- **Multi-type unions** emit a type array for 3.1+; a 3.0 target gets the first type only, with the
+  loss flagged by validation rather than silently accepted round-trip damage.
+- **References in `content` maps** (a Media Type Object position, 3.2+) are written verbatim for every
+  target — omitting the member would lose the whole media type, so a dangling-below-3.2 reference is a
+  validation concern, matching how every other referenceable position behaves.
+
 ## AOT posture
 
 `Utf8JsonReader`/`Utf8JsonWriter`/`JsonDocument` only — no `JsonSerializer` reflection, no source
