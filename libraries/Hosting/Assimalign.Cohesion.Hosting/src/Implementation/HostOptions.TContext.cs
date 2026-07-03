@@ -20,7 +20,7 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     public bool StartServicesConcurrently { get; set; }
 
     /// <summary>
-    /// 
+    /// Specify whether the services should be stopped concurrently.
     /// </summary>
     public bool StopServicesConcurrently { get; set; }
 
