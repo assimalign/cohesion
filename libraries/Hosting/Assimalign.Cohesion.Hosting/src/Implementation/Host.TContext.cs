@@ -67,16 +67,13 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             cancellationTokenSource.CancelAfter(_options.StartupTimeout);
         }
 
-        // Ensure we have a shutdown callback registered. This happens when StartAsync is called directly.
-        Context.ShutdownCallback ??= async () =>
-        {
-            await (this as IHost).StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-        };
-
         cancellationToken = cancellationTokenSource.Token;
+
+        // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
+        // RunAsync can unwind. Init has always run by this point, so the shutdown callback
+        // is set; the registration dies with the startup token source.
         cancellationToken.Register(() =>
         {
-            // TODO: Need to change implementation for safer shutdown process
             Context.Shutdown();
         });
 
@@ -171,6 +168,8 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
 
         cancellationToken = cancellationTokenSource.Token;
 
+        await OnStoppingAsync(cancellationToken).ConfigureAwait(false);
+
         List<Exception> exceptions = new();
         bool concurrent = _options.StartServicesConcurrently;
         bool abortOnFirstException = !concurrent;
@@ -213,6 +212,16 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
 
         SetState(HostState.Stopped);
 
+        // Unpark a RunAsync that is waiting on the run signal (the direct StopAsync path),
+        // then reset run-state here in the coordinator - deliberately not in the
+        // OnStoppedAsync hook, so a subclass override that forgets to call base cannot
+        // wedge a later restart.
+        _taskCompletionSource?.TrySetResult(this);
+
+        Reset();
+
+        await OnStoppedAsync(cancellationToken).ConfigureAwait(false);
+
         if (exceptions.Count > 0)
         {
             if (exceptions.Count == 1)
@@ -241,57 +250,68 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
         Init(cancellationToken);
 
-        await (this as IHost).StartAsync(_cancellationTokenSource!.Token).ConfigureAwait(false);
+        // Capture this run's state locally: a direct StopAsync resets the fields while
+        // this method is parked on the run signal.
+        CancellationTokenSource runTokenSource = _cancellationTokenSource!;
+        TaskCompletionSource<Host<TContext>> runCompletionSource = _taskCompletionSource!;
 
-        await _taskCompletionSource!.Task.ConfigureAwait(false);
+        await (this as IHost).StartAsync(runTokenSource.Token).ConfigureAwait(false);
 
-        await (this as IHost).StopAsync(_cancellationTokenSource.Token).ConfigureAwait(false);
+        await runCompletionSource.Task.ConfigureAwait(false);
+
+        // Stop with a fresh token: the run token is cancelled by definition at this point
+        // (its cancellation IS the shutdown signal), so passing it would pre-cancel the
+        // graceful drain. The stop budget comes from ShutdownTimeout inside StopAsync.
+        await (this as IHost).StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// A lifecycle method for Host startup process.
+    /// A lifecycle hook invoked after the host enters <see cref="HostState.Starting"/> and
+    /// before any hosted service is started.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    protected virtual Task OnStartingAsync(CancellationToken cancellationToken)
+    /// <param name="cancellationToken">Aborts the startup if signaled.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
+    protected virtual Task OnStartingAsync(CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// 
+    /// A lifecycle hook invoked after every hosted service has started and the host has
+    /// entered <see cref="HostState.Started"/>.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">Aborts the startup if signaled.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
     protected virtual Task OnStartedAsync(CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// 
+    /// A lifecycle hook invoked after the host enters <see cref="HostState.Stopping"/> and
+    /// before any hosted service is stopped. Use it to begin draining work (connection
+    /// drain, flush, checkpoint) ahead of service shutdown.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">The shutdown budget; signaled when <see cref="HostOptions{TContext}.ShutdownTimeout"/> expires.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
     protected virtual Task OnStoppingAsync(CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// 
+    /// A lifecycle hook invoked after every hosted service has stopped and the host has
+    /// entered <see cref="HostState.Stopped"/>. Run-state has already been reset by the
+    /// coordinator, so overrides need no base call for the host to restart cleanly.
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
+    /// <param name="cancellationToken">The shutdown budget; signaled when <see cref="HostOptions{TContext}.ShutdownTimeout"/> expires.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
     protected virtual Task OnStoppedAsync(CancellationToken cancellationToken = default)
     {
-        _cancellationTokenSource = null;
-        _taskCompletionSource = null;
-        Context.ShutdownCallback = null;
-
-
         return Task.CompletedTask;
     }
 
@@ -316,32 +336,53 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             return;
         }
 
-        // Create a cancellation token source to pass
-        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Per-run state: the run token's cancellation IS the shutdown signal, and the
+        // completion source is the run signal RunAsync parks on.
+        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var taskCompletionSource = new TaskCompletionSource<Host<TContext>>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Let's control the task completion of 'RunAsync()` by manually setting the 
-        // results when Cancellation is Requested
-        _taskCompletionSource = new TaskCompletionSource<Host<TContext>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _cancellationTokenSource = cancellationTokenSource;
+        _taskCompletionSource = taskCompletionSource;
 
-        // Set the Shutdown handle
+        // The callback captures this run's source: the coordinator disposes it on stop,
+        // and a shutdown signal arriving after that is a no-op, not a fault.
         Context.ShutdownCallback = () =>
         {
-            _cancellationTokenSource.Cancel();
+            try
+            {
+                cancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The host already stopped and reset this run's state.
+            }
         };
 
-        // Let's register a callback to complete the task 
-        _cancellationTokenSource.Token.Register(state =>
+        // Complete the run signal on shutdown. TrySetResult: the coordinator also
+        // completes the signal when StopAsync is called directly.
+        cancellationTokenSource.Token.Register(() =>
         {
-            var source = (TaskCompletionSource<Host<TContext>>)state!;
-
-            source.SetResult(this);
-
-        }, _taskCompletionSource);
+            taskCompletionSource.TrySetResult(this);
+        });
 
         _isInit = true;
     }
 
-    
+    /// <summary>
+    /// Coordinator-owned reset of per-run state so the host can be started again after a
+    /// clean stop. Not part of <see cref="OnStoppedAsync"/> by design: an overridable hook
+    /// a subclass may forget to base-call must not own restart correctness.
+    /// </summary>
+    private void Reset()
+    {
+        _cancellationTokenSource?.Dispose();
+        _cancellationTokenSource = null;
+        _taskCompletionSource = null;
+        Context.ShutdownCallback = null;
+        _isInit = false;
+    }
+
+
 
     private void SetState(HostState state)
     {

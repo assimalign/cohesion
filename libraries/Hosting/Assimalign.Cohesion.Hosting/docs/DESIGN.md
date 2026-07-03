@@ -11,6 +11,18 @@ The package splits host runtime concerns into explicit contracts: a host orchest
 - BackgroundService is the convenience base class for long-running units of *asynchronous* work inside a host. It is pool-scheduled: `StartAsync` launches `ExecuteAsync` directly and stores the real work task (no `Task.Factory.StartNew` wrapper, no `LongRunning`), so `StopAsync` cancels and then joins that exact task within the caller's shutdown budget, and any fault thrown by `ExecuteAsync` surfaces to the host (synchronous faults during start, post-yield faults on stop) instead of being swallowed. A cooperative cancellation exit is treated as a clean stop.
 - DedicatedThreadService is the base class for *synchronous, blocking* units of work that own a dedicated background OS thread for their entire life.
 
+## Lifecycle
+
+A start/stop cycle drives four host-level specialization hooks around the service phases, in this order:
+
+`OnStartingAsync` → services `StartingAsync`/`StartAsync`/`StartedAsync` → `OnStartedAsync` → *(running)* → `OnStoppingAsync` → services `StoppingAsync`/`StopAsync`/`StoppedAsync` → `OnStoppedAsync`
+
+- `OnStartingAsync`/`OnStartedAsync` bracket startup; `OnStoppingAsync`/`OnStoppedAsync` bracket shutdown (e.g. a database engine's checkpoint or a web app's connection drain hangs off `OnStoppingAsync`). The stop-side hooks receive the shutdown-budget token (`ShutdownTimeout`).
+- **Run-state reset is coordinator-owned.** After the host reaches `Stopped`, `StopAsync` itself resets the per-run state (run token source, run signal, shutdown callback, init flag). It is deliberately *not* the job of `OnStoppedAsync`: an overridable hook a subclass may forget to base-call must not own restart correctness. A cleanly stopped host can be started - or `RunAsync`-driven - again.
+- **The run token is a signal, not a stop budget.** `RunAsync` parks on a run signal completed by shutdown (`Context.Shutdown()` cancels the run token) and then stops with a *fresh* token: the run token is cancelled by definition at that point, so using it would pre-cancel every service's graceful drain. The stop budget always comes from `ShutdownTimeout` inside `StopAsync`.
+- A direct `StopAsync` (without a shutdown signal) also completes the run signal, so a parked `RunAsync` unwinds instead of hanging forever.
+- A shutdown signal arriving after the host has stopped is a no-op, not a fault.
+
 ## Execution model - the per-service menu
 
 `Host<TContext>` imposes no execution model, so where a unit of work meets a thread is decided per service, by the service class that knows its own I/O profile, through static dispatch: pick a base class at authoring time. There is no host-level threading strategy and no reflection.
