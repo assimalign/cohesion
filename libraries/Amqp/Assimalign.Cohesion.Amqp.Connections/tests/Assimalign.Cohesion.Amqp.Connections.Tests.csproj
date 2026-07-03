@@ -7,6 +7,7 @@
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Amqp.Connections" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
         <CohesionPackageReference Include="coverlet.collector" />
         <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
         <CohesionPackageReference Include="Shouldly" />

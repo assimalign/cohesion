@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #772 | _PENDING_ | Stage 1 · Lane C. Built `libraries/Connections/Assimalign.Cohesion.Connections.InMemory` as a Tcp/Udp/Quic peer: cross-wired duplex-pipe connection pairs (`InMemoryConnectionPair.Create`, `InMemoryConnectionListener` + `InMemoryConnectionFactory`) supporting live multi-round-trip exchange, plus a multiplexed variant (`InMemoryMultiplexed…`) for h2/h3-shaped stream tests. Migrated the four transport test projects' duplicated pipe-pair doubles onto it (Security uses the driver directly; Connections/Http.Connections/Amqp re-base their `TestConnection` as thin adapters over the driver, deleting the bespoke pipe wiring). **Unblocks #793** (Web.Testing factory). |
 
 ---
 

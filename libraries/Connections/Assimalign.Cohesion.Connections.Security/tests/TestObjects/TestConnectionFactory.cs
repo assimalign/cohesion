@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -14,7 +15,7 @@ internal sealed class TestConnectionFactory : ConnectionFactory
 {
     private readonly Queue<Connection> _pending = new();
 
-    public override ConnectionCapabilities Capabilities => TestPipeConnection.DefaultCapabilities;
+    public override ConnectionCapabilities Capabilities => InMemoryConnectionPair.DefaultCapabilities;
 
     public void Enqueue(Connection connection) => _pending.Enqueue(connection);
 

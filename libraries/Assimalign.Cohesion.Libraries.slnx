@@ -249,6 +249,13 @@
 	<Folder Name="/libraries/Connections/Assimalign.Cohesion.Connections.Udp/tests/">
 		<Project Path="Connections/Assimalign.Cohesion.Connections.Udp/tests/Assimalign.Cohesion.Connections.Udp.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/" />
+	<Folder Name="/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/">
+		<Project Path="Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/tests/">
+		<Project Path="Connections/Assimalign.Cohesion.Connections.InMemory/tests/Assimalign.Cohesion.Connections.InMemory.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/Content/">
 		<File Path="Content/Directory.Build.props" />
 		<File Path="Content/Directory.Build.targets" />
