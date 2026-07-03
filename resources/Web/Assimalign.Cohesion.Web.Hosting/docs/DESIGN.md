@@ -1,0 +1,219 @@
+# Assimalign.Cohesion.Web.Hosting — Design
+
+`Assimalign.Cohesion.Web.Hosting` is the composition root for the Web resource: it
+builds a `WebApplication` (a `Host<WebApplicationContext>`), wires the middleware
+pipeline, and owns the runtime server that turns accepted HTTP connections into
+pipeline invocations. It is the **only** Web layer where DI, logging, and
+configuration are integrated, and that integration is strictly builder-time —
+nothing resolves services per request.
+
+This document focuses on the piece with the most load-bearing runtime behaviour:
+`WebApplicationServer`, the default `IWebApplicationServer`. Its dispatch model
+and stop semantics are the contract the rest of the Web middleware stack builds
+on, so they are recorded here rather than left to be re-derived from the code.
+
+## Design intent
+
+The server has one job: pull connections off a listener and drive each one
+through the middleware pipeline, forever, without letting any single connection —
+well-behaved or hostile — degrade the others or take down the host.
+
+Three properties fall out of that intent and shape the whole implementation:
+
+- **Connections are independent.** One connection's pace, idleness, or failure
+  must never be observable by another. This rules out any design that serves
+  connections from a shared loop.
+- **Application faults are contained.** Middleware is arbitrary user code. A
+  throw from it is expected, not exceptional, and must cost exactly one
+  connection — never the accept loop, never the process.
+- **Shutdown is deterministic.** Stopping the server drains what is in flight and
+  releases every resource, without leaving an unobserved exception behind.
+
+## Server dispatch model
+
+```
+StartAsync ──> AcceptLoopAsync (one stored Task)
+                  │  (optional) await a concurrency slot
+                  ├─ await listener.AcceptOrListenAsync
+                  └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
+                                    await using connection
+                                      OpenAsync
+                                      await foreach ReceiveAsync
+                                        pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
+                                      dispose context
+                                    (connection disposed by await using)
+```
+
+**One accept loop, one task per connection.** `StartAsync` schedules a single
+accept loop as a stored `Task` and returns immediately (the host-service contract
+uses the start token only to abort startup, which completes synchronously here).
+The loop accepts a connection and *hands it off* to `ServeConnectionAsync` on its
+own `Task`, then loops straight back to accept the next one. The loop never awaits
+a connection's service.
+
+**Why this is the whole point.** The previous implementation queued one
+`async void` thread-pool work item that accepted a connection and then
+`await foreach`-ed its entire receive sequence inline before accepting the next.
+A single idle HTTP/1.1 keep-alive client — parked in `ReceiveAsync` waiting for a
+request it never sends — blocked that loop indefinitely, so every other accepted
+connection sat unserved in the listener backlog. Per-connection dispatch removes
+the shared bottleneck: the idle client parks on *its* task while every other task
+runs.
+
+**Stored `Task`, never `async void`.** The accept loop and each connection task
+are stored/tracked `Task`s. An `async void` body escalates any escaped exception
+to a process-terminating unhandled exception via the thread pool; a `Task` makes
+the exception observable instead. The accept loop additionally swallows its own
+terminal faults so the stored task always completes cleanly.
+
+**In-flight tracking.** Connection tasks are registered in a
+`ConcurrentDictionary<long, Task>` keyed by a monotonic id, added by the accept
+loop and removed by each task as it completes. The map is the drain set
+`StopAsync` awaits. A connection that completes synchronously (only possible with
+a degenerate/empty receive sequence) is removed immediately after registration so
+the map never leaks a completed entry.
+
+## Layering boundary — what the server does *not* do
+
+Wire-level failure isolation lives one layer down, in
+`Assimalign.Cohesion.Http.Connections` (see its `docs/DESIGN.md`,
+"Receive-loop failure isolation"). Truncated frames, malformed request lines,
+peer resets, HTTP/2 `RST_STREAM`/`GOAWAY`, and per-stream HTTP/3 faults are all
+classified and handled there: the receive enumerable simply stops yielding on a
+wire error and the surrounding `await using` disposes the connection.
+
+The server therefore owns **only** the concerns above that layer:
+
+| Concern | Owner |
+| --- | --- |
+| Wire-protocol conformance, frame parsing, per-stream reset | `Http.Connections` |
+| Wire-level failure isolation (bad frames, peer reset) | `Http.Connections` |
+| Application-exception isolation (middleware throws) | **this server** |
+| Per-connection dispatch / concurrency | **this server** |
+| Connection + context disposal | **this server** |
+| In-flight tracking + graceful drain | **this server** |
+| Optional concurrency cap | **this server** |
+
+The server never inspects a frame, a stream id, or a protocol version. It sees
+`IHttpConnection` → `IHttpConnectionContext` → `IHttpContext` and nothing lower.
+
+## Error model — application-exception isolation
+
+Each connection's receive loop wraps pipeline execution in a boundary that
+catches exceptions by scope:
+
+- **`OperationCanceledException`** — cooperative shutdown or a per-exchange
+  cancellation. Treated as a clean drain, not a fault: the loop unwinds quietly.
+- **Any other `Exception`** — an application fault from the middleware pipeline
+  (or the per-exchange receive/send). The connection is `Abort`-ed so the peer
+  sees it torn down, and the enclosing `await using` disposes it. The accept loop
+  is untouched and keeps serving; a subsequently accepted connection is served
+  normally.
+
+Catching bare `Exception` here is a deliberate, documented departure from the
+"catch specific exceptions" rule. This is a **fault-isolation boundary around
+arbitrary user code**, the same pattern the transport's accept loop uses
+(`HttpConnectionListener.RunStreamAcceptLoopAsync`). The alternative — letting an
+unknown middleware exception propagate out of a background task — is precisely the
+process-crash hazard this component exists to remove. The catch is annotated in
+source so future readers do not "correct" it back to a narrow catch.
+
+## Disposal contract
+
+When a connection's loop ends — normally, by client disconnect, or by pipeline
+fault — the server disposes, in order:
+
+1. **Each exchange** (`IHttpContext`) in a `finally` around its pipeline
+   execute/send, so an exchange is released even if the pipeline throws.
+2. **The connection context** (`IHttpConnectionContext`) in a `finally` after the
+   receive loop.
+3. **The connection** (`IHttpConnection`) via `await using`.
+
+`IHttpConnectionContext` is intentionally *not* `IAsyncDisposable`: a context is a
+projection over the connection, and the connection releases the underlying
+transport on its own disposal (see `Http1Connection.DisposeAsync`). The server
+still disposes any context that *does* implement `IAsyncDisposable`/`IDisposable`
+through a type test (no reflection), so a future stateful context is torn down
+deterministically. Today this is a defensive no-op for the real projection
+contexts; it exists so the disposal guarantee holds regardless of a context's
+internal state.
+
+## Stop semantics
+
+`StopAsync` performs a graceful, idempotent shutdown:
+
+1. **Signal shutdown.** Cancel the single shutdown `CancellationTokenSource`. This
+   both stops the accept loop and unblocks every in-flight connection — an idle
+   keep-alive parked in `ReceiveAsync` observes the cancellation and unwinds, so
+   the drain cannot hang on it.
+2. **Wait for the accept loop.** Await the accept-loop task first, so no new
+   connection task can be added after the in-flight set is snapshotted.
+3. **Drain in-flight connections.** `await Task.WhenAll` over the tracked
+   connection tasks. Each task is self-contained — it swallows its own
+   cancellation and faults and never rethrows — so the drain completes without
+   surfacing an unobserved `OperationCanceledException` or any other escaped
+   exception.
+4. **Dispose the listener**, then the shutdown token source and (if present) the
+   concurrency semaphore.
+
+Cancelling before starting, or stopping twice, is a safe no-op guarded by
+interlocked flags. The drain budget is owned by the caller's host lifecycle
+(`Host<TContext>.StopAsync` applies `ShutdownTimeout`); the server does not
+impose its own.
+
+**Cancellation is drain, not force-kill of in-progress requests.** A single token
+governs both "stop accepting" and "unblock in-flight connections." Idle
+keep-alives unblock immediately; a request actively executing in the pipeline
+observes the same cancellation and unwinds. Letting an in-progress request run to
+completion before closing its connection (lame-duck draining) is a deliberate
+non-goal for this iteration — see below.
+
+## Concurrency cap (`MaxConcurrentConnections`)
+
+Optional, configured builder-time via
+`WebApplicationServerBuilder.LimitConcurrentConnections(int)` and carried on
+`WebApplicationServerOptions.MaxConcurrentConnections`. `null` (the default) means
+**unlimited**.
+
+When set to a positive `N`, a `SemaphoreSlim(N, N)` gates the accept loop: a slot
+is acquired **before** accepting a connection and released when that connection's
+task finishes. Once `N` connections are being served, the loop stops accepting, so
+additional connections stay in the listener's backlog channel — accepted by the
+transport but not opened or served — applying natural backpressure until an active
+connection completes. A non-positive cap is rejected at construction.
+
+The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
+`ConcurrentDictionary` — no reflection, no dynamic code.
+
+## AOT posture
+
+`IsAotCompatible=true` holds with no special handling. The dispatch machinery is
+`SemaphoreSlim`, `CancellationTokenSource`, `ConcurrentDictionary`, `Interlocked`,
+`Task`, and `await using`/`await foreach` — all trim/AOT-clean. The defensive
+context disposal is a `switch` type test, not a reflection probe. No runtime code
+generation, no `Assembly.LoadFrom`, no reflection-based serialization.
+
+## Testing
+
+Behaviour is verified in `tests/` with xUnit + Shouldly against instrumented
+doubles (`FakeHttpConnectionListener`, `FakeHttpConnection`,
+`FakeHttpConnectionContext`, `FakeHttpContext`, `FakePipeline`) that let a test
+script receive sequences, park connections, throw from the pipeline, and observe
+opens/sends/aborts/disposals. The suite pins each acceptance property: idle
+keep-alive non-starvation, single-connection fault isolation with continued
+service, connection+context disposal on every exit path, graceful `StopAsync`
+drain + listener disposal, and the concurrency cap holding connections back until
+a slot frees.
+
+## Non-goals
+
+- **Lame-duck request draining.** Waiting for in-progress exchanges to finish
+  before cancelling on shutdown (versus cancelling them with the drain token) is
+  future work; it needs a two-phase signal ("finish the current exchange, accept
+  no new ones on this connection") that this iteration does not implement.
+- **TLS / HTTP/3 registration surface** on the server builder — tracked
+  separately (issues #763, #767).
+- **Per-request service resolution.** DI/logging/config are builder-time only;
+  the server resolves nothing per connection or per request.
+- **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
+  isolation stay in `Http.Connections` and are never duplicated here.
