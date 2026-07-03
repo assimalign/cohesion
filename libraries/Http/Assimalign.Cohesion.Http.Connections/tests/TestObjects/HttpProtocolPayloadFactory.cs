@@ -105,6 +105,47 @@ internal static class HttpProtocolPayloadFactory
     }
 
     /// <summary>
+    /// Builds the bytes a peer would send on its HTTP/3 control stream: the
+    /// control stream-type prefix (0x00), a SETTINGS frame carrying the supplied
+    /// identifier/value pairs, then the supplied trailing control frames
+    /// (e.g. GOAWAY, MAX_PUSH_ID) appended after SETTINGS. Used to exercise the
+    /// post-SETTINGS drain path.
+    /// </summary>
+    public static byte[] CreateHttp3ControlStreamWithControlFrames(
+        (long Id, long Value)[] settings,
+        params (long FrameType, byte[] Payload)[] trailingFrames)
+    {
+        using MemoryStream settingsPayload = new();
+        foreach ((long id, long value) in settings)
+        {
+            WriteQuicInteger(settingsPayload, id);
+            WriteQuicInteger(settingsPayload, value);
+        }
+
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, 0x00); // control stream type
+        WriteHttp3Frame(buffer, 0x4 /* SETTINGS */, settingsPayload.ToArray());
+
+        foreach ((long frameType, byte[] payload) in trailingFrames)
+        {
+            WriteHttp3Frame(buffer, frameType, payload);
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Encodes a single value as a QUIC variable-length integer payload — the
+    /// body of a GOAWAY (a stream/push ID) or MAX_PUSH_ID (a push ID) frame.
+    /// </summary>
+    public static byte[] CreateHttp3VarintPayload(long value)
+    {
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, value);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
     /// Builds the bytes for a generic HTTP/3 unidirectional stream: the
     /// stream-type prefix followed by an optional raw payload. Used to drive
     /// QPACK / push / unknown stream-type handling in tests.
@@ -214,6 +255,48 @@ internal static class HttpProtocolPayloadFactory
         }
 
         return frames;
+    }
+
+    /// <summary>
+    /// Parses the bytes written to an HTTP/3 unidirectional stream: the leading
+    /// stream-type varint followed by zero or more length-delimited frames.
+    /// Used to decode the server's outbound control stream.
+    /// </summary>
+    public static (long StreamType, IReadOnlyList<(long FrameType, byte[] Payload)> Frames) ParseHttp3UnidirectionalStream(byte[] payload)
+    {
+        int index = 0;
+        long streamType = DecodeQuicInteger(payload, ref index);
+
+        List<(long FrameType, byte[] Payload)> frames = new();
+        while (index < payload.Length)
+        {
+            long type = DecodeQuicInteger(payload, ref index);
+            long length = DecodeQuicInteger(payload, ref index);
+            byte[] framePayload = payload.AsSpan(index, checked((int)length)).ToArray();
+            index += (int)length;
+            frames.Add((type, framePayload));
+        }
+
+        return (streamType, frames);
+    }
+
+    /// <summary>
+    /// Decodes an HTTP/3 SETTINGS frame payload into its identifier→value pairs
+    /// (RFC 9114 §7.2.4).
+    /// </summary>
+    public static IReadOnlyDictionary<long, long> DecodeHttp3Settings(byte[] settingsPayload)
+    {
+        Dictionary<long, long> settings = new();
+        int index = 0;
+
+        while (index < settingsPayload.Length)
+        {
+            long id = DecodeQuicInteger(settingsPayload, ref index);
+            long value = DecodeQuicInteger(settingsPayload, ref index);
+            settings[id] = value;
+        }
+
+        return settings;
     }
 
     public static Dictionary<string, string> DecodeLiteralHttp2Headers(byte[] headerBlock)

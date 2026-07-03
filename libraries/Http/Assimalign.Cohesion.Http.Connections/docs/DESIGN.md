@@ -338,14 +338,19 @@ host therefore sees the transport's root-cause exception from
 HTTP/3 (RFC 9114) runs over QUIC, which surfaces two kinds of
 peer-initiated streams: **bidirectional** streams carry requests, and
 **unidirectional** streams carry control data, QPACK table
-synchronisation, and (from a server) pushes. `Http3ConnectionContext`
-demultiplexes the two off a single accept loop:
+synchronisation, and (from a server) pushes. RFC 9114 §6.2.1 also requires
+each peer to open **its own** unidirectional control stream and send
+SETTINGS first, so `Http3ConnectionContext` both emits an outbound control
+stream and demultiplexes inbound streams off a single accept loop:
 
 ```
+on receive start → open outbound control stream (WriteOnly):
+     write stream-type 0x00 + SETTINGS frame, keep open (critical stream)
+
 accept inbound QUIC stream
   ├─ bidirectional → request stream → parse HEADERS/DATA → yield IHttpContext
   └─ unidirectional → read stream-type varint (RFC 9114 §6.2):
-       0x00 control      → read SETTINGS, apply, then keep open
+       0x00 control      → read+apply SETTINGS, then drain later frames
        0x02 QPACK encoder→ accept (no instructions; dynamic table disabled)
        0x03 QPACK decoder→ accept (no instructions; dynamic table disabled)
        0x01 push         → connection error (client must not push)
@@ -356,11 +361,50 @@ The stream direction is reported by the transport via
 `IConnection.Direction` on each accepted stream (see below); the HTTP
 layer never inspects QUIC stream IDs directly.
 
-### Control stream and SETTINGS
+### The server control stream and SETTINGS emission
 
-RFC 9114 §6.2.1 / §7.2.4 impose two hard rules that the engine enforces
-as connection errors (the loop stops yielding and the connection tears
-down):
+RFC 9114 §6.2.1 requires **each** peer — including the server — to open a
+unidirectional control stream and send SETTINGS as its first frame. At the
+start of the receive loop the engine opens one outbound stream via
+`IMultiplexedConnection.OpenStreamAsync(ConnectionDirection.WriteOnly)`,
+writes the stream-type varint `0x00` (control) followed by a SETTINGS frame,
+and then **leaves the stream open** for the connection lifetime. The frame
+is written straight to the stream's `Output` `PipeWriter` (whose `WriteAsync`
+flushes), the symmetric counterpart to reading inbound control frames off
+`Input`; the outbound `Output` is never completed while the connection
+serves requests.
+
+`Http3LocalSettings.EncodePayload` serialises the advertised payload — the
+same posture as the HTTP/2 transport's initial SETTINGS:
+
+- **`SETTINGS_ENABLE_CONNECT_PROTOCOL` (0x08) = 1** (RFC 9220 §3) tells peers
+  they may initiate extended CONNECT (`CONNECT` + `:protocol`) over HTTP/3,
+  matching the HTTP/2 transport's RFC 8441/9220 stance. This is what
+  unblocks WebSocket-over-HTTP/3 clients, which will not send an extended
+  CONNECT until the server advertises the capability.
+- **`QPACK_MAX_TABLE_CAPACITY` (0x01) = 0** (RFC 9204 §5) states explicitly
+  that the QPACK dynamic table is disabled (see the QPACK section), rather
+  than relying on the peer to assume the default.
+
+Emission is best-effort: opening an outbound stream requires a live QUIC
+connection, so if the connection is already gone the setup failure is
+swallowed and the accept loop terminates on the same underlying failure —
+the exception never surfaces into the consumer's enumeration.
+
+Setting **identifiers** are defined once in `Http3SettingId` (the shared
+wire registry) and referenced by both `Http3LocalSettings` (what the server
+sends) and `Http3PeerSettings` (what the peer sent), so the two directions
+never duplicate the identifier literals.
+
+> Beyond the extended-CONNECT enabler, emitting SETTINGS closes an RFC 9114
+> §6.2.1 conformance gap: a server that sent no SETTINGS at all could be
+> failed by a strict client with `H3_MISSING_SETTINGS`.
+
+### The peer control stream and SETTINGS
+
+RFC 9114 §6.2.1 / §7.2.4 impose two hard rules the engine enforces on the
+**peer's** control stream as connection errors (the loop stops yielding and
+the connection tears down):
 
 - **At most one control stream per peer.** A second control stream is
   `H3_STREAM_CREATION_ERROR`.
@@ -368,12 +412,20 @@ down):
   or non-SETTINGS first frame is `H3_MISSING_SETTINGS`.
 
 The SETTINGS payload is parsed into `Http3PeerSettings`, a small
-identifier→value store that recognises `QPACK_MAX_TABLE_CAPACITY`
-(0x01), `MAX_FIELD_SECTION_SIZE` (0x06), `QPACK_BLOCKED_STREAMS` (0x07),
-and `SETTINGS_ENABLE_CONNECT_PROTOCOL` (0x08). Unknown identifiers are
-retained-but-ignored per RFC 9114 §7.2.4.1. Later control frames are not
-acted on in this supported subset — the engine reads and applies the
-mandatory opening SETTINGS frame and leaves the stream open.
+identifier→value store keyed by the `Http3SettingId` registry. Unknown
+identifiers are retained-but-ignored per RFC 9114 §7.2.4.1. The opening
+SETTINGS frame is read and applied synchronously (so a missing/non-SETTINGS
+first frame terminates the connection inline); the stream is then handed to
+a **background drain** (`DrainPeerControlStreamAsync`) that parses and
+discards subsequent control frames for the connection lifetime. Draining on
+a background task is load-bearing: the control stream is long-lived, so
+draining it inline would block the accept loop from ever serving another
+request. Post-SETTINGS frames are read but inert in this subset — `GOAWAY`
+(§7.2.6) is discarded (graceful-drain handling is deferred to the GOAWAY
+work item), and `MAX_PUSH_ID` (§7.2.7) is discarded because the server never
+pushes. The drain exists so those frames cannot accumulate unread in the
+pipe; it stops on end-of-stream, connection teardown, or a per-stream parse
+failure and never throws into the receive loop.
 
 ### QPACK encoder/decoder streams
 
@@ -392,22 +444,31 @@ A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
 
 ### Connection teardown — critical streams and close ordering
 
-The accepted control and QPACK streams stay open for the connection's
-lifetime; RFC 9114 §6.2.1 and RFC 9204 §4.2 make them *critical*
-streams — a peer that observes one of them terminate (FIN, RESET, or a
-STOP_SENDING request) before the connection close MUST fail the whole
-connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is therefore
-connection-first: `Http3Connection.DisposeAsync` delegates to the
+Three long-lived unidirectional streams stay open for the connection's
+lifetime: the server's **own outbound control stream**, and the accepted
+**peer control and QPACK** streams. RFC 9114 §6.2.1 and RFC 9204 §4.2 make
+them all *critical* streams — a peer that observes one of them terminate
+(FIN, RESET, or a STOP_SENDING request) before the connection close MUST
+fail the whole connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is
+therefore connection-first: `Http3Connection.DisposeAsync` delegates to the
 multiplexed connection, whose dispose completes bidirectional (request)
 streams — delivering any in-flight response data — then closes the QUIC
 connection (`CONNECTION_CLOSE` with the transport's configured close
 code, `H3_NO_ERROR` by default on the QUIC driver's options), and only
-then releases the inbound unidirectional streams locally, after the
-close means no stream-level frames can reach the peer. The ordering
-lives in the QUIC driver (`QuicMultiplexedConnection`), not here: any
-multiplexed protocol with long-lived unidirectional control channels
-needs the same discipline. A `GOAWAY`-announced graceful drain ahead of
-the close remains future work (see Non-goals).
+then releases the unidirectional streams locally, after the close means no
+stream-level frames can reach the peer. The ordering lives in the QUIC
+driver (`QuicMultiplexedConnection`), not here: any multiplexed protocol
+with long-lived unidirectional control channels needs the same discipline.
+
+The context's own teardown (`ShutdownAsync`, run from the receive loop's
+`finally`) is deliberately minimal: it cancels the inbound control-stream
+drain and awaits it, but **never completes, aborts, or FINs the outbound
+control stream**. Completing it early — before the connection close — is
+exactly the `H3_CLOSED_CRITICAL_STREAM` violation the connection-first
+ordering exists to avoid, so the context leaves the outbound critical stream
+for the multiplexed connection's dispose to release alongside the close. A
+`GOAWAY`-announced graceful drain ahead of the close remains future work
+(see Non-goals).
 
 ### Incremental reads off the PipeReader
 
@@ -467,9 +528,13 @@ the peer-settings store is a plain dictionary.
 ### Non-goals
 
 - **Acting on post-SETTINGS control frames.** `GOAWAY`, `MAX_PUSH_ID`,
-  and friends are read off the wire where they appear but are not acted
-  on in this subset (the server never pushes, so `MAX_PUSH_ID` is inert;
-  graceful `GOAWAY`-driven drain is future work).
+  and friends are now *drained* (parsed and discarded by the background
+  control-stream drain, so they cannot accumulate unread) but are not
+  *acted on* in this subset: the server never pushes, so `MAX_PUSH_ID` is
+  inert, and graceful `GOAWAY`-driven drain is future work.
+- **Emitting server GOAWAY / MAX_PUSH_ID.** The server control stream
+  carries only the opening SETTINGS frame today; sending `GOAWAY` (for
+  graceful drain) rides on it as future work.
 - **QPACK dynamic table.** Encoder/decoder streams are accepted but not
   processed; the static-table + Huffman + literal field-section support
   (#335) runs with the dynamic table disabled.
@@ -628,16 +693,15 @@ connection `PROTOCOL_ERROR` (GOAWAY); HTTP/3 drops the offending stream
 - **HTTP/2** advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` (id `0x8`)
   in its initial SETTINGS (RFC 8441 §3), telling peers they may use
   extended CONNECT.
-- **HTTP/3** does **not** yet advertise it. Doing so requires the server to
-  open its own *unidirectional* control stream and send a SETTINGS frame on
-  it. The connection contract now supports exactly that —
+- **HTTP/3** advertises the same. The server opens its own *unidirectional*
+  control stream via
   `IMultiplexedConnection.OpenStreamAsync(ConnectionDirection.WriteOnly)`
-  opens an outbound unidirectional stream — so the former API obstacle is
-  gone; emitting the server control stream is simply not yet implemented
-  (future work alongside GOAWAY-driven drain). The omission is safe: a
-  conformant client will simply not initiate extended CONNECT over HTTP/3,
-  and if one does anyway, the request is still recognized, validated, and
-  modeled exactly as on HTTP/2 — there is no silent downgrade.
+  and sends a SETTINGS frame carrying `SETTINGS_ENABLE_CONNECT_PROTOCOL`
+  (0x08) = 1 as its first frame — see "The server control stream and
+  SETTINGS emission" above. This matches the HTTP/2 posture, so a client
+  may initiate extended CONNECT (`CONNECT` + `:protocol`) over HTTP/3, and
+  the request is then recognized, validated, and modeled identically to
+  HTTP/2 — there is no silent downgrade in either direction.
 
 ### No tunnel — scope boundary
 
@@ -659,8 +723,6 @@ class resolved through the existing feature collection.
 ### Non-goals
 
 - **WebSocket framing / the data tunnel.** See above.
-- **HTTP/3 advertisement.** Deferred pending unidirectional outbound stream
-  support in the multiplex transport.
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
   as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
 
