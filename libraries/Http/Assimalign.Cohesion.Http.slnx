@@ -95,10 +95,6 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Http/Assimalign.Cohesion.Http.Identity/" />
-	<Folder Name="/Http/Assimalign.Cohesion.Http.Identity/src/">
-		<Project Path="Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
-	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/" />
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/">
 		<Project Path="Assimalign.Cohesion.Http.ProtocolUpgrade/src/Assimalign.Cohesion.Http.ProtocolUpgrade.csproj" />

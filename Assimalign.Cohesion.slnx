@@ -844,10 +844,6 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Identity/" />
-	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Identity/src/">
-		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
@@ -1958,13 +1954,6 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Server/" />
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Server/src/">
-		<Project Path="resources/Web/Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Server/tests/">
-		<Project Path="resources/Web/Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
