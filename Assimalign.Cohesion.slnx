@@ -858,6 +858,18 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLimits/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.RequestLimits/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLimits/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.RequestLimits/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLimits/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.RequestLimits/src/Assimalign.Cohesion.Http.RequestLimits.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLimits/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.RequestLimits/tests/Assimalign.Cohesion.Http.RequestLimits.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Sessions/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Sessions/README.md" />
 	</Folder>

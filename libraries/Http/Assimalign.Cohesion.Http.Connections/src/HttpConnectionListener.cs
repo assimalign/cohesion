@@ -29,6 +29,8 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 {
     private readonly List<(HttpProtocol Protocol, IConnectionListener Listener)> _streamListeners;
     private readonly List<IMultiplexedConnectionListener> _multiplexedListeners;
+    private readonly HttpServerLimits _limits;
+    private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
@@ -53,6 +55,10 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
         _streamListeners = new List<(HttpProtocol, IConnectionListener)>();
         _multiplexedListeners = new List<IMultiplexedConnectionListener>();
+        _limits = options.Limits;
+        // Snapshot: registrations after this point must not race the accept loops or observe a
+        // half-mutated list; the empty snapshot keeps the parser's zero-interceptor fast path.
+        _interceptors = [.. options.Interceptors];
 
         HttpProtocol protocols = HttpProtocol.None;
 
@@ -238,7 +244,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
                 HttpConnection httpConnection = protocol switch
                 {
-                    HttpProtocol.Http11 => new Http1Connection(connection, isSecure),
+                    HttpProtocol.Http11 => new Http1Connection(connection, isSecure, _limits, _interceptors),
                     HttpProtocol.Http20 => new Http2Connection(connection, isSecure),
                     _ => throw new InvalidOperationException($"The configured HTTP protocol '{protocol}' does not map to a stream connection listener.")
                 };
