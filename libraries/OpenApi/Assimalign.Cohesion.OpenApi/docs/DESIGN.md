@@ -113,8 +113,8 @@ it belongs to the model.
 
 Critically, the serialization package reuses this same tree as its intermediate representation for the
 **entire** document: model → node tree (all version logic) → text. JSON and YAML differ only in the
-final node-tree-to-text renderer. That is the seam that makes a YAML reader/writer a drop-in addition
-(tracked as the required fast-follow, issue #532) without touching the model or the version logic.
+final node-tree-to-text renderer. That is the seam that made the YAML reader/writer (#532, built on
+the Cohesion `Content.Yaml` engine) a drop-in addition without touching the model or the version logic.
 
 ## Error model
 
@@ -131,7 +131,7 @@ package depends on the root model; no package depends on a sibling except throug
 | Package | Responsibility | Depends on | Status |
 |---|---|---|---|
 | `Assimalign.Cohesion.OpenApi` | Canonical model, version capability matrix, node tree | — | **this wave** |
-| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON I/O (YAML fast-follow) | model | **this wave** |
+| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON and YAML I/O | model, Content.Yaml | **this wave** |
 | `…OpenApi.Validation` | Diagnostics + structural/semantic/version rules | model | **this wave** |
 | `…OpenApi.Fluent` | Fluent authoring builders | model | Wave 2 |
 | `…OpenApi.Attributes` | Attribute metadata model | model | Wave 2 |
@@ -155,7 +155,6 @@ is trimming- and NativeAOT-safe.
 
 - Fluent authoring, attribute model, source generation, version *transforms*, advanced authoring
   surfaces, official-example compliance corpus, and Web/ApiManager integration (later waves).
-- YAML I/O — architected for but deferred to the immediate fast-follow (#532).
 - A full JSON Schema 2020-12 conformance engine — the official-schema validation stage is an exposed
   extension point, not yet implemented.
 - The JSON Schema `$vocabulary` keyword — meta-schema authoring is out of scope; unknown `$` keywords

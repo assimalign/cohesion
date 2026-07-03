@@ -2,14 +2,13 @@
 
 ## Design intent
 
-Turn the canonical model into JSON and back without reflection, while keeping the door open for YAML as
-a pure drop-in. The package is organized as three layers so that the version logic and the wire format
-are never entangled.
+Turn the canonical model into JSON and YAML and back without reflection. The package is organized as
+three layers so that the version logic and the wire format are never entangled.
 
 ## Three layers
 
 ```
-OpenApiDocument  ⇄  OpenApiNode tree  ⇄  text (JSON now, YAML next)
+OpenApiDocument  ⇄  OpenApiNode tree  ⇄  text (JSON and YAML)
         |                   |                    |
  model↔node mapping    (the seam)         node↔text formatter
  (version-aware)                          (format-specific)
@@ -23,19 +22,28 @@ OpenApiDocument  ⇄  OpenApiNode tree  ⇄  text (JSON now, YAML next)
    of which line produced it.
 2. **The node tree** (`OpenApiNode`, defined in the model package) is the format-agnostic intermediate
    representation. It is the seam: nothing above it knows about JSON or YAML.
-3. **Node ↔ text** (`OpenApiJsonNodeFormatter`) is the only JSON-aware layer, built on
-   `Utf8JsonWriter` and `JsonDocument`.
+3. **Node ↔ text** — two thin formatters. `OpenApiJsonNodeFormatter` is the only JSON-aware layer,
+   built on `Utf8JsonWriter` and `JsonDocument`. `OpenApiYamlNodeFormatter` is the only YAML-aware
+   layer, converting the node tree to and from the `Assimalign.Cohesion.Content.Yaml` document model
+   (a Cohesion in-house YAML 1.2 engine — no third-party dependency).
 
-## Why a node-tree intermediate (and the YAML fast-follow)
+## Why a node-tree intermediate (validated by the YAML formatter)
 
-A direct model-to-`Utf8JsonWriter` writer would be marginally faster but would bake JSON assumptions into
-the version logic, forcing a parallel reimplementation for YAML. Routing through a neutral node tree means
-**YAML is purely a second node↔text formatter** (`OpenApiYamlNodeFormatter`) plus a `OpenApiYaml` facade —
-zero changes to the ~600 lines of model↔node mapping or any version gating. YAML is the required
-fast-follow (issue #532); this layering is the reason it is a focused, low-risk addition.
+A direct model-to-`Utf8JsonWriter` writer would be marginally faster but would bake JSON assumptions
+into the version logic, forcing a parallel reimplementation for YAML. Routing through a neutral node
+tree meant the YAML support (issue #532) landed exactly as designed: **a second node↔text formatter
+plus the `OpenApiYaml` facade, with zero changes to the model↔node mapping or any version gating.**
+Scalar kinds map one-to-one (`OpenApiValueKind` ⇄ `YamlScalarKind` via the YAML core schema); strings
+that would re-resolve as other kinds are pinned so kinds survive the format boundary; YAML stream
+input flows through `Content.Text` Unicode encoding detection.
 
 The cost is one extra object-tree allocation per document. For an API-description document (not a hot
 path) that is a deliberate and acceptable trade for the format independence.
+
+Parse failures surface uniformly: both readers wrap their format exception (`JsonException`,
+`YamlException`) in an `OpenApiException` with the same message shape, so callers handle malformed
+input consistently across formats. An OpenAPI description is one document — multi-document YAML
+streams are rejected.
 
 ## Determinism and fidelity
 
@@ -63,11 +71,12 @@ The 3.1 full-JSON-Schema surfaces get explicit down-level treatment rather than 
 
 ## AOT posture
 
-`Utf8JsonReader`/`Utf8JsonWriter`/`JsonDocument` only — no `JsonSerializer` reflection, no source
-generator required. Fully trimming- and NativeAOT-safe.
+`Utf8JsonReader`/`Utf8JsonWriter`/`JsonDocument` for JSON and the hand-written `Content.Yaml` engine
+for YAML — no reflection anywhere, no source generator required. Fully trimming- and NativeAOT-safe.
 
-## Non-goals (Wave 1)
+## Non-goals
 
-- **YAML** — architected for (the seam exists), implemented next (#532).
 - External `$ref` resolution / document bundling — the reader preserves references verbatim; resolving
   them across documents is a later concern.
+- YAML comment preservation — comments are not part of the node tree; a round-trip drops them (the
+  underlying engine documents the same limit).

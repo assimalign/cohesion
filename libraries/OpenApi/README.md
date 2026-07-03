@@ -19,7 +19,7 @@ sibling except through the model.
 | Package | Responsibility | Depends on | Status |
 |---|---|---|---|
 | [`Assimalign.Cohesion.OpenApi`](./Assimalign.Cohesion.OpenApi/) | Canonical version-aware model, capability matrix, `OpenApiNode` value tree | — | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON read/write (YAML fast-follow) | model | Implemented (JSON) |
+| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON and YAML read/write | model, Content.Yaml | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model | Implemented |
 | `Assimalign.Cohesion.OpenApi.Fluent` | Fluent authoring builders | model | Planned (Wave 2) |
 | `Assimalign.Cohesion.OpenApi.Attributes` | Attribute metadata model | model | Planned (Wave 2) |
@@ -45,9 +45,9 @@ emission) and validation (field placement).
 
 ## Status and roadmap
 
-Wave 1 (model + JSON serialization + validation) is implemented. The immediate fast-follow is **YAML
-serialization** (the node-tree seam is already in place). Subsequent work covers fluent authoring,
-the attribute model and AOT source generator, version transforms, advanced authoring surfaces, an
+Wave 1 (model + JSON/YAML serialization + validation) is implemented; YAML rides the Cohesion
+`Content.Yaml` engine through the node-tree seam. Subsequent work covers fluent authoring, the
+attribute model and AOT source generator, version transforms, advanced authoring surfaces, an
 official example/upgrade compliance corpus, and Web/ApiManager integration contracts.
 
 See each package's `docs/OVERVIEW.md` and `docs/DESIGN.md` for detail.
