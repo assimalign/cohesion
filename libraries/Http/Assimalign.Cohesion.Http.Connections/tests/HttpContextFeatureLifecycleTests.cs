@@ -24,16 +24,24 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </remarks>
 public class HttpContextFeatureLifecycleTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose an empty per-request feature collection by default")]
-    public async Task Features_OnRequest_ShouldExposeEmptyCollection()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose only the transport max-request-body-size feature by default")]
+    public async Task Features_OnRequest_ShouldExposeMaxRequestBodySizeFeature()
     {
         // Arrange + Act
         IHttpContext httpContext = await ReceiveSingleContextAsync();
 
-        // Assert — Features is non-null but empty.
+        // Assert — the transport seeds exactly one feature per request: the typed
+        // max-request-body-size feature. No middleware has run, so nothing else is present.
         httpContext.Features.ShouldNotBeNull();
+        httpContext.Features.Get<Assimalign.Cohesion.Http.IHttpMaxRequestBodySizeFeature>().ShouldNotBeNull();
+
+        int count = 0;
         using IEnumerator<IHttpFeature> enumerator = httpContext.Features.GetEnumerator();
-        enumerator.MoveNext().ShouldBeFalse();
+        while (enumerator.MoveNext())
+        {
+            count++;
+        }
+        count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: IDisposable feature should be disposed when the request disposes")]

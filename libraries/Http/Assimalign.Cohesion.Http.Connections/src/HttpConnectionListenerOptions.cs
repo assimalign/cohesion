@@ -30,6 +30,17 @@ public sealed class HttpConnectionListenerOptions
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
     /// <summary>
+    /// Gets the request-shaping and timeout limits enforced on accepted connections.
+    /// </summary>
+    /// <remarks>
+    /// The limits carry conservative Kestrel-parity defaults, so a listener is protected against
+    /// oversized request lines / header sections, oversized request bodies, and idle / slow-header
+    /// (Slowloris) peers without any explicit configuration. Mutate the returned instance to tune
+    /// them for a deployment. See <see cref="HttpServerLimits"/> for the individual bounds.
+    /// </remarks>
+    public HttpServerLimits Limits { get; } = new HttpServerLimits();
+
+    /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
     /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.

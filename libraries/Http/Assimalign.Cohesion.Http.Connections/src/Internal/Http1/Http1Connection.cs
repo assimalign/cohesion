@@ -9,12 +9,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 internal sealed class Http1Connection : HttpConnection
 {
     private readonly IConnection _connection;
+    private readonly HttpServerLimits _limits;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure)
+    public Http1Connection(IConnection connection, bool isSecure, HttpServerLimits limits)
         : base(isSecure)
     {
         _connection = connection;
+        _limits = limits;
     }
 
     public override ConnectionId Id => _connection.Id;
@@ -32,7 +34,7 @@ internal sealed class Http1Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure);
+        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

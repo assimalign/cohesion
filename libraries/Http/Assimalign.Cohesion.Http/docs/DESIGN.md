@@ -165,3 +165,35 @@ and must not be normalized away:
 
 Pure logic over the existing collections — no reflection, no codegen. Fully
 AOT/trim safe.
+
+## Typed request-limit features
+
+### `IHttpMaxRequestBodySizeFeature`
+
+The maximum request body size a server will accept is a per-request concern:
+the connection-wide default is a deployment policy, but an endpoint that
+legitimately accepts large uploads (or one that must reject anything but a tiny
+payload) needs to raise or lower the cap for *its* requests only. Rather than
+bake a mutable knob into `IHttpRequest`, the cap is exposed as a typed feature
+on `IHttpContext.Features` — the established extensibility seam (the same shape
+as sessions, auth, extended CONNECT).
+
+- `MaxRequestBodySize` is a `long?` (octets, `null` = unbounded).
+- `IsReadOnly` flips to `true` once the transport begins reading the body, after
+  which assigning `MaxRequestBodySize` throws. This mirrors Kestrel's
+  `IHttpMaxRequestBodySizeFeature` lifecycle so consumers can rely on the same
+  contract: adjust the cap *before* the body is read, observe it any time.
+
+The contract lives here in the core so it is version-neutral (any transport can
+implement it); the implementation is transport-internal. In the HTTP/1.1
+transport today the body is fully buffered before the request is dispatched, so
+the transport seeds the feature with the connection-wide default, reads the body
+under that cap, and then marks the feature read-only — the writable pre-read
+window that lets middleware adjust the cap opens up once the streaming-body
+rework (a deferred follow-up) moves the read after dispatch. Even today the
+feature is the honest source of the *effective* cap for the exchange.
+
+### AOT posture
+
+A plain interface resolved through the existing `IHttpFeatureCollection`
+dictionary lookup — no reflection, no codegen.

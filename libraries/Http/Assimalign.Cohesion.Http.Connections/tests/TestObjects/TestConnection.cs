@@ -32,7 +32,8 @@ internal sealed class TestConnection : Connection
         ConnectionDirection direction = ConnectionDirection.Bidirectional,
         ConnectionCapabilities? capabilities = null,
         EndPoint? localEndPoint = null,
-        EndPoint? remoteEndPoint = null)
+        EndPoint? remoteEndPoint = null,
+        bool completeInput = true)
     {
         _direction = direction;
         _capabilities = capabilities ?? DefaultCapabilities;
@@ -57,9 +58,16 @@ internal sealed class TestConnection : Connection
             _receivePipe.Writer.WriteAsync(input).GetAwaiter().GetResult();
         }
 
-        // The peer has sent everything it ever will; the parser observes a
-        // finite stream that ends after the preloaded payload.
-        _receivePipe.Writer.Complete();
+        if (completeInput)
+        {
+            // The peer has sent everything it ever will; the parser observes a
+            // finite stream that ends after the preloaded payload.
+            _receivePipe.Writer.Complete();
+        }
+
+        // When completeInput is false the receive writer is left open, so reads that
+        // exhaust the preloaded payload block indefinitely — modelling an idle or
+        // slow (Slowloris) peer whose connection the transport must reclaim on a timeout.
     }
 
     public static ConnectionCapabilities DefaultCapabilities { get; } = new(

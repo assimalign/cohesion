@@ -30,23 +30,29 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 ///   whitespace. Negative / out-of-range sizes are rejected.</description></item>
 ///   <item><description>Chunk-ext fields are stripped per RFC 9112 §7.1.1 (a recipient
 ///   MAY ignore them). They are not surfaced to the application layer.</description></item>
-///   <item><description>The body is capped at <see cref="MaxBodySize"/> octets so a
-///   malicious peer cannot send Content-Length: 2^63 and exhaust the heap.</description></item>
+///   <item><description>The body is capped at the effective per-request maximum body size
+///   (<c>maxBodySize</c>, sourced from <see cref="HttpServerLimits.MaxRequestBodySize"/> and the
+///   per-request <see cref="Assimalign.Cohesion.Http.IHttpMaxRequestBodySizeFeature"/>) so a
+///   malicious peer cannot send Content-Length: 2^63 and exhaust the heap. A <see langword="null"/>
+///   cap leaves the body unbounded; an exceeded cap is rejected with 413.</description></item>
 /// </list>
 /// </remarks>
 internal static class Http1MessageBodyReader
 {
     /// <summary>
-    /// Maximum body size accepted in a single message. Acts as a DoS guard against a peer
-    /// sending an absurdly large <c>Content-Length</c> or unbounded chunked body. 100 MB
-    /// matches the recommended ceiling in many production HTTP servers; a future PR can
-    /// wire this through <c>HttpConnectionListenerOptions</c> for per-deployment tuning.
+    /// Reads the message body per the framing rules signalled by <paramref name="headers"/>,
+    /// enforcing the effective per-request body-size cap.
     /// </summary>
-    public const long MaxBodySize = 100L * 1024 * 1024;
-
+    /// <param name="stream">The connection stream to read from.</param>
+    /// <param name="headers">The already-parsed request header collection.</param>
+    /// <param name="maxBodySize">The maximum body size in octets, or <see langword="null"/> for unbounded.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The parsed message body and any chunked trailer fields.</returns>
+    /// <exception cref="Http1LimitExceededException">Thrown (413) when the body exceeds <paramref name="maxBodySize"/>.</exception>
     public static async ValueTask<Http1MessageBody> ReadAsync(
         Stream stream,
         HttpHeaderCollection headers,
+        long? maxBodySize,
         CancellationToken cancellationToken)
     {
         // RFC 9112 §6.3 — reject ambiguous framing before reading a single body byte.
@@ -62,13 +68,13 @@ internal static class Http1MessageBodyReader
         if (hasTransferEncoding)
         {
             ValidateTransferEncoding(headers);
-            return await ReadChunkedAsync(stream, cancellationToken).ConfigureAwait(false);
+            return await ReadChunkedAsync(stream, maxBodySize, cancellationToken).ConfigureAwait(false);
         }
 
         if (hasContentLength)
         {
-            long length = ParseContentLength(headers);
-            byte[] body = await ReadFixedLengthAsync(stream, length, cancellationToken).ConfigureAwait(false);
+            long length = ParseContentLength(headers, maxBodySize);
+            byte[] body = await ReadFixedLengthAsync(stream, length, maxBodySize, cancellationToken).ConfigureAwait(false);
             return new Http1MessageBody(body, new HttpHeaderCollection());
         }
 
@@ -106,7 +112,7 @@ internal static class Http1MessageBodyReader
         }
     }
 
-    private static long ParseContentLength(HttpHeaderCollection headers)
+    private static long ParseContentLength(HttpHeaderCollection headers, long? maxBodySize)
     {
         if (!headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue raw))
         {
@@ -141,10 +147,12 @@ internal static class Http1MessageBodyReader
                     throw new InvalidDataException(
                         $"RFC 9112 §6.3: Content-Length value '{segment}' is negative.");
                 }
-                if (parsed > MaxBodySize)
+                if (maxBodySize is { } cap && parsed > cap)
                 {
-                    throw new InvalidDataException(
-                        $"Content-Length value '{segment}' exceeds the maximum supported body size ({MaxBodySize} octets).");
+                    // RFC 9110 §15.5.14 — reject an oversized declaration before reading a byte.
+                    throw new Http1LimitExceededException(
+                        HttpStatusCode.RequestEntityTooLarge,
+                        $"Content-Length value '{segment}' exceeds the configured maximum request body size ({cap} octets).");
                 }
                 if (agreed is { } existing && existing != parsed)
                 {
@@ -164,17 +172,19 @@ internal static class Http1MessageBodyReader
     private static async ValueTask<byte[]> ReadFixedLengthAsync(
         Stream stream,
         long length,
+        long? maxBodySize,
         CancellationToken cancellationToken)
     {
         if (length == 0)
         {
             return Array.Empty<byte>();
         }
-        if (length > MaxBodySize)
+        if (maxBodySize is { } cap && length > cap)
         {
             // Defense in depth — ParseContentLength already rejects this.
-            throw new InvalidDataException(
-                $"Declared body length {length} exceeds the maximum supported body size ({MaxBodySize} octets).");
+            throw new Http1LimitExceededException(
+                HttpStatusCode.RequestEntityTooLarge,
+                $"Declared body length {length} exceeds the configured maximum request body size ({cap} octets).");
         }
 
         byte[] body = new byte[length];
@@ -194,6 +204,7 @@ internal static class Http1MessageBodyReader
 
     private static async ValueTask<Http1MessageBody> ReadChunkedAsync(
         Stream stream,
+        long? maxBodySize,
         CancellationToken cancellationToken)
     {
         using MemoryStream body = new();
@@ -227,10 +238,13 @@ internal static class Http1MessageBodyReader
                 return new Http1MessageBody(body.ToArray(), trailers);
             }
 
-            if (totalRead + chunkSize > MaxBodySize)
+            if (maxBodySize is { } cap && totalRead + chunkSize > cap)
             {
-                throw new InvalidDataException(
-                    $"Chunked body exceeds the maximum supported body size ({MaxBodySize} octets) at chunk size {chunkSize} after {totalRead} octets read.");
+                // RFC 9110 §15.5.14 — a chunked body that would exceed the cap is rejected as it
+                // accumulates, before the offending chunk is buffered.
+                throw new Http1LimitExceededException(
+                    HttpStatusCode.RequestEntityTooLarge,
+                    $"Chunked body exceeds the configured maximum request body size ({cap} octets) at chunk size {chunkSize} after {totalRead} octets read.");
             }
 
             byte[] buffer = new byte[chunkSize];
@@ -292,8 +306,8 @@ internal static class Http1MessageBodyReader
                     $"RFC 9112 §7.1: chunk-size '{sizeText.ToString()}' contains non-hex character '{c}'.");
             }
 
-            // Overflow guard: chunk size is bounded by MaxBodySize, so 4 hex digits beyond
-            // log2(MaxBodySize)/4 is plenty conservative.
+            // Overflow guard: a single chunk-size is bounded by Int32; the accumulated body is
+            // separately bounded by the effective max-body-size cap in ReadChunkedAsync.
             if (value > (int.MaxValue - digit) / 16)
             {
                 throw new InvalidDataException(

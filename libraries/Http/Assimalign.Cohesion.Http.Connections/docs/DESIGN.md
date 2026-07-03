@@ -331,6 +331,128 @@ exception so accepts that begin after cancellation rethrow it too. The
 host therefore sees the transport's root-cause exception from
 `AcceptOrListenAsync`, never a bare `ObjectDisposedException`.
 
+## HTTP/1.1 server limits and timeouts
+
+### Why this lives in the transport
+
+An HTTP server that reads request bytes off a socket without bounding them is
+trivially DoS-able. Two vectors are specific to the HTTP/1.1 read path and must
+be closed *inside the transport*, before a request ever reaches the application:
+
+- **Unbounded buffering (memory exhaustion).** `Http1MessageReader` reads the
+  request line and each header line via a byte-at-a-time `ReadLineAsync` that
+  accumulates into a `MemoryStream`. With no cap, a peer that opens a connection
+  and streams an endless request line — or an endless run of header bytes with
+  no terminating CRLF — grows that buffer without bound and exhausts the heap.
+  This is a *live* memory-exhaustion vector, not a theoretical one.
+- **Idle / slow peers (Slowloris).** The receive loop was previously bounded
+  only by the ambient connection token. A peer that connects and then dribbles
+  (or never sends) request bytes ties up a connection indefinitely; enough of
+  them starve the server of connection slots.
+
+Both are wire-level concerns the application layer cannot see (by the time a
+context is dispatched the head is already parsed), so enforcement belongs here,
+alongside the existing framing / smuggling defences.
+
+### The limits surface
+
+`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`) is the tuning
+surface, with conservative Kestrel-`KestrelServerLimits`-parity defaults so a
+listener is protected out of the box:
+
+| Limit | Default | Enforced by | Rejection |
+|---|---|---|---|
+| `MaxRequestLineSize` | 8 KB | `Http1MessageReader` request-line read | `414` URI Too Long (RFC 9110 §15.5.15) |
+| `MaxRequestHeaderCount` | 100 | header loop | `431` Request Header Fields Too Large (§15.5.22) |
+| `MaxRequestHeadersTotalSize` | 32 KB | per-line cap = remaining budget | `431` |
+| `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1MessageBodyReader` | `413` Content Too Large (§15.5.14) |
+| `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
+| `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
+
+The limits flow listener → `Http1Connection` → `Http1ConnectionContext` →
+reader as a plain object reference; there is no DI, config, or logging
+dependency in this package (Lane A guardrail — config binding of these limits is
+a Web.Hosting builder-time concern).
+
+### 414 / 431 / 413 semantics, not a silent drop
+
+The pre-existing behaviour for a malformed request is to classify it as a
+wire-level failure and drop the connection silently (the receive enumerable
+yields nothing). For a *limit* violation that is user-hostile: a conformant
+client gets no signal about why its connection died. So limit violations throw a
+dedicated `Http1LimitExceededException` carrying the HTTP status to emit;
+`Http1ConnectionContext.TryReadRequestAsync` catches it *before* the generic
+wire-level catch, writes a minimal bodyless status response
+(`Http1MessageWriter.WriteErrorResponseAsync` — status line + `Content-Length: 0`
++ `Connection: close`), and then ends the connection. The write is best-effort:
+if the peer is already gone the I/O error is swallowed and the connection is
+dropped anyway.
+
+`Http1LimitExceededException` derives from `IOException` (not the sealed
+`InvalidDataException`) precisely so that if it ever escapes the dedicated catch
+it still degrades to the existing wire-level-drop path rather than faulting the
+host — belt-and-suspenders on top of the explicit catch.
+
+### The two-phase read timeout
+
+`Http1ReadTimeout` reclaims idle and slow peers with a single
+`CancellationTokenSource` (linked to the ambient connection token) whose deadline
+moves through the request lifecycle:
+
+1. **Keep-alive idle wait.** Armed with `KeepAliveTimeout` while the transport
+   waits for the *first byte* of the next request. A connection that goes idle
+   between requests (or never sends its first request) is reclaimed here — with
+   no response, because there is no request to answer.
+2. **Request-headers deadline.** The reader signals `OnRequestLineStarted` on the
+   first request byte, which re-arms the CTS with `RequestHeadersTimeout`. This
+   single deadline covers the entire head (request line + all header fields), so
+   a Slowloris peer that dribbles headers is reclaimed — with a `408` because it
+   is mid-request.
+3. **Disarmed for the body.** After the blank line terminating the header
+   section, the reader signals `OnHeadReceived`, which disables the timer so the
+   body read is bounded only by the ambient connection token. Body-read data-rate
+   limits (`MinRequestBodyDataRate`) are deliberately deferred behind the
+   streaming-body rework — the reader fully buffers bodies today, so a data-rate
+   gate is meaningless until the read is incremental.
+
+Every read on the connection stream uses `Http1ReadTimeout.Token`. When the
+timer fires, `PipeReader.ReadAsync` throws `OperationCanceledException`; the
+context distinguishes a *timeout* cancel from a *shutdown* cancel via
+`TimedOut` (`this CTS fired && the connection token did not`) so cooperative
+shutdown still propagates normally and is never mistaken for a Slowloris.
+
+The read-timeout controller's token must **not** become the request's abort
+token — the controller is disposed when the read completes, but the dispatched
+context outlives it. The reader therefore threads the *connection* token
+through to `Http1Context` as `requestAborted` and uses the controller's token
+only for the reads it bounds.
+
+### Per-request body-size override
+
+The effective body-size cap is surfaced as the core
+`IHttpMaxRequestBodySizeFeature` (see the `Assimalign.Cohesion.Http` DESIGN).
+`Http1MessageReader` builds the internal `HttpMaxRequestBodySizeFeature` seeded
+with `Limits.MaxRequestBodySize`, reads the body under that value, marks the
+feature read-only, and attaches it to the context's features. Today the read is
+fully buffered before dispatch, so the writable pre-read window is only reachable
+by the transport; the streaming-body rework opens it to middleware. This is the
+one feature the transport seeds on *every* HTTP/1.1 request — everything else on
+`Features` is attached by higher layers.
+
+### Scope boundary
+
+These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
+(rapid-reset, CONTINUATION flood, header-list size) and HTTP/2 body-buffering
+backpressure are governed by the frame/flow-control machinery and tracked
+separately; `MaxConcurrentConnections` is an accept-loop concern owned by the
+Web-runtime rewrite, not this surface.
+
+### AOT posture
+
+No reflection, no codegen. The limits are plain properties with guard-clause
+validation; enforcement is byte counting and `CancellationTokenSource.CancelAfter`
+timer arithmetic.
+
 ## HTTP/3 stream model and SETTINGS engine
 
 ### What it is
