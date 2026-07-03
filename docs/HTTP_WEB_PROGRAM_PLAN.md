@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #768 | [#797](https://github.com/assimalign/cohesion/pull/797) | Stage 0 · Lane B. Corrected `HttpHeaderKey.SecWebSocketProtocol` to emit `Sec-WebSocket-Protocol` (RFC 6455 §11.3.4) and removed the redundant `WebSocketSubProtocols` alias (one canonical key remains). Added round-trip tests over `IHttpHeaderCollection`. |
 
 ---
 
