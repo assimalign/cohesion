@@ -7,7 +7,6 @@
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionPackageReference Include="FluentAssertions" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.CookiePolicy" />

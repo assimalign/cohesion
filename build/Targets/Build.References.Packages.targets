@@ -37,7 +37,6 @@
     <!-- XUnit Test Dependencies-->
     <ItemGroup>
         <_CohesionPackage Include="Shouldly" Version="4.3.0" />
-        <_CohesionPackage Include="FluentAssertions" Version="8.10.0" />
         <_CohesionPackage Include="xunit" Version="2.9.3" />
         <_CohesionPackage Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
         <_CohesionPackage Include="xunit.runner.visualstudio" Version="3.1.5"

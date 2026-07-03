@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Language.Sql.Tests;
@@ -12,17 +12,17 @@ public class SqlUpdateParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "UPDATE Users SET Name = 'Bob' WHERE Id = 1;");
-        var update = statement.SqlExpression.Should().BeOfType<SqlUpdateExpression>().Subject;
+        var update = statement.SqlExpression.ShouldBeOfType<SqlUpdateExpression>();
 
-        update.CommandType.Should().Be(SqlQueryCommandType.Update);
-        update.Table.TableName.Should().Be("Users");
-        update.Assignments.Should().HaveCount(1);
-        update.Assignments[0].ColumnName.Should().Be("Name");
+        update.CommandType.ShouldBe(SqlQueryCommandType.Update);
+        update.Table.TableName.ShouldBe("Users");
+        update.Assignments.Count.ShouldBe(1);
+        update.Assignments[0].ColumnName.ShouldBe("Name");
 
-        var val = update.Assignments[0].Value.Should().BeOfType<SqlLiteralExpression>().Subject;
-        val.LiteralType.Should().Be(SqlLiteralType.String);
+        var val = update.Assignments[0].Value.ShouldBeOfType<SqlLiteralExpression>();
+        val.LiteralType.ShouldBe(SqlLiteralType.String);
 
-        update.Where.Should().NotBeNull();
+        update.Where.ShouldNotBeNull();
     }
 
     [Fact]
@@ -30,12 +30,12 @@ public class SqlUpdateParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "UPDATE dbo.Users SET Name = 'Bob', Status = 'active' WHERE Id = 1;");
-        var update = statement.SqlExpression.Should().BeOfType<SqlUpdateExpression>().Subject;
+        var update = statement.SqlExpression.ShouldBeOfType<SqlUpdateExpression>();
 
-        update.Table.SchemaName.Should().Be("dbo");
-        update.Assignments.Should().HaveCount(2);
-        update.Assignments[0].ColumnName.Should().Be("Name");
-        update.Assignments[1].ColumnName.Should().Be("Status");
+        update.Table.SchemaName.ShouldBe("dbo");
+        update.Assignments.Count.ShouldBe(2);
+        update.Assignments[0].ColumnName.ShouldBe("Name");
+        update.Assignments[1].ColumnName.ShouldBe("Status");
     }
 
     [Fact]
@@ -43,8 +43,8 @@ public class SqlUpdateParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "UPDATE Users SET Status = 'inactive';");
-        var update = statement.SqlExpression.Should().BeOfType<SqlUpdateExpression>().Subject;
+        var update = statement.SqlExpression.ShouldBeOfType<SqlUpdateExpression>();
 
-        update.Where.Should().BeNull();
+        update.Where.ShouldBeNull();
     }
 }

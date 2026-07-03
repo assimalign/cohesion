@@ -780,23 +780,21 @@ public void Cache_OnMiss_ShouldReturnNull()
     var result = cache.Get("nonexistent");
     
     // Assert
-    result.Should().BeNull();
+    result.ShouldBeNull();
 }
 ```
 
 ### Test Assertions
 
-**Prefer Shouldly or FluentAssertions:**
+**Use Shouldly - it is the single assertion library for this repository:**
 ```csharp
 // ✅ Shouldly
 result.ShouldNotBeNull();
 result.Count.ShouldBe(5);
 result.ShouldContain(x => x.Id == "123");
 
-// ✅ FluentAssertions
+// ❌ FluentAssertions (forbidden - v8+ moved to a paid commercial license)
 result.Should().NotBeNull();
-result.Count.Should().Be(5);
-result.Should().Contain(x => x.Id == "123");
 
 // ❌ Traditional Assert (avoid)
 Assert.NotNull(result);

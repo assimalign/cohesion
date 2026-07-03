@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Xunit;
-using FluentAssertions;
+using Shouldly;
 using NUlid;
 
 
@@ -21,19 +21,19 @@ public class UlidTest
                 var ulid = Ulid.NewUlid();
                 var nulid = new NUlid.Ulid(ulid.ToByteArray());
 
-                ulid.ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
-                ulid.ToString().Should().Be(nulid.ToString());
-                ulid.Equals(ulid).Should().BeTrue();
-                ulid.Equals(Ulid.NewUlid()).Should().BeFalse();
+                ulid.ToByteArray().ShouldBe(nulid.ToByteArray());
+                ulid.ToString().ShouldBe(nulid.ToString());
+                ulid.Equals(ulid).ShouldBeTrue();
+                ulid.Equals(Ulid.NewUlid()).ShouldBeFalse();
             }
             {
                 var nulid = NUlid.Ulid.NewUlid();
                 var ulid = new Ulid(nulid.ToByteArray());
 
-                ulid.ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
-                ulid.ToString().Should().Be(nulid.ToString());
-                ulid.Equals(ulid).Should().BeTrue();
-                ulid.Equals(Ulid.NewUlid()).Should().BeFalse();
+                ulid.ToByteArray().ShouldBe(nulid.ToByteArray());
+                ulid.ToString().ShouldBe(nulid.ToString());
+                ulid.Equals(ulid).ShouldBeTrue();
+                ulid.Equals(Ulid.NewUlid()).ShouldBeFalse();
             }
         }
     }
@@ -50,7 +50,7 @@ public class UlidTest
                 new DateTime(2016,12,4),
         };
 
-        times.Select(x => Ulid.NewUlid(x)).OrderBy(x => x).Select(x => x.Time).Should().BeEquivalentTo(times.OrderBy(x => x));
+        times.Select(x => Ulid.NewUlid(x)).OrderBy(x => x).Select(x => x.Time).ShouldBe(times.OrderBy(x => x));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class UlidTest
         for (int i = 0; i < 100; i++)
         {
             var nulid = NUlid.Ulid.NewUlid();
-            Ulid.Parse(nulid.ToString()).ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
+            Ulid.Parse(nulid.ToString()).ToByteArray().ShouldBe(nulid.ToByteArray());
         }
     }
 
@@ -78,7 +78,7 @@ public class UlidTest
         var r = new byte[10];
         var first = Ulid.NewUlid(d, r);
         var second = Ulid.NewUlid(d, r);
-        first.ToString().Should().BeEquivalentTo(second.ToString());
+        first.ToString().ShouldBe(second.ToString());
         // Console.WriteLine($"first={first.ToString()}, second={second.ToString()}");
     }
 
@@ -89,7 +89,7 @@ public class UlidTest
         var guid = ulid.ToGuid();
         var ulid2 = new Ulid(guid);
 
-        ulid2.Should().BeEquivalentTo(ulid, "a Ulid-Guid roundtrip should result in identical values");
+        ulid2.ShouldBe(ulid, "a Ulid-Guid roundtrip should result in identical values");
     }
 
     [Fact]
@@ -98,14 +98,14 @@ public class UlidTest
         var largeUlid = Ulid.MaxValue;
         var smallUlid = Ulid.MinValue;
 
-        largeUlid.CompareTo(smallUlid).Should().Be(1);
-        smallUlid.CompareTo(largeUlid).Should().Be(-1);
-        smallUlid.CompareTo(smallUlid).Should().Be(0);
+        largeUlid.CompareTo(smallUlid).ShouldBe(1);
+        smallUlid.CompareTo(largeUlid).ShouldBe(-1);
+        smallUlid.CompareTo(smallUlid).ShouldBe(0);
 
         object smallObject = (object)smallUlid;
-        largeUlid.CompareTo(smallUlid).Should().Be(1);
-        largeUlid.CompareTo(null).Should().Be(1);
-        largeUlid.Invoking(u => u.CompareTo("")).Should().Throw<ArgumentException>();
+        largeUlid.CompareTo(smallUlid).ShouldBe(1);
+        largeUlid.CompareTo(null).ShouldBe(1);
+        Should.Throw<ArgumentException>(() => largeUlid.CompareTo(""));
     }
 
     [Fact]
@@ -119,8 +119,8 @@ public class UlidTest
         var guid_smaller = ulid_smaller.ToGuid();
         var guid_larger = ulid_larger.ToGuid();
 
-        ulid_smaller.CompareTo(ulid_larger).Should().BeLessThan(0, "a Ulid comparison should compare byte to byte");
-        guid_smaller.CompareTo(guid_larger).Should().BeLessThan(0, "a Ulid to Guid cast should preserve order");
+        ulid_smaller.CompareTo(ulid_larger).ShouldBeLessThan(0, "a Ulid comparison should compare byte to byte");
+        guid_smaller.CompareTo(guid_larger).ShouldBeLessThan(0, "a Ulid to Guid cast should preserve order");
     }
 
     [Fact]
@@ -146,13 +146,13 @@ public class UlidTest
         var destination = new char[26];
         var largeDestination = new char[27];
 
-        ulid.TryFormat(destination, out int length, default, null).Should().BeTrue();
-        destination.Should().BeEquivalentTo(asString);
-        length.Should().Be(26);
+        ulid.TryFormat(destination, out int length, default, null).ShouldBeTrue();
+        destination.ShouldBe(asString.ToCharArray());
+        length.ShouldBe(26);
 
-        ulid.TryFormat(largeDestination, out int largeLength, default, null).Should().BeTrue();
-        largeDestination.AsSpan().Slice(0, 26).ToArray().Should().BeEquivalentTo(asString);
-        largeLength.Should().Be(26);
+        ulid.TryFormat(largeDestination, out int largeLength, default, null).ShouldBeTrue();
+        largeDestination.AsSpan().Slice(0, 26).ToArray().ShouldBe(asString.ToCharArray());
+        largeLength.ShouldBe(26);
     }
 
     [Fact]
@@ -162,9 +162,9 @@ public class UlidTest
         var ulid = Ulid.Parse(asString);
         var formatted = new char[25];
 
-        ulid.TryFormat(formatted, out int length, default, null).Should().BeFalse();
-        formatted.Should().BeEquivalentTo(new char[25]);
-        length.Should().Be(0);
+        ulid.TryFormat(formatted, out int length, default, null).ShouldBeFalse();
+        formatted.ShouldBe(new char[25]);
+        length.ShouldBe(0);
     }
 #endif
 #if NET7_0_OR_GREATER
@@ -175,10 +175,10 @@ public class UlidTest
         for (int i = 0; i < 100; i++)
         {
             var nulid = NUlid.Ulid.NewUlid();
-            Ulid.Parse(nulid.ToString(), null).ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
+            Ulid.Parse(nulid.ToString(), null).ToByteArray().ShouldBe(nulid.ToByteArray());
 
-            Ulid.TryParse(nulid.ToString(), null, out Ulid ulid).Should().BeTrue();
-            ulid.ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
+            Ulid.TryParse(nulid.ToString(), null, out Ulid ulid).ShouldBeTrue();
+            ulid.ToByteArray().ShouldBe(nulid.ToByteArray());
         }
     }
 
@@ -188,10 +188,10 @@ public class UlidTest
         for (int i = 0; i < 100; i++)
         {
             var nulid = NUlid.Ulid.NewUlid();
-            Ulid.Parse(nulid.ToString().AsSpan(), null).ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
+            Ulid.Parse(nulid.ToString().AsSpan(), null).ToByteArray().ShouldBe(nulid.ToByteArray());
 
-            Ulid.TryParse(nulid.ToString().AsSpan(), null, out Ulid ulid).Should().BeTrue();
-            ulid.ToByteArray().Should().BeEquivalentTo(nulid.ToByteArray());
+            Ulid.TryParse(nulid.ToString().AsSpan(), null, out Ulid ulid).ShouldBeTrue();
+            ulid.ToByteArray().ShouldBe(nulid.ToByteArray());
         }
     }
 #endif
@@ -203,8 +203,8 @@ public class UlidTest
         var utf8Value = System.Text.Encoding.UTF8.GetBytes(value.ToString());
 
         var result = new byte[26];
-        value.TryFormat(result, out var bytesWritten, Array.Empty<char>(), null).Should().BeTrue();
-        bytesWritten.Should().Be(26);
-        result.Should().Equal(utf8Value);
+        value.TryFormat(result, out var bytesWritten, Array.Empty<char>(), null).ShouldBeTrue();
+        bytesWritten.ShouldBe(26);
+        result.ShouldBe(utf8Value);
     }
 }
