@@ -165,3 +165,115 @@ and must not be normalized away:
 
 Pure logic over the existing collections — no reflection, no codegen. Fully
 AOT/trim safe.
+
+## Media types and content negotiation
+
+The core owns the RFC 9110 §8.3 / §12 content-negotiation primitives so that every
+consumer that must reason about representations — result writers and negotiation
+(#149), static-file serving (#777), request/response compression (#779), and the
+RFC 10008 QUERY content rules (#746) — shares one media-type value object and one
+negotiation algorithm instead of each re-deriving Accept parsing. This is a
+deliberate **fan-out foundation**: the surface is kept conservative because these
+types are hard to change once several areas import them.
+
+### `HttpMediaType` — the value object
+
+`HttpMediaType` is a `readonly struct` that parses a `type/subtype` pair with
+optional parameters, mirroring the span-based `TryParse`/`Parse` shape of the other
+core value objects (`HttpMethod`, `HttpRequestTarget`). It carries four things the
+negotiation layer needs:
+
+- **Structured-syntax suffix.** The subtype is stored whole (`vnd.api+json`), and
+  `Suffix` exposes the part after the last `+` (`json`) so a writer keyed on "any
+  `+json` representation" does not re-split the subtype.
+- **Parameters, minus `q`.** Parameters (`charset`, `boundary`, …) are retained as
+  `HttpMediaTypeParameter` values; `Charset` is a convenience accessor. The Accept
+  `q` weight is **not** a media-type parameter — it belongs to the Accept grammar
+  and is stripped by `HttpAcceptParser` before the media type is built, so it never
+  leaks into `Parameters`.
+- **Wildcards + specificity.** A media range may wildcard the type (`*/*`) or the
+  subtype (`text/*`). `Specificity` collapses the RFC 9110 §12.5.1 precedence into a
+  single integer (`*/*` < `type/*` < `type/subtype` < each added parameter), which is
+  what both the parser's ordering and the selector's "most specific matching range"
+  rule compare on.
+- **Directional matching.** `Includes(candidate)` treats the instance as a range and
+  tests membership: type/subtype match respecting wildcards (case-insensitively), and
+  every parameter the range constrains must be present on the candidate with an equal
+  value (extra candidate parameters are allowed). Comparison is case-insensitive on
+  parameter values too, which is pragmatic (charset is genuinely case-insensitive) and
+  matches the behavior downstream consumers expect.
+
+`HttpQuality` is a companion `readonly struct` storing the weight as an integer number
+of thousandths (0–1000). Fixed-point storage makes equality and ordering exact — there
+is no floating-point drift when comparing `q=0.7` against `q=0.700` — and keeps the
+RFC 9110 §12.4.2 grammar (at most three fractional digits, range 0–1) enforceable in
+`TryParse` without rounding heuristics.
+
+### Why static parsers/selectors, not interfaces
+
+`HttpAcceptParser` and `HttpContentNegotiation` are `static` helper classes, following
+`HttpFieldRules`/`HttpFieldNormalization` rather than the interface-first pattern used
+for services. They are pure, stateless functions over value types with exactly one
+correct implementation — an interface seam would add indirection and an AOT-hostile
+virtual dispatch for no substitutability benefit. The interface-first rule targets
+injectable behavior; these are value transformations.
+
+### Parsing is tolerant; selection is authoritative
+
+`HttpAcceptParser` splits the four Accept-family headers **quote-aware** (a `,` or `;`
+inside a quoted parameter value does not split an entry) and **skips** any malformed
+comma-separated segment — a bad token, a missing `type/subtype`, or an unparseable `q`
+— rather than throwing, so one broken entry never discards the whole header. The
+returned lists are ordered by client preference: descending quality, and for equal
+quality the more specific candidate first (specificity breaks q ties).
+
+The preference-ordered list is a convenience, not the negotiation result. The
+authoritative algorithm lives in `HttpContentNegotiation`: for each server
+representation the quality is taken from the **most specific matching client range**
+(RFC 9110 §12.5.1), the highest-quality representation wins, and ties are broken in
+favor of the server's own preference order (the order it lists its options). A missing
+Accept header means "accept everything" → the server's first option. Nothing acceptable
+(all weights zero or unmatched) returns `false` — the signal a caller turns into
+`406 Not Acceptable`; the core does not decide between 406 and a server default.
+
+### The `identity` rule for content-coding selection
+
+`TrySelectEncoding` centralizes the RFC 9110 §12.5.3 `identity` handling that
+compression (#779) would otherwise get subtly wrong. `identity` (send the response
+uncompressed) is **acceptable by default** and is refused only by an explicit
+`identity;q=0` or a `*;q=0` with no overriding identity entry. When a listed coding is
+acceptable the selector compresses even at a low weight, choosing `identity` over a
+coding only when the client **explicitly** ranks identity strictly higher — which
+matches real-world compression behavior while still honoring an explicit
+no-compression preference. When no Accept-Encoding header is present the selector
+returns `identity` (do not compress for a client that never advertised support).
+
+### `HttpContentTypes` — the extension map
+
+The extension-to-content-type table is a `static FrozenDictionary<string,string>`
+built once at startup with case-insensitive keys and no reflection. `FrozenDictionary`
+(not a plain `Dictionary` or a reflection-scanned MIME registry) is the AOT-safe choice
+for a read-mostly lookup that is hot on the static-file path. Resolution matches the
+**final** extension of a file name (`archive.tar.gz` → `.gz`). The table covers common
+web asset types rather than the full IANA registry; consumers that need custom mappings
+build their own overlay with `CreateMap`, which clones the defaults and applies
+overrides — the default table is immutable and shared.
+
+### AOT posture
+
+Every primitive is span-based, allocation-conscious, and free of reflection or runtime
+codegen. `FrozenDictionary` is trim/AOT-safe; parameter storage is a plain array (no
+`ImmutableArray` dependency). Fully AOT/trim safe.
+
+### Non-goals
+
+- **Field wiring.** These are value objects and pure functions; reading `Accept` off a
+  request, writing `Content-Type`/`Content-Encoding`/`Vary` onto a response, and the
+  `406`-vs-default policy belong to the result-writer and middleware layers that consume
+  them (#149, #777, #779), not to the core.
+- **Charset/language sophistication.** `TrySelectByQuality` does exact-token-plus-`*`
+  matching suitable for `Accept-Charset` and `Accept-Language`. It does **not** implement
+  RFC 4647 language-range prefix matching (`en` matching `en-US`) — that is a routing/
+  localization concern layered above this primitive if and when it is needed.
+- **A complete MIME registry.** `HttpContentTypes` is a curated common-asset table, not
+  the IANA database; breadth is added by consumer overlay, not by growing the core.

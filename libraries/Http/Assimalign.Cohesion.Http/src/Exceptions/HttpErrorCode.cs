@@ -43,6 +43,11 @@ public enum HttpErrorCode
     InvalidHeader,
 
     /// <summary>
+    /// A media type or media range (RFC 9110 &#167; 8.3.1) could not be parsed.
+    /// </summary>
+    InvalidMediaType,
+
+    /// <summary>
     /// The HTTP protocol was violated.
     /// </summary>
     ProtocolViolation,
