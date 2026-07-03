@@ -15,8 +15,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 /// <summary>
 /// Covers the <see cref="WebHostingExtensions"/> convenience surface that the deleted
-/// <c>Assimalign.Cohesion.Web.Server</c> project never had tests for (issue #766). The wrapper is
-/// the single home for the <c>UseHttp1</c>/<c>UseHttp2</c> callback sugar over the TCP driver.
+/// <c>Web.Server</c> project never had tests for (issue #766). The wrapper is the single home
+/// for the <c>UseHttp1</c>/<c>UseHttp2</c> callback sugar over the TCP driver.
 /// </summary>
 public class WebHostingExtensionsTests
 {
