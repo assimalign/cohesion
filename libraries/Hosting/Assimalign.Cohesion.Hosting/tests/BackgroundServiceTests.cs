@@ -46,14 +46,19 @@ public class BackgroundServiceTests
     public async Task StopAsync_WhenExecuteFaultsAfterYield_SurfacesException()
     {
         // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var service = new DelegateBackgroundService(async cancellationToken =>
         {
-            await Task.Yield();
+            // Gate the fault on a test-controlled signal. With a bare Task.Yield the
+            // continuation can win the race against StartAsync's IsCompleted check on a
+            // fast runner, surfacing the fault at start instead of stop.
+            await release.Task;
             throw new InvalidOperationException("post-yield fault");
         });
 
         // Act
         await service.StartAsync();
+        release.SetResult();
         var exception = await Should.ThrowAsync<InvalidOperationException>(
             () => service.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token));
 
