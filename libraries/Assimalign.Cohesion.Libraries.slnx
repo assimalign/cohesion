@@ -657,6 +657,9 @@
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel/tests/Assimalign.Cohesion.IdentityModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
