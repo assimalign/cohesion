@@ -181,6 +181,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 | Date | Issue | PR | Notes |
 |---|---|---|---|
 | 2026-07-03 | #761 | [#799](https://github.com/assimalign/cohesion/pull/799) | Stage 0 · Lane D — deleted dead pre-redesign `Web.ApplicationModel/src`; csproj + slnx preserved for the Phase-4 Layer-3d manifest rebuild (`libraries/ApplicationModel/DESIGN.md` §9.4). No `Assimalign.Cohesion.Transports` code references remain. |
+| 2026-07-03 | #766 | [#800](https://github.com/assimalign/cohesion/pull/800) | Stage 0 (Lane D) · Deleted the vestigial `Web.Server` project pair; `UseHttp1`/`UseHttp2(Action<TcpConnectionListenerOptions>)` sugar now lives only in `WebHostingExtensions` (Web.Hosting, deferred-factory form), with new wrapper tests added. |
 
 ---
 
