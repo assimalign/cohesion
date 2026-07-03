@@ -22,9 +22,6 @@
 	<Folder Name="/cohesion/.github/actions/build/">
 		<File Path=".github/actions/build/action.yml" />
 	</Folder>
-	<Folder Name="/cohesion/.github/actions/release/">
-		<File Path=".github/actions/release/action.yml" />
-	</Folder>
 	<Folder Name="/cohesion/.github/scripts/">
 		<File Path=".github/scripts/Publish-Nupkg.ps1" />
 	</Folder>
@@ -34,6 +31,7 @@
 		<File Path=".github/workflows/library-application-model.yml" />
 		<File Path=".github/workflows/library-cache.yml" />
 		<File Path=".github/workflows/library-configuration.yml" />
+		<File Path=".github/workflows/library-connections.yml" />
 		<File Path=".github/workflows/library-content.yml" />
 		<File Path=".github/workflows/library-core.yml" />
 		<File Path=".github/workflows/library-dependency-injection.yml" />
@@ -43,13 +41,13 @@
 		<File Path=".github/workflows/library-http.yml" />
 		<File Path=".github/workflows/library-identity-model.yml" />
 		<File Path=".github/workflows/library-logging.yml" />
-		<File Path=".github/workflows/library-net.yml" />
 		<File Path=".github/workflows/library-object-mapping.yml" />
 		<File Path=".github/workflows/library-object-pool.yml" />
 		<File Path=".github/workflows/library-object-validation.yml" />
 		<File Path=".github/workflows/library-openapi.yml" />
 		<File Path=".github/workflows/library-opentelemetry.yml" />
 		<File Path=".github/workflows/library-resilience.yml" />
+		<File Path=".github/workflows/library-security.yml" />
 		<File Path=".github/workflows/resource-api-manager.yml" />
 		<File Path=".github/workflows/resource-configuration-store.yml" />
 		<File Path=".github/workflows/resource-database.yml" />
@@ -86,18 +84,18 @@
 	</Folder>
 	<Folder Name="/cohesion/docs/">
 		<File Path="docs/DELIVERY_ROADMAP.md" />
-		<File Path="docs/overview.md" />
+		<File Path="docs/OVERVIEW.md" />
 		<File Path="docs/REFERENCES.md" />
 		<File Path="docs/SERVICE_LAYER_DESIGN.md" />
 		<File Path="docs/SERVICE_STORY_REQUIREMENTS.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/build/">
-		<File Path="docs/build/msbuild-cohesion-props.md" />
-		<File Path="docs/build/msbuild-common-props.md" />
-		<File Path="docs/build/msbuild-common-targets.md" />
+		<File Path="docs/build/MSBUILD_COHESION_PROPS.md" />
+		<File Path="docs/build/MSBUILD_COMMON_PROPS.md" />
+		<File Path="docs/build/MSBUILD_COMMON_TARGETS.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/versioning/">
-		<File Path="docs/versioning/versioning.md" />
+		<File Path="docs/versioning/VERSIONING.md" />
 	</Folder>
 	<Folder Name="/cohesion/extensions/" />
 	<Folder Name="/cohesion/extensions/dotnet/" />
@@ -514,7 +512,7 @@
 		<File Path="libraries/Content/Assimalign.Cohesion.Content/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/docs/">
-		<File Path="libraries/Content/Assimalign.Cohesion.Content/docs/design.md" />
+		<File Path="libraries/Content/Assimalign.Cohesion.Content/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Content/Assimalign.Cohesion.Content/src/">
 		<Project Path="libraries/Content/Assimalign.Cohesion.Content/src/Assimalign.Cohesion.Content.csproj" />
@@ -603,12 +601,12 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/">
 		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/DESIGN.md" />
-		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Overview.md" />
+		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/">
-		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/Overview.md" />
+		<File Path="libraries/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Core/Assimalign.Cohesion.Core/src/">
 		<Project Path="libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
@@ -801,7 +799,7 @@
 		<File Path="libraries/Http/Assimalign.Cohesion.Http/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/docs/">
-		<File Path="libraries/Http/Assimalign.Cohesion.Http/docs/design.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
@@ -1629,7 +1627,7 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
-		<File Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Design.md" />
+		<File Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />

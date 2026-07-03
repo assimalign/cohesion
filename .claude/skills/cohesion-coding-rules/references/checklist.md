@@ -9,7 +9,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No duplicated `<PropertyGroup>` or `<ItemGroup>` blocks across sibling csprojs that should live in shared `.props`/`.targets`
 - [ ] Internal dependencies use `CohesionProjectReference`, not `ProjectReference` with relative paths
 - [ ] Package dependencies use `CohesionPackageReference`, not raw `PackageReference`
-- [ ] Any new package version is added to `build/Targets/PackageReferences.targets` first
+- [ ] Any new package version is added to `build/Targets/Build.References.Packages.targets` first
 - [ ] No new references to any `Microsoft.Extensions.*` package
 - [ ] No per-project `<Version>` overrides — `$(CohesionVersion)` chain intact
 - [ ] No hardcoded versions on `<Import Sdk>` elements

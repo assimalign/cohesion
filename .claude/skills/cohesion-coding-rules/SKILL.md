@@ -13,7 +13,7 @@ Do these three things before writing or modifying code:
 
 1. **Re-read `AGENTS.md`** at the repo root if you have not consulted it in this session, or if more than a handful of turns have passed since you last did. The drift this skill exists to prevent comes from operating off stale memory of the rules.
 2. **Read the relevant area's `README.md` and any project-level `docs/DESIGN.md`** for the library, resource, framework, or SDK you are touching. Area context often determines which rule variant applies (e.g., area-scoped exception roots, framework membership, layering position).
-3. **Briefly state the rules that apply to this task before coding.** A one- or two-line plan that names the relevant patterns (e.g., "interface-first, `extension(...)` registration, add package version to `PackageReferences.targets` first") is enough. This forces the rules into the active plan instead of leaving them as background knowledge.
+3. **Briefly state the rules that apply to this task before coding.** A one- or two-line plan that names the relevant patterns (e.g., "interface-first, `extension(...)` registration, add package version to `Build.References.Packages.targets` first") is enough. This forces the rules into the active plan instead of leaving them as background knowledge.
 
 ## Drift-prone rules — re-verify each before completion
 
@@ -23,7 +23,7 @@ These are the rules most commonly forgotten or partially implemented in long ses
 
 - **Shared MSBuild logic lives in `.props` / `.targets` files**, not duplicated in every csproj. Before adding properties or items to a project file, check whether the same setup already exists (or belongs) in `build/Targets/*.props` or `build/Targets/*.targets` and extend the shared file instead. Two or more sibling csprojs carrying the same `<PropertyGroup>` block is a strong signal the block belongs in shared build config. Per-project duplication is the failure mode to watch for.
 - **`CohesionProjectReference` for internal deps** — never `ProjectReference` with relative paths.
-- **`CohesionPackageReference` for NuGet packages** — never raw `PackageReference`. Add the version to `build/Targets/PackageReferences.targets` first, then reference it.
+- **`CohesionPackageReference` for NuGet packages** — never raw `PackageReference`. Add the version to `build/Targets/Build.References.Packages.targets` first, then reference it.
 - **Never reference any `Microsoft.Extensions.*` package.** This is a standing architectural commitment, not a stylistic preference.
 - **`$(CohesionVersion)` is the single source of truth.** No per-project `<Version>` overrides anywhere.
 - **Never hardcode a version on `<Import Sdk>`** — only `<Project Sdk>` honors that syntax. Pin SDK versions in `global.json`'s `msbuild-sdks` block.

@@ -7,10 +7,9 @@
 public class DatabaseConnectionTests { }
 ```
 
-**Test method:** `{Method}_{Scenario}_{ExpectedBehavior}`
+**Test method:** `{Method}_{Scenario}_{ExpectedBehavior}`, with the display name set through the `Fact`/`Theory` attribute
 ```csharp
-[Fact]
-[DisplayName("Cohesion Test [Database] - Execute: Should retry on transient failure")]
+[Fact(DisplayName = "Cohesion Test [Database] - Execute: Should retry on transient failure")]
 public async Task Execute_OnTransientFailure_ShouldRetry()
 {
     // Test implementation
@@ -65,4 +64,4 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 
 ## Cancellation in async tests
 
-Async test methods should still respect `CancellationToken` where the system under test takes one. Pass `TestContext.Current.CancellationToken` or equivalent when available.
+Async test methods should still exercise `CancellationToken` where the system under test takes one. The repo currently pins xUnit v2 (no ambient `TestContext`), so create a token in the test — e.g. a `CancellationTokenSource` with a timeout — or pass `CancellationToken.None` when cancellation is not the behavior under test.

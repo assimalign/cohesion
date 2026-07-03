@@ -32,7 +32,7 @@ Custom items for managing dependencies within a project.
  > <!-- <CohesionProjectReference Include="Assimalign.Cohesion.Web" /> -->
  > <!-- <CohesionProjectReference Include="Assimalign.Cohesion.Database" /> -->
  > <!-- <CohesionProjectReference Include="Assimalign.Cohesion.Logging" /> -->
- > <!-- <CohesionProjectReference Include="Assimalign.Cohesion.Messaging" /> -->
+ > <!-- <CohesionProjectReference Include="Assimalign.Cohesion.Hosting" /> -->
 >></ItemGroup>
 >```
 
@@ -44,7 +44,7 @@ Notes:
 
 `CohesionPackageReference` lets you add a package by name. Package versions and common metadata are centrally managed by the Cohesion build so individual projects do not repeat version numbers.
 
-See the Package Management Guidelines for details: [docs/guidelines/guidelines-package-management.md](docs/guidelines/guidelines-package-management.md)
+Versions are declared centrally in [`build/Targets/Build.References.Packages.targets`](../../build/Targets/Build.References.Packages.targets); see the build-system rules in [`AGENTS.md`](../../AGENTS.md) for details.
 
 Example: `<CohesionPackageReference Include="{Package Name}"/>`
 
@@ -94,6 +94,5 @@ Attribute parameters
 ---
 ## Related Docs
 
-- Build: [docs/build/msbuild-common-props.md](docs/build/msbuild-common-props.md)
-- Build: [docs/build/msbuild-common-targets.md](docs/build/msbuild-common-targets.md)
-- Guidelines: [docs/guidelines/guidelines-package-management.md](docs/guidelines/guidelines-package-management.md)
+- Build: [Common MSBuild Properties](./MSBUILD_COMMON_PROPS.md)
+- Build: [Common MSBuild Targets](./MSBUILD_COMMON_TARGETS.md)

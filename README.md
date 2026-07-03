@@ -1,6 +1,6 @@
 # Cohesion
 
-Cohesion is 
+Cohesion is a code-first, multi-service application framework for .NET. It provides the building blocks — foundation libraries, an application model, MSBuild SDKs, and NuGet-distributed shared frameworks — for composing services that can run in-process, out-of-process, or across machines without changing application code. Everything targets the latest .NET with NativeAOT compatibility as a standing requirement.
 
 - [Cohesion](#cohesion)
 - [Sdk](#sdk)
@@ -13,25 +13,32 @@ Cohesion is
 # Sdk
 ![SDK](https://github.com/assimalign/cohesion/actions/workflows/framework.yml/badge.svg?branch=main)
 
-Cohesion is a mono repository 
+Cohesion ships as a family of MSBuild SDKs (`Assimalign.Cohesion.Sdk`, `Assimalign.Cohesion.Sdk.<Domain>`) paired with NuGet-distributed shared frameworks (`Assimalign.Cohesion.App[.<Domain>]`), modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App`. A consumer project picks the SDK for its domain and automatically receives every Cohesion library that belongs to the matching framework — no installer required. See [sdks/README.md](sdks/README.md) for consumption details and [AGENTS.md](AGENTS.md) for the full architecture.
 
 ## Libraries
 ![amqp](https://github.com/assimalign/cohesion/actions/workflows/library-amqp.yml/badge.svg?branch=main)
 ![application model](https://github.com/assimalign/cohesion/actions/workflows/library-application-model.yml/badge.svg?branch=main)
+![cache](https://github.com/assimalign/cohesion/actions/workflows/library-cache.yml/badge.svg?branch=main)
 ![configuration](https://github.com/assimalign/cohesion/actions/workflows/library-configuration.yml/badge.svg?branch=main)
+![connections](https://github.com/assimalign/cohesion/actions/workflows/library-connections.yml/badge.svg?branch=main)
 ![content](https://github.com/assimalign/cohesion/actions/workflows/library-content.yml/badge.svg?branch=main)
 ![core](https://github.com/assimalign/cohesion/actions/workflows/library-core.yml/badge.svg?branch=main)
+![dependency injection](https://github.com/assimalign/cohesion/actions/workflows/library-dependency-injection.yml/badge.svg?branch=main)
 ![dns](https://github.com/assimalign/cohesion/actions/workflows/library-dns.yml/badge.svg?branch=main)
 ![filesystem](https://github.com/assimalign/cohesion/actions/workflows/library-filesystem.yml/badge.svg?branch=main)
 ![hosting](https://github.com/assimalign/cohesion/actions/workflows/library-hosting.yml/badge.svg?branch=main)
 ![http](https://github.com/assimalign/cohesion/actions/workflows/library-http.yml/badge.svg?branch=main)
 ![identity model](https://github.com/assimalign/cohesion/actions/workflows/library-identity-model.yml/badge.svg?branch=main)
 ![logging](https://github.com/assimalign/cohesion/actions/workflows/library-logging.yml/badge.svg?branch=main)
+![object mapping](https://github.com/assimalign/cohesion/actions/workflows/library-object-mapping.yml/badge.svg?branch=main)
+![object pool](https://github.com/assimalign/cohesion/actions/workflows/library-object-pool.yml/badge.svg?branch=main)
+![object validation](https://github.com/assimalign/cohesion/actions/workflows/library-object-validation.yml/badge.svg?branch=main)
 ![openapi](https://github.com/assimalign/cohesion/actions/workflows/library-openapi.yml/badge.svg?branch=main)
 ![opentelemetry](https://github.com/assimalign/cohesion/actions/workflows/library-opentelemetry.yml/badge.svg?branch=main)
 ![resilience](https://github.com/assimalign/cohesion/actions/workflows/library-resilience.yml/badge.svg?branch=main)
+![security](https://github.com/assimalign/cohesion/actions/workflows/library-security.yml/badge.svg?branch=main)
 
-
+The foundation libraries under [`libraries/`](libraries/README.md) are the L1 layer: every protocol, abstraction, and runtime primitive the services compose. Each library is its own project with co-located `src/`, `tests/`, and `docs/`.
 
 ## Services/Resources
 ![api manager](https://github.com/assimalign/cohesion/actions/workflows/resource-api-manager.yml/badge.svg?branch=main)
@@ -48,30 +55,35 @@ Cohesion is a mono repository
 ![secret store](https://github.com/assimalign/cohesion/actions/workflows/resource-secret-store.yml/badge.svg?branch=main)
 ![web](https://github.com/assimalign/cohesion/actions/workflows/resource-web.yml/badge.svg?branch=main)
 
-The service section of this repository is broken into a two layer approach folder structure `Layer 1 [Service/Resource] -> Layer 2 [Library]`. This approach
+The service section of the repository follows a two-layer folder approach: `Layer 1 [Service/Resource] -> Layer 2 [Library]`. Each service under `resources/` composes the foundation libraries and ships as its own `Sdk.<Name>` + `App.<Name>` framework family, so a consumer can target exactly the service domain they are building against.
 
 ## Tooling
 
+Developer tooling lives under `tooling/` — the `cohesion` CLI and repository dev scripts.
+
 ## Extensions
+
+IDE and platform integrations live under `extensions/` — the Visual Studio extension and the `dotnet new` project templates.
 
 # Repository Structure
 
-Cohesion is a mono repository that contains all the source code, extensions, and tooling in one. This allows for easier development. When working with cohesion it's best to scope development to specific areas of the repository 
+Cohesion is a mono repository that contains all the source code, extensions, and tooling in one place. When working with Cohesion it is best to scope development to a specific area of the repository:
 
-The following l
+| Folder          | Usage                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `./analyzers`   | Roslyn analyzers, code fixes, and source generators.                                                        |
+| `./assets`      | Shared assets such as the `cohesion.config` JSON schemas.                                                   |
+| `./build`       | Custom MSBuild infrastructure: centralized targets, package versions, and build tasks shared by every project. |
+| `./docs`        | Repository-level documentation (delivery roadmap, service design, build system, versioning).               |
+| `./extensions`  | IDE and platform integrations (Visual Studio extension, `dotnet new` templates).                           |
+| `./frameworks`  | Shared-framework producer projects (`App[.Domain]` Ref + Runtime packs) and the framework membership manifest. |
+| `./installer`   | WiX MSI source and delivery scripts (`Install-Local.ps1`, domain scaffolding).                              |
+| `./libraries`   | Foundation libraries (L1) — every Cohesion building block.                                                  |
+| `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family.   |
+| `./sdks`        | MSBuild SDK projects (`Assimalign.Cohesion.Sdk[.Domain]`).                                                  |
+| `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts).                                                            |
 
-| Folder         | Usage                                                                 |
-| -------------- | --------------------------------------------------------------------- |
-| `./.build`     | This contains all the scripts and process for packaging the SDK which |
-| `./.docs`      |                                                                       |
-| `./.samples`   |                                                                       |
-| `./libraries`  | All the source code for cohesion lives in the following folder.       |
-| `./tooling`    |                                                                       |
-| `./extensions` |                                                                       |
-| `./sdk`        | This contains source code for MSBuild SDK Style Project.              |
-
-
-
+The delivery waves below reflect the dependency order of the foundation libraries (see [docs/DELIVERY_ROADMAP.md](docs/DELIVERY_ROADMAP.md) for the full plan):
 
 ```mermaid
 graph TD
@@ -85,7 +97,7 @@ graph TD
         Config["Configuration L01.01.04"]
         Logging["Logging L01.01.13"]
         FS["FileSystem L01.01.09"]
-        Net["Net L01.01.14"]
+        Connections["Connections L01.01.14"]
         Cache["Cache L01.01.03"]
         Resilience["Resilience L01.01.17"]
     end
@@ -109,7 +121,7 @@ graph TD
     Core --> Config
     Core --> Logging
     Core --> FS
-    Core --> Net
+    Core --> Connections
     Core --> Cache
     Core --> Resilience
     Core --> Http
@@ -121,8 +133,8 @@ graph TD
     Security --> Identity
     FS --> Config
     FS --> Content
-    Net --> Http
-    Net --> Amqp
+    Connections --> Http
+    Connections --> Amqp
     DI --> Hosting
     DI --> AppModel
     Config --> AppModel
