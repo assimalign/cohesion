@@ -180,7 +180,8 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-03 | #791 (Stage 1 / Lane A) | [#811](https://github.com/assimalign/cohesion/pull/811) | HTTP/1.1 server limits & timeouts (414/431/413, keep-alive + request-headers timeouts, `HttpServerLimits`, typed per-request body-size feature, Web.Hosting config binding). Data-rate limits deferred to #810 (streaming-body rework). Had no blockers. |
+| 2026-07-03 | #791 (Stage 1 / Lane A) | [#811](https://github.com/assimalign/cohesion/pull/811) | HTTP/1.1 server limits & timeouts (414/431/413, keep-alive + request-headers timeouts, `HttpServerLimits`, Web.Hosting config binding). Data-rate limits deferred to #810 (streaming-body rework). Had no blockers. |
+| 2026-07-03 | #818 (Lane A/B, discovered on #791's branch) | [#811](https://github.com/assimalign/cohesion/pull/811) | Request-parse interceptor seam (`IHttpRequestInterceptor` + context + typed rejection in core Http) + new `Http.RequestLimits` package owning `IHttpMaxRequestBodySizeFeature` (moved out of core); transport decoupled from feature packages; Web.Hosting default-installs the limits interceptor. h2/h3 hook wiring is #819; future parse-time consumers: #756 digest, #779 decompression. |
 
 ---
 
