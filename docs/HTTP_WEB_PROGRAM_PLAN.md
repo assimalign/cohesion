@@ -180,6 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
+| 2026-07-03 | #759 | [#798](https://github.com/assimalign/cohesion/pull/798) | Stage 0 (Lane B). Retired the `Assimalign.Cohesion.Http.Identity` skeleton — deleted the directory and removed its entries from all three solution files. Restores the commit-481a6fb layering invariant: no `System.Security.Claims`-typed public surface in the `Assimalign.Cohesion.Http` protocol core. Decision recorded in `resources/Web/Assimalign.Cohesion.Web.Authentication/docs/DESIGN.md`: no `request.User` accessor absorbed (redundant with the existing `context.User`; the skeleton's `ClaimsPrincipal.Current` fallback deliberately not carried over). |
 | 2026-07-03 | #766 | [#800](https://github.com/assimalign/cohesion/pull/800) | Stage 0 (Lane D) · Deleted the vestigial `Web.Server` project pair; `UseHttp1`/`UseHttp2(Action<TcpConnectionListenerOptions>)` sugar now lives only in `WebHostingExtensions` (Web.Hosting, deferred-factory form), with new wrapper tests added. |
 
 ---
