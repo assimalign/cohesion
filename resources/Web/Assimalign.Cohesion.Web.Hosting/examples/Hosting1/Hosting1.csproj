@@ -5,7 +5,6 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<!--<CohesionProjectReference Include="Assimalign.Cohesion.Web.Forms" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />-->
 	</ItemGroup>

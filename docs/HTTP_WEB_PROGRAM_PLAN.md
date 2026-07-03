@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| _(none yet — program filed 2026-07-03)_ | | | |
+| 2026-07-03 | #766 | _pending_ | Stage 0 (Lane D) · Deleted the vestigial `Web.Server` project pair; `UseHttp1`/`UseHttp2(Action<TcpConnectionListenerOptions>)` sugar now lives only in `WebHostingExtensions` (Web.Hosting, deferred-factory form), with new wrapper tests added. |
 
 ---
 
