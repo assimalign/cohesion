@@ -626,10 +626,6 @@
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Identity/" />
-	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Identity/src/">
-		<Project Path="Http/Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
-	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/" />
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/">
 		<Project Path="Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/Assimalign.Cohesion.Http.ProtocolUpgrade.csproj" />
