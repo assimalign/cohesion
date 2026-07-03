@@ -2,7 +2,8 @@
 	<Import Project="..\Directory.Build.props" />
 	<PropertyGroup>
 		<TargetFramework>$(TargetFrameworkForResources)</TargetFramework>
-		<IsTestProject>$(MSBuildProjectDirectory.EndsWith('test'))</IsTestProject>
+		<!-- No IsTestProject here: Microsoft.NET.Test.Sdk's package props set it for test
+		     projects, and package props import after Directory.Build.props anyway. -->
 		<IsSourceProject>$(MSBuildProjectDirectory.EndsWith('src'))</IsSourceProject>
 	</PropertyGroup>
 	<!-- #region Frameworks Specific Props
@@ -10,7 +11,7 @@
 			/ Service 
 				/ Library
 					/src
-					/test
+					/tests
 					-->
 	<PropertyGroup>
 		<!-- AOT-->
