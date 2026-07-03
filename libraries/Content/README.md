@@ -23,7 +23,7 @@ layers, never on each other's internals.
 |---|---|---|---|
 | [`Assimalign.Cohesion.Content`](./Assimalign.Cohesion.Content/) | Root contracts: identity, format metadata, stream ownership, composition, reader/writer seam, exceptions | — | Implemented |
 | `Assimalign.Cohesion.Content.Binary` | Shared binary parsing surface (exact reads, bounded slices) | Content | Placeholder |
-| `Assimalign.Cohesion.Content.Text` | Encoding detection and text reading surface | Content | In design |
+| [`Assimalign.Cohesion.Content.Text`](./Assimalign.Cohesion.Content.Text/) | Encoding detection and text reading surface | Content | Implemented |
 | `Assimalign.Cohesion.Content.Yaml` | YAML 1.2 document model, parser, emitter | Content, Content.Text | In design |
 | `Assimalign.Cohesion.Content.Markdown` | Markdown document model and parser | Content.Text | Placeholder |
 | `Assimalign.Cohesion.Content.Media` | Shared media abstractions | Content.Binary | Placeholder |
