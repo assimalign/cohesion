@@ -23,6 +23,14 @@ A start/stop cycle drives four host-level specialization hooks around the servic
 - A direct `StopAsync` (without a shutdown signal) also completes the run signal, so a parked `RunAsync` unwinds instead of hanging forever.
 - A shutdown signal arriving after the host has stopped is a no-op, not a fault.
 
+### Start failure
+
+A failed or cancelled start never wedges the host in `Starting` with partially-started services leaked (e.g. a bound socket). The coordinator compensates and rethrows:
+
+- Every hosted service is stopped **best-effort** in reverse registration order, on a fresh `ShutdownTimeout` budget, *without* the lifecycle stop ceremony (`StoppingAsync`/`StoppedAsync` and the host stop hooks do not fire - this is compensation, not a graceful stop). Rollback failures are swallowed so the original fault is what the caller observes.
+- The host transitions to the terminal `HostState.Failed` - distinct from a clean `Stopped` - and the run/stopped signals complete, so a parked `RunAsync` or nested-host wrapper unwinds.
+- A `Failed` host is not wedged: `StopAsync` is a clean no-op (teardown already happened), disposal works, and a retried `StartAsync` is allowed (the state machine treats `Failed` like `Stopped` for restart, so a supervisor can retry a transient failure).
+
 ## Execution model - the per-service menu
 
 `Host<TContext>` imposes no execution model, so where a unit of work meets a thread is decided per service, by the service class that knows its own I/O profile, through static dispatch: pick a base class at authoring time. There is no host-level threading strategy and no reflection.

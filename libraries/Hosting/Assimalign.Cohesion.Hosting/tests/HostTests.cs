@@ -159,6 +159,117 @@ public class HostTests
         host.Context.State.ShouldBe(HostState.Stopped);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A failing service start rolls back started services and marks the host Failed")]
+    public async Task StartAsync_WhenServiceFailsToStart_RollsBackStartedServicesAndFails()
+    {
+        // Arrange - a healthy service that starts first...
+        var healthyStopped = false;
+        var options = new TestHostOptions();
+
+        options.HostedServices.Add(new DelegateBackgroundService(async cancellationToken =>
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            healthyStopped = true;
+        }));
+
+        // ...followed by a service whose start fails.
+        options.HostedServices.Add(new DelegateHostService(
+            cancellationToken => throw new InvalidOperationException("start failure")));
+
+        IHost host = new TestHost(options);
+
+        // Act
+        var exception = await Should.ThrowAsync<InvalidOperationException>(() => host.StartAsync());
+
+        // Assert
+        exception.Message.ShouldBe("start failure");
+        host.Context.State.ShouldBe(HostState.Failed);
+        healthyStopped.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A failed start does not wedge the host: stop and a retried start work")]
+    public async Task StartAsync_AfterFailedStart_HostCanBeStoppedAndStartedAgain()
+    {
+        // Arrange - a service that fails its first start and succeeds afterwards.
+        var attempts = 0;
+        var options = new TestHostOptions();
+
+        options.HostedServices.Add(new DelegateHostService(cancellationToken =>
+        {
+            attempts++;
+            return attempts == 1
+                ? Task.FromException(new InvalidOperationException("transient start failure"))
+                : Task.CompletedTask;
+        }));
+
+        IHost host = new TestHost(options);
+
+        // Act
+        await Should.ThrowAsync<InvalidOperationException>(() => host.StartAsync());
+        host.Context.State.ShouldBe(HostState.Failed);
+
+        // Assert - stopping the failed host is a clean no-op, and a retried start succeeds.
+        await Should.NotThrowAsync(() => host.StopAsync());
+        host.Context.State.ShouldBe(HostState.Failed);
+
+        await host.StartAsync();
+        host.Context.State.ShouldBe(HostState.Started);
+
+        await host.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A cancelled startup tears down started services and marks the host Failed")]
+    public async Task StartAsync_CancelledDuringStartup_TearsDownAndFails()
+    {
+        // Arrange - a healthy first service...
+        var healthyStopped = false;
+        var options = new TestHostOptions();
+
+        options.HostedServices.Add(new DelegateBackgroundService(async cancellationToken =>
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            healthyStopped = true;
+        }));
+
+        // ...and a second whose start only finishes when the token is honored.
+        var startEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blockStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        options.HostedServices.Add(new DelegateHostService(async cancellationToken =>
+        {
+            startEntered.SetResult();
+            await blockStart.Task.WaitAsync(cancellationToken);
+        }));
+
+        IHost host = new TestHost(options);
+        using var startTokenSource = new CancellationTokenSource();
+
+        // Act - cancel while the second service is mid-start.
+        var start = host.StartAsync(startTokenSource.Token);
+        await startEntered.Task;
+        startTokenSource.Cancel();
+
+        // Assert
+        await Should.ThrowAsync<OperationCanceledException>(() => start);
+        host.Context.State.ShouldBe(HostState.Failed);
+        healthyStopped.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = DisplayPrefix + "RunAsync can run the same host again after a completed run")]
     public async Task RunAsync_AfterPreviousRun_RunsAgain()
     {

@@ -79,6 +79,21 @@ public class HostToServiceWrapperTests
         await stopped.WaitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "The stopped signal also completes when the host fails")]
+    public async Task WhenStoppedAsync_OnFailedTransition_Completes()
+    {
+        // Arrange
+        var context = new TestHostContext(new List<IHostService>());
+        var stopped = context.WhenStoppedAsync();
+
+        // Act
+        context.SetState(HostState.Starting);
+        context.SetState(HostState.Failed);
+
+        // Assert
+        await stopped.WaitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A nested host runs until the outer stop and is stopped by it")]
     public async Task StopAsync_AfterNestedHostStarted_StopsTheNestedHost()
     {

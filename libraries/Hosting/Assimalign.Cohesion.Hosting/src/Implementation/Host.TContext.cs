@@ -58,90 +58,101 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
 
         SetState(HostState.Starting);
 
-        await OnStartingAsync(cancellationToken).ConfigureAwait(false);
-
-        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
+        try
         {
-            cancellationTokenSource.CancelAfter(_options.StartupTimeout);
-        }
+            await OnStartingAsync(cancellationToken).ConfigureAwait(false);
 
-        cancellationToken = cancellationTokenSource.Token;
+            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
-        // RunAsync can unwind. Init has always run by this point, so the shutdown callback
-        // is set; the registration dies with the startup token source.
-        cancellationToken.Register(() =>
-        {
-            Context.Shutdown();
-        });
+            if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
+            {
+                cancellationTokenSource.CancelAfter(_options.StartupTimeout);
+            }
 
-        List<Exception> exceptions = new();
-        bool concurrent = _options.StartServicesConcurrently;
-        bool abortOnFirstException = !concurrent;
+            cancellationToken = cancellationTokenSource.Token;
 
-        IEnumerable<IHostService> services = Context.HostedServices;
-        IEnumerable<IHostLifecycleService>? lifecycleServices = GetLifecycleServices(services);
+            // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
+            // RunAsync can unwind. Init has always run by this point, so the shutdown callback
+            // is set; the registration dies with the startup token source.
+            cancellationToken.Register(() =>
+            {
+                Context.Shutdown();
+            });
 
-        if (lifecycleServices is not null)
-        {
+            List<Exception> exceptions = new();
+            bool concurrent = _options.StartServicesConcurrently;
+            bool abortOnFirstException = !concurrent;
+
+            IEnumerable<IHostService> services = Context.HostedServices;
+            IEnumerable<IHostLifecycleService>? lifecycleServices = GetLifecycleServices(services);
+
+            if (lifecycleServices is not null)
+            {
+                await ForeachService(
+                    lifecycleServices,
+                    cancellationToken,
+                    concurrent,
+                    abortOnFirstException,
+                    exceptions,
+                    (service, token) => service.StartingAsync(token)
+                ).ConfigureAwait(false);
+
+                ThrowIfError();
+            }
+
             await ForeachService(
-                lifecycleServices,
+                services,
                 cancellationToken,
                 concurrent,
                 abortOnFirstException,
                 exceptions,
-                (service, token) => service.StartingAsync(token)
-            ).ConfigureAwait(false);
-
-            ThrowIfError();
-        }
-
-        await ForeachService(
-            services,
-            cancellationToken,
-            concurrent,
-            abortOnFirstException,
-            exceptions,
-            (service, token) => service.StartAsync(token))
-            .ConfigureAwait(false);
-
-        ThrowIfError();
-
-        if (lifecycleServices is not null)
-        {
-            await ForeachService(
-                lifecycleServices,
-                cancellationToken,
-                concurrent,
-                abortOnFirstException,
-                exceptions,
-                (service, token) => service.StartedAsync(token))
+                (service, token) => service.StartAsync(token))
                 .ConfigureAwait(false);
 
             ThrowIfError();
-        }
 
-        SetState(HostState.Started);
-
-        await OnStartedAsync(cancellationToken).ConfigureAwait(false);
-
-        void ThrowIfError()
-        {
-            if (exceptions.Count > 0)
+            if (lifecycleServices is not null)
             {
-                if (exceptions.Count == 1)
+                await ForeachService(
+                    lifecycleServices,
+                    cancellationToken,
+                    concurrent,
+                    abortOnFirstException,
+                    exceptions,
+                    (service, token) => service.StartedAsync(token))
+                    .ConfigureAwait(false);
+
+                ThrowIfError();
+            }
+
+            SetState(HostState.Started);
+
+            await OnStartedAsync(cancellationToken).ConfigureAwait(false);
+
+            void ThrowIfError()
+            {
+                if (exceptions.Count > 0)
                 {
-                    // Rethrow if it's a single error
-                    Exception exception = exceptions[0];
-                    ExceptionDispatchInfo.Capture(exception).Throw();
-                }
-                else
-                {
-                    throw new AggregateException("One or more hosted services failed to start.", exceptions);
+                    if (exceptions.Count == 1)
+                    {
+                        // Rethrow if it's a single error
+                        Exception exception = exceptions[0];
+                        ExceptionDispatchInfo.Capture(exception).Throw();
+                    }
+                    else
+                    {
+                        throw new AggregateException("One or more hosted services failed to start.", exceptions);
+                    }
                 }
             }
+        }
+        catch
+        {
+            // A failed or cancelled start must not wedge the host in Starting with
+            // partially-started services leaked: compensate, mark Failed, rethrow.
+            await RollbackStartAsync().ConfigureAwait(false);
+
+            throw;
         }
     }
 
@@ -149,8 +160,9 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        // Check 
-        if (Context.State.IsAny(HostState.Starting!, HostState.Stopping!, HostState.Stopped!))
+        // Check: a failed start has already been rolled back, so stopping a Failed host is
+        // a clean no-op rather than a second teardown.
+        if (Context.State.IsAny(HostState.Starting!, HostState.Stopping!, HostState.Stopped!, HostState.Failed!))
         {
             return;
         }
@@ -366,6 +378,37 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         });
 
         _isInit = true;
+    }
+
+    /// <summary>
+    /// Best-effort compensation for a failed or cancelled start: stops whatever managed to
+    /// start (newest first, without the lifecycle stop ceremony), unparks a waiting
+    /// <see cref="RunAsync"/>, resets run-state, and marks the host <see cref="HostState.Failed"/>.
+    /// Rollback failures are swallowed so they never mask the original fault, which the
+    /// caller rethrows.
+    /// </summary>
+    private async Task RollbackStartAsync()
+    {
+        using var cancellationTokenSource = new CancellationTokenSource(_options.ShutdownTimeout);
+
+        foreach (IHostService service in Context.HostedServices.Reverse())
+        {
+            try
+            {
+                await service.StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Best-effort teardown on the failure path; the original start fault is
+                // what the caller must observe.
+            }
+        }
+
+        _taskCompletionSource?.TrySetResult(this);
+
+        Reset();
+
+        SetState(HostState.Failed);
     }
 
     /// <summary>
