@@ -9,6 +9,7 @@ connection transformation, and certificate management.
 |---|---|
 | `Assimalign.Cohesion.Security` | TLS as a connection upgrade: `UseTls(...)` on listeners/factories (via `TlsConnectionLayer : IConnectionLayer`) and `UpgradeToTlsAsync(...)` on individual connections. Returns a new secured `IConnection` whose duplex pipe is encrypted and whose `Capabilities.Security` reports `Tls`. |
 | `Assimalign.Cohesion.Security.Cryptography` | Certificate store management abstractions and OS-specific certificate providers. |
+| `Assimalign.Cohesion.Security.DataProtection` | Purpose-bound data protection with a rotating key ring: interface-first protector contracts (`IDataProtectionProvider`/`IDataProtector`), AES-256-GCM payloads with versioned key-id headers, HKDF-SHA256 subkey derivation, and an `IKeyRepository` persistence seam with a file-system default. BCL crypto only; the shared primitive that consumers (antiforgery, auth cookies, sessions) protect blobs with instead of hand-rolling key management. |
 
 ## Layering
 
@@ -29,3 +30,7 @@ application protocols knowing about it. Application protocols observe security o
 - [Assimalign.Cohesion.Security/docs/DESIGN.md](Assimalign.Cohesion.Security/docs/DESIGN.md) —
   why TLS is an upgrade returning a new connection rather than middleware observing an existing one.
 - [Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md](Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md)
+- [Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md](Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md)
+- [Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md](Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md) —
+  the AES-GCM + HKDF construction, the rotating key ring with grace-period unprotect, and why
+  composition lives in `*.Hosting`.

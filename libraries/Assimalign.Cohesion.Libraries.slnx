@@ -965,4 +965,15 @@
 	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security/tests/">
 		<Project Path="Security/Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security.DataProtection/" />
+	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security.DataProtection/docs/">
+		<File Path="Security/Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md" />
+		<File Path="Security/Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security.DataProtection/src/">
+		<Project Path="Security/Assimalign.Cohesion.Security.DataProtection/src/Assimalign.Cohesion.Security.DataProtection.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security.DataProtection/tests/">
+		<Project Path="Security/Assimalign.Cohesion.Security.DataProtection/tests/Assimalign.Cohesion.Security.DataProtection.Tests.csproj" />
+	</Folder>
 </Solution>
