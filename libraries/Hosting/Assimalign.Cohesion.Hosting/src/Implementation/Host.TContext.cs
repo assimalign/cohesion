@@ -160,16 +160,17 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        // Check: a failed start has already been rolled back, so stopping a Failed host is
-        // a clean no-op rather than a second teardown.
-        if (Context.State.IsAny(HostState.Starting!, HostState.Stopping!, HostState.Stopped!, HostState.Failed!))
+        // Check: a never-started (Idle) host has nothing to stop - disposing one must be a
+        // no-op - and a failed start has already been rolled back, so stopping a Failed
+        // host is a clean no-op rather than a second teardown. Starting/Stopping/Stopped
+        // guard re-entrancy. Only a Started host proceeds, which also guarantees the
+        // per-run state from Init exists.
+        if (Context.State.IsAny(HostState.Idle!, HostState.Starting!, HostState.Stopping!, HostState.Stopped!, HostState.Failed!))
         {
             return;
         }
 
         SetState(HostState.Stopping);
-
-        InvalidOperationException.ThrowIf(Context.ShutdownCallback is null, "Host has not started.");
 
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -183,8 +184,12 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         await OnStoppingAsync(cancellationToken).ConfigureAwait(false);
 
         List<Exception> exceptions = new();
-        bool concurrent = _options.StartServicesConcurrently;
-        bool abortOnFirstException = !concurrent;
+        bool concurrent = _options.StopServicesConcurrently;
+
+        // Shutdown is best-effort: a failing service must not leak the ones behind it, so
+        // the abort policy is not coupled to the concurrency flag. Failures are collected
+        // and thrown together after every service has been given its stop.
+        const bool abortOnFirstException = false;
 
         IEnumerable<IHostService> services = Context.HostedServices.Reverse();
         IEnumerable<IHostLifecycleService>? lifecycleServices = GetLifecycleServices(services);
@@ -244,7 +249,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             }
             else
             {
-                throw new AggregateException("One or more hosted services failed to start.", exceptions);
+                throw new AggregateException("One or more hosted services failed to stop.", exceptions);
             }
         }
     }

@@ -270,6 +270,129 @@ public class HostTests
         healthyStopped.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = DisplayPrefix + "StopAsync honors StopServicesConcurrently")]
+    public async Task StopAsync_WithStopServicesConcurrently_StopsServicesConcurrently()
+    {
+        // Arrange - two services whose stops can only finish if both are in flight at once.
+        var enteredFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var options = new TestHostOptions
+        {
+            StopServicesConcurrently = true,
+        };
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: async cancellationToken =>
+            {
+                enteredFirst.SetResult();
+                await enteredSecond.Task.WaitAsync(cancellationToken);
+            }));
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: async cancellationToken =>
+            {
+                enteredSecond.SetResult();
+                await enteredFirst.Task.WaitAsync(cancellationToken);
+            }));
+
+        IHost host = new TestHost(options);
+
+        // Act & Assert - a serial stop would deadlock each service on the other and abort
+        // on the stop budget; a concurrent stop completes.
+        await host.StartAsync();
+        await Should.NotThrowAsync(
+            () => host.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token));
+
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A failing service stop does not leak the services behind it")]
+    public async Task StopAsync_WhenAServiceFailsToStop_StillStopsRemainingServices()
+    {
+        // Arrange - stop order is reverse registration: third, second (throws), first.
+        var firstStopped = false;
+        var thirdStopped = false;
+        var options = new TestHostOptions();
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: cancellationToken =>
+            {
+                firstStopped = true;
+                return Task.CompletedTask;
+            }));
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: cancellationToken => throw new InvalidOperationException("stop failure")));
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: cancellationToken =>
+            {
+                thirdStopped = true;
+                return Task.CompletedTask;
+            }));
+
+        IHost host = new TestHost(options);
+
+        // Act
+        await host.StartAsync();
+        var exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token));
+
+        // Assert - the failure surfaced, but every other service was still stopped.
+        exception.Message.ShouldBe("stop failure");
+        thirdStopped.ShouldBeTrue();
+        firstStopped.ShouldBeTrue();
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Multiple stop failures aggregate with a stop message")]
+    public async Task StopAsync_WhenMultipleServicesFailToStop_ThrowsAggregateWithStopMessage()
+    {
+        // Arrange
+        var options = new TestHostOptions();
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: cancellationToken => throw new InvalidOperationException("first stop failure")));
+
+        options.HostedServices.Add(new DelegateHostService(
+            start: cancellationToken => Task.CompletedTask,
+            stop: cancellationToken => throw new InvalidOperationException("second stop failure")));
+
+        IHost host = new TestHost(options);
+
+        // Act
+        await host.StartAsync();
+        var exception = await Should.ThrowAsync<AggregateException>(
+            () => host.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token));
+
+        // Assert
+        exception.Message.ShouldContain("failed to stop");
+        exception.InnerExceptions.Count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Stopping or disposing a never-started host is a no-op")]
+    public async Task StopAsync_NeverStartedHost_IsNoOpAndDisposeDoesNotThrow()
+    {
+        // Arrange
+        IHost neverStartedForStop = new TestHost(new TestHostOptions());
+        IHost neverStartedForAsyncDispose = new TestHost(new TestHostOptions());
+        IHost neverStartedForSyncDispose = new TestHost(new TestHostOptions());
+
+        // Act & Assert
+        await Should.NotThrowAsync(() => neverStartedForStop.StopAsync());
+        neverStartedForStop.Context.State.ShouldBe(HostState.Idle);
+
+        await Should.NotThrowAsync(() => neverStartedForAsyncDispose.DisposeAsync().AsTask());
+        Should.NotThrow(() => neverStartedForSyncDispose.Dispose());
+    }
+
     [Fact(DisplayName = DisplayPrefix + "RunAsync can run the same host again after a completed run")]
     public async Task RunAsync_AfterPreviousRun_RunsAgain()
     {

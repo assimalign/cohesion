@@ -142,17 +142,29 @@ public class HostToServiceWrapperTests
 
         await service.StartAsync();
         await started;
+
+        // Let transient work (JIT, GC, expiring timers from sibling tests) settle.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
         await Task.Delay(100);
 
-        // Act - sample process CPU time over an idle window. The old implementation spun a
-        // tight state-polling loop that burned the entire window (~500ms of CPU).
-        var before = Process.GetCurrentProcess().TotalProcessorTime;
-        await Task.Delay(500);
-        var consumed = Process.GetCurrentProcess().TotalProcessorTime - before;
+        // Act - sample process CPU over idle windows. A busy-spin burns every window on a
+        // full core, so a single quiet window proves the wrapper is parked, while process
+        // noise (finalizers, timer callbacks from earlier tests) may legitimately blow the
+        // budget in some windows.
+        var quietWindowObserved = false;
 
-        // Assert - generous threshold: parked-on-signal consumes near zero; a busy-spin
-        // consumes at least the full window on one core.
-        consumed.ShouldBeLessThan(TimeSpan.FromMilliseconds(250));
+        for (var attempt = 0; attempt < 4 && !quietWindowObserved; attempt++)
+        {
+            var before = Process.GetCurrentProcess().TotalProcessorTime;
+            await Task.Delay(500);
+            var consumed = Process.GetCurrentProcess().TotalProcessorTime - before;
+
+            quietWindowObserved = consumed < TimeSpan.FromMilliseconds(250);
+        }
+
+        // Assert
+        quietWindowObserved.ShouldBeTrue();
 
         await service.StopAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
     }

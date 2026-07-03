@@ -7,7 +7,7 @@ Defines the hosting abstractions, lifecycle orchestration, environment and conte
 ## Current Evaluation
 
 - Status: Active
-- Production source files: 17; key type candidates discovered: 9; test files discovered: 9.
+- Production source files: 17; key type candidates discovered: 9; test files discovered: 15.
 - Project references: Assimalign.Cohesion.Core
 - Package references: None
 - NotImplementedException markers: 0

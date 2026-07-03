@@ -22,6 +22,8 @@ A start/stop cycle drives four host-level specialization hooks around the servic
 - **The run token is a signal, not a stop budget.** `RunAsync` parks on a run signal completed by shutdown (`Context.Shutdown()` cancels the run token) and then stops with a *fresh* token: the run token is cancelled by definition at that point, so using it would pre-cancel every service's graceful drain. The stop budget always comes from `ShutdownTimeout` inside `StopAsync`.
 - A direct `StopAsync` (without a shutdown signal) also completes the run signal, so a parked `RunAsync` unwinds instead of hanging forever.
 - A shutdown signal arriving after the host has stopped is a no-op, not a fault.
+- **Shutdown is best-effort.** A failing service stop never leaks the services behind it: failures are collected while every service is still given its stop (serially in reverse registration order, or concurrently when `StopServicesConcurrently` is set), then thrown together after the host reaches `Stopped`. The abort policy is deliberately not coupled to the concurrency flag. Startup keeps the opposite default - serial start aborts on the first failure and the rollback path (below) compensates - because refusing to continue past a broken dependency is the safer start-side behavior.
+- Stopping or disposing a never-started (`Idle`) host is a no-op. Only a `Started` host actually runs the stop sequence, which also guarantees the per-run state exists - there is no "has not started" failure mode on the stop path.
 
 ### Start failure
 
