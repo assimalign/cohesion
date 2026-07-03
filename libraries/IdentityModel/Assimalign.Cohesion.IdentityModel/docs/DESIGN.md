@@ -270,6 +270,98 @@ of them is a breaking design change, not a refactor.
   deliberately `string→string`: it carries wire qualifier leftovers only and
   keeps identifier equality trivially cheap.
 
+## Shared protocol abstraction decisions
+
+Feature `[L01.01.12.03]` added the `Protocols` namespace: the cross-protocol
+concepts the OIDC and SAML branches derive from. These decisions were
+stress-tested against both branches' forward requirements before
+implementation and are load-bearing.
+
+- **Abstract envelope bases are data-only, with protocol pinned by the
+  derived type.** `ProtocolMetadata` and `ProtocolMessage` (and the
+  request/response/logout derivatives) are guided abstract bases: get-only
+  properties snapshotted in a `protected` constructor, no virtual or abstract
+  behavior members, so derivatives can never change base semantics. The
+  `AuthenticationProtocol` is a constructor argument supplied by the derived
+  type — never descriptor data — so an object can never claim a protocol that
+  contradicts its type. Their descriptors are abstract too; branch types pair
+  with branch descriptors. Growth flows through descriptors, not positional
+  constructor parameters.
+- **`ProtocolMetadata` models *published* entity metadata and `EntityId` is
+  always required.** Shapes without an identifier — an OIDC dynamic client
+  registration *request*, where the server assigns `client_id` in the
+  response — are branch-owned request types and must not derive from the
+  base. Endpoints and keys are flat lists carrying an optional
+  `ProtocolRole` scope (null = entity-wide) so dual-role SAML entities keep
+  key/endpoint role attribution without a SAML-shaped role-descriptor
+  hierarchy in the base; role-grouped views are branch projections.
+  `RawDocument` preserves the as-received document for later signature
+  re-verification, mirroring `ProtocolMessage.RawMessage`. `CacheDuration`
+  is a computed `TimeSpan` — SAML `xs:duration` calendar components are not
+  exactly representable, so branches preserve the lexical form in
+  `Properties` when inexact.
+- **Locations and destinations are wire-exact strings, never `System.Uri`.**
+  `Uri` normalizes (default-port dropping, host case folding, IDN encoding)
+  and its equality is loose — but endpoint/destination comparison is a
+  signed-value security control in SAML and an exact-match rule for OAuth
+  redirect URIs. `ProtocolEndpoint.Location`/`ResponseLocation` are validated
+  to parse as absolute URIs at materialization (validate with `Uri`, store
+  the string); `ProtocolMessage.Destination` is unvalidated wire capture —
+  judging it is a validator's job. All comparisons are ordinal.
+- **Correlation semantics are pinned once.** `CorrelationState` carries the
+  opaque round-trip value on both legs (OIDC `state`, SAML `RelayState`);
+  `InResponseTo` is message-*identifier* correlation only (SAML) and is
+  always null for OIDC, which has no message ids. `Issuer` on a message is
+  the *sender*. `Reason` on a logout request is strictly the *why* category
+  (SAML `Reason` URI) — subject hints like OIDC `logout_hint` are *who* and
+  live on branch types.
+- **`ProtocolResponse.Status` is required and has no default.**
+  Absence-means-success is a wire-parsing rule for branch materializers; a
+  response whose status was never mapped fails construction rather than
+  reading as accepted. `ProtocolResponseStatus` stores `Succeeded`
+  orthogonally to wire codes (SAML successes always carry the `Success` code;
+  single logout can succeed with a `PartialLogout` sub-code) and carries the
+  ordered `SubCodes` chain because SAML status nesting is unbounded.
+- **The `ProtocolBinding` vocabulary is transport-shaped, one name per wire
+  shape**: `http-redirect`, `http-post`, `http-fragment`, `http-artifact`,
+  `soap`, `back-channel`. OIDC response modes map onto these
+  (`query`→`http-redirect`, `form_post`→`http-post`,
+  `fragment`→`http-fragment`) with the wire spellings as branch constants —
+  two spellings for one shape in an open vocabulary would make stored
+  metadata and routing silently mismatch. A binding names the transport
+  shape only; message encoding differs per protocol, so dispatch is always
+  on the (protocol, binding) pair. `ProtocolEndpointKind` is the same
+  open-vocabulary shape with no root well-known values: endpoint kinds are
+  protocol-spec vocabulary and live as typed values in the owning branch.
+- **`ProtocolExchange` describes two legs** (request endpoint + optional
+  response endpoint, each leg's binding on its endpoint; null response
+  endpoint = back-channel same-connection). Both protocols' flagship
+  front-channel flows terminate the two legs at different parties'
+  endpoints; a SAML artifact flow is two exchanges.
+- **`ProtocolKeyUse.Unspecified = 0` is deliberately not the fail-closed
+  `Unknown`.** Both SAML and JWK define an absent `use` as valid-for-any-
+  purpose; the descriptive model preserves that wire semantic, and the
+  fail-closed rule applies to *usability gates*, not wire data. Consumers
+  use `CanSign`/`CanEncrypt` (which treat `Unspecified` as unrestricted)
+  instead of naive equality filters; whether an unrestricted key is trusted
+  is downstream validator policy. Keys carry multiple `Algorithms` (SAML
+  permits several `EncryptionMethod` entries).
+- **Validation diagnostics are the family's shared currency.**
+  `ProtocolValidationResult` is sealed; `Succeeded` is computed (no
+  error-severity diagnostics) so "succeeded with errors" is
+  unconstructible; `ProtocolValidationSeverity.Error = 0` so a defaulted
+  severity reads as the most severe interpretation. Richer results elsewhere
+  (token validation in `[L01.01.12.06]`) *compose* the result or reuse
+  `ProtocolValidationDiagnostic` — no result inheritance hierarchy.
+  Association with the validated artifact is the caller's composition
+  concern. No builder: validators accumulate a `List<>` and materialize
+  once.
+- **`ProtocolParty` is a minimal reference** (trust-registry entries) with
+  equality over (Identifier, Role) ordinal — `DisplayName`/`Properties`
+  excluded, per the `SubjectIdentifier` precedent — and deliberately no
+  protocol member: one entity identifier can serve both protocols; protocol
+  provenance lives on metadata and messages.
+
 ## Error model
 
 `IdentityModelException` (root namespace) is the area-scoped exception root,

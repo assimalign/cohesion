@@ -36,13 +36,32 @@ internal static class ModelSnapshot
         string parameterName)
     {
         ArgumentNullException.ThrowIfNull(source, parameterName);
+        return Properties(source, source.Count, parameterName);
+    }
 
-        if (source.Count == 0)
+    internal static IReadOnlyDictionary<string, IdentityClaimValue> Properties(
+        IReadOnlyDictionary<string, IdentityClaimValue>? source,
+        string parameterName)
+    {
+        if (source is null or { Count: 0 })
         {
             return EmptyProperties;
         }
 
-        var snapshot = new Dictionary<string, IdentityClaimValue>(source.Count, StringComparer.Ordinal);
+        return Properties(source, source.Count, parameterName);
+    }
+
+    private static IReadOnlyDictionary<string, IdentityClaimValue> Properties(
+        IEnumerable<KeyValuePair<string, IdentityClaimValue>> source,
+        int count,
+        string parameterName)
+    {
+        if (count == 0)
+        {
+            return EmptyProperties;
+        }
+
+        var snapshot = new Dictionary<string, IdentityClaimValue>(count, StringComparer.Ordinal);
         foreach (var (name, value) in source)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(name, parameterName);

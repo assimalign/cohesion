@@ -38,9 +38,19 @@ Epic `[L01.01.12]` (#105) is in delivery. Currently shipped:
   plus the `IdentityModelException` area root and claim-collection
   `extension(…)` accessors.
 
-Remaining features land in dependency order: shared protocol abstractions,
-OIDC branch, SAML branch, then token-package alignment and cross-protocol
-normalization. See the delivery roadmap table in `docs/DESIGN.md`.
+- The shared protocol abstractions (`[L01.01.12.03]`) in the `Protocols`
+  namespace: the open vocabularies (`ProtocolRole`, `ProtocolBinding`,
+  `ProtocolEndpointKind`), party references, the published-entity metadata
+  base (`ProtocolMetadata` + endpoints and keys with role scoping), the
+  message envelope hierarchy (`ProtocolMessage`/`Request`/`Response` with
+  pinned correlation semantics and fail-closed `ProtocolResponseStatus`),
+  shared logout semantics, the two-leg `ProtocolExchange` description, and
+  the validation-result contracts (`ProtocolValidationResult` /
+  `ProtocolValidationDiagnostic`).
+
+Remaining features land in dependency order: OIDC branch, SAML branch, then
+token-package alignment and cross-protocol normalization. See the delivery
+roadmap table in `docs/DESIGN.md`.
 
 ## Scope
 
