@@ -180,7 +180,7 @@ Move an item here with its PR link + date the moment it merges — this is the s
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-03 | #747 | _open — this PR_ | RFC 9651 Structured Field Values toolkit (Items/Lists/Dictionaries + all 8 bare types incl. Date & Display String) in core `Assimalign.Cohesion.Http`. Fan-out foundation: unblocks #753 (Priority), #756 (Digest), #746 (QUERY/Accept-Query), and future Proxy-Status / Signature-Input. Lands as span-based AOT-safe value objects (`StructuredField*`); `HttpFieldRules` stays name-classification only. |
+| 2026-07-03 | #747 | [#804](https://github.com/assimalign/cohesion/pull/804) _(open)_ | RFC 9651 Structured Field Values toolkit (Items/Lists/Dictionaries + all 8 bare types incl. Date & Display String) in core `Assimalign.Cohesion.Http`. Fan-out foundation: unblocks #753 (Priority), #756 (Digest), #746 (QUERY/Accept-Query), and future Proxy-Status / Signature-Input. Lands as span-based AOT-safe value objects (`StructuredField*`); `HttpFieldRules` stays name-classification only. |
 
 ---
 
