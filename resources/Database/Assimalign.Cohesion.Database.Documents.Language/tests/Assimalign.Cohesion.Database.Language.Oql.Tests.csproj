@@ -8,7 +8,7 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
-		<CohesionPackageReference Include="FluentAssertions"/>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language.Oql" />
+		<CohesionPackageReference Include="Shouldly"/>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
 	</ItemGroup>
 </Project>

@@ -5,6 +5,6 @@
 		<OutDir>$(CohesionOutputPathForCli)</OutDir>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Sharprompt" />
+		<CohesionPackageReference Include="Sharprompt" />
 	</ItemGroup>
 </Project>

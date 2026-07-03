@@ -66,7 +66,7 @@ If this file and `AGENTS.md` ever drift, treat `AGENTS.md` as the canonical sour
 - Libraries target `net10.0` through the repo build system.
 - Preview language features must remain enabled.
 - Markdown files should use uppercase naming conventions such as `README.md` and `CONTRIBUTING.md`.
-- New package versions belong in `build/Targets/PackageReferences.targets` before they are consumed.
+- New package versions belong in `build/Targets/Build.References.Packages.targets` before they are consumed.
 - Respect the repo folder conventions for `src`, `tests`, `Abstractions`, `Extensions`, `Internal`, `Exceptions`, and `ValueObjects`.
 - Respect the repo documentation conventions for sibling `docs/` folders, project-level `OVERVIEW.md` and `DESIGN.md`, and namespace or type-based API reference material in `docs/Assembly/`.
 

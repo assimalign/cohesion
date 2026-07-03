@@ -20,14 +20,14 @@ public class DatabaseEngine { }
 ```xml
 <CohesionPackageReference Include="Newtonsoft.Json" />
 ```
-Version goes in `build/Targets/PackageReferences.targets` first.
+Version goes in `build/Targets/Build.References.Packages.targets` first.
 
 ### Namespace matches assembly name exactly
 - Assembly: `Assimalign.Cohesion.Database.Documents`
 - Namespace: `namespace Assimalign.Cohesion.Database.Documents;`
 
 ### Target framework
-- Libraries target `net10.0` — but the target framework is centrally managed in `build/Targets/TargetFramework.props`, so per-project overrides are normally not needed.
+- Libraries target `net10.0` — but the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`, so per-project overrides are normally not needed.
 
 ### Preview language features
 ```xml
@@ -86,7 +86,7 @@ namespace Assimalign.Cohesion.Database
 ```
 
 ### Adding package references without centralized versions
-- Always add to `build/Targets/PackageReferences.targets` first.
+- Always add to `build/Targets/Build.References.Packages.targets` first.
 - Then use `CohesionPackageReference`.
 
 ### Raw `PackageReference`
@@ -191,7 +191,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-using Microsoft.Extensions.Logging;
+using NUlid;
 
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Configuration;

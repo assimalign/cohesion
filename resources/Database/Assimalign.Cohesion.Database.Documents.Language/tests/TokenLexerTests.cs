@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Language.Oql;
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Language.Oql.Tests;
@@ -39,8 +39,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(keyword);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Keyword, keyword, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Keyword, keyword, 0));
     }
 
     [Theory]
@@ -51,8 +51,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(keyword);
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(TokenType.Keyword);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(TokenType.Keyword);
     }
 
     // ── Functions ──────────────────────────────────────────────────────
@@ -68,8 +68,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(function);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Function, function, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Function, function, 0));
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("count");
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(TokenType.Function);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(TokenType.Function);
     }
 
     // ── Identifiers ────────────────────────────────────────────────────
@@ -92,8 +92,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(identifier);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Identifier, identifier, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Identifier, identifier, 0));
     }
 
     [Fact]
@@ -101,8 +101,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("\"my column\"");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.QuotedIdentifier, "\"my column\"", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.QuotedIdentifier, "\"my column\"", 0));
     }
 
     // ── String Literals ────────────────────────────────────────────────
@@ -112,8 +112,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("'hello world'");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.String, "'hello world'", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.String, "'hello world'", 0));
     }
 
     [Fact]
@@ -121,8 +121,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("'it''s'");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.String, "'it''s'", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.String, "'it''s'", 0));
     }
 
     [Fact]
@@ -130,8 +130,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("''");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.String, "''", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.String, "''", 0));
     }
 
     // ── Numeric Literals ───────────────────────────────────────────────
@@ -141,8 +141,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("42");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Integer, "42", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Integer, "42", 0));
     }
 
     [Fact]
@@ -150,8 +150,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("3.14");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Float, "3.14", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Float, "3.14", 0));
     }
 
     [Fact]
@@ -159,8 +159,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(".5");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Float, ".5", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Float, ".5", 0));
     }
 
     [Theory]
@@ -171,8 +171,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Float, expected, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Float, expected, 0));
     }
 
     [Fact]
@@ -180,10 +180,10 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("1..10");
 
-        tokens.Should().HaveCount(3);
-        tokens[0].Should().Be((TokenType.Integer, "1", 0));
-        tokens[1].Should().Be((TokenType.DotDot, "..", 1));
-        tokens[2].Should().Be((TokenType.Integer, "10", 3));
+        tokens.Count.ShouldBe(3);
+        tokens[0].ShouldBe((TokenType.Integer, "1", 0));
+        tokens[1].ShouldBe((TokenType.DotDot, "..", 1));
+        tokens[2].ShouldBe((TokenType.Integer, "10", 3));
     }
 
     // ── Operators ──────────────────────────────────────────────────────
@@ -205,8 +205,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(expected);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(expected);
     }
 
     [Theory]
@@ -223,8 +223,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(expected);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(expected);
     }
 
     // ── Punctuation ────────────────────────────────────────────────────
@@ -244,8 +244,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(expected);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(expected);
     }
 
     // ── Parameters ─────────────────────────────────────────────────────
@@ -258,8 +258,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Parameter, expected, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Parameter, expected, 0));
     }
 
     [Theory]
@@ -269,8 +269,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize(input);
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Parameter, expected, 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Parameter, expected, 0));
     }
 
     // ── Comments ───────────────────────────────────────────────────────
@@ -280,8 +280,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("-- this is a comment");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Comment, "-- this is a comment", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Comment, "-- this is a comment", 0));
     }
 
     [Fact]
@@ -289,8 +289,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("/* block */");
 
-        tokens.Should().ContainSingle()
-            .Which.Should().Be((TokenType.Comment, "/* block */", 0));
+        tokens.ShouldHaveSingleItem()
+            .ShouldBe((TokenType.Comment, "/* block */", 0));
     }
 
     [Fact]
@@ -298,8 +298,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("/* outer /* inner */ still comment */");
 
-        tokens.Should().ContainSingle()
-            .Which.Type.Should().Be(TokenType.Comment);
+        tokens.ShouldHaveSingleItem()
+            .Type.ShouldBe(TokenType.Comment);
     }
 
     [Fact]
@@ -307,9 +307,9 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("-- comment\nSELECT");
 
-        tokens.Should().HaveCount(2);
-        tokens[0].Type.Should().Be(TokenType.Comment);
-        tokens[1].Should().Be((TokenType.Keyword, "SELECT", 11));
+        tokens.Count.ShouldBe(2);
+        tokens[0].Type.ShouldBe(TokenType.Comment);
+        tokens[1].ShouldBe((TokenType.Keyword, "SELECT", 11));
     }
 
     // ── Edge Cases ─────────────────────────────────────────────────────
@@ -319,8 +319,8 @@ public class TokenLexerTests
     {
         var lexer = new TokenLexer("", OqlLanguage.CreateLexerOptions());
 
-        lexer.MoveNext().Should().BeFalse();
-        lexer.Current.Type.Should().Be(TokenType.Eof);
+        lexer.MoveNext().ShouldBeFalse();
+        lexer.Current.Type.ShouldBe(TokenType.Eof);
     }
 
     [Fact]
@@ -328,7 +328,7 @@ public class TokenLexerTests
     {
         var lexer = new TokenLexer("   \t\n  ", OqlLanguage.CreateLexerOptions());
 
-        lexer.MoveNext().Should().BeFalse();
+        lexer.MoveNext().ShouldBeFalse();
     }
 
     [Fact]
@@ -337,10 +337,10 @@ public class TokenLexerTests
         // "a + b" → a(0) +(2) b(4)
         var tokens = Tokenize("a + b");
 
-        tokens.Should().HaveCount(3);
-        tokens[0].Position.Should().Be(0);
-        tokens[1].Position.Should().Be(2);
-        tokens[2].Position.Should().Be(4);
+        tokens.Count.ShouldBe(3);
+        tokens[0].Position.ShouldBe(0);
+        tokens[1].Position.ShouldBe(2);
+        tokens[2].Position.ShouldBe(4);
     }
 
     [Fact]
@@ -352,8 +352,8 @@ public class TokenLexerTests
         lexer.Reset();
         lexer.MoveNext(); // SELECT again
 
-        lexer.Current.Type.Should().Be(TokenType.Keyword);
-        lexer.Current.Value.ToString().Should().Be("SELECT");
+        lexer.Current.Type.ShouldBe(TokenType.Keyword);
+        lexer.Current.Value.ToString().ShouldBe("SELECT");
     }
 
     // ── Object Navigation (OQL-specific patterns) ──────────────────────
@@ -364,12 +364,12 @@ public class TokenLexerTests
         // OQL: person.address.city
         var tokens = Tokenize("person.address.city");
 
-        tokens.Should().HaveCount(5);
-        tokens[0].Should().Be((TokenType.Identifier, "person", 0));
-        tokens[1].Should().Be((TokenType.Dot, ".", 6));
-        tokens[2].Should().Be((TokenType.Identifier, "address", 7));
-        tokens[3].Should().Be((TokenType.Dot, ".", 14));
-        tokens[4].Should().Be((TokenType.Identifier, "city", 15));
+        tokens.Count.ShouldBe(5);
+        tokens[0].ShouldBe((TokenType.Identifier, "person", 0));
+        tokens[1].ShouldBe((TokenType.Dot, ".", 6));
+        tokens[2].ShouldBe((TokenType.Identifier, "address", 7));
+        tokens[3].ShouldBe((TokenType.Dot, ".", 14));
+        tokens[4].ShouldBe((TokenType.Identifier, "city", 15));
     }
 
     // ── Full OQL Queries ───────────────────────────────────────────────
@@ -379,15 +379,15 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("SELECT name FROM customers WHERE age > 21");
 
-        tokens.Should().HaveCount(8);
-        tokens[0].Should().Be((TokenType.Keyword, "SELECT", 0));
-        tokens[1].Should().Be((TokenType.Identifier, "name", 7));
-        tokens[2].Should().Be((TokenType.Keyword, "FROM", 12));
-        tokens[3].Should().Be((TokenType.Identifier, "customers", 17));
-        tokens[4].Should().Be((TokenType.Keyword, "WHERE", 27));
-        tokens[5].Should().Be((TokenType.Identifier, "age", 33));
-        tokens[6].Should().Be((TokenType.GreaterThan, ">", 37));
-        tokens[7].Should().Be((TokenType.Integer, "21", 39));
+        tokens.Count.ShouldBe(8);
+        tokens[0].ShouldBe((TokenType.Keyword, "SELECT", 0));
+        tokens[1].ShouldBe((TokenType.Identifier, "name", 7));
+        tokens[2].ShouldBe((TokenType.Keyword, "FROM", 12));
+        tokens[3].ShouldBe((TokenType.Identifier, "customers", 17));
+        tokens[4].ShouldBe((TokenType.Keyword, "WHERE", 27));
+        tokens[5].ShouldBe((TokenType.Identifier, "age", 33));
+        tokens[6].ShouldBe((TokenType.GreaterThan, ">", 37));
+        tokens[7].ShouldBe((TokenType.Integer, "21", 39));
     }
 
     [Fact]
@@ -395,14 +395,14 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("SELECT COUNT(*) FROM orders");
 
-        tokens.Should().HaveCount(7);
-        tokens[0].Should().Be((TokenType.Keyword, "SELECT", 0));
-        tokens[1].Should().Be((TokenType.Function, "COUNT", 7));
-        tokens[2].Should().Be((TokenType.LeftParen, "(", 12));
-        tokens[3].Should().Be((TokenType.Asterisk, "*", 13));
-        tokens[4].Should().Be((TokenType.RightParen, ")", 14));
-        tokens[5].Should().Be((TokenType.Keyword, "FROM", 16));
-        tokens[6].Should().Be((TokenType.Identifier, "orders", 21));
+        tokens.Count.ShouldBe(7);
+        tokens[0].ShouldBe((TokenType.Keyword, "SELECT", 0));
+        tokens[1].ShouldBe((TokenType.Function, "COUNT", 7));
+        tokens[2].ShouldBe((TokenType.LeftParen, "(", 12));
+        tokens[3].ShouldBe((TokenType.Asterisk, "*", 13));
+        tokens[4].ShouldBe((TokenType.RightParen, ")", 14));
+        tokens[5].ShouldBe((TokenType.Keyword, "FROM", 16));
+        tokens[6].ShouldBe((TokenType.Identifier, "orders", 21));
     }
 
     [Fact]
@@ -411,17 +411,17 @@ public class TokenLexerTests
         // OQL: STRUCT(name: 'John', age: 30)
         var tokens = Tokenize("STRUCT(name: 'John', age: 30)");
 
-        tokens.Should().HaveCount(10);
-        tokens[0].Type.Should().Be(TokenType.Keyword);   // STRUCT
-        tokens[1].Type.Should().Be(TokenType.LeftParen);  // (
-        tokens[2].Type.Should().Be(TokenType.Identifier); // name
-        tokens[3].Type.Should().Be(TokenType.Colon);      // :
-        tokens[4].Type.Should().Be(TokenType.String);     // 'John'
-        tokens[5].Type.Should().Be(TokenType.Comma);      // ,
-        tokens[6].Type.Should().Be(TokenType.Identifier); // age
-        tokens[7].Type.Should().Be(TokenType.Colon);      // :
-        tokens[8].Type.Should().Be(TokenType.Integer);    // 30
-        tokens[9].Type.Should().Be(TokenType.RightParen); // )
+        tokens.Count.ShouldBe(10);
+        tokens[0].Type.ShouldBe(TokenType.Keyword);   // STRUCT
+        tokens[1].Type.ShouldBe(TokenType.LeftParen);  // (
+        tokens[2].Type.ShouldBe(TokenType.Identifier); // name
+        tokens[3].Type.ShouldBe(TokenType.Colon);      // :
+        tokens[4].Type.ShouldBe(TokenType.String);     // 'John'
+        tokens[5].Type.ShouldBe(TokenType.Comma);      // ,
+        tokens[6].Type.ShouldBe(TokenType.Identifier); // age
+        tokens[7].Type.ShouldBe(TokenType.Colon);      // :
+        tokens[8].Type.ShouldBe(TokenType.Integer);    // 30
+        tokens[9].Type.ShouldBe(TokenType.RightParen); // )
     }
 
     [Fact]
@@ -430,15 +430,15 @@ public class TokenLexerTests
         // OQL: SELECT FLATTEN(SELECT addresses FROM customers)
         var tokens = Tokenize("SELECT FLATTEN(SELECT addresses FROM customers)");
 
-        tokens.Should().HaveCount(8);
-        tokens[0].Type.Should().Be(TokenType.Keyword);    // SELECT
-        tokens[1].Type.Should().Be(TokenType.Keyword);    // FLATTEN (keyword takes precedence)
-        tokens[2].Type.Should().Be(TokenType.LeftParen);
-        tokens[3].Type.Should().Be(TokenType.Keyword);    // SELECT
-        tokens[4].Type.Should().Be(TokenType.Identifier); // addresses
-        tokens[5].Type.Should().Be(TokenType.Keyword);    // FROM
-        tokens[6].Type.Should().Be(TokenType.Identifier); // customers
-        tokens[7].Type.Should().Be(TokenType.RightParen); // )
+        tokens.Count.ShouldBe(8);
+        tokens[0].Type.ShouldBe(TokenType.Keyword);    // SELECT
+        tokens[1].Type.ShouldBe(TokenType.Keyword);    // FLATTEN (keyword takes precedence)
+        tokens[2].Type.ShouldBe(TokenType.LeftParen);
+        tokens[3].Type.ShouldBe(TokenType.Keyword);    // SELECT
+        tokens[4].Type.ShouldBe(TokenType.Identifier); // addresses
+        tokens[5].Type.ShouldBe(TokenType.Keyword);    // FROM
+        tokens[6].Type.ShouldBe(TokenType.Identifier); // customers
+        tokens[7].Type.ShouldBe(TokenType.RightParen); // )
     }
 
     [Fact]
@@ -446,19 +446,19 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("SELECT name FROM people WHERE name LIKE 'A%' AND age >= 18");
 
-        tokens.Should().HaveCount(12);
-        tokens[0].Type.Should().Be(TokenType.Keyword);    // SELECT
-        tokens[1].Type.Should().Be(TokenType.Identifier); // name
-        tokens[2].Type.Should().Be(TokenType.Keyword);    // FROM
-        tokens[3].Type.Should().Be(TokenType.Identifier); // people
-        tokens[4].Type.Should().Be(TokenType.Keyword);    // WHERE
-        tokens[5].Type.Should().Be(TokenType.Identifier); // name
-        tokens[6].Type.Should().Be(TokenType.Keyword);    // LIKE
-        tokens[7].Type.Should().Be(TokenType.String);     // 'A%'
-        tokens[8].Type.Should().Be(TokenType.Keyword);    // AND
-        tokens[9].Type.Should().Be(TokenType.Identifier); // age
-        tokens[10].Type.Should().Be(TokenType.GreaterEqual); // >=
-        tokens[11].Type.Should().Be(TokenType.Integer);   // 18
+        tokens.Count.ShouldBe(12);
+        tokens[0].Type.ShouldBe(TokenType.Keyword);    // SELECT
+        tokens[1].Type.ShouldBe(TokenType.Identifier); // name
+        tokens[2].Type.ShouldBe(TokenType.Keyword);    // FROM
+        tokens[3].Type.ShouldBe(TokenType.Identifier); // people
+        tokens[4].Type.ShouldBe(TokenType.Keyword);    // WHERE
+        tokens[5].Type.ShouldBe(TokenType.Identifier); // name
+        tokens[6].Type.ShouldBe(TokenType.Keyword);    // LIKE
+        tokens[7].Type.ShouldBe(TokenType.String);     // 'A%'
+        tokens[8].Type.ShouldBe(TokenType.Keyword);    // AND
+        tokens[9].Type.ShouldBe(TokenType.Identifier); // age
+        tokens[10].Type.ShouldBe(TokenType.GreaterEqual); // >=
+        tokens[11].Type.ShouldBe(TokenType.Integer);   // 18
     }
 
     [Fact]
@@ -466,8 +466,8 @@ public class TokenLexerTests
     {
         var tokens = Tokenize("SELECT name FROM users WHERE id = $1");
 
-        tokens.Should().HaveCount(8);
-        tokens[7].Should().Be((TokenType.Parameter, "$1", 34));
+        tokens.Count.ShouldBe(8);
+        tokens[7].ShouldBe((TokenType.Parameter, "$1", 34));
     }
 
     [Fact]
@@ -476,10 +476,10 @@ public class TokenLexerTests
         // OQL: ELEMENT(SELECT salary FROM employees WHERE name = 'Alice')
         var tokens = Tokenize("ELEMENT(SELECT salary FROM employees WHERE name = 'Alice')");
 
-        tokens[0].Type.Should().Be(TokenType.Keyword); // ELEMENT (keyword takes precedence)
-        tokens[1].Type.Should().Be(TokenType.LeftParen);
-        tokens[2].Type.Should().Be(TokenType.Keyword); // SELECT
-        tokens[tokens.Count - 1].Type.Should().Be(TokenType.RightParen);
+        tokens[0].Type.ShouldBe(TokenType.Keyword); // ELEMENT (keyword takes precedence)
+        tokens[1].Type.ShouldBe(TokenType.LeftParen);
+        tokens[2].Type.ShouldBe(TokenType.Keyword); // SELECT
+        tokens[tokens.Count - 1].Type.ShouldBe(TokenType.RightParen);
     }
 
     // ── Foreach / Enumerator Pattern ───────────────────────────────────
@@ -501,6 +501,6 @@ public class TokenLexerTests
             second.Add(token.Value.ToString());
         }
 
-        first.Should().Equal(second);
+        first.ShouldBe(second);
     }
 }

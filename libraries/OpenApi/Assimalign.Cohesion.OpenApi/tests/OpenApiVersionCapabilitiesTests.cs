@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Tests;
@@ -19,17 +19,17 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(OpenApiFeature.SchemaExamples)]
     public void Supports_ThreeOneFeatures_DisabledInThreeZero(OpenApiFeature feature)
     {
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).Should().BeFalse();
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_1).Should().BeTrue();
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_2).Should().BeTrue();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).ShouldBeFalse();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_1).ShouldBeTrue();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_2).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - Capabilities: nullable keyword only in 3.0")]
     public void Supports_NullableKeyword_OnlyThreeZero()
     {
-        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_0).Should().BeTrue();
-        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_1).Should().BeFalse();
-        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_2).Should().BeFalse();
+        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_0).ShouldBeTrue();
+        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_1).ShouldBeFalse();
+        OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaNullableKeyword, OpenApiSpecVersion.V3_2).ShouldBeFalse();
     }
 
     [Theory(DisplayName = "Cohesion Test [OpenApi] - Capabilities: 3.2 features gated off below 3.2")]
@@ -39,9 +39,9 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(OpenApiFeature.OAuthDeviceAuthorizationFlow)]
     public void Supports_ThreeTwoFeatures_OnlyThreeTwo(OpenApiFeature feature)
     {
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).Should().BeFalse();
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_1).Should().BeFalse();
-        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_2).Should().BeTrue();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).ShouldBeFalse();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_1).ShouldBeFalse();
+        OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_2).ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [OpenApi] - Capabilities: canonical version strings")]
@@ -50,7 +50,7 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(OpenApiSpecVersion.V3_2, "3.2.0")]
     public void GetVersionString_ReturnsCanonicalPatch(OpenApiSpecVersion version, string expected)
     {
-        OpenApiVersionCapabilities.GetVersionString(version).Should().Be(expected);
+        OpenApiVersionCapabilities.GetVersionString(version).ShouldBe(expected);
     }
 
     [Theory(DisplayName = "Cohesion Test [OpenApi] - Capabilities: parse openapi field to line")]
@@ -60,8 +60,8 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData("3.2.0", OpenApiSpecVersion.V3_2)]
     public void TryParseVersion_KnownLines_MapsCorrectly(string field, OpenApiSpecVersion expected)
     {
-        OpenApiVersionCapabilities.TryParseVersion(field, out var version).Should().BeTrue();
-        version.Should().Be(expected);
+        OpenApiVersionCapabilities.TryParseVersion(field, out var version).ShouldBeTrue();
+        version.ShouldBe(expected);
     }
 
     [Theory(DisplayName = "Cohesion Test [OpenApi] - Capabilities: unknown openapi field rejected")]
@@ -71,6 +71,6 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(null)]
     public void TryParseVersion_UnknownLines_ReturnsFalse(string? field)
     {
-        OpenApiVersionCapabilities.TryParseVersion(field, out _).Should().BeFalse();
+        OpenApiVersionCapabilities.TryParseVersion(field, out _).ShouldBeFalse();
     }
 }

@@ -14,7 +14,7 @@ Concrete rules:
 - If two or more sibling csprojs would carry the same block, the block belongs in shared build config. Lift it.
 - Per-project `<Version>` overrides are forbidden — `$(CohesionVersion)` in `build/Targets/Build.Version.props` is the single source of truth.
 - `TargetFramework`, `LangVersion`, `EnablePreviewFeatures`, `IsAotCompatible`, etc. are centrally set. Don't duplicate them per project unless the project genuinely deviates from the repo default.
-- Package versions live in `build/Targets/PackageReferences.targets`. Add the version there, then use `CohesionPackageReference` in the consuming csproj.
+- Package versions live in `build/Targets/Build.References.Packages.targets`. Add the version there, then use `CohesionPackageReference` in the consuming csproj.
 
 When in doubt: search for the property name in `build/Targets/` first. If it's already there, extend the central definition; don't override locally.
 
@@ -85,7 +85,7 @@ A one-line edit to `App.props`:
 <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Jobs" />
 ```
 
-The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.NameOnly.ProjectReferences.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly.
+The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly.
 
 ## Adding a new framework + SDK domain
 
@@ -100,8 +100,8 @@ pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 #       sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props
 #    b. Add a property-conditioned ItemGroup to
 #       frameworks/Assimalign.Cohesion.App.props
-#    c. Add the framework name to $cohesionFrameworks and the SDK to the
-#       SDK projects list in installer/scripts/Install-Local.ps1
+#    c. Add the framework name to $cohesionFrameworks and the SDK name to
+#       $cohesionSdks in installer/scripts/Install-Local.ps1
 #    d. Add the new Refs + Runtime folder/project entries to
 #       frameworks/Assimalign.Cohesion.Frameworks.slnx
 
@@ -155,24 +155,34 @@ frameworks/
 ├── Assimalign.Cohesion.App.props          ← framework membership manifest
 ├── Assimalign.Cohesion.App.targets        ← collection + manifest writer logic
 ├── Directory.Build.props                  ← sets VersionPrefix for framework projects
-└── Assimalign.Cohesion.App[.Domain]/
-    ├── Refs/src/...Refs.csproj            ← produces the .Ref targeting pack
-    └── Runtime/src/...Runtime.csproj      ← produces the .Runtime.<rid> runtime pack(s)
+├── Assimalign.Cohesion.App[.Domain].Refs/
+│   └── src/...Refs.csproj                 ← produces the .Ref targeting pack
+└── Assimalign.Cohesion.App[.Domain].Runtime/
+    └── src/...Runtime.csproj              ← produces the .Runtime.<rid> runtime pack(s)
 
 sdks/
 └── Assimalign.Cohesion.Sdk[.Domain]/
     ├── Sdk/Sdk.props                      ← what consumers see first
     ├── Sdk/Sdk.targets
-    ├── Targets/...FrameworkReference.props ← base SDK only: KnownFrameworkReference list
-    ├── Targets/Sdk.<Domain>.props          ← per-domain build hooks
+    ├── Targets/Sdk.<Domain>.props         ← chained SDKs: per-domain build hooks
     ├── Targets/Sdk.<Domain>.targets
     └── Tasks/...Tasks.csproj              ← code-generation task DLL
 
+sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
+├── ...Sdk.FrameworkReference.props        ← KnownFrameworkReference list (every framework)
+├── ...Sdk.Common.props / .targets         ← shared consumer build logic
+├── ...Sdk.NameOnly.ProjectReference.targets
+├── ...Sdk.StronglyTypedSettings.props / .targets
+└── ...Sdk.ApplicationModel.Build.targets
+
 installer/scripts/
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
+├── Get-CohesionVersion.ps1                ← resolves $(CohesionVersion) for scripts + CI
 ├── New-CohesionDomainScaffold.ps1         ← scaffold a new SDK + Framework pair
-├── Publish-Nupkg.ps1                      ← delete-then-push helper for GitHub Packages
 └── Cleanup-PriorRegistrations.ps1         ← one-shot cleanup for old MSI-based registrations
+
+.github/scripts/
+└── Publish-Nupkg.ps1                      ← delete-then-push helper for GitHub Packages
 ```
 
 ## Architecture rules (hard constraints)

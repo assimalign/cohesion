@@ -9,7 +9,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No duplicated `<PropertyGroup>` or `<ItemGroup>` blocks across sibling csprojs that should live in shared `.props`/`.targets`
 - [ ] Internal dependencies use `CohesionProjectReference`, not `ProjectReference` with relative paths
 - [ ] Package dependencies use `CohesionPackageReference`, not raw `PackageReference`
-- [ ] Any new package version is added to `build/Targets/PackageReferences.targets` first
+- [ ] Any new package version is added to `build/Targets/Build.References.Packages.targets` first
 - [ ] No new references to any `Microsoft.Extensions.*` package
 - [ ] No per-project `<Version>` overrides — `$(CohesionVersion)` chain intact
 - [ ] No hardcoded versions on `<Import Sdk>` elements
@@ -54,7 +54,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Test class named `{Feature}Tests`
 - [ ] Test methods named `{Method}_{Scenario}_{ExpectedBehavior}`
 - [ ] Tests follow AAA pattern (Arrange / Act / Assert)
-- [ ] Assertions use Shouldly or FluentAssertions, not traditional `Assert.*`
+- [ ] Assertions use Shouldly — not FluentAssertions (v8+ commercial license; removed from the repo) and not traditional `Assert.*`
 - [ ] Test fixtures live under `tests/TestObjects/`
 
 ## Documentation

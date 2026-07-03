@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Validation.Tests;
@@ -13,7 +13,7 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion && d.Location == "#/info/summary");
     }
 
@@ -25,7 +25,7 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().NotContain(d => d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion);
+        result.Diagnostics.ShouldNotContain(d => d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Version: webhooks in 3.0 is unsupported")]
@@ -36,7 +36,7 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion && d.Location == "#/webhooks");
     }
 
@@ -48,7 +48,7 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion && d.Location == "#/components/securitySchemes/mtls");
     }
 
@@ -60,7 +60,7 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion && d.Location == "#/$self");
     }
 
@@ -72,6 +72,6 @@ public class OpenApiVersionPlacementValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().NotContain(d => d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion);
+        result.Diagnostics.ShouldNotContain(d => d.Code == OpenApiValidationRuleCodes.UnsupportedInVersion);
     }
 }

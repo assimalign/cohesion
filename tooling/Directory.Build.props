@@ -1,0 +1,12 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+	<!--
+	    Mirrors the per-area pattern (libraries/, resources/, sdks/, ...): the area
+	    Directory.Build.props shadows the repo root one, so it must chain to the
+	    parent and set the area's target framework from the central
+	    build/Targets/Build.TargetFramework.props properties.
+	-->
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkForTooling)</TargetFramework>
+	</PropertyGroup>
+</Project>

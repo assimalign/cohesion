@@ -18,7 +18,6 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />
-		<CohesionPackageReference Include="FluentAssertions" />
 		<CohesionPackageReference Include="Shouldly" />
 	</ItemGroup>
 	<ItemGroup>

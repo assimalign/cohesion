@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Language.Sql.Tests;
@@ -12,16 +12,16 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "CREATE TABLE Users (Id INT, Name TEXT);");
-        var create = statement.SqlExpression.Should().BeOfType<SqlCreateTableExpression>().Subject;
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>();
 
-        create.CommandType.Should().Be(SqlQueryCommandType.Create);
-        create.Table.TableName.Should().Be("Users");
-        create.IfNotExists.Should().BeFalse();
-        create.Columns.Should().HaveCount(2);
-        create.Columns[0].ColumnName.Should().Be("Id");
-        create.Columns[0].DataType.Should().Be("INT");
-        create.Columns[1].ColumnName.Should().Be("Name");
-        create.Columns[1].DataType.Should().Be("TEXT");
+        create.CommandType.ShouldBe(SqlQueryCommandType.Create);
+        create.Table.TableName.ShouldBe("Users");
+        create.IfNotExists.ShouldBeFalse();
+        create.Columns.Count.ShouldBe(2);
+        create.Columns[0].ColumnName.ShouldBe("Id");
+        create.Columns[0].DataType.ShouldBe("INT");
+        create.Columns[1].ColumnName.ShouldBe("Name");
+        create.Columns[1].DataType.ShouldBe("TEXT");
     }
 
     [Fact]
@@ -29,10 +29,10 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "CREATE TABLE IF NOT EXISTS Users (Id INT);");
-        var create = statement.SqlExpression.Should().BeOfType<SqlCreateTableExpression>().Subject;
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>();
 
-        create.IfNotExists.Should().BeTrue();
-        create.Table.TableName.Should().Be("Users");
+        create.IfNotExists.ShouldBeTrue();
+        create.Table.TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -40,12 +40,12 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "CREATE TABLE Users (Id INT PRIMARY KEY NOT NULL, Name TEXT DEFAULT 'unknown');");
-        var create = statement.SqlExpression.Should().BeOfType<SqlCreateTableExpression>().Subject;
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>();
 
-        create.Columns.Should().HaveCount(2);
-        create.Columns[0].IsPrimaryKey.Should().BeTrue();
-        create.Columns[0].IsNullable.Should().BeFalse();
-        create.Columns[1].DefaultValue.Should().NotBeNull();
+        create.Columns.Count.ShouldBe(2);
+        create.Columns[0].IsPrimaryKey.ShouldBeTrue();
+        create.Columns[0].IsNullable.ShouldBeFalse();
+        create.Columns[1].DefaultValue.ShouldNotBeNull();
     }
 
     [Fact]
@@ -53,10 +53,10 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "CREATE TABLE dbo.Users (Id INT);");
-        var create = statement.SqlExpression.Should().BeOfType<SqlCreateTableExpression>().Subject;
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>();
 
-        create.Table.SchemaName.Should().Be("dbo");
-        create.Table.TableName.Should().Be("Users");
+        create.Table.SchemaName.ShouldBe("dbo");
+        create.Table.TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -64,11 +64,11 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "DROP TABLE Users;");
-        var drop = statement.SqlExpression.Should().BeOfType<SqlDropTableExpression>().Subject;
+        var drop = statement.SqlExpression.ShouldBeOfType<SqlDropTableExpression>();
 
-        drop.CommandType.Should().Be(SqlQueryCommandType.Drop);
-        drop.Table.TableName.Should().Be("Users");
-        drop.IfExists.Should().BeFalse();
+        drop.CommandType.ShouldBe(SqlQueryCommandType.Drop);
+        drop.Table.TableName.ShouldBe("Users");
+        drop.IfExists.ShouldBeFalse();
     }
 
     [Fact]
@@ -76,10 +76,10 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "DROP TABLE IF EXISTS Users;");
-        var drop = statement.SqlExpression.Should().BeOfType<SqlDropTableExpression>().Subject;
+        var drop = statement.SqlExpression.ShouldBeOfType<SqlDropTableExpression>();
 
-        drop.IfExists.Should().BeTrue();
-        drop.Table.TableName.Should().Be("Users");
+        drop.IfExists.ShouldBeTrue();
+        drop.Table.TableName.ShouldBe("Users");
     }
 
     [Fact]
@@ -87,13 +87,13 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "ALTER TABLE Users ADD Email TEXT;");
-        var alter = statement.SqlExpression.Should().BeOfType<SqlAlterTableExpression>().Subject;
+        var alter = statement.SqlExpression.ShouldBeOfType<SqlAlterTableExpression>();
 
-        alter.CommandType.Should().Be(SqlQueryCommandType.Alter);
-        alter.Table.TableName.Should().Be("Users");
-        var addAction = alter.Action.Should().BeOfType<SqlAlterAddColumnAction>().Subject;
-        addAction.Column.ColumnName.Should().Be("Email");
-        addAction.Column.DataType.Should().Be("TEXT");
+        alter.CommandType.ShouldBe(SqlQueryCommandType.Alter);
+        alter.Table.TableName.ShouldBe("Users");
+        var addAction = alter.Action.ShouldBeOfType<SqlAlterAddColumnAction>();
+        addAction.Column.ColumnName.ShouldBe("Email");
+        addAction.Column.DataType.ShouldBe("TEXT");
     }
 
     [Fact]
@@ -101,9 +101,9 @@ public class SqlDdlParserTests
     {
         var statement = (SqlQueryStatement)_parser.Parse(
             "ALTER TABLE Users DROP COLUMN Email;");
-        var alter = statement.SqlExpression.Should().BeOfType<SqlAlterTableExpression>().Subject;
+        var alter = statement.SqlExpression.ShouldBeOfType<SqlAlterTableExpression>();
 
-        var dropAction = alter.Action.Should().BeOfType<SqlAlterDropColumnAction>().Subject;
-        dropAction.ColumnName.Should().Be("Email");
+        var dropAction = alter.Action.ShouldBeOfType<SqlAlterDropColumnAction>();
+        dropAction.ColumnName.ShouldBe("Email");
     }
 }

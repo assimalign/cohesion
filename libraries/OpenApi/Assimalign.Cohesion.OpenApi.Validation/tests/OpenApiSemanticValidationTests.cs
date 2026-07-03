@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Validation.Tests;
@@ -18,7 +18,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.DuplicateOperationId);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.DuplicateOperationId);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Semantic: undeclared path placeholder is reported")]
@@ -34,7 +34,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.MissingPathParameter);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.MissingPathParameter);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Semantic: path parameter must be required")]
@@ -45,7 +45,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.PathParameterNotRequired);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.PathParameterNotRequired);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Semantic: path parameter not in template is reported")]
@@ -62,7 +62,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.UndeclaredPathParameter);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.UndeclaredPathParameter);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Semantic: undefined security scheme is reported")]
@@ -75,7 +75,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.UnknownSecurityScheme);
     }
 
@@ -88,7 +88,7 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.InvalidResponseKey);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.InvalidResponseKey);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Semantic: parameter without schema or content is reported")]
@@ -99,6 +99,6 @@ public class OpenApiSemanticValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.ParameterSchemaAndContent);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.ParameterSchemaAndContent);
     }
 }

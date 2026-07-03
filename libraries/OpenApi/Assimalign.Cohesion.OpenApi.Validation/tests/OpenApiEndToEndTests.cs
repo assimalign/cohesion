@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.OpenApi.Serialization;
@@ -19,11 +19,11 @@ public class OpenApiEndToEndTests
         var result = reparsed.Validate();
 
         // Assert: the emitted document targets 3.1.2, round-trips, and validates clean.
-        json.Should().Contain("\"openapi\": \"3.1.2\"");
-        reparsed.SpecVersion.Should().Be(OpenApiSpecVersion.V3_1);
-        reparsed.Paths!.Items.Should().ContainKey("/pets/{id}");
-        result.IsValid.Should().BeTrue();
-        result.Diagnostics.Should().BeEmpty();
+        json.ShouldContain("\"openapi\": \"3.1.2\"", Case.Sensitive);
+        reparsed.SpecVersion.ShouldBe(OpenApiSpecVersion.V3_1);
+        reparsed.Paths!.Items.ShouldContainKey("/pets/{id}");
+        result.IsValid.ShouldBeTrue();
+        result.Diagnostics.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - EndToEnd: emitting 3.0 from a 3.1 model adapts version-gated fields")]
@@ -34,7 +34,7 @@ public class OpenApiEndToEndTests
 
         var json = document.ToJson(OpenApiSpecVersion.V3_0, indented: false);
 
-        json.Should().Contain("\"openapi\":\"3.0.4\"");
-        json.Should().Contain("\"nullable\":true");
+        json.ShouldContain("\"openapi\":\"3.0.4\"", Case.Sensitive);
+        json.ShouldContain("\"nullable\":true", Case.Sensitive);
     }
 }

@@ -7,10 +7,9 @@
 public class DatabaseConnectionTests { }
 ```
 
-**Test method:** `{Method}_{Scenario}_{ExpectedBehavior}`
+**Test method:** `{Method}_{Scenario}_{ExpectedBehavior}`, with the display name set through the `Fact`/`Theory` attribute
 ```csharp
-[Fact]
-[DisplayName("Cohesion Test [Database] - Execute: Should retry on transient failure")]
+[Fact(DisplayName = "Cohesion Test [Database] - Execute: Should retry on transient failure")]
 public async Task Execute_OnTransientFailure_ShouldRetry()
 {
     // Test implementation
@@ -34,7 +33,9 @@ public void Cache_OnMiss_ShouldReturnNull()
 }
 ```
 
-## Assertions — Shouldly or FluentAssertions
+## Assertions — Shouldly
+
+Shouldly is the single assertion library for the repo.
 
 ```csharp
 // ✅ Shouldly
@@ -42,17 +43,15 @@ result.ShouldNotBeNull();
 result.Count.ShouldBe(5);
 result.ShouldContain(x => x.Id == "123");
 
-// ✅ FluentAssertions
+// ❌ FluentAssertions — forbidden (v8+ moved to a paid commercial license; migrated out 2026-07)
 result.Should().NotBeNull();
-result.Count.Should().Be(5);
-result.Should().Contain(x => x.Id == "123");
 
 // ❌ Avoid traditional Assert
 Assert.NotNull(result);
 Assert.Equal(5, result.Count);
 ```
 
-Pick one library per project and stay consistent within that project.
+Caveat: Shouldly's string `ShouldContain`/`ShouldNotContain` default to case-INSENSITIVE comparison. Pass `Case.Sensitive` when asserting exact fragments (e.g., serialized JSON).
 
 ## Test folder layout
 
@@ -65,4 +64,4 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 
 ## Cancellation in async tests
 
-Async test methods should still respect `CancellationToken` where the system under test takes one. Pass `TestContext.Current.CancellationToken` or equivalent when available.
+Async test methods should still exercise `CancellationToken` where the system under test takes one. The repo currently pins xUnit v2 (no ambient `TestContext`), so create a token in the test — e.g. a `CancellationTokenSource` with a timeout — or pass `CancellationToken.None` when cancellation is not the behavior under test.

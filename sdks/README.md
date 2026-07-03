@@ -10,12 +10,16 @@ through a common base (`Assimalign.Cohesion.Sdk`), which itself chains through
 | `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. |
 | `Assimalign.Cohesion.Sdk.Database` | Database-resident application (migrations, seeded schemas, etc.). |
 
+Every resource domain under `resources/` has a matching SDK (`Sdk.ApiManager`,
+`Sdk.ConfigurationStore`, `Sdk.EventHub`, …) — the three above are just the most
+common entry points. The full set mirrors the folders under `sdks/`.
+
 ## Consumption
 
 Pin the SDK version inline:
 
 ```xml
-<Project Sdk="Assimalign.Cohesion.Sdk.Web/9.0.0">
+<Project Sdk="Assimalign.Cohesion.Sdk.Web/10.0.0">
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -28,9 +32,9 @@ Pin the SDK version inline:
 ```json
 {
     "msbuild-sdks": {
-        "Assimalign.Cohesion.Sdk":          "9.0.0",
-        "Assimalign.Cohesion.Sdk.Web":      "9.0.0",
-        "Assimalign.Cohesion.Sdk.Database": "9.0.0"
+        "Assimalign.Cohesion.Sdk":          "10.0.0",
+        "Assimalign.Cohesion.Sdk.Web":      "10.0.0",
+        "Assimalign.Cohesion.Sdk.Database": "10.0.0"
     }
 }
 ```
@@ -67,7 +71,7 @@ trimmer a recognizable framework boundary.
     <CohesionAutoIncludeAppFramework>false</CohesionAutoIncludeAppFramework>
 
     <!-- Pin the App framework to a version different from the SDK's. -->
-    <CohesionAppFrameworkVersion>9.0.1</CohesionAppFrameworkVersion>
+    <CohesionAppFrameworkVersion>10.0.1</CohesionAppFrameworkVersion>
 </PropertyGroup>
 ```
 
@@ -83,19 +87,17 @@ pwsh installer\scripts\Install-Local.ps1
 
 What that runs:
 
-1. `dotnet pack` each SDK project → `Assimalign.Cohesion.Sdk[.*].nupkg`.
-2. `dotnet pack -p:RuntimeIdentifier=<rid>` on the App.Runtime project once per
-   requested RID → `Assimalign.Cohesion.App.Runtime.<rid>.nupkg`.
-3. `dotnet pack` the App.Refs project (which depends on Runtime, so the ref
-   assemblies are there to collect) → `Assimalign.Cohesion.App.Ref.nupkg`.
+1. `dotnet build` on the Cohesion build tasks (prerequisite for code generation).
+2. `dotnet pack` each SDK project → `Assimalign.Cohesion.Sdk[.*].nupkg`.
+3. `dotnet pack -p:RuntimeIdentifier=<rid>` on every framework's Runtime project
+   once per requested RID → `Assimalign.Cohesion.App[.*].Runtime.<rid>.nupkg`.
+4. `dotnet pack` every framework's Refs project (which depends on Runtime, so the
+   ref assemblies are there to collect) → `Assimalign.Cohesion.App[.*].Ref.nupkg`.
 
-All five+ packages land in `_out/packages/`. Then:
-
-```powershell
-dotnet build examples\FrameworkReferenceSmokeTest\FrameworkReferenceSmokeTest.csproj
-```
-
-Resolves everything against the local feed. No registration step, no admin.
+Every package lands in `_out/packages/`. Any consumer csproj under the repo (or a
+sibling repo whose `nuget.config` points back here) then resolves the whole chain —
+SDK, targeting pack, runtime pack — against the local feed. No registration step,
+no admin.
 
 Iteration shortcuts:
 

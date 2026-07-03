@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Tests;
@@ -15,23 +15,23 @@ public class OpenApiNodeTests
             ["mango"] = "m"
         };
 
-        node.Keys.Should().Equal("zebra", "apple", "mango");
+        node.Keys.ShouldBe(new[] { "zebra", "apple", "mango" });
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - Node: value preserves scalar kind")]
     public void ValueNode_PreservesScalarKind()
     {
-        OpenApiValueNode.Integer(7).Kind.Should().Be(OpenApiValueKind.Integer);
-        OpenApiValueNode.Double(1.5).Kind.Should().Be(OpenApiValueKind.Double);
-        OpenApiValueNode.Boolean(true).Kind.Should().Be(OpenApiValueKind.Boolean);
-        OpenApiValueNode.String("x").Kind.Should().Be(OpenApiValueKind.String);
-        OpenApiValueNode.Null.IsNull.Should().BeTrue();
+        OpenApiValueNode.Integer(7).Kind.ShouldBe(OpenApiValueKind.Integer);
+        OpenApiValueNode.Double(1.5).Kind.ShouldBe(OpenApiValueKind.Double);
+        OpenApiValueNode.Boolean(true).Kind.ShouldBe(OpenApiValueKind.Boolean);
+        OpenApiValueNode.String("x").Kind.ShouldBe(OpenApiValueKind.String);
+        OpenApiValueNode.Null.IsNull.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - Node: integer is readable as double")]
     public void ValueNode_Integer_ReadableAsDouble()
     {
-        OpenApiValueNode.Integer(42).GetDouble().Should().Be(42d);
+        OpenApiValueNode.Integer(42).GetDouble().ShouldBe(42d);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - Node: implicit conversions produce expected kinds")]
@@ -43,11 +43,11 @@ public class OpenApiNodeTests
         OpenApiNode fromDouble = 2.5;
         OpenApiNode fromNull = (string?)null;
 
-        ((OpenApiValueNode)fromString).Kind.Should().Be(OpenApiValueKind.String);
-        ((OpenApiValueNode)fromBool).Kind.Should().Be(OpenApiValueKind.Boolean);
-        ((OpenApiValueNode)fromInt).Kind.Should().Be(OpenApiValueKind.Integer);
-        ((OpenApiValueNode)fromDouble).Kind.Should().Be(OpenApiValueKind.Double);
-        ((OpenApiValueNode)fromNull).IsNull.Should().BeTrue();
+        ((OpenApiValueNode)fromString).Kind.ShouldBe(OpenApiValueKind.String);
+        ((OpenApiValueNode)fromBool).Kind.ShouldBe(OpenApiValueKind.Boolean);
+        ((OpenApiValueNode)fromInt).Kind.ShouldBe(OpenApiValueKind.Integer);
+        ((OpenApiValueNode)fromDouble).Kind.ShouldBe(OpenApiValueKind.Double);
+        ((OpenApiValueNode)fromNull).IsNull.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi] - Node: duplicate object key rejected by Add")]
@@ -58,6 +58,6 @@ public class OpenApiNodeTests
 
         var act = () => node.Add("k", "other");
 
-        act.Should().Throw<System.ArgumentException>();
+        Should.Throw<System.ArgumentException>(act);
     }
 }

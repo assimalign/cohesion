@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.OpenApi.Validation.Tests;
@@ -10,8 +10,8 @@ public class OpenApiStructuralValidationTests
     {
         var result = SampleDocuments.CreateValid(OpenApiSpecVersion.V3_1).Validate();
 
-        result.IsValid.Should().BeTrue();
-        result.Diagnostics.Should().BeEmpty();
+        result.IsValid.ShouldBeTrue();
+        result.Diagnostics.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Structural: missing title is reported")]
@@ -22,8 +22,8 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.IsValid.Should().BeFalse();
-        result.Diagnostics.Should().Contain(d =>
+        result.IsValid.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.RequiredField && d.Location == "#/info/title");
     }
 
@@ -35,7 +35,7 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.RequiredField && d.Location == "#/info/version");
     }
 
@@ -47,7 +47,7 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.MutuallyExclusiveFields);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.MutuallyExclusiveFields);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Structural: path template must start with a slash")]
@@ -58,7 +58,7 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d => d.Code == OpenApiValidationRuleCodes.InvalidPathTemplate);
+        result.Diagnostics.ShouldContain(d => d.Code == OpenApiValidationRuleCodes.InvalidPathTemplate);
     }
 
     [Fact(DisplayName = "Cohesion Test [OpenApi.Validation] - Structural: 3.0 requires the paths field")]
@@ -72,7 +72,7 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.RequiredField && d.Location == "#/paths");
     }
 
@@ -84,7 +84,7 @@ public class OpenApiStructuralValidationTests
 
         var result = document.Validate();
 
-        result.Diagnostics.Should().Contain(d =>
+        result.Diagnostics.ShouldContain(d =>
             d.Code == OpenApiValidationRuleCodes.RequiredField && d.Location.EndsWith("/description"));
     }
 }

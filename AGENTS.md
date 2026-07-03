@@ -48,6 +48,8 @@ pwsh installer/scripts/Install-Local.ps1
 - `frameworks/` contains the shared-framework producer projects (one Refs project + one Runtime project per framework family) plus the authoritative manifest files `Assimalign.Cohesion.App.props` and `Assimalign.Cohesion.App.targets`
 - `build/` contains custom MSBuild logic, centralized targets, and package-version management. `build/Targets/Build.Version.props` is the single source of truth for `$(CohesionVersion)`
 - `sdks/` contains Cohesion SDK projects. Each SDK family (`Sdk`, `Sdk.Web`, `Sdk.<Domain>`) is a separate folder; `Sdk` is the base and the others chain to it
+- `analyzers/` contains Roslyn analyzers, code fixes, and source generators. These target `netstandard2.0` and set `IsAotCompatible=false` in `analyzers/Directory.Build.props` — the one sanctioned exception to the repo-wide TFM/AOT defaults, because Roslyn components load inside the compiler
+- `assets/` contains shared repo assets such as the `cohesion.config` JSON schemas
 - `installer/` contains the WiX MSI source plus development scripts (`Install-Local.ps1`, `Publish-Nupkg.ps1`, `New-CohesionDomainScaffold.ps1`)
 - `extensions/` and `tooling/` contain developer tooling and integration surfaces
 - `docs/` contains repository-level documentation
@@ -58,7 +60,7 @@ pwsh installer/scripts/Install-Local.ps1
 - Internal dependencies should use `CohesionProjectReference`
 - Internal dependencies that must NOT flow to consumers of the resulting `.nupkg` should use `CohesionPrivateProjectReference` (paired with a `CohesionFrameworkPrivateAssembly` entry on the owning framework - see "Cross-resource dependencies" below)
 - External packages should use `CohesionPackageReference`
-- Central package versions are managed in `build/Targets/PackageReferences.targets`
+- Central package versions are managed in `build/Targets/Build.References.Packages.targets`
 - Strongly typed value objects may be generated through `CohesionCodeGenValueType`
 
 ### GitHub Project Execution Metadata
@@ -72,6 +74,7 @@ When work is coming from the Cohesion GitHub Project, treat project fields as ex
 - If issue body details, dependency relationships, `Priority`, and `Wave` conflict, resolve them in this order: explicit user instruction, dependency or blocker relationships, `Priority`, then `Wave`.
 - Preserve later-wave requirements in planning and design notes even when only implementing current-wave scope.
 - When a ticket requires prerequisite work from another ticket, call that out explicitly rather than silently skipping the project ordering.
+- Work items follow the `[<wbs>] <title>` scheme (area epic `L01.01.NN` → feature `L01.01.NN.MM` → task `L01.01.NN.MM.PP`) in Project #13. Use the `cohesion-work-items` skill (`.claude/skills/cohesion-work-items/`) to create, place, and link new items — especially for capturing scope creep discovered mid-branch.
 
 ### Backlog Authoring Guidance
 
@@ -177,7 +180,7 @@ A one-line edit to `App.props`:
 ```
 
 The Runtime csproj converts the list to `<CohesionProjectReference>` items,
-which `build/Targets/Build.NameOnly.ProjectReferences.targets` resolves to
+which `build/Targets/Build.References.Projects.targets` resolves to
 matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the
 library's DLL into the Runtime project's bin, and `App.targets` packs it
 into the framework's NuGet packs along with a matching entry in
@@ -267,8 +270,8 @@ pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 #       sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props
 #    b. Add a property-conditioned ItemGroup to
 #       frameworks/Assimalign.Cohesion.App.props
-#    c. Add the framework name to $cohesionFrameworks and the SDK to the
-#       SDK projects list in installer/scripts/Install-Local.ps1
+#    c. Add the framework name to $cohesionFrameworks and the SDK name to
+#       $cohesionSdks in installer/scripts/Install-Local.ps1
 #    d. Add the new Refs + Runtime folder/project entries to
 #       frameworks/Assimalign.Cohesion.Frameworks.slnx
 
@@ -360,24 +363,34 @@ frameworks/
 ├── Assimalign.Cohesion.App.props          ← framework membership manifest
 ├── Assimalign.Cohesion.App.targets        ← collection + manifest writer logic
 ├── Directory.Build.props                  ← sets VersionPrefix for framework projects
-└── Assimalign.Cohesion.App[.Domain]/
-    ├── Refs/src/...Refs.csproj            ← produces the .Ref targeting pack
-    └── Runtime/src/...Runtime.csproj      ← produces the .Runtime.<rid> runtime pack(s)
+├── Assimalign.Cohesion.App[.Domain].Refs/
+│   └── src/...Refs.csproj                 ← produces the .Ref targeting pack
+└── Assimalign.Cohesion.App[.Domain].Runtime/
+    └── src/...Runtime.csproj              ← produces the .Runtime.<rid> runtime pack(s)
 
 sdks/
 └── Assimalign.Cohesion.Sdk[.Domain]/
     ├── Sdk/Sdk.props                      ← what consumers see first
     ├── Sdk/Sdk.targets
-    ├── Targets/...FrameworkReference.props ← base SDK only: KnownFrameworkReference list
-    ├── Targets/Sdk.<Domain>.props          ← per-domain build hooks (mostly empty today)
+    ├── Targets/Sdk.<Domain>.props         ← chained SDKs: per-domain build hooks
     ├── Targets/Sdk.<Domain>.targets
     └── Tasks/...Tasks.csproj              ← code-generation task DLL
 
+sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
+├── ...Sdk.FrameworkReference.props        ← KnownFrameworkReference list (every framework)
+├── ...Sdk.Common.props / .targets         ← shared consumer build logic
+├── ...Sdk.NameOnly.ProjectReference.targets
+├── ...Sdk.StronglyTypedSettings.props / .targets
+└── ...Sdk.ApplicationModel.Build.targets
+
 installer/scripts/
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
+├── Get-CohesionVersion.ps1                ← resolves $(CohesionVersion) for scripts + CI
 ├── New-CohesionDomainScaffold.ps1         ← scaffold a new SDK + Framework pair
-├── Publish-Nupkg.ps1                      ← delete-then-push helper for GitHub Packages
 └── Cleanup-PriorRegistrations.ps1         ← one-shot cleanup for old MSI-based registrations
+
+.github/scripts/
+└── Publish-Nupkg.ps1                      ← delete-then-push helper for GitHub Packages
 ```
 
 ### Architecture rules
@@ -440,7 +453,7 @@ installer/scripts/
      <TargetFramework>net10.0</TargetFramework>
    </PropertyGroup>
    ```
-   - However this can be generally disregarded as the target framework is managed in `build\Targets\TargetFramework.props`
+   - Do not set this per project — the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`
 
 6. **Preview language features MUST be enabled**
    ```xml
@@ -454,6 +467,7 @@ installer/scripts/
    - ✅ `README.md`, `CONTRIBUTING.md`, `LICENSE`
    - ❌ `readme.md`, `contributing.md`
    - Exception: API reference files under `docs/Assembly/` may mirror namespace and type names directly, for example `docs/Assembly/System.IO/Glob.md`
+   - Exception: files whose names are fixed by external tooling keep their conventional casing, for example `.github/copilot-instructions.md`, `.github/pull_request_template.md`, and `.claude/skills/**` skill files
 
 8. **Prefer direct throws or .NET 10 extension type methods over ThrowHelpers**
    - Use direct `throw` statements or framework guard APIs when the logic is local
@@ -486,7 +500,7 @@ installer/scripts/
    ```
 
 3. **NEVER add package references without adding to centralized versions**
-   - First add to `build/Targets/PackageReferences.targets`
+   - First add to `build/Targets/Build.References.Packages.targets`
    - Then use `CohesionPackageReference`
 
 4. **NEVER use `PackageReference` directly**
@@ -545,9 +559,9 @@ public class DatabaseEngine { }
 public class ConfigurationBuilder { }
 ```
 
-**Exceptions:** Suffix with `Exception`
+**Exceptions:** Suffix with `Exception`, inheriting from the owning area's root (never a framework-wide root)
 ```csharp
-public class DatabaseConnectionException : CohesionException { }
+public class DatabaseConnectionException : DatabaseException { }
 ```
 
 **Extension Classes:** Suffix with `Extensions`
@@ -639,7 +653,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-using Microsoft.Extensions.Logging;
+using NUlid;
 
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Configuration;
@@ -710,7 +724,7 @@ Examples:
 Area-level `README.md` files should summarize:
 - the purpose of the area
 - the major projects or services it contains
-- how the area fits into the L1, L2, and L3 layering model
+- how the area fits into the L1, L2, and L3 layering model (L1 = foundation libraries and SDK/tooling, L2 = application runtime and composition, L3 = service platforms; see `docs/DELIVERY_ROADMAP.md`)
 - important dependencies on other areas
 - links to project-level `OVERVIEW.md` and `DESIGN.md` files where relevant
 
@@ -756,10 +770,9 @@ public async Task<QueryResult> ExecuteAsync(
 public class DatabaseConnectionTests { }
 ```
 
-**Test methods:** `{Method}_{Scenario}_{ExpectedBehavior}`
+**Test methods:** `{Method}_{Scenario}_{ExpectedBehavior}`, with the display name set through the `Fact`/`Theory` attribute
 ```csharp
-[Fact]
-[DisplayName("Cohesion Test [Database] - Execute: Should retry on transient failure")]
+[Fact(DisplayName = "Cohesion Test [Database] - Execute: Should retry on transient failure")]
 public async Task Execute_OnTransientFailure_ShouldRetry()
 {
     // Test implementation
@@ -780,23 +793,21 @@ public void Cache_OnMiss_ShouldReturnNull()
     var result = cache.Get("nonexistent");
     
     // Assert
-    result.Should().BeNull();
+    result.ShouldBeNull();
 }
 ```
 
 ### Test Assertions
 
-**Prefer Shouldly or FluentAssertions:**
+**Use Shouldly - it is the single assertion library for this repository:**
 ```csharp
 // ✅ Shouldly
 result.ShouldNotBeNull();
 result.Count.ShouldBe(5);
 result.ShouldContain(x => x.Id == "123");
 
-// ✅ FluentAssertions
+// ❌ FluentAssertions (forbidden - v8+ moved to a paid commercial license)
 result.Should().NotBeNull();
-result.Count.Should().Be(5);
-result.Should().Contain(x => x.Id == "123");
 
 // ❌ Traditional Assert (avoid)
 Assert.NotNull(result);
@@ -1010,7 +1021,7 @@ chore(build): update to .NET 10.0.101
 
 - `main` - Production-ready code
 - `development` - Integration branch
-- `feature/{name}` - New features
+- `feature/{name}` - New features. Work tracked in the Cohesion GitHub Project uses `feature/<wbs>-<slug>` (for example `feature/L01.01.11.14-extended-connect`) so the branch names the feature work item in flight
 - `fix/{name}` - Bug fixes
 - `docs/{name}` - Documentation updates
 
