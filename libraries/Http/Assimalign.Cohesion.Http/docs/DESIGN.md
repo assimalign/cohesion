@@ -115,7 +115,9 @@ dictionaries. Fully AOT/trim safe.
   drop-in (`IsSupported = true` + a populated `HttpTrailerCollection`).
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
-  belongs to the field-specific consumer.
+  belongs to the field-specific consumer, and the shared toolkit those consumers
+  build on for RFC 9651 syntax is the structured-fields surface documented below.
+  `HttpFieldRules` stays name-classification only.
 
 ## Cross-version normalization
 
@@ -277,3 +279,173 @@ codegen. `FrozenDictionary` is trim/AOT-safe; parameter storage is a plain array
   localization concern layered above this primitive if and when it is needed.
 - **A complete MIME registry.** `HttpContentTypes` is a curated common-asset table, not
   the IANA database; breadth is added by consumer overlay, not by growing the core.
+## Structured Field Values (RFC 9651)
+
+The `StructuredField*` types are the core, field-agnostic toolkit for parsing and
+serializing HTTP Structured Field Values (RFC 9651, which obsoletes RFC 8941 and adds the
+Date and Display String bare types). They live in the core protocol library because they
+are *protocol value objects* — the shared primitive that field-specific consumers build on,
+not a transport concern.
+
+### Why this is the shared primitive, and where it sits in the layering
+
+Several current and planned fields are defined *as* structured fields: Priority
+(RFC 9218), Digest / Content-Digest (RFC 9530), the QUERY method's Accept-Query
+(RFC 10008), Proxy-Status (RFC 9209), and Signature-Input (RFC 9421). Each of those is a
+thin *field-specific consumer* that says "this field is a Dictionary whose `u` key is an
+Integer" — it should not re-implement item/list/dictionary tokenization. This toolkit is
+the one place that tokenization lives, so the consumers only encode their field's shape.
+
+This keeps the established layering intact:
+
+- **`HttpFieldRules`** classifies field *names* (connection-specific, singleton,
+  no-fold, trailer-prohibited). It says nothing about *values*.
+- **The structured-fields toolkit** parses and serializes field *values* that use the
+  RFC 9651 grammar. It is field-agnostic — it does not know that `Priority` exists.
+- **Field-specific consumers** (future `Priority`, `Digest`, `AcceptQuery`, …) compose the
+  two: they name their field via `HttpHeaderKey`, read the raw `HttpHeaderValue`, and hand
+  it to `StructuredFieldDictionary.Parse` / `StructuredFieldList.Parse` /
+  `StructuredFieldItem.Parse`, then interpret the typed result.
+
+It deliberately does **not** live in `Http.Connections`: that is the wire/transport layer,
+and DESIGN.md already assigns field-value parsing to consumers above the transport.
+
+### The surface
+
+Eight readonly-struct value objects model the RFC's data model exactly:
+
+- `StructuredFieldBareItem` — the eight-way discriminated bare item (Integer, Decimal,
+  String, Token, Byte Sequence, Boolean, Date, Display String), tagged by
+  `StructuredFieldType`. Numeric kinds store inline; textual/binary kinds hold one
+  reference. Factories (`FromInteger`, `FromToken`, …) validate range and syntax so an
+  instance always serializes canonically; typed accessors (`AsInteger`, `AsToken`, …)
+  throw `InvalidOperationException` on a type mismatch.
+- `StructuredFieldParameters` — the ordered key→bare-item map attached to items, inner
+  lists, and members (first-seen order preserved; a repeated key keeps its position and
+  takes the last value).
+- `StructuredFieldItem` — a bare item plus parameters; also the element type of an inner
+  list, and the top-level `item` field type.
+- `StructuredFieldInnerList` — a parenthesized sequence of items plus parameters.
+- `StructuredFieldMember` — the `item`-or-`inner-list` union that a list holds and a
+  dictionary maps to. Inspect `IsInnerList` before reading `Item` / `InnerList`.
+- `StructuredFieldList` / `StructuredFieldDictionary` — the two collection-shaped top-level
+  field types.
+
+The three top-level types (`StructuredFieldItem`, `StructuredFieldList`,
+`StructuredFieldDictionary`) each expose the same static entry points, matching the
+existing `HttpRequestTarget` / `HttpHeaderValue` primitive style:
+
+- `Parse(ReadOnlySpan<char>)` / `TryParse(ReadOnlySpan<char>, out …)` /
+  `TryParse(ReadOnlySpan<char>, out …, out string? error)`
+- `Parse(HttpHeaderValue)` / `TryParse(HttpHeaderValue, out …)` — the multi-line entry.
+  A repeated field's lines are combined by comma via `HttpHeaderValue.Value` (RFC 9651
+  §4.2), which is exactly the comma-combining the List/Dictionary grammar expects.
+- `Serialize()` — the RFC 9651 §4.1 canonical form.
+
+`Parse` throws `HttpException` (`HttpErrorCode.InvalidStructuredField`, via the internal
+`HttpInvalidStructuredFieldException`); `TryParse` returns `false` with an optional
+diagnostic. Why static `Parse`/`TryParse`/`Serialize` value types rather than an
+interface-first `IStructuredField` hierarchy: these are immutable protocol primitives with
+no polymorphic behavior to abstract — the same reasoning that makes `HttpHeaderKey` and
+`HttpRequestTarget` structs. An interface would add allocation and indirection with no
+extensibility payoff, and the surface is intentionally conservative because many consumers
+will build on it and it is costly to change later.
+
+### Strict fail-parsing
+
+Parsing follows RFC 9651 §4.2 exactly: a single forward pass with **no lenient recovery**.
+Any malformed token, out-of-range Integer/Date (±999,999,999,999,999), over-long Decimal
+(>12 integer or >3 fractional digits), non-canonical Byte Sequence base64, or trailing
+content fails the *entire* field. This is what lets a consumer treat a successful parse as
+a fully validated value.
+
+### AOT posture
+
+No reflection, no runtime codegen, no dynamic serialization — a parser built from span
+slicing and BCL numeric/base64/UTF-8 primitives. Tokenization is span-based: the parser
+scans by index and materializes only the values it returns (the string of a String/Token,
+the `byte[]` of a Byte Sequence, the result collections), with a fast path that slices
+escape-free strings directly. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **Field-specific semantics.** This toolkit models the RFC 9651 *syntax*; it does not know
+  any concrete field's schema (that `Priority.u` is 0–7, that `Content-Digest` values are
+  Byte Sequences). Those rules belong to each field-specific consumer.
+- **Retaining non-canonical input.** Parsing yields the RFC data model, not the original
+  bytes; `Serialize()` always emits the §4.1 canonical form. A parse→serialize round-trip
+  therefore normalizes (e.g. `1.50` → `1.5`, `-0` → `0`) rather than preserving the wire
+  spelling.
+## Request-parse interception seam
+
+### What it is
+
+`IHttpRequestInterceptor` + `HttpRequestInterceptorContext` +
+`HttpRequestRejectedException` form the server-side seam that lets feature
+packages participate while a request is being **parsed** — before it is
+dispatched — without the server transport referencing any feature package:
+
+- `OnRequestHead(context)` runs after the head is parsed and before the body is
+  surfaced: attach typed features, adjust the body-size knob, or throw the
+  typed rejection.
+- `Stream OnRequestBody(context, body)` runs after the body stream is
+  materialized: return the stream unchanged or a wrapper (read-only decorators,
+  digest hashing, decompression). Wrappers own what they wrap.
+
+Both members are default-implemented, following this library's recorded
+"interface evolution via a default member" practice — implementers override
+only the hook they need, and future hook points (a trailer hook is the known
+candidate; an async variant is the known escape hatch) are added the same way
+without breaking anyone.
+
+### Why the seam is core and the features are not
+
+This is the same taxonomy as `IHttpFeature` vs. the feature packages: **seams
+live in core, features live in packages**. The interceptor contract is generic
+infrastructure every parse-time feature shares (`Http.RequestLimits` today;
+digest fields and request decompression are the designed next consumers), so it
+sits here; the concrete `IHttpMaxRequestBodySizeFeature` was deliberately moved
+*out* of this core into `Assimalign.Cohesion.Http.RequestLimits`. Registration
+is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
+`Http.Connections`) because *when* hooks run is a transport decision; *what*
+they can do is defined here.
+
+Unlike the ExtendedConnect Items-key bridge (one-way, post-parse, no shared
+symbol), this seam is a compile-time contract — justified specifically by
+mutation the transport must enforce mid-parse, pre-dispatch feature attachment,
+and stream replacement, none of which a loosely-typed key can express. New
+capabilities that only need one-way post-parse publication should still prefer
+the Items-key bridge.
+
+### Contract details that are load-bearing
+
+- **`Headers` is a read-only view** (`HttpHeaderCollection.AsReadOnly()`, a
+  shared-store view with fail-loud mutation). The transport derives framing,
+  keep-alive, and host resolution from the same collection after hooks run;
+  a mutable view would be a self-inflicted request-smuggling primitive.
+- **The context is the body-size cell.** `MaxRequestBodySize` (validated,
+  `null` = unbounded) is the value the transport enforces;
+  `FreezeMaxRequestBodySize()` / `IsMaxRequestBodySizeReadOnly` are the
+  transport-owned freeze. Write-through features project this knob rather than
+  copying it, so when the streaming-body rework moves the freeze from
+  buffered-materialization to first-byte-read, no feature contract changes.
+  The transport keeps the context alive until the body is consumed — the
+  documented lifetime is "until the request body is consumed or the exchange
+  completes", not "until dispatch".
+- **Interceptor instances are shared across all connections/requests** and must
+  be stateless; per-request state goes in `Features`. Hooks are CPU-only.
+- **Rejection is typed.** `HttpRequestRejectedException` carries a 4xx/5xx
+  status the transport answers before closing. It exists because an untyped
+  `IOException`/`InvalidDataException` thrown from a hook is indistinguishable
+  from a wire failure and would be silently swallowed by the transport's
+  failure classifier.
+- **Evolution rules:** v1 context members are `required` (init-only, except the
+  deliberately-mutable body-size knob); all future members must be optional
+  with defaults so existing construction sites (including test fakes — the
+  context is deliberately constructible in tests) keep compiling.
+
+### AOT posture
+
+Interface dispatch plus the existing dictionary-backed feature lookup — no
+reflection, no codegen.

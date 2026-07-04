@@ -13,7 +13,7 @@ internal sealed class Http3Context : TransportHttpContext
         CancellationToken requestAborted,
         IConnection streamConnection,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted)
+        : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted, features)
     {
         StreamConnection = streamConnection;
     }

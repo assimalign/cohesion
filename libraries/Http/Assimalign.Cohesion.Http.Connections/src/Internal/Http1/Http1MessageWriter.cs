@@ -7,6 +7,25 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 internal static class Http1MessageWriter
 {
+    /// <summary>
+    /// Writes a minimal, bodyless HTTP/1.1 error response (status line, zero Content-Length, and
+    /// <c>Connection: close</c>) directly to the stream. Used by the read path to emit a
+    /// protocol-level rejection (414 / 431 / 413 / 408) for a request that never became a valid
+    /// <see cref="Http1Context"/>, before the connection is closed.
+    /// </summary>
+    /// <param name="stream">The connection stream to write to.</param>
+    /// <param name="statusCode">The status code to emit.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task that completes when the response has been flushed.</returns>
+    public static async ValueTask WriteErrorResponseAsync(Stream stream, HttpStatusCode statusCode, CancellationToken cancellationToken)
+    {
+        await WriteAsciiAsync(stream, $"HTTP/1.1 {statusCode}\r\n", cancellationToken).ConfigureAwait(false);
+        await WriteAsciiAsync(stream, "Content-Length: 0\r\n", cancellationToken).ConfigureAwait(false);
+        await WriteAsciiAsync(stream, "Connection: close\r\n", cancellationToken).ConfigureAwait(false);
+        await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public static async ValueTask WriteResponseAsync(Stream stream, Http1Context context, CancellationToken cancellationToken)
     {
         byte[] bodyBytes = await ReadBodyAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
