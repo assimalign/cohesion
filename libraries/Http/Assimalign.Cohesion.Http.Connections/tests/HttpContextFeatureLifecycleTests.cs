@@ -18,16 +18,18 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// disposes, and a single faulty feature cannot leak the rest.
 /// </summary>
 /// <remarks>
-/// The old per-listener feature factory
-/// (<c>HttpConnectionListenerOptions.CreateFeatures</c>) no longer exists;
-/// features are attached per request via <c>Features.Set</c>.
+/// Features are attached per request — at parse time by registered
+/// <see cref="IHttpRequestInterceptor"/> implementations, or later via
+/// <c>Features.Set</c> (middleware-style, as these tests do).
 /// </remarks>
 public class HttpContextFeatureLifecycleTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose an empty per-request feature collection by default")]
     public async Task Features_OnRequest_ShouldExposeEmptyCollection()
     {
-        // Arrange + Act
+        // Arrange + Act — no request-parse interceptors are registered, so the transport takes
+        // the zero-interceptor fast path and seeds nothing (features are attached by registered
+        // IHttpRequestInterceptor implementations or by middleware).
         IHttpContext httpContext = await ReceiveSingleContextAsync();
 
         // Assert — Features is non-null but empty.
