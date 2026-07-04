@@ -43,6 +43,13 @@ public enum HttpErrorCode
     InvalidHeader,
 
     /// <summary>
+    /// A field value could not be parsed or serialized as an RFC 9651 Structured
+    /// Field Value (Item, List, or Dictionary). Includes bare items that violate
+    /// their range or syntax rules and fields that fail strict fail-parsing.
+    /// </summary>
+    InvalidStructuredField,
+
+    /// <summary>
     /// The HTTP protocol was violated.
     /// </summary>
     ProtocolViolation,
