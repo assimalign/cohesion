@@ -99,20 +99,19 @@ internal sealed class TestHttpContext : IHttpContext
 
     private sealed class TestFormFeature : IHttpFormFeature
     {
-        private readonly IHttpFormCollection _form;
 
         public TestFormFeature(IHttpFormCollection form)
         {
-            _form = form;
+            Form = form;
         }
 
         public string Name => nameof(TestFormFeature);
 
-        public IHttpFormCollection? Form => _form;
+        public IHttpFormCollection? Form { get; set; }
 
         public Task<IHttpFormCollection> ReadFormAsync(CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(_form);
+            return Task.FromResult(Form);
         }
     }
 }

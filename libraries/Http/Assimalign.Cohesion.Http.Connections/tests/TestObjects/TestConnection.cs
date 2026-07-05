@@ -35,7 +35,8 @@ internal sealed class TestConnection : Connection
         ConnectionDirection direction = ConnectionDirection.Bidirectional,
         ConnectionCapabilities? capabilities = null,
         EndPoint? localEndPoint = null,
-        EndPoint? remoteEndPoint = null)
+        EndPoint? remoteEndPoint = null,
+        bool completeInput = true)
     {
         _direction = direction;
 
