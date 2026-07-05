@@ -4,14 +4,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- References every family assembly so the family-boundary and namespace-alignment
-         tests can load and inspect them. -->
-    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
   </ItemGroup>
 
   <ItemGroup>

@@ -22,6 +22,13 @@
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/tests/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols/tests/Assimalign.Cohesion.IdentityModel.Protocols.Tests.csproj" />
 	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/">
+		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.csproj" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests.csproj" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />

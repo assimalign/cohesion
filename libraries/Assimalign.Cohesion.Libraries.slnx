@@ -667,6 +667,13 @@
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/tests/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/tests/Assimalign.Cohesion.IdentityModel.Protocols.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/" />
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />

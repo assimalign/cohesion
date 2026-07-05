@@ -8,6 +8,7 @@ using Xunit;
 
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Protocols;
+using Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect;
 using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 using Assimalign.Cohesion.IdentityModel.Token.Saml;
@@ -34,6 +35,12 @@ public sealed class IdentityModelNamespaceAlignmentTests
     public void ProtocolsAssembly_PublicTypes_ShouldLiveUnderTheAssemblyNamespace()
     {
         AssertPublicTypesAlign(typeof(ProtocolRole).Assembly);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - Namespaces: OpenIdConnect public types should live under the assembly namespace")]
+    public void OpenIdConnectAssembly_PublicTypes_ShouldLiveUnderTheAssemblyNamespace()
+    {
+        AssertPublicTypesAlign(typeof(OpenIdConnectIdToken).Assembly);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Namespaces: Token public types should live under the assembly namespace")]
