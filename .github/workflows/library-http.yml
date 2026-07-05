@@ -26,7 +26,9 @@ jobs:
             "Assimalign.Cohesion.Http.Connections",
             "Assimalign.Cohesion.Http.ExtendedConnect",
             "Assimalign.Cohesion.Http.ProtocolUpgrade",
-            "Assimalign.Cohesion.Http.RequestLimits"
+            "Assimalign.Cohesion.Http.RequestLimits",
+            "Assimalign.Cohesion.Http.Cookies",
+            "Assimalign.Cohesion.Http.Antiforgery"
           ]
     steps:
       - uses: actions/checkout@v4

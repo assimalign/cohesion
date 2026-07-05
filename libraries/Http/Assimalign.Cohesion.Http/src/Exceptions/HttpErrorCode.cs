@@ -43,6 +43,9 @@ public enum HttpErrorCode
     InvalidHeader,
 
     /// <summary>
+    /// A media type or media range (RFC 9110 &#167; 8.3.1) could not be parsed.
+    /// </summary>
+    InvalidMediaType,
     /// A field value could not be parsed or serialized as an RFC 9651 Structured
     /// Field Value (Item, List, or Dictionary). Includes bare items that violate
     /// their range or syntax rules and fields that fail strict fail-parsing.
