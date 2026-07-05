@@ -54,9 +54,17 @@ internal sealed class TestConnection : Connection
             _peer.Output.WriteAsync(input).AsTask().GetAwaiter().GetResult();
         }
 
-        // The peer has sent everything it ever will; the parser observes a finite stream that ends
-        // after the preloaded payload.
-        _peer.Output.Complete();
+        if (completeInput)
+        {
+            // The peer has sent everything it ever will; the parser observes a finite stream that
+            // ends after the preloaded payload (the single-shot shape).
+            _peer.Output.Complete();
+        }
+
+        // When completeInput is false the peer's writer is left open, so the connection's Input stays
+        // live: a read blocks waiting for more bytes rather than seeing end-of-stream. This lets the
+        // holder exercise read timeouts / keep-alive deadlines (a stalled peer), where the connection
+        // is reclaimed by the server's deadline instead of by end-of-stream.
     }
 
     public static ConnectionCapabilities DefaultCapabilities => InMemoryConnectionPair.DefaultCapabilities;
