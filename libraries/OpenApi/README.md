@@ -25,6 +25,7 @@ sibling except through the model.
 | [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | Implemented |
 | [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | attributes (analyzer) | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | Implemented |
+| [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | Implemented |
 | `Assimalign.Cohesion.OpenApi.Compliance.Tests` | Official example corpus, schema-backed conformance, upgrade fixtures | serialization, validation | Planned (Wave 3) |
 
 These boundaries are advisory architecture guidance. They exist to preserve, respectively: additive
