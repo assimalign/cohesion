@@ -3,24 +3,23 @@
 ## Summary
 
 The root contract package of the Cohesion IdentityModel family and the
-dependency anchor for authentication across the platform. It owns:
+dependency anchor for authentication across the platform. It owns the
+**canonical identity domain model**: subjects, application identities, actors,
+credentials, claims and multi-value attributes, authentication sessions,
+authentication context, and authentication results — plus the
+`IdentityModelException` area root and the shared internal
+descriptor-materialization helper the family builds on.
 
-- The **canonical identity domain model**: subjects, application identities,
-  actors, credentials, claims and multi-value attributes, authentication
-  sessions, authentication context, and authentication results.
-- The **shared protocol abstractions**: protocol parties and roles, protocol
-  metadata, request/response envelopes, validation results, logout semantics,
-  and binding descriptors.
-- The **first-class protocol contract branches** for OpenID Connect
-  (`Protocols.OpenIdConnect`) and SAML 2.0 (`Protocols.Saml`).
-
-Descendant packages (`…IdentityModel.Token`, `…Token.JsonWebToken`,
-`…Token.Saml`) build concrete token-document behavior on these contracts;
-none of them defines parallel foundational identity abstractions.
+The protocol contracts (OpenID Connect, SAML 2.0) live in their own projects
+under the `Protocols` branch, and concrete token-document behavior lives in the
+`Token` branch. Every one of those projects depends on this root package and
+none defines a parallel foundational identity abstraction. See the area
+[README](../../README.md) for the full project map and the family
+[DESIGN.md](DESIGN.md) for the keystone design rationale.
 
 ## Status
 
-Epic `[L01.01.12]` (#105) is in delivery. Currently shipped:
+Epic `[L01.01.12]` (#105) is in delivery. This root package currently ships:
 
 - Family design, namespace map, ownership boundaries, and dependency rules
   (`docs/DESIGN.md`), enforced by architecture tests in
@@ -38,17 +37,11 @@ Epic `[L01.01.12]` (#105) is in delivery. Currently shipped:
   plus the `IdentityModelException` area root and claim-collection
   `extension(…)` accessors.
 
-- The shared protocol abstractions (`[L01.01.12.03]`) in the `Protocols`
-  namespace: the open vocabularies (`ProtocolRole`, `ProtocolBinding`,
-  `ProtocolEndpointKind`), party references, the published-entity metadata
-  base (`ProtocolMetadata` + endpoints and keys with role scoping), the
-  message envelope hierarchy (`ProtocolMessage`/`Request`/`Response` with
-  pinned correlation semantics and fail-closed `ProtocolResponseStatus`),
-  shared logout semantics, the two-leg `ProtocolExchange` description, and
-  the validation-result contracts (`ProtocolValidationResult` /
-  `ProtocolValidationDiagnostic`).
-
-Remaining features land in dependency order: OIDC branch, SAML branch, then
+The shared protocol abstractions (`[L01.01.12.03]`) ship in the
+`Assimalign.Cohesion.IdentityModel.Protocols` project, and the OpenID Connect
+contracts (`[L01.01.12.04]`) in
+`Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` — each with its own
+`docs/`. Remaining features land in dependency order: SAML branch, then
 token-package alignment and cross-protocol normalization. See the delivery
 roadmap table in `docs/DESIGN.md`.
 
@@ -65,19 +58,18 @@ This package is deliberately descriptive, not executable. It does NOT:
 
 ## Dependencies
 
-None (BCL only). The rest of the family depends one-way on this package:
-
-```
-…IdentityModel ← …IdentityModel.Token ← { …Token.JsonWebToken, …Token.Saml }
-```
+None (BCL only). The rest of the family depends one-way on this package (see
+the README for the branch diagram).
 
 ## Test coverage
 
-`Assimalign.Cohesion.IdentityModel.Tests` contains:
+`Assimalign.Cohesion.IdentityModel.Tests` contains the family-level guards plus
+the root domain-model suites:
 
-- `IdentityModelFamilyBoundaryTests` — dependency-direction guards: the root
-  references no Cohesion assemblies, descendants reference only their parent
-  chain, sibling token packages never reference each other, and no family
+- `IdentityModelFamilyBoundaryTests` — dependency-direction guards across all
+  six family assemblies: the root references no Cohesion assemblies, each
+  branch references only its parent chain, the protocol and token branches
+  never cross-reference, siblings never reference each other, and no family
   assembly references `Microsoft.Extensions.*`.
 - `IdentityModelNamespaceAlignmentTests` — every public type in every family
   assembly lives under its assembly-name namespace, keeping the documented
@@ -89,5 +81,5 @@ None (BCL only). The rest of the family depends one-way on this package:
   principal maps from OIDC-shaped and SAML-shaped data with provenance
   intact.
 
-Protocol-contract and compliance-fixture suites are added by the features
-that introduce those surfaces.
+Protocol-contract and compliance-fixture suites live in the respective protocol
+projects' test assemblies.

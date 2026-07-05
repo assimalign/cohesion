@@ -120,6 +120,15 @@ public sealed class ProtocolEndpoint
     /// <inheritdoc />
     public override string ToString() => $"{Kind} {Location} ({Binding})";
 
+    /// <summary>
+    /// Determines whether a string satisfies the endpoint location rule: it parses as an
+    /// absolute URI and spells its scheme explicitly. Shared with branch materializers
+    /// that project typed wire members into endpoint lists.
+    /// </summary>
+    /// <param name="value">The candidate location.</param>
+    /// <returns><see langword="true" /> when the value is a valid endpoint location; otherwise <see langword="false" />.</returns>
+    internal static bool IsValidLocation(string value) => IsExplicitAbsoluteUri(value);
+
     private static bool IsExplicitAbsoluteUri(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))

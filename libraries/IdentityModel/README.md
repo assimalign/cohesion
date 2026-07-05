@@ -9,7 +9,10 @@ inventing service-local identity types.
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.IdentityModel` | The dependency anchor. Canonical identity domain model (subjects, application identities, credentials, claims and attributes, sessions, authentication results) plus the protocol abstractions and first-class contract branches for OpenID Connect and SAML 2.0. |
+| `Assimalign.Cohesion.IdentityModel` | The dependency anchor. Canonical identity domain model: subjects, application identities, credentials, claims and attributes, sessions, authentication results. |
+| `Assimalign.Cohesion.IdentityModel.Protocols` | Shared, transport-agnostic protocol abstractions: party roles, published-entity metadata, message envelopes, response status, validation results, logout semantics, binding descriptors. |
+| `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contract branch: discovery/client metadata, authorization/token/ID token/UserInfo/logout contracts, spec-oriented validation. |
+| `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contract branch: assertions, protocol messages, entity metadata, bindings. |
 | `Assimalign.Cohesion.IdentityModel.Token` | Protocol-neutral token and assertion normalization between the root contracts and the concrete token packages. |
 | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior (compact serialization, header and claim fidelity, validation descriptors). |
 | `Assimalign.Cohesion.IdentityModel.Token.Saml` | Concrete SAML 2.0 assertion token behavior (statements, conditions, subject confirmation fidelity). |
@@ -22,21 +25,24 @@ composition and L3 service platforms (IdentityHub, Web, Database, …) consume
 these contracts; nothing in this family depends on hosting, transport, or
 service runtime concerns.
 
-Dependency direction is strictly one-way, toward the root:
+Two independent branches hang off the root anchor, each protocol in its own
+project so protocols can expand — and new identity protocols be added — without
+touching the shared base or each other:
 
 ```
-Assimalign.Cohesion.IdentityModel            (no Cohesion dependencies)
-    ▲
-Assimalign.Cohesion.IdentityModel.Token
-    ▲                        ▲
-…Token.JsonWebToken     …Token.Saml          (siblings never reference each other)
+                    Assimalign.Cohesion.IdentityModel        (no Cohesion dependencies)
+                   /                                  \
+   …IdentityModel.Protocols                        …IdentityModel.Token
+     /                 \                             /              \
+ …Protocols.OpenIdConnect  …Protocols.Saml   …Token.JsonWebToken  …Token.Saml
 ```
 
-Protocol *contracts* — including the OpenID Connect and SAML 2.0 branches —
-live in the root library. Descendant packages own concrete token *document*
-behavior only. Future implementation packages (protocol readers, writers,
-metadata handlers, validators) may be added as descendants, but the contracts
-they implement stay in the root.
+Protocol *contracts* live in the `Protocols` branch: the shared `…Protocols`
+base plus one project per protocol. Token packages own concrete token
+*document* behavior only. The two branches never reference each other. Future
+implementation packages that *execute* — protocol readers, metadata retrievers,
+crypto validators — are separate descendant projects that depend on the
+contract branch plus the transport/Security areas.
 
 ## Dependencies
 

@@ -6,7 +6,7 @@ using Xunit;
 
 using Assimalign.Cohesion.IdentityModel.Protocols;
 
-namespace Assimalign.Cohesion.IdentityModel.Tests;
+namespace Assimalign.Cohesion.IdentityModel.Protocols.Tests;
 
 /// <summary>
 /// Contains unit tests for the open protocol vocabularies: roles, bindings, and endpoint

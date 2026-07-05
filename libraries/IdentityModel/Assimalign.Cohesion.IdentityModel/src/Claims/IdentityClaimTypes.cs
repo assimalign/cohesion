@@ -16,6 +16,36 @@ public static class IdentityClaimTypes
     public const string Subject = "sub";
 
     /// <summary>
+    /// The issuer claim (<c>iss</c>, RFC 7519).
+    /// </summary>
+    public const string Issuer = "iss";
+
+    /// <summary>
+    /// The audience claim (<c>aud</c>, RFC 7519).
+    /// </summary>
+    public const string Audience = "aud";
+
+    /// <summary>
+    /// The expiration time claim (<c>exp</c>, RFC 7519).
+    /// </summary>
+    public const string ExpirationTime = "exp";
+
+    /// <summary>
+    /// The issued-at claim (<c>iat</c>, RFC 7519).
+    /// </summary>
+    public const string IssuedAt = "iat";
+
+    /// <summary>
+    /// The not-before claim (<c>nbf</c>, RFC 7519).
+    /// </summary>
+    public const string NotBefore = "nbf";
+
+    /// <summary>
+    /// The token identifier claim (<c>jti</c>, RFC 7519).
+    /// </summary>
+    public const string JwtId = "jti";
+
+    /// <summary>
     /// The full display name claim (<c>name</c>).
     /// </summary>
     public const string Name = "name";

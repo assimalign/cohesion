@@ -6,9 +6,9 @@ using Xunit;
 
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Protocols;
-using Assimalign.Cohesion.IdentityModel.Tests.TestObjects;
+using Assimalign.Cohesion.IdentityModel.Protocols.Tests.TestObjects;
 
-namespace Assimalign.Cohesion.IdentityModel.Tests;
+namespace Assimalign.Cohesion.IdentityModel.Protocols.Tests;
 
 /// <summary>
 /// Contains unit tests for the shared logout semantics, including the correlation join

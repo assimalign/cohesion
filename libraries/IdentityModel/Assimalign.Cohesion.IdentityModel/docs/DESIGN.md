@@ -36,26 +36,55 @@ Three tenets shape everything in the family:
 
 | Package | Role | Cohesion dependencies |
 |---------|------|-----------------------|
-| `Assimalign.Cohesion.IdentityModel` | Canonical identity domain model + shared protocol abstractions + OIDC and SAML 2.0 contract branches | none |
+| `Assimalign.Cohesion.IdentityModel` | Canonical identity domain model (the dependency anchor) | none |
+| `Assimalign.Cohesion.IdentityModel.Protocols` | Shared, transport-agnostic protocol abstractions the contract branches build on | `…IdentityModel` |
+| `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contract branch | `…IdentityModel.Protocols` |
+| `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contract branch | `…IdentityModel.Protocols` |
 | `Assimalign.Cohesion.IdentityModel.Token` | Protocol-neutral token/assertion normalization layer | `…IdentityModel` |
 | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior | `…IdentityModel.Token` |
 | `Assimalign.Cohesion.IdentityModel.Token.Saml` | Concrete SAML assertion token behavior | `…IdentityModel.Token` |
 
-Dependency direction is one-way toward the root. Sibling token packages never
-reference each other. These rules are enforced by architecture tests in
-`Assimalign.Cohesion.IdentityModel.Tests` (`IdentityModelFamilyBoundaryTests`),
-which fail the build the moment a package grows a reference that violates the
-direction, references a sibling, or picks up any `Microsoft.Extensions.*`
-dependency.
+Two independent branches hang off the root anchor:
+
+```
+                    Assimalign.Cohesion.IdentityModel           (canonical model)
+                   /                                  \
+   …IdentityModel.Protocols                        …IdentityModel.Token
+     /                 \                             /              \
+ …Protocols.OpenIdConnect  …Protocols.Saml   …Token.JsonWebToken  …Token.Saml
+```
+
+The protocol branch (contracts: what a protocol *says*) and the token branch
+(documents: what a token *is*) are deliberately independent — neither
+references the other. Dependency direction is one-way toward the root; sibling
+packages within a branch never reference each other. These rules are enforced
+by architecture tests in `Assimalign.Cohesion.IdentityModel.Tests`
+(`IdentityModelFamilyBoundaryTests`), which fail the build the moment a package
+grows a reference that violates the direction, crosses branches, references a
+sibling, or picks up any `Microsoft.Extensions.*` dependency.
+
+Each protocol lives in its own project so protocols can expand — and new
+identity protocols can be added — without touching the shared base or the
+other protocols, and so each protocol is built and tested in isolation.
 
 ### Ownership boundaries
 
 - **Root (`…IdentityModel`)** owns: the canonical identity domain model
   (subjects, application identities, actors, credentials, claims and
   attributes, sessions, authentication context, authentication results); the
-  shared protocol abstractions (party roles, protocol metadata, message
-  envelopes, validation results, logout semantics, binding descriptors); and
-  the first-class protocol contract branches for OpenID Connect and SAML 2.0.
+  `IdentityModelException` error root; and the shared internal
+  descriptor-materialization helper (`ModelSnapshot`), exposed to the family
+  via `InternalsVisibleTo`.
+- **`…IdentityModel.Protocols`** owns: the shared, transport-agnostic protocol
+  abstractions — party roles, published-entity metadata, message envelopes,
+  response status, validation results, logout semantics, binding and endpoint
+  descriptors — plus the cross-protocol validation code vocabulary. Every
+  protocol contract branch derives from these.
+- **`…Protocols.OpenIdConnect`** owns: the OpenID Connect contract surface —
+  discovery/client metadata, authorization/token/ID token/UserInfo/logout
+  contracts, OIDC constants and validation codes.
+- **`…Protocols.Saml`** owns: the SAML 2.0 contract surface — assertion
+  content, protocol messages, entity metadata, bindings, SAML constants.
 - **`…IdentityModel.Token`** owns: the protocol-neutral token/assertion
   normalization contracts — what it means to be "a token" (issuer, subject,
   audiences, temporal validity, normalized claims, provenance) independent of
@@ -71,45 +100,48 @@ dependency.
 Two placement rules resolve every "where does this type go?" question:
 
 1. If a concept is a *protocol contract* (message shape, metadata shape,
-   validation semantics), it lives in the root — even when only one protocol
-   uses it today.
+   validation semantics), it lives in that protocol's branch project — or, if
+   it is genuinely cross-protocol, in the shared `…Protocols` base.
 2. If a concept is *concrete document behavior* for one token format, it
-   lives in that format's descendant package.
+   lives in that format's token package.
 
-### Extension guidance (future packages)
+### Adding a protocol package
 
-Implementation packages — protocol readers/writers, metadata document
-handlers, validators that execute cryptography — may be added later as
-descendants (for example `…IdentityModel.Protocols.OpenIdConnect.Metadata` or
-`…IdentityModel.Saml.Serialization`). When they are:
+A new identity protocol (say, WS-Federation or a future protocol) is a new
+`…IdentityModel.Protocols.<Name>` project:
 
-- They depend on the root (and on `…Token` where token materialization is
-  involved); the contracts they implement stay in the root library.
-- They never introduce a second foundational abstraction for a concept the
-  root already models.
-- They register in `frameworks/Assimalign.Cohesion.App.props` alongside the
-  existing family members and get an entry in the family boundary tests.
+1. Create `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.<Name>/`
+   with `src/` and `tests/`, referencing `Assimalign.Cohesion.IdentityModel.Protocols`.
+2. Add `<InternalsVisibleTo Include="…Protocols.<Name>" />` to the root project
+   (for the shared `ModelSnapshot`) and to `…Protocols` (for shared endpoint
+   validation) — the two shared-internal seams the branches use.
+3. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`, add it
+   to both `.slnx` files, and add a branch entry to
+   `IdentityModelFamilyBoundaryTests` / `IdentityModelNamespaceAlignmentTests`.
+4. Add `docs/OVERVIEW.md` + `docs/DESIGN.md`; the deep family-level rationale
+   stays in this keystone document, which each project's `DESIGN.md` links to.
+
+Implementation packages that *execute* — protocol readers/writers, metadata
+retrievers, validators that run cryptography — are separate descendant projects
+again (for example `…Protocols.OpenIdConnect.Metadata` retrieving discovery
+documents over HTTP, or `…Protocols.Saml.Serialization` reading assertion XML).
+The contract branch stays pure data; the executable layer depends on it and on
+the Security/transport areas.
 
 ## Namespace map
 
-The root assembly uses namespace branches under the assembly-name root, so
-protocol-spec ownership is obvious from the namespace alone:
+Each project's assembly name equals its root namespace (the repo rule), so the
+project boundary and the namespace boundary coincide:
 
-| Namespace | Contents |
+| Assembly / namespace | Contents |
 |---|---|
 | `Assimalign.Cohesion.IdentityModel` | Canonical identity domain model: subjects, application identity, actors, credentials, claims/attributes, sessions, authentication context and results; the `IdentityModelException` error root. |
-| `Assimalign.Cohesion.IdentityModel.Protocols` | Cross-protocol abstractions: protocol parties and roles, protocol metadata, request/response envelopes, validation results, logout semantics, binding and endpoint descriptors. |
+| `Assimalign.Cohesion.IdentityModel.Protocols` | Cross-protocol abstractions: protocol parties and roles, protocol metadata, request/response envelopes, validation results and codes, logout semantics, binding and endpoint descriptors. |
 | `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contracts: issuer/discovery metadata, client metadata and registration shape, authorization/token/ID token/UserInfo/logout message contracts, OIDC constants. |
 | `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contracts: assertion content (subject, NameID, statements, conditions, confirmations), protocol messages (AuthnRequest, Response, Status, logout), entity metadata, binding descriptors, SAML constants. |
 
-Folder layout under `src/` mirrors the namespace branches
-(`src/Protocols/OpenIdConnect/…`, `src/Protocols/Saml/…`), with the repo's
-standard `Abstractions/`, `Extensions/`, `Internal/`, and `Exceptions/`
-folders inside each area where applicable.
-
-Descendant assemblies keep the repo rule that namespace == assembly name:
-`Assimalign.Cohesion.IdentityModel.Token`,
-`…Token.JsonWebToken`, `…Token.Saml`. The
+Within each project, `src/` uses the repo's standard `Abstractions/`,
+`Extensions/`, `Internal/`, and `Exceptions/` folders where applicable. The
 `IdentityModelNamespaceAlignmentTests` guardrail asserts every public type in
 every family assembly lives under its assembly-name namespace.
 
@@ -272,10 +304,10 @@ of them is a breaking design change, not a refactor.
 
 ## Shared protocol abstraction decisions
 
-Feature `[L01.01.12.03]` added the `Protocols` namespace: the cross-protocol
-concepts the OIDC and SAML branches derive from. These decisions were
-stress-tested against both branches' forward requirements before
-implementation and are load-bearing.
+Feature `[L01.01.12.03]` created the `Assimalign.Cohesion.IdentityModel.Protocols`
+project: the cross-protocol concepts the OIDC and SAML branch projects derive
+from. These decisions were stress-tested against both branches' forward
+requirements before implementation and are load-bearing.
 
 - **Abstract envelope bases are data-only, with protocol pinned by the
   derived type.** `ProtocolMetadata` and `ProtocolMessage` (and the
@@ -361,6 +393,106 @@ implementation and are load-bearing.
   excluded, per the `SubjectIdentifier` precedent — and deliberately no
   protocol member: one entity identifier can serve both protocols; protocol
   provenance lives on metadata and messages.
+
+## OpenID Connect branch decisions
+
+Feature `[L01.01.12.04]` created the
+`Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` project. The branch
+was stress-tested against Discovery 1.0 / DCR 1.0 / Core 1.0 / RP-Initiated
+Logout 1.0 / Back-Channel Logout 1.0 / RFC 7636 / RFC 9207 requirements and
+against the JWT-package and cross-protocol features that build on it.
+
+- **Guards stop at artifact identity; conformance is diagnostics.** The only
+  branch hard guards are the members that make a *constructed request*
+  recognizable as its artifact (authorization request: `client_id` +
+  `response_type`; token request: `grant_type`) plus the base's settled
+  guards (metadata `EntityId`, response `Status`). Everything RECEIVED from
+  a counterparty — success artifacts, `token_type`, the ID token's required
+  five, UserInfo's `sub` — is nullable and reported by `Validate()`:
+  received documents are exactly what compliance suites must hold, and
+  non-nullable members backed by guards are one-way nullability doors on
+  sealed types.
+- **`Validate()` methods are pure data rules** — functions of (artifact,
+  explicit options) with no I/O, no clock ownership (`ValidateAt` is a
+  required option), and no cryptography. The Core §3.1.3.7 split with the
+  JWT package: this branch owns the data checks (issuer/audience/azp with
+  the MUST-vs-SHOULD severity map, temporal windows, nonce, `auth_time`
+  age); the JWT package owns signature and `at_hash`/`c_hash`
+  presence-plus-value as one crypto concern. Additional audiences are
+  untrusted by default (the spec's posture) with an explicit
+  `AllowAdditionalAudiences` opt-out, on both the ID token and the logout
+  token; an absent RFC 9207 `iss` from an advertising provider is an Error
+  (the spec's MUST-reject). Skew arithmetic always applies to the
+  caller-controlled instant so extreme wire timestamps diagnose instead of
+  throwing. Cross-protocol diagnostic codes live in the shared `…Protocols`
+  project's `ProtocolValidationCodes`; OIDC-minted codes in
+  `OpenIdConnectValidationCodes`.
+- **Envelope aliasing, not duplication.** `ClientId` on requests and the
+  RFC 9207 `iss` on authorization responses are aliases of the base
+  `ProtocolMessage.Issuer` (the sender), exactly as F3's descriptor docs
+  pin — materializers set them only from wire data so RFC 9207 absence
+  detection works, and `authorization_response_iss_parameter_supported`
+  rides provider metadata to drive it.
+- **Metadata: typed members are stored wire truth; the base endpoint list is
+  the well-formed projection.** Materialization projects valid typed
+  endpoint values into the base list with branch kinds and bindings;
+  malformed values stay typed-only and `Validate()` reports them; the
+  inherited descriptor list carries extension endpoints (revocation,
+  introspection, …) with kind-collision guards. Client metadata projects
+  its logout and JWK Set URIs (SLO fan-out enumerates the neutral list);
+  redirect URIs are deliberately not endpoints. The registered client
+  record derives from `ProtocolMetadata` (`EntityId` = `client_id`); the
+  registration *request* is the standalone
+  `OpenIdConnectClientRegistrationRequest` reusing the client descriptor
+  with the identifier required absent.
+- **Token contracts are single-source.** `OpenIdConnectIdToken` /
+  `OpenIdConnectLogoutToken` / `OpenIdConnectUserInfo` build their claim
+  collections from the typed members plus extension claims at
+  materialization, stamping OIDC provenance; extension claims colliding
+  with a typed member are rejected, so the validated surface and the
+  claims the cross-protocol mapper reads cannot disagree. NumericDate
+  claims keep their wire shape (integer seconds) in the collection while
+  typed members expose `DateTimeOffset`. `RawToken`/`RawDocument` retain
+  originals (the RP-initiated logout `id_token_hint` and signature
+  re-verification need them); `JwtId` feeds
+  `AuthenticationResult.EvidenceId`.
+- **The subject-identifier recipe is pinned once** in
+  `OpenIdConnectSubjectExtensions.GetSubjectIdentifier()`: value = `sub`,
+  issuer = `iss`, unspecified format, no relying-party qualifier — wire
+  fields only, used identically by the login leg and the back-channel
+  logout leg so single-logout equality cannot fork. Sector enrichment is a
+  consumer policy applied on both legs or neither. Subjects on token
+  contracts are raw wire strings for the same reason.
+- **Back-channel logout composes with the shared logout semantics**:
+  `OpenIdConnectBackChannelLogoutRequestDescriptor.Apply(token)` populates
+  the base issuer/subject/session members from the parsed logout token
+  (the base envelope snapshots the descriptor, so population precedes
+  materialization), and materialization guards agreement between the
+  descriptor and the token — internal consistency is structural. A
+  sub-only logout token maps onto the family's "empty session ids +
+  subject = all sessions" pin. `Events` is a dictionary (event URI →
+  payload) because the wire shape is a JSON object and §2.6's
+  payload-is-an-object check must be expressible.
+- **`response_type` is a single wire-exact string with computed parts and a
+  set-comparison helper** (`OpenIdConnectResponseTypes.Matches`): the OAuth
+  Multiple Response Types registry treats the combination as the unit but
+  makes it order-insensitive, so only atomic constants ship and no ordinal
+  comparison is ever correct. Every other space-delimited wire list
+  (scopes, prompts, `acr_values`, `amr`, `ui_locales`) is modeled as a
+  list, with the join/split as a transport concern.
+- **Unresolved aggregated/distributed claims** ride
+  `OpenIdConnectClaimsSource` entries on the ID token and UserInfo —
+  never the claim collection, per the canonical-model pin. Resolution
+  (HTTP, JWT parsing) stays out of scope; the mapping feature consumes
+  resolved claims via `IIdentityClaim.Issuer`.
+- **Scope notes**: every F4 type pins `AuthenticationProtocol.OpenIdConnect`
+  (a type named OpenIdConnect\* must never claim another protocol; pure
+  OAuth-only flows are representable as data but read `oidc` — a future
+  OAuth branch would get its own types, and `oauth2` remains the
+  `AuthenticationResult`-level provenance value). Client secrets are never
+  modeled (client assertions are — they're signed public artifacts);
+  JAR/`claims` parameters are carried as raw wire strings without object
+  models.
 
 ## Error model
 
@@ -459,9 +591,9 @@ a decision recorded here:
 |---|---|
 | `[L01.01.12.01]` #584 | This document, namespace map, family boundaries, architecture validation. |
 | `[L01.01.12.02]` #588 | Canonical identity domain model (subjects, credentials, sessions, results, claims). |
-| `[L01.01.12.03]` #592 | Shared protocol abstractions (`Protocols` namespace). |
-| `[L01.01.12.04]` #596 | OpenID Connect contract branch. |
-| `[L01.01.12.05]` #600 | SAML 2.0 contract branch. |
+| `[L01.01.12.03]` #592 | Shared protocol abstractions — the `…Protocols` project. |
+| `[L01.01.12.04]` #596 | OpenID Connect contract branch — the `…Protocols.OpenIdConnect` project. |
+| `[L01.01.12.05]` #600 | SAML 2.0 contract branch — the `…Protocols.Saml` project. |
 | `[L01.01.12.06]` #604 | Token normalization alignment with the root model. |
 | `[L01.01.12.07]` #608 | JWT package to OIDC grade. |
 | `[L01.01.12.08]` #612 | SAML token package to assertion grade. |

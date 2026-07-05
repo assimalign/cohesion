@@ -1,7 +1,7 @@
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Protocols;
 
-namespace Assimalign.Cohesion.IdentityModel.Tests.TestObjects;
+namespace Assimalign.Cohesion.IdentityModel.Protocols.Tests.TestObjects;
 
 /// <summary>
 /// Minimal concrete derivatives of the abstract protocol envelope types, standing in for
