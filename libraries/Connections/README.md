@@ -20,6 +20,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream TCP driver (`TcpConnectionListener` / `TcpConnectionFactory`). |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |
 | `Assimalign.Cohesion.Connections.Quic` | Reliable, ordered, multiplexed QUIC driver (`QuicConnectionListener` / `QuicConnectionFactory`); each stream is itself an `IConnection` with a `ConnectionDirection`. |
+| `Assimalign.Cohesion.Connections.InMemory` | Socketless in-memory driver: cross-wired duplex-pipe connection pairs (`InMemoryConnectionListener` / `InMemoryConnectionFactory`, plus a multiplexed variant) for deterministic, live transport testing. |
 
 ## Layering
 

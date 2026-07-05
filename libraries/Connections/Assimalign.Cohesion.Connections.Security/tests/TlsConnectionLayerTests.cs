@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -28,7 +29,7 @@ public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         TlsConnectionLayer layer = new(new TlsServerOptions());
-        ConnectionCapabilities capabilities = TestPipeConnection.DefaultCapabilities;
+        ConnectionCapabilities capabilities = InMemoryConnectionPair.DefaultCapabilities;
 
         // Act
         ConnectionCapabilities described = layer.Describe(capabilities);
@@ -42,7 +43,7 @@ public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TlsConnectionLayer layer = new(new TlsServerOptions
         {
             AuthenticationOptions =

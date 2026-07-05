@@ -1045,6 +1045,13 @@
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/tests/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Udp/tests/Assimalign.Cohesion.Connections.Udp.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.InMemory/tests/Assimalign.Cohesion.Connections.InMemory.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/ObjectMapping/">
 		<File Path="libraries/ObjectMapping/Directory.Build.props" />
 		<File Path="libraries/ObjectMapping/Directory.Build.targets" />
