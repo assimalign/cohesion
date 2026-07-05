@@ -11,7 +11,7 @@ internal sealed class Http2Context : TransportHttpContext
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http20, request, response, connectionInfo, requestAborted)
+        : base(HttpVersion.Http20, request, response, connectionInfo, requestAborted, features)
     {
         Stream = stream;
     }

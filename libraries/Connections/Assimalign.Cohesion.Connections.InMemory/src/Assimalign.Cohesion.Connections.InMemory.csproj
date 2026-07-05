@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>In-memory driver implementing the Cohesion connection contracts with cross-wired duplex-pipe connection pairs, for socketless, deterministic transport testing.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+</Project>
