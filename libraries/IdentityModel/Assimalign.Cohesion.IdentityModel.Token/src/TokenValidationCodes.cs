@@ -19,4 +19,11 @@ public static class TokenValidationCodes
 
     /// <summary>The token is not yet valid at the validation instant.</summary>
     public const string NotYetValid = "not_yet_valid";
+
+    /// <summary>
+    /// A member the governing specification requires is absent. Mirrors the protocol branch's
+    /// <c>ProtocolValidationCodes.MissingRequiredMember</c> value so cross-branch tooling can
+    /// group the finding.
+    /// </summary>
+    public const string MissingRequiredMember = "missing_required_member";
 }

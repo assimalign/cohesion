@@ -691,12 +691,67 @@ assertion shapes and against the JWT/SAML token packages that build on it.
   decision above: branch independence forbids the token branch from referencing
   `…Protocols`, so the token validation result/diagnostic/severity mirror the
   protocol contract as independent types.
-- **Scope of the AOT purge.** `[L01.01.12.06]` removes `object?` from the
-  neutral token base only. The JWT JOSE-header dictionary
-  (`IJsonWebToken.Header`) and the SAML condition dictionary
-  (`ISamlToken.Conditions`) remain `object?` and are deliberately deferred to
-  `[L01.01.12.07]` (#608) and `[L01.01.12.08]` (#612), which take those
-  packages to grade and map those surfaces onto `IdentityClaimValue` then.
+- **Scope of the AOT purge.** `[L01.01.12.06]` removed `object?` from the
+  neutral token base; `[L01.01.12.07]` replaced the JWT JOSE-header bag with a
+  typed `JoseHeader` over an `IdentityClaimValue` record. The last `object?`
+  surface is the SAML condition dictionary (`ISamlToken.Conditions`), deferred
+  to `[L01.01.12.08]` (#612), after which `IdentityClaimValue` is the single
+  value currency family-wide.
+
+## JSON Web Token package decisions
+
+Feature `[L01.01.12.07]` brought `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`
+to OIDC grade. The decisions below were stress-tested against RFC 7515/7517/
+7518/7519/8725 and OpenID Connect Core before implementation.
+
+- **The crypto line is key material, not the word "crypto".** The JWT package
+  *executes* the keyless, deterministic checks a JWT document owns —
+  `alg=none` rejection (RFC 8725) and the `at_hash`/`c_hash` half-SHA-2
+  base64url comparison (OIDC Core §3.1.3.6/§3.3.2.11), with the digest size
+  read from the JWS `alg` name and `none`/EdDSA/unknown yielding a diagnostic
+  rather than a silent pass. It *exposes but does not execute* signature
+  verification: `SigningInput` (the raw ASCII `header.payload`) and the
+  signature bytes are the seam a Security-layer verifier consumes. A
+  successful `Validate` means "data + hash rules passed", never "signature
+  verified" — the same validated≠trusted caveat the other branches carry. This
+  resolves the earlier keystone tension (see the narrowed Non-goal): keyless
+  hashing is document fidelity; keyed verification is the deferred seam.
+- **The JWT/OIDC validation split has one owner per rule.** The JWT package
+  owns JOSE `alg`/`b64`/`crit`, required-claim presence, and `at_hash`/`c_hash`
+  value; the OpenID Connect branch owns the protocol rules (`nonce` match,
+  `azp`-equals-client, `max_age`, additional-audience trust). Both compose the
+  neutral issuer/audience/temporal base `Validate`. When one physical JWT is
+  materialized as both a `JsonWebToken` and an `OpenIdConnectIdToken`, the
+  shared checks run in both by design — document substrate vs protocol profile
+  — and must not be consolidated.
+- **The claim-name and validation-code vocabularies are branch-local
+  mirrors.** The JWT package cannot reference the OpenID Connect branch, so it
+  owns `JsonWebTokenClaimTypes` (the IANA-registered `nonce`/`azp`/`auth_time`/
+  `at_hash`/`c_hash`/… names the document carries) and `JsonWebTokenValidationCodes`,
+  mirroring `OpenIdConnectClaimTypes` / `OpenIdConnectValidationCodes`. A
+  cross-branch test pins the claim-name strings equal so the mirrors cannot
+  drift; cross-cutting codes reuse the shared string values (for example
+  `missing_required_member`). This is the same branch-independence-mirror
+  discipline as `TokenValidationResult`.
+- **`JoseHeader` completes the object?-purge the neutral layer began.** The
+  F6-deferred `object?` JOSE-header bag is replaced by a typed `JoseHeader`
+  whose accessors (`Algorithm`, `Type`, `KeyId`, `Critical`, …) are computed
+  projections of a single authoritative `IdentityClaimValue` `Parameters`
+  record — RFC 7515 header params are a fixed, spec-governed vocabulary, so
+  typed accessors are correct, and projecting one record keeps them from
+  drifting. `IdentityClaimValue` is now the single value currency across the
+  whole family; the SAML condition bag is the last `object?` surface, deferred
+  to `[L01.01.12.08]`.
+- **Parsing is reflection-free and fail-closed.** Compact parsing uses
+  `System.Text.Json`'s `JsonDocument`/`Utf8JsonReader` (never `JsonSerializer`)
+  with `System.Buffers.Text.Base64Url` and one-shot `SHA*.HashData` — all
+  in-box, no package references, AOT-safe. It rejects RFC 8725 §2.3 duplicate
+  members, bounds NumericDate so an extreme `exp` degrades to a null projection
+  (the raw claim staying wire-shaped in `Claims`) instead of throwing, folds
+  string-or-array `aud` into both surfaces consistently, and bounds claim-graph
+  depth. Signature verification, JWE, and the unencoded-payload (`b64:false`)
+  variant are out of scope; the compatibility matrix in the package
+  `docs/DESIGN.md` records implemented-vs-deferred.
 
 ## Error model
 
@@ -765,10 +820,16 @@ work item):
 - **Protocol flow orchestration and transport execution.** No HTTP clients,
   redirect handling, or endpoint hosting. Binding descriptors describe
   transports; they never execute them.
-- **Cryptographic execution.** Signature creation/verification, key
-  management, and encryption are seams (descriptors, validation parameters),
-  not implementations. Executing crypto belongs to future implementation
-  packages that can layer on the Security area.
+- **Keyed cryptographic execution.** The deferred seam is *keyed*
+  cryptography — signature/MAC creation and verification, key management, and
+  encryption/decryption — all of which require key material and
+  algorithm-suite dispatch and belong to the Security-area implementation
+  packages (descriptors and validation parameters are the seam). *Keyless,
+  deterministic hashing* that a token document must perform to check its own
+  self-consistency — the JOSE/OIDC `at_hash`/`c_hash` half-SHA-2 comparison and
+  `alg=none` rejection — is document fidelity, not a key operation, and is
+  owned and executed by the JWT package (see the JSON Web Token package
+  decisions). The line is key material, not the word "crypto".
 - **Wire-format serialization for SAML.** The family preserves raw assertion
   XML as opaque context; XML readers/writers are a future implementation
   package.
