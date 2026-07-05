@@ -26,6 +26,11 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     {
         _store = store ?? new Dictionary<HttpHeaderKey, HttpHeaderValue>();
     }
+    private HttpHeaderCollection(Dictionary<HttpHeaderKey, HttpHeaderValue> store, bool isReadOnly)
+    {
+        _store = store;
+        IsReadOnly = isReadOnly;
+    }
 
     #endregion
 
@@ -81,6 +86,18 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     {
         ThrowIfReadOnly();
         _store?.Clear();
+    }
+
+    /// <summary>
+    /// Returns a read-only view over the same underlying store. Reads (including enumeration)
+    /// observe the live collection; every mutation attempt on the view throws
+    /// <see cref="InvalidOperationException"/>. Returns the current instance when it is already
+    /// read-only.
+    /// </summary>
+    /// <returns>A read-only view of this collection.</returns>
+    public HttpHeaderCollection AsReadOnly()
+    {
+        return IsReadOnly ? this : new HttpHeaderCollection(_store, isReadOnly: true);
     }
     public bool ContainsKey(HttpHeaderKey key)
     {
@@ -169,7 +186,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     {
         if (IsReadOnly)
         {
-            throw new InvalidOperationException("The response headers cannot be modified because the response has already started.");
+            throw new InvalidOperationException("The header collection is read-only and cannot be modified.");
         }
     }
 
