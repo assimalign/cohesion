@@ -16,7 +16,7 @@ public sealed class SamlToken : IdentityToken, ISamlToken
     /// </summary>
     /// <param name="descriptor">The SAML descriptor.</param>
     public SamlToken(SamlTokenDescriptor descriptor)
-        : base(IdentityTokenKind.Saml, NormalizeDescriptor(descriptor))
+        : base(IdentityTokenKind.Saml, descriptor)
     {
         AssertionId = descriptor.AssertionId;
         Version = descriptor.Version;
@@ -49,18 +49,5 @@ public sealed class SamlToken : IdentityToken, ISamlToken
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conditionName);
         return Conditions.TryGetValue(conditionName, out value);
-    }
-
-    private static SamlTokenDescriptor NormalizeDescriptor(SamlTokenDescriptor descriptor)
-    {
-        ArgumentNullException.ThrowIfNull(descriptor);
-
-        if (string.IsNullOrWhiteSpace(descriptor.Subject) &&
-            !string.IsNullOrWhiteSpace(descriptor.NameIdentifier))
-        {
-            descriptor.Subject = descriptor.NameIdentifier;
-        }
-
-        return descriptor;
     }
 }

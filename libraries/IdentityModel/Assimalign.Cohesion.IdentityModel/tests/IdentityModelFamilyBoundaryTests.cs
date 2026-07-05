@@ -103,11 +103,12 @@ public sealed class IdentityModelFamilyBoundaryTests
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Family: Token should reference only the root")]
     public void TokenAssembly_WhenInspected_ShouldReferenceOnlyTheRoot()
     {
-        // The emitted metadata only records references the compiler actually used, so this
-        // stays a subset check until [L01.01.12.06] aligns the token contracts with the
-        // root model and the root reference becomes a required entry.
+        // Since [L01.01.12.06] the token contracts are built on root types (SubjectIdentifier,
+        // IIdentityClaimCollection, AuthenticationContext, AuthenticationProtocol), so the
+        // root reference is now a required entry, not merely permitted.
         var references = GetCohesionReferences(TokenAssembly);
 
+        references.ShouldContain(RootAssemblyName);
         references.ShouldBeSubsetOf(new[] { RootAssemblyName });
     }
 

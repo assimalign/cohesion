@@ -87,9 +87,13 @@ other protocols, and so each protocol is built and tested in isolation.
   content, protocol messages, entity metadata, bindings, SAML constants.
 - **`…IdentityModel.Token`** owns: the protocol-neutral token/assertion
   normalization contracts — what it means to be "a token" (issuer, subject,
-  audiences, temporal validity, normalized claims, provenance) independent of
-  wire format — plus reader/writer/validator seams that are genuinely
-  protocol-neutral.
+  audiences, temporal validity, authentication context, normalized claims,
+  provenance) independent of wire format, expressed **in the root canonical
+  types** (`SubjectIdentifier`, `IIdentityClaimCollection`,
+  `AuthenticationContext`) — plus the one genuinely protocol-neutral
+  behavior, a `Validate()` data-rule method on the token base. It ships no
+  neutral reader or writer seam (parsing and serialization are inherently
+  format-specific; see the Token normalization decisions).
 - **`…Token.JsonWebToken`** owns: concrete JWT document fidelity — JOSE
   header shape, compact serialization, registered and OIDC ID-token claims,
   JWT-specific validation descriptors and negative-case behavior.
@@ -382,12 +386,20 @@ requirements before implementation and are load-bearing.
   `ProtocolValidationResult` is sealed; `Succeeded` is computed (no
   error-severity diagnostics) so "succeeded with errors" is
   unconstructible; `ProtocolValidationSeverity.Error = 0` so a defaulted
-  severity reads as the most severe interpretation. Richer results elsewhere
-  (token validation in `[L01.01.12.06]`) *compose* the result or reuse
-  `ProtocolValidationDiagnostic` — no result inheritance hierarchy.
-  Association with the validated artifact is the caller's composition
-  concern. No builder: validators accumulate a `List<>` and materialize
-  once.
+  severity reads as the most severe interpretation. Richer results within
+  this branch *compose* the result or reuse `ProtocolValidationDiagnostic` —
+  no result inheritance hierarchy. The **token branch cannot share this
+  currency**: branch independence (enforced by the boundary tests) forbids
+  `…Token` from referencing `…Protocols`, so `[L01.01.12.06]` defines a
+  branch-local `TokenValidationResult`/`TokenValidationDiagnostic`/
+  `TokenValidationSeverity` that *mirror* this contract (sealed, computed
+  `Succeeded`, `Error = 0`, accumulate-then-materialize) rather than
+  reference it. Two parallel copies is the deliberate cost of keeping the
+  branches independent; promoting the type to the root was rejected because
+  validation vocabulary is a protocol/token concern, not canonical-identity,
+  and the anchor must reference no other assembly. Association with the
+  validated artifact is the caller's composition concern. No builder:
+  validators accumulate a `List<>` and materialize once.
 - **`ProtocolParty` is a minimal reference** (trust-registry entries) with
   equality over (Identifier, Role) ordinal — `DisplayName`/`Properties`
   excluded, per the `SubjectIdentifier` precedent — and deliberately no
@@ -616,6 +628,76 @@ OIDC branch settled.
   raw assertion/response XML is preserved as opaque context for the SAML token
   package, which owns reading and writing it.
 
+## Token normalization decisions
+
+Feature `[L01.01.12.06]` evolved `Assimalign.Cohesion.IdentityModel.Token` from
+a self-contained model with its own parallel abstractions into the
+protocol-neutral normalization layer, expressed in the root canonical types.
+The decisions below were stress-tested against the OIDC ID token and SAML
+assertion shapes and against the JWT/SAML token packages that build on it.
+
+- **The token layer reuses the root canonical types; it no longer duplicates
+  them.** The old branch carried its own `IIdentityTokenClaim` /
+  `IdentityTokenClaim` / `IdentityTokenValueKind` and `object?` value bags.
+  Those are deleted. A normalized token now exposes `SubjectIdentifier?
+  Subject`, `IIdentityClaimCollection Claims`, `AuthenticationContext?
+  AuthenticationContext`, `AuthenticationProtocol Protocol`, and
+  `IReadOnlyDictionary<string, IdentityClaimValue> Properties` — the same
+  types every other family member speaks. This is what makes a JWT-normalized
+  and a SAML-normalized principal comparable, and it removes the AOT-hostile
+  `object?` surface from the neutral layer. Claim lookup is the root
+  `Contains`/`TryGet`/`GetAll`/`GetValues` on `Claims`, so the family ships
+  one spelling; `HasAudience` and the temporal predicates (`IsActive`,
+  `IsExpired`) are `extension(IIdentityToken)` members, not interface members.
+- **`Claims` is the authoritative record; the typed members are its
+  projection.** The complete normalized claim set lives in `Claims` with
+  provenance. The first-class members (`Subject`, `Issuer`, `Audiences`, the
+  temporal window, `AuthenticationContext`) are the convenience/normalized
+  projection a concrete token package populates *consistently with* `Claims`.
+  This mirrors how the OIDC ID token already materializes its claim collection
+  from typed members; keeping one authoritative surface is what lets a
+  compliance test assert a JWT and a SAML assertion resolve to the same
+  canonical shape.
+- **Two issuers, pinned.** `IIdentityToken.Issuer` is the *asserting* issuer
+  (OIDC `iss` / SAML `Assertion/Issuer`) — the answer to "who issued this
+  token". `Subject.Issuer` is the subject-*scoping* qualifier (SAML
+  `NameQualifier`, defaulting to the assertion issuer) and MAY differ. Identity
+  equality/lookup uses `SubjectIdentifier`; issuer trust uses
+  `IIdentityToken.Issuer`. Concrete packages set them independently.
+- **The document format and the protocol are distinct axes.**
+  `IdentityTokenKind` (`Unknown = 0` fail-closed, `JsonWebToken`, `Saml`) is
+  the wire shape, pinned by the concrete type through the constructor.
+  `AuthenticationProtocol` is provenance carried as descriptor data, because a
+  JWT may be an OIDC ID token (`oidc`) or an OAuth access token (`oauth2`)
+  while a SAML assertion is always `saml2`.
+- **Validation is a `Validate(options)` method on the token base, not a
+  seam.** Every validator in the family is a data-rule method on the artifact
+  (`OpenIdConnectIdToken.Validate`, `SamlAssertion.Validate`); there is no
+  `IValidator` anywhere. The token layer follows suit: the neutral checks
+  (issuer match, audience membership, the primary temporal window with skew
+  applied to the caller instant) are a method on `IdentityToken`. An
+  `IIdentityTokenValidator` interface + default implementation was rejected as
+  a seam-for-its-own-sake with no second implementation. Format-specific rules
+  (signature, a SAML bearer-confirmation window, per-restriction audiences)
+  belong to the concrete package.
+- **No neutral reader or writer seam.** Parsing (compact JWT vs assertion XML)
+  and serialization are inherently format-specific with no protocol-neutral
+  behavior and no polymorphic caller that holds the abstraction without knowing
+  the format, so `[L01.01.12.06]` ships neither. Concrete readers/writers that
+  return their concrete token types are the JWT/SAML packages' concern; a
+  neutral entry point is introduced only if a real multi-format dispatch need
+  appears.
+- **`TokenValidationResult` is a branch-local mirror.** See the shared-currency
+  decision above: branch independence forbids the token branch from referencing
+  `…Protocols`, so the token validation result/diagnostic/severity mirror the
+  protocol contract as independent types.
+- **Scope of the AOT purge.** `[L01.01.12.06]` removes `object?` from the
+  neutral token base only. The JWT JOSE-header dictionary
+  (`IJsonWebToken.Header`) and the SAML condition dictionary
+  (`ISamlToken.Conditions`) remain `object?` and are deliberately deferred to
+  `[L01.01.12.07]` (#608) and `[L01.01.12.08]` (#612), which take those
+  packages to grade and map those surfaces onto `IdentityClaimValue` then.
+
 ## Error model
 
 `IdentityModelException` (root namespace) is the area-scoped exception root,
@@ -633,8 +715,8 @@ it's not an exception.
 
 - Plain-old CLR object models — no serializer dependencies in any shipped
   assembly, no reflection-based inference on public paths, no runtime code
-  generation. (The existing `IdentityTokenClaim` value-kind inference uses
-  type pattern matching, which is trim-safe.)
+  generation. Value-kind handling is `IdentityClaimValue`'s trim-safe type
+  pattern matching, never runtime reflection.
 - Free of open-generic factory patterns that would require reflection emit.
 - Serialization-agnostic: consumers bring their own source-generated
   serializers. The JWT package may use `System.Text.Json`'s reader/document

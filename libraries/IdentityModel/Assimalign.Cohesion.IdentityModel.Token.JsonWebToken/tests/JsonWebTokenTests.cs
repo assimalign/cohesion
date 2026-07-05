@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 
+using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
@@ -23,13 +24,13 @@ public sealed class JsonWebTokenTests
         var descriptor = new JsonWebTokenDescriptor
         {
             Issuer = "https://issuer.cohesion.local",
-            Subject = "user-42",
+            Subject = new SubjectIdentifier("user-42"),
             RawData = rawToken
         };
 
         descriptor.Header.Add("alg", "HS256");
         descriptor.Header.Add("typ", "JWT");
-        descriptor.Claims.Add(new IdentityTokenClaim("sub", "user-42"));
+        descriptor.Claims.Add(new IdentityClaim("sub", "user-42"));
 
         // Act
         var token = new JsonWebToken(descriptor);
