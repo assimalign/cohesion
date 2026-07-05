@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>SAML 2.0 contract branch for Cohesion IdentityModel: assertions, subject and NameID, statements and conditions, protocol messages (AuthnRequest/Response/logout), entity metadata, bindings, and specification-oriented validation. Builds on Assimalign.Cohesion.IdentityModel.Protocols.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml.Tests" />
+  </ItemGroup>
+</Project>

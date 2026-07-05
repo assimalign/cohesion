@@ -494,6 +494,128 @@ against the JWT-package and cross-protocol features that build on it.
   JAR/`claims` parameters are carried as raw wire strings without object
   models.
 
+## SAML branch decisions
+
+Feature `[L01.01.12.05]` created the
+`Assimalign.Cohesion.IdentityModel.Protocols.Saml` project. The branch was
+stress-tested against SAML 2.0 Core, Bindings, Profiles (Web Browser SSO,
+Single Logout), and Metadata before implementation, and against the SAML
+token-package and cross-protocol features that build on it. It applies the same
+guards-stop-at-artifact-identity and validation-is-diagnostics discipline the
+OIDC branch settled.
+
+- **The assertion is the branch's token contract, and its `Validate()` owns
+  pure SAML data rules.** `SamlAssertion` is the SAML counterpart to the OIDC
+  ID token: it materializes from a descriptor, builds its claim collection
+  once, and validates issuer / subject presence / conditions window / audience
+  restrictions / bearer confirmation / authn-context presence as functions of
+  (assertion, explicit options). Signature verification and `EncryptedID` /
+  `EncryptedAssertion` / `EncryptedAttribute` decryption are deliberately absent
+  — they are the SAML token package's one crypto concern, so each SAML Core
+  rule has exactly one owner. The only hard guards are the artifact-identity
+  members (`SamlAssertion.Id`, message `MessageId`, metadata `EntityId`); every
+  wire-received field is nullable and reported by `Validate()`, because received
+  documents are exactly what compliance suites must hold.
+- **Real SAML structure is preserved, never flattened.** The stress-test
+  rejected a naive flat assertion. The branch models `SamlSubject`,
+  `SamlSubjectConfirmation`, `SamlSubjectConfirmationData`, `SamlAuthnContext`,
+  `SamlConditions`, and `SamlAuthnStatement` as distinct value objects; the
+  `Issuer` is a `SamlNameId` (SAML Core types `Issuer` as a NameID with format
+  and qualifiers), not a bare string. Content the descriptive layer cannot open
+  is a typed `SamlEncryptedElement` marker (never silently dropped), and each
+  signable element retains its own verbatim `RawXml` (the `<saml:Assertion>`
+  subtree separately from the `<samlp:Response>` element) so the token package
+  can re-verify an assertion-level signature independently of a response-level
+  one.
+- **Audience satisfaction is AND-across / OR-within, and fails closed.** An
+  assertion satisfies its audience constraint when the relying party matches at
+  least one audience of *every* `AudienceRestriction`. `SamlConditions.
+  IsAudienceSatisfied` implements exactly that; an empty restriction set (a
+  wire malformation) is treated as unsatisfiable, never vacuously true. The
+  audience check runs only when the caller supplies `ExpectedAudience` and the
+  assertion actually carries restrictions — an unrestricted assertion is
+  unrestricted.
+- **Bearer confirmation is existential and profile-shaped.** The Web Browser
+  SSO profile is met when at least one `SubjectConfirmation` is `bearer` and its
+  data has `NotOnOrAfter` present and in the future, no `NotBefore`, a
+  `Recipient` matching the expected assertion-consumer URL when one is
+  expected, and an `InResponseTo` equal to the sent request id (both-null is
+  the legal identity-provider-initiated case). `RequireBearerConfirmation`
+  defaults true; a holder-of-key-only subject fails the profile. The profile's
+  authentication-statement requirement (Profiles §4.1.4.2) is enforced the same
+  way: `RequireAuthnStatement` defaults true, so an assertion with zero
+  authentication statements fails closed rather than being accepted with no
+  asserted authentication context — the attribute-only assertions SAML Core
+  §2.7.2 permits opt out by setting it false.
+- **Clock skew is applied to the caller instant, once.** Every temporal rule
+  (conditions window, bearer `NotOnOrAfter`) evaluates against
+  `options.ValidateAt ± options.ClockSkew`, never per field, so a single skew
+  source governs the whole assertion and extreme wire timestamps diagnose
+  rather than throw — the same discipline as the OIDC branch. `ClockSkew`
+  defaults to five minutes; the library never owns a clock (`ValidateAt` is
+  required).
+- **Claims keep raw SAML names; authentication data does not become claims.**
+  `BuildClaims` emits `sub` from the subject NameID and one claim per attribute
+  *value*, keyed by the **raw** SAML attribute name (the cross-protocol mapper
+  remaps to canonical types later), with provenance carrying the protocol
+  (`saml2`), original name, name format, and friendly name so nothing is lost;
+  multi-value and repeated attributes become duplicate claims, per the family's
+  canonical multi-value rule. Authentication-statement data (authn instant,
+  context class, session index) is deliberately *not* forced into the claim
+  collection — it flows to session and authorization layers through the typed
+  `SamlAuthnStatement`, kept SAML-native.
+- **The NameID-to-`SubjectIdentifier` recipe is pinned once, and both SSO legs
+  use it.** `SamlSubjectExtensions.GetSubjectIdentifier()` maps value = NameID
+  value, format = NameID `Format` (normalized to unspecified when absent),
+  issuer = `NameQualifier` or the message/assertion issuer fallback (SAML Core
+  §2.2.3), relying-party qualifier = `SPNameQualifier`, with `SPProvidedID`
+  riding `Properties` (non-matching, so excluded from equality). The login leg
+  (assertion subject) and the logout leg (logout `NameID`) both derive
+  identifiers through this one recipe, so single-logout correlation cannot fork
+  — the SAML Core §3.7.3.2 obligation that the logout NameID be consistent with
+  the login NameID is what makes the two legs converge, and identical field
+  mapping is what makes the derived identifiers *equal*.
+- **Single logout composes the shared logout semantics.**
+  `SamlLogoutRequestDescriptor.Apply(nameId, sessionIndexes)` populates the base
+  `Subject` (through the pinned recipe, defaulting the name qualifier to the
+  message `Issuer`) and the base `ProviderSessionIds` (the `SessionIndex`
+  values), so correlation joins on the `(Issuer, ProviderSessionIds)` pair
+  *identically* to OIDC back-channel logout, and an empty session set means
+  every session for the subject. The partial-logout outcome is a success status
+  carrying a `PartialLogout` sub-code (`ProtocolResponseStatus.SuccessWith`),
+  never a failure.
+- **Response validation is envelope-scoped; assertions validate themselves.**
+  `SamlResponse.Validate` checks the success status, the `InResponseTo` and
+  `Destination` matches, and — on success — the presence of at least one
+  assertion (cleartext or encrypted). Each contained assertion's data rules run
+  through `SamlAssertion.Validate`, so the envelope and its assertions have
+  separate, composable validators. A SAML success always carries the `Success`
+  status code on the wire (`Status.Succeeded` is stored, not inferred).
+- **Entity metadata: role descriptors are authoritative; the flat lists are a
+  role-stamped projection.** `SamlEntityMetadata` derives `ProtocolMetadata`;
+  materialization projects each `SamlRoleDescriptor`'s endpoints and keys into
+  the inherited flat lists and **stamps `ProtocolEndpoint.Role` /
+  `ProtocolKey.Role` from the enclosing role descriptor**, overwriting whatever
+  the caller authored, so a role-scoped entity never surfaces a null-role entry
+  and a dual-role entity (identity provider *and* service provider) keeps its
+  per-role keys and endpoints distinguishable to protocol-neutral consumers.
+  The typed policy the base cannot hold (NameID formats, protocol support
+  enumeration, signing flags) stays on the role descriptor. Conformance
+  (at least one role descriptor, SAML 2.0 protocol support, `validUntil`
+  expiry) is `Validate()` diagnostics, not materialization guards.
+- **Bindings and NameID formats map through single sources.** SAML binding
+  URIs live in this branch; `SamlBindings.ToProtocolBinding` is the one place
+  they map onto the transport-shaped `ProtocolBinding` vocabulary (SOAP and
+  PAOS both collapse to `soap`), mirroring how the OIDC branch maps response
+  modes. `SamlNameIdFormats` forwards to the root `SubjectIdentifierFormats`
+  constants — one literal per URI, because the canonical `SubjectIdentifier.
+  Format` participates in equality and a second copy would be a drift hazard.
+- **Scope notes**: every SAML type pins `AuthenticationProtocol.Saml2`. Status
+  codes are the exact OASIS URNs, consumed through `Status.Code` (top-level)
+  and `Status.SubCodes` (nested, unbounded). XML serialization is out of scope:
+  raw assertion/response XML is preserved as opaque context for the SAML token
+  package, which owns reading and writing it.
+
 ## Error model
 
 `IdentityModelException` (root namespace) is the area-scoped exception root,

@@ -28,6 +28,7 @@ public sealed class IdentityModelFamilyBoundaryTests
     private const string RootAssemblyName = "Assimalign.Cohesion.IdentityModel";
     private const string ProtocolsAssemblyName = "Assimalign.Cohesion.IdentityModel.Protocols";
     private const string OpenIdConnectAssemblyName = "Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect";
+    private const string SamlProtocolAssemblyName = "Assimalign.Cohesion.IdentityModel.Protocols.Saml";
     private const string TokenAssemblyName = "Assimalign.Cohesion.IdentityModel.Token";
     private const string JsonWebTokenAssemblyName = "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken";
     private const string SamlTokenAssemblyName = "Assimalign.Cohesion.IdentityModel.Token.Saml";
@@ -35,6 +36,12 @@ public sealed class IdentityModelFamilyBoundaryTests
     private static Assembly RootAssembly => typeof(IdentityKind).Assembly;
     private static Assembly ProtocolsAssembly => typeof(ProtocolRole).Assembly;
     private static Assembly OpenIdConnectAssembly => typeof(OpenIdConnectIdToken).Assembly;
+
+    // Fully qualified: the Protocols.Saml and Token.Saml namespaces share short type-name
+    // prefixes, so an unqualified anchor would be ambiguous under both usings.
+    private static Assembly SamlProtocolAssembly =>
+        typeof(Protocols.Saml.SamlConstants).Assembly;
+
     private static Assembly TokenAssembly => typeof(IIdentityToken).Assembly;
     private static Assembly JsonWebTokenAssembly => typeof(JsonWebToken).Assembly;
     private static Assembly SamlTokenAssembly => typeof(SamlToken).Assembly;
@@ -45,6 +52,7 @@ public sealed class IdentityModelFamilyBoundaryTests
         RootAssembly.GetName().Name.ShouldBe(RootAssemblyName);
         ProtocolsAssembly.GetName().Name.ShouldBe(ProtocolsAssemblyName);
         OpenIdConnectAssembly.GetName().Name.ShouldBe(OpenIdConnectAssemblyName);
+        SamlProtocolAssembly.GetName().Name.ShouldBe(SamlProtocolAssemblyName);
         TokenAssembly.GetName().Name.ShouldBe(TokenAssemblyName);
         JsonWebTokenAssembly.GetName().Name.ShouldBe(JsonWebTokenAssemblyName);
         SamlTokenAssembly.GetName().Name.ShouldBe(SamlTokenAssemblyName);
@@ -74,6 +82,22 @@ public sealed class IdentityModelFamilyBoundaryTests
 
         references.ShouldContain(ProtocolsAssemblyName);
         references.ShouldBeSubsetOf(new[] { RootAssemblyName, ProtocolsAssemblyName });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - Family: SAML protocol should reference only its parent chain")]
+    public void SamlProtocolAssembly_WhenInspected_ShouldReferenceOnlyItsParentChain()
+    {
+        var references = GetCohesionReferences(SamlProtocolAssembly);
+
+        references.ShouldContain(ProtocolsAssemblyName);
+        references.ShouldBeSubsetOf(new[] { RootAssemblyName, ProtocolsAssemblyName });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - Family: Sibling protocol packages should not reference each other")]
+    public void SiblingProtocolAssemblies_WhenInspected_ShouldNotReferenceEachOther()
+    {
+        GetCohesionReferences(OpenIdConnectAssembly).ShouldNotContain(SamlProtocolAssemblyName);
+        GetCohesionReferences(SamlProtocolAssembly).ShouldNotContain(OpenIdConnectAssemblyName);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Family: Token should reference only the root")]
@@ -114,9 +138,14 @@ public sealed class IdentityModelFamilyBoundaryTests
         openIdReferences.ShouldNotContain(TokenAssemblyName);
         openIdReferences.ShouldNotContain(JsonWebTokenAssemblyName);
 
+        var samlProtocolReferences = GetCohesionReferences(SamlProtocolAssembly);
+        samlProtocolReferences.ShouldNotContain(TokenAssemblyName);
+        samlProtocolReferences.ShouldNotContain(SamlTokenAssemblyName);
+
         GetCohesionReferences(JsonWebTokenAssembly).ShouldNotContain(OpenIdConnectAssemblyName);
         GetCohesionReferences(JsonWebTokenAssembly).ShouldNotContain(ProtocolsAssemblyName);
         GetCohesionReferences(SamlTokenAssembly).ShouldNotContain(ProtocolsAssemblyName);
+        GetCohesionReferences(SamlTokenAssembly).ShouldNotContain(SamlProtocolAssemblyName);
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Family: Sibling token packages should not reference each other")]
@@ -138,6 +167,7 @@ public sealed class IdentityModelFamilyBoundaryTests
             RootAssembly,
             ProtocolsAssembly,
             OpenIdConnectAssembly,
+            SamlProtocolAssembly,
             TokenAssembly,
             JsonWebTokenAssembly,
             SamlTokenAssembly,

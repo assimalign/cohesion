@@ -43,6 +43,14 @@ public sealed class IdentityModelNamespaceAlignmentTests
         AssertPublicTypesAlign(typeof(OpenIdConnectIdToken).Assembly);
     }
 
+    [Fact(DisplayName = "Cohesion Test [IdentityModel] - Namespaces: SAML protocol public types should live under the assembly namespace")]
+    public void SamlProtocolAssembly_PublicTypes_ShouldLiveUnderTheAssemblyNamespace()
+    {
+        // Fully qualified: the Protocols.Saml and Token.Saml namespaces share short
+        // type-name prefixes, so an unqualified anchor would be ambiguous under both usings.
+        AssertPublicTypesAlign(typeof(Protocols.Saml.SamlConstants).Assembly);
+    }
+
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Namespaces: Token public types should live under the assembly namespace")]
     public void TokenAssembly_PublicTypes_ShouldLiveUnderTheAssemblyNamespace()
     {

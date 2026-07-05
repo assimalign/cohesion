@@ -151,6 +151,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
