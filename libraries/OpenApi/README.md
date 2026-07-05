@@ -22,7 +22,7 @@ sibling except through the model.
 | [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON and YAML read/write | model, Content.Yaml | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | Implemented |
-| `Assimalign.Cohesion.OpenApi.Attributes` | Attribute metadata model | model | Planned (Wave 2) |
+| [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | Implemented |
 | `Assimalign.Cohesion.OpenApi.SourceGeneration` | AOT-safe attribute discovery → descriptors | attributes, model | Planned (Wave 2) |
 | `Assimalign.Cohesion.OpenApi.Generation` | Generation orchestration | model, serialization, attributes | Planned (Wave 2) |
 | `Assimalign.Cohesion.OpenApi.Compliance.Tests` | Official example corpus, schema-backed conformance, upgrade fixtures | serialization, validation | Planned (Wave 3) |
