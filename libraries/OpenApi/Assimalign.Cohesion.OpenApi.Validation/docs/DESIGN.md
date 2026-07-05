@@ -19,7 +19,7 @@ The built-in rules:
 |---|---|---|
 | `StructuralValidationRule` | Required fields, path-template shape, mutually exclusive fields, version-aware response description | `OPENAPI1001`–`OPENAPI1003` |
 | `VersionPlacementRule` | Fields/features used outside the versions that support them | `OPENAPI2001` |
-| `SemanticValidationRule` | operationId uniqueness, path-parameter consistency, parameter shape/uniqueness, querystring usage, response keys, security-scheme references, example value exclusivity, OAuth flow completeness, reserved additional operations | `OPENAPI3001`–`OPENAPI3012` |
+| `SemanticValidationRule` | operationId uniqueness, path-parameter consistency, parameter shape/uniqueness, querystring usage, response keys, security-scheme references, example value exclusivity, OAuth flow completeness, reserved additional operations, link `operationId`/`operationRef` exclusivity | `OPENAPI3001`–`OPENAPI3013` |
 | `OpenApiSchemaConformanceRule` (opt-in) | Divergence from the official meta-schema for the document's line | `OPENAPI4001` |
 
 Codes are stable and published in `OpenApiValidationRuleCodes` (`1xxx` structural, `2xxx` version,

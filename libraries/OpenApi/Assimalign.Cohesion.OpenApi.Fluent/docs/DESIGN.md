@@ -7,14 +7,22 @@ canonical model and produces the same model types — it is a construction conve
 representation. A developer authors a document by chaining builder members and nested `Action<T>`
 callbacks; the result is an ordinary `OpenApiDocument` that serializes and validates like any other.
 
-## Shape: interface-first builders, nested callbacks
+## Shape: concrete builders, nested callbacks
 
-Every builder is an interface (`IOpenApiSchemaBuilder`, `IOpenApiOperationBuilder`, …) with an
-`internal sealed` implementation, matching the repo's builder convention (`IConfigurationBuilder`,
-`IMapperBuilder`). The single public entry is `OpenApiDocumentBuilder.Create(version, title, apiVersion)`,
-which returns `IOpenApiDocumentBuilder`. Child structures are configured through `Action<IChildBuilder>`
-callbacks rather than exposed constructors, so the whole document reads as one nested expression and no
-raw model type is touched by the caller:
+> **Deviation from AGENTS.md interface-first (deliberate, scoped to this library).** The builders are
+> `public sealed class`es, not interfaces. OpenAPI is a published standard, so consumers routinely bring
+> their own authoring abstractions; imposing an `IOpenApi*Builder` contract here would be over-abstraction
+> that competes with theirs. These concrete builders are a convenience *over the public model* — a caller
+> is free to ignore them and construct `OpenApiDocument` directly, or write their own builder against the
+> same model. The entry point carries a `// Deviates from AGENTS.md …` marker so the choice isn't
+> "corrected" back. This deviation is scoped to the Fluent library only; the rest of the OpenApi family
+> stays interface-first for its behavioral seams (`IOpenApiReader`, `IOpenApiValidator`, …).
+
+Every builder is a `public sealed class` (`OpenApiSchemaBuilder`, `OpenApiOperationBuilder`, …) with a
+public constructor and a public `Build()`. The single entry is
+`OpenApiDocumentBuilder.Create(version, title, apiVersion)`, which returns `OpenApiDocumentBuilder`. Child
+structures are configured through `Action<ChildBuilder>` callbacks, so the whole document reads as one
+nested expression and no raw model type is touched by the caller:
 
 ```csharp
 var document = OpenApiDocumentBuilder.Create(OpenApiSpecVersion.V3_1, "Petstore", "1.0.0")
@@ -50,10 +58,13 @@ common authoring papercut.
 - The builder does **not** re-validate the finished document — that is the validation library's job.
   It only enforces the version constraints it can check locally at authoring time. A fluently built
   document is still expected to pass `document.Validate()`, which the tests assert.
-- The builder covers the common authoring surface (documents, paths, operations, parameters, request
-  bodies, responses, media types, components, schemas, security schemes, examples, tags, info). Rarely
-  authored corners (callbacks, links, encoding, discriminator, XML) are reached by dropping to the model
-  on the built document or via the `Extension` escape hatch — the fluent layer never blocks the model.
+- The builder covers the authoring surface end to end: documents, paths, operations, parameters, request
+  bodies, responses, media types, components, schemas, security schemes, examples, tags, info, and the
+  advanced description surfaces — callbacks (`operation.Callback` over runtime-expression path items),
+  links (`response.Link`/`LinkReference`, `components.Link`), webhooks (`document.Webhook`), and
+  `externalDocs` on the document, operations, tags, and schemas. The remaining low-level corners
+  (encoding, discriminator, XML node types) are reached by dropping to the model on the built document or
+  via the `Extension` escape hatch — the fluent layer never blocks the model.
 
 ## AOT posture
 

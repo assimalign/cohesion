@@ -54,6 +54,9 @@ public static class OpenApiValidationRuleCodes
     /// <summary>An <c>additionalOperations</c> entry uses a method that belongs to a fixed operation field.</summary>
     public const string ReservedAdditionalOperation = "OPENAPI3012";
 
+    /// <summary>A Link Object declares both <c>operationId</c> and <c>operationRef</c>, which are mutually exclusive.</summary>
+    public const string LinkOperationConflict = "OPENAPI3013";
+
     /// <summary>The serialized document diverges from the official OpenAPI schema for its version. Reported as a warning; the specification text is authoritative.</summary>
     public const string SchemaViolation = "OPENAPI4001";
 }

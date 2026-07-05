@@ -20,6 +20,7 @@ internal sealed class SemanticValidationRule : IOpenApiValidationRule
         ValidateResponseKeys(context, document);
         ValidateSecurity(context, document);
         ValidateExamples(context, document);
+        ValidateLinks(context, document);
         ValidateOAuthFlows(context, document);
         ValidateAdditionalOperations(context, document);
     }
@@ -229,6 +230,44 @@ internal sealed class SemanticValidationRule : IOpenApiValidationRule
             context.Error(
                 OpenApiValidationRuleCodes.ExampleValueConflict,
                 "The Example Object combines mutually exclusive value fields ('value', 'externalValue', 'dataValue', 'serializedValue').",
+                pointer);
+        }
+    }
+
+    private static void ValidateLinks(OpenApiValidationContext context, OpenApiDocument document)
+    {
+        if (document.Components is not null)
+        {
+            foreach (var link in document.Components.Links)
+            {
+                ValidateLink(context, link.Value, JsonPointer.Of("components", "links", link.Key));
+            }
+        }
+
+        foreach (var entry in OpenApiOperationWalker.Enumerate(document))
+        {
+            if (entry.Operation.Responses is null)
+            {
+                continue;
+            }
+
+            foreach (var response in entry.Operation.Responses.Items)
+            {
+                foreach (var link in response.Value.Links)
+                {
+                    ValidateLink(context, link.Value, JsonPointer.Append(entry.Pointer, "responses", response.Key, "links", link.Key));
+                }
+            }
+        }
+    }
+
+    private static void ValidateLink(OpenApiValidationContext context, OpenApiLink link, string pointer)
+    {
+        if (link.Reference is null && link.OperationId is not null && link.OperationRef is not null)
+        {
+            context.Error(
+                OpenApiValidationRuleCodes.LinkOperationConflict,
+                "The Link Object declares both 'operationId' and 'operationRef', which are mutually exclusive.",
                 pointer);
         }
     }

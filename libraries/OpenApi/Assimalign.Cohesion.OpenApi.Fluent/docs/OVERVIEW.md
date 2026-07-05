@@ -1,13 +1,15 @@
 # Assimalign.Cohesion.OpenApi.Fluent — Overview
 
 A fluent authoring layer for the OpenApi model. `OpenApiDocumentBuilder.Create(version, title, apiVersion)`
-returns an `IOpenApiDocumentBuilder`; chain members and nested `Action<T>` callbacks to author a
-document, then call `Build()` to get an `OpenApiDocument`.
+returns an `OpenApiDocumentBuilder` (a concrete class — see the DESIGN note on why this library is not
+interface-first); chain members and nested `Action<T>` callbacks to author a document, then call
+`Build()` to get an `OpenApiDocument`.
 
 ## Scope
 
 - Version-targeted builders for documents, info, servers, paths, operations, parameters, request
-  bodies, responses, media types, components, schemas, security schemes, examples, and tags.
+  bodies, responses, media types, components, schemas, security schemes, examples, tags, and the
+  advanced surfaces (callbacks, links, webhooks, externalDocs).
 - Version-gated members throw `OpenApiException` at authoring time when the target line does not
   support them.
 
