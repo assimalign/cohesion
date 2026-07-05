@@ -38,4 +38,22 @@ public static class OpenApiValidationRuleCodes
 
     /// <summary>A parameter declares both <c>schema</c> and <c>content</c>, or neither.</summary>
     public const string ParameterSchemaAndContent = "OPENAPI3007";
+
+    /// <summary>Two parameters in the same list share a name and location.</summary>
+    public const string DuplicateParameter = "OPENAPI3008";
+
+    /// <summary>A <c>querystring</c> parameter breaks its usage rules: it must use <c>content</c>, appear at most once, and not coexist with <c>query</c> parameters.</summary>
+    public const string QuerystringParameterUsage = "OPENAPI3009";
+
+    /// <summary>An Example Object combines mutually exclusive value fields.</summary>
+    public const string ExampleValueConflict = "OPENAPI3010";
+
+    /// <summary>An OAuth flow is missing a URL that its flow type requires.</summary>
+    public const string IncompleteOAuthFlow = "OPENAPI3011";
+
+    /// <summary>An <c>additionalOperations</c> entry uses a method that belongs to a fixed operation field.</summary>
+    public const string ReservedAdditionalOperation = "OPENAPI3012";
+
+    /// <summary>The serialized document diverges from the official OpenAPI schema for its version. Reported as a warning; the specification text is authoritative.</summary>
+    public const string SchemaViolation = "OPENAPI4001";
 }
