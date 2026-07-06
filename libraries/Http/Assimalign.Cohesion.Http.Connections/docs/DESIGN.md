@@ -278,6 +278,111 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   handshake runs), surfaced through a typed seam rather than through
   HTTP-transport plumbing.
 
+## Response streaming: raw body sink behind the response-interceptor seam
+
+### What it is
+
+The baseline response path buffers a whole response and serializes it once
+(`SendAsync` reads `Response.Body` and writes it in a single HEADERS+DATA
+sequence). That cannot express Server-Sent Events, long-lived progress feeds, or
+memory-efficient large responses, because the peer sees nothing until the handler
+returns. The streaming write path adds the ability to start a response and write it
+incrementally — but **it is deliberately not wired into the transport as a
+streaming feature.** Instead the transport exposes a generic seam and a raw body
+sink; the streaming/SSE capability is a feature package that plugs in.
+
+This keeps the transport free of any streaming or SSE dependency: the streaming
+API, its state machine, and the SSE wire format all live in feature packages
+(`Assimalign.Cohesion.Http.Streaming`, `Assimalign.Cohesion.Http.ServerSentEvents`)
+that this library never references.
+
+### The two moving parts
+
+- **`HttpResponseBodyStream`** — the transport's raw response body sink, a write-only
+  `System.IO.Stream`. Its abstract base owns the response-lifecycle state machine
+  (commit-the-head-once on the first write/flush, idempotent completion) and forwards
+  the framing to per-protocol subclasses: `Http1ResponseBodyStream` (chunked transfer
+  coding), `Http2ResponseBodyStream` / `Http3ResponseBodyStream` (`DATA` frames). This
+  is where the header-commit timing and the wire framing live.
+- **`IHttpResponseInterceptor`** (core Http) + `HttpConnectionListenerOptions.ResponseInterceptors`
+  — the symmetric counterpart to the request-interceptor seam. At context setup, when
+  any response interceptor is registered, the transport creates the per-protocol sink,
+  builds a `HttpResponseInterceptorContext` exposing it as `ResponseBody`, and runs the
+  interceptors. A feature package's interceptor wraps the sink in a typed feature and
+  installs it on `context.Features`; the transport neither knows nor cares what feature.
+
+Response interceptors are snapshotted on the `HttpConnectionListener` (like request
+interceptors) and threaded to all three protocol connections. **Zero response
+interceptors is a true fast path**: no sink is created and the buffered response
+path runs exactly as before.
+
+### The `SendAsync` inversion
+
+The connection loop still calls `connectionContext.SendAsync(context)` after the
+handler returns. Each transport's `SendAsync` branches at the top: if a response
+feature wrote to the raw sink (`ResponseBodySink is { HasStarted: true }`),
+`SendAsync` **finalizes** the sink — emitting the terminating zero-length chunk
+(HTTP/1.1) or the empty `END_STREAM` DATA frame (HTTP/2) — instead of writing a
+second buffered response. If the sink was never written (or none exists), the
+buffered path runs unchanged. The wire terminator is thus emitted by the transport
+when it finalizes the exchange, not by the feature.
+
+### Per-protocol framing
+
+- **HTTP/1.1 — chunked transfer coding (RFC 9112 §7.1).** When the handler left
+  `Content-Length` unset (the streaming case), `Http1ResponseBodyStream` adds
+  `Transfer-Encoding: chunked` and wraps every write in a chunk; the finalize emits
+  the terminating zero-length chunk. Chunked framing is self-delimiting, so the
+  connection stays keep-alive. A HEAD response commits the head but writes no body.
+  `Http1MessageWriter.WriteHeadAsync` is shared by the buffered and streaming paths.
+- **HTTP/2 — incremental DATA frames (RFC 9113).** The HEADERS block is written
+  **without** a synthesized `Content-Length` (the body is delimited by
+  `END_STREAM`); each write emits one or more DATA frames split on the peer's
+  `MAX_FRAME_SIZE`, each flushed through the transport; finalize emits an empty DATA
+  frame carrying `END_STREAM`.
+- **HTTP/3 — incremental DATA frames (RFC 9114).** Same shape over the QUIC request
+  stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
+  delimited by the QUIC stream end, so finalize only flushes.
+
+### Backpressure (flow control)
+
+- **HTTP/2** multiplexes over one TCP stream and tracks flow-control windows in
+  software, so send-side backpressure is enforced here. `WriteStreamingDataAsync`
+  calls `AcquireSendWindowAsync`, which consumes credit from **both** the
+  connection-level and stream-level send windows (RFC 9113 §5.2) and, when both are
+  exhausted, parks on a `TaskCompletionSource` signal until an inbound
+  `WINDOW_UPDATE` (or a `SETTINGS_INITIAL_WINDOW_SIZE` increase) replenishes credit.
+  Window reads/writes are serialized under a dedicated `_sendFlowLock`;
+  `ProcessWindowUpdateFrame` replenishes under the same lock and signals parked
+  writers. A writer never holds the flow lock across an `await`, and signal
+  completions run asynchronously so a parked writer never resumes inline under the
+  lock.
+- **HTTP/3** rides QUIC, whose per-stream flow control is applied by the transport on
+  the underlying `Stream.WriteAsync`, so no software window accounting is needed here.
+
+Because a streaming response is written on the application thread while the receive
+loop keeps pumping frames (so window replenishment can arrive), the HTTP/2 path is
+careful about shared state: all outbound frame writes go through the existing
+`_writeLock`, all send-window access goes through `_sendFlowLock`, and the streaming
+completion does **not** remove the stream from `_streams` (a concurrent `Remove`
+would race the receive loop's reads). The fully-closed stream is reaped at
+connection teardown instead.
+
+### AOT posture
+
+No reflection, no runtime code generation. Chunk framing is byte arithmetic; the
+HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
+
+### Non-goals
+
+- **Data-rate (minimum-throughput) limits** on the streamed body — deferred with the
+  other data-rate limits.
+- **HEAD-body suppression on HTTP/2 / HTTP/3.** Only the HTTP/1.1 path suppresses the
+  body for HEAD; the h2/h3 buffered paths never did, and the sink matches their
+  existing behavior.
+- **A streaming/SSE dependency in this library.** By design — the feature packages
+  own it; this transport only exposes the sink and the interceptor seam.
+
 ## Receive-loop failure isolation
 
 Each protocol's receive loop (`Http1ConnectionContext.ReceiveAsync`,

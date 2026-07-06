@@ -198,6 +198,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>If-Unmodified-Since</c> HTTP header name.</summary>
     public static HttpHeaderKey IfUnmodifiedSince {get;}= new( "If-Unmodified-Since");
 
+    /// <summary>Gets the <c>Last-Event-ID</c> HTTP header name.</summary>
+    /// <remarks>
+    /// Defined by the WHATWG HTML Server-Sent Events specification. A browser
+    /// reconnecting to an <c>text/event-stream</c> endpoint replays the last event
+    /// id it saw in this request header so the server can resume the stream from
+    /// that point.
+    /// </remarks>
+    public static HttpHeaderKey LastEventId {get;}= new( "Last-Event-ID");
+
     /// <summary>Gets the <c>Last-Modified</c> HTTP header name.</summary>
     public static HttpHeaderKey LastModified {get;}= new( "Last-Modified");
 

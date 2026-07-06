@@ -25,15 +25,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(IMultiplexedConnection connection, bool isSecure)
+    public Http3ConnectionContext(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors)
     {
         _connection = connection;
         _isSecure = isSecure;
+        _responseInterceptors = responseInterceptors;
     }
 
     public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
@@ -632,6 +634,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
+        // If a response feature streamed to the raw sink, the HEADERS and DATA frames are already on
+        // the wire; finalize instead of writing a buffered response.
+        if (http3Context.ResponseBodySink is { HasStarted: true } sink)
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
@@ -686,6 +696,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
         Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection);
+
+        // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
+        // provides backpressure) to registered response interceptors so a feature package
+        // (streaming / SSE) can wrap it — without this transport depending on that package.
+        if (_responseInterceptors.Length > 0)
+        {
+            context.RunResponseInterceptors(_responseInterceptors, new Http3ResponseBodyStream(context));
+        }
 
         // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
         // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model

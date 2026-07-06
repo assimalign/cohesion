@@ -31,6 +31,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     private readonly List<IMultiplexedConnectionListener> _multiplexedListeners;
     private readonly HttpServerLimits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
@@ -59,6 +60,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         // Snapshot: registrations after this point must not race the accept loops or observe a
         // half-mutated list; the empty snapshot keeps the parser's zero-interceptor fast path.
         _interceptors = [.. options.Interceptors];
+        _responseInterceptors = [.. options.ResponseInterceptors];
 
         HttpProtocol protocols = HttpProtocol.None;
 
@@ -244,8 +246,8 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
                 HttpConnection httpConnection = protocol switch
                 {
-                    HttpProtocol.Http11 => new Http1Connection(connection, isSecure, _limits, _interceptors),
-                    HttpProtocol.Http20 => new Http2Connection(connection, isSecure),
+                    HttpProtocol.Http11 => new Http1Connection(connection, isSecure, _limits, _interceptors, _responseInterceptors),
+                    HttpProtocol.Http20 => new Http2Connection(connection, isSecure, _responseInterceptors),
                     _ => throw new InvalidOperationException($"The configured HTTP protocol '{protocol}' does not map to a stream connection listener.")
                 };
 
@@ -287,7 +289,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure);
+                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure, _responseInterceptors);
 
                 await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -315,14 +317,14 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
     }
 
-    private static Http3Connection CreateHttp3Connection(IMultiplexedConnection connection, bool isSecure)
+    private static Http3Connection CreateHttp3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors)
     {
         if (!IsHttp3SupportedPlatform())
         {
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return new Http3Connection(connection, isSecure);
+        return new Http3Connection(connection, isSecure, responseInterceptors);
     }
 
     [SupportedOSPlatformGuard("windows")]

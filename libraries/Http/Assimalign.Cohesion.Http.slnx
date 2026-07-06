@@ -86,6 +86,23 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
 		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/src/">
+		<Project Path="Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/tests/">
+		<Project Path="Assimalign.Cohesion.Http.Streaming/tests/Assimalign.Cohesion.Http.Streaming.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/src/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/src/Assimalign.Cohesion.Http.ServerSentEvents.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/tests/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/tests/Assimalign.Cohesion.Http.ServerSentEvents.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/">
 		<File Path="Assimalign.Cohesion.Http.Forms/README.md" />
 	</Folder>
