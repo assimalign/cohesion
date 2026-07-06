@@ -10,16 +10,20 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 internal sealed class Http3Connection : HttpConnection
 {
     private readonly IMultiplexedConnection _connection;
+    private readonly HttpServerLimits _limits;
+    private readonly IHttpRequestInterceptor[] _interceptors;
     private Http3ConnectionContext? _openContext;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(IMultiplexedConnection connection, bool isSecure)
+    public Http3Connection(IMultiplexedConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
         : base(isSecure)
     {
         _connection = connection;
+        _limits = limits;
+        _interceptors = interceptors;
     }
 
     public override ConnectionId Id => _connection.Id;
@@ -45,7 +49,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _interceptors);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

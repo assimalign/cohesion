@@ -17,6 +17,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private static readonly byte[] ClientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
     private readonly HPackDecoder _headerDecoder;
+    private readonly HttpServerLimits _limits;
+    private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly Dictionary<int, Http2Stream> _streams;
     // RFC 9113 §6.5 — local settings are what we (the server) advertised
     // to the peer; remote settings are what the peer advertised to us.
@@ -51,10 +53,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure)
+    public Http2ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
         : base(connection, isSecure)
     {
         _headerDecoder = new HPackDecoder();
+        _limits = limits;
+        _interceptors = interceptors;
         _streams = new Dictionary<int, Http2Stream>();
         _localSettings = BuildLocalSettings();
         _remoteSettings = new Http2ConnectionSettings();
@@ -401,11 +405,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 await ProcessSettingsFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
             case Http2FrameType.Headers:
-                return ProcessHeadersFrame(receivedFrame);
+                return await ProcessHeadersFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Continuation:
-                return ProcessContinuationFrame(receivedFrame);
+                return await ProcessContinuationFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Data:
-                return ProcessDataFrame(receivedFrame);
+                return await ProcessDataFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Ping:
                 await ProcessPingFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
@@ -707,7 +711,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    private Http2Context? ProcessHeadersFrame(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessHeadersFrameAsync(ReceivedFrame receivedFrame)
     {
         if (!_receivedClientSettings)
         {
@@ -765,10 +769,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return null;
         }
 
-        return TryCompleteStream(stream);
+        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
     }
 
-    private Http2Context? ProcessContinuationFrame(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessContinuationFrameAsync(ReceivedFrame receivedFrame)
     {
         if (_continuationStreamId is null || _continuationStreamId.Value != receivedFrame.Frame.StreamId)
         {
@@ -793,10 +797,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             _continuationStreamId = null;
         }
 
-        return TryCompleteStream(stream);
+        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
     }
 
-    private Http2Context? ProcessDataFrame(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame)
     {
         // RFC 9113 §6.1 — DATA frames MUST be associated with a stream;
         // stream 0 is reserved for connection-level frames.
@@ -855,7 +859,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         stream.ReceiveData(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
-        return TryCompleteStream(stream);
+        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
     }
 
     private async Task ProcessPingFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
@@ -879,7 +883,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    private Http2Context? TryCompleteStream(Http2Stream stream)
+    private async Task<Http2Context?> TryCompleteStreamAsync(Http2Stream stream)
     {
         if (!stream.IsRequestReady)
         {
@@ -894,7 +898,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // the application's IHttpContext.
         try
         {
-            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None);
+            return await stream.CreateContextAsync(
+                _headerDecoder,
+                ConnectionInfo,
+                GetScheme(),
+                CancellationToken.None,
+                _interceptors,
+                _limits.MaxRequestBodySize).ConfigureAwait(false);
         }
         catch (HPack.HPackDecodingException error)
         {
@@ -906,6 +916,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
                 $"HTTP/2 HEADERS frame contained a malformed field section: {error.Message}");
+        }
+        catch (HttpRequestRejectedException rejection)
+        {
+            // A request-parse interceptor refused this request (the pipeline already disposed the
+            // partial body-wrapper chain and hook-attached features before surfacing). RFC 9113
+            // §5.4.2 — reset the single stream rather than writing the h1-style status response;
+            // the connection and its other streams are unaffected. HTTP/2 has no REQUEST_REJECTED
+            // code (unlike HTTP/3), so CANCEL carries the reset — a neutral per-stream termination
+            // consistent with the transport's application-cancel path, without REFUSED_STREAM's
+            // "safe to retry" promise (see docs/DESIGN.md).
+            throw new Http2StreamException(
+                stream.StreamId,
+                Http2ErrorCode.Cancel,
+                $"HTTP/2 stream {stream.StreamId} was rejected by a request-parse interceptor with status '{rejection.StatusCode}'.");
         }
     }
 

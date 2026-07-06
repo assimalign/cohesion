@@ -245,7 +245,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 HttpConnection httpConnection = protocol switch
                 {
                     HttpProtocol.Http11 => new Http1Connection(connection, isSecure, _limits, _interceptors),
-                    HttpProtocol.Http20 => new Http2Connection(connection, isSecure),
+                    HttpProtocol.Http20 => new Http2Connection(connection, isSecure, _limits, _interceptors),
                     _ => throw new InvalidOperationException($"The configured HTTP protocol '{protocol}' does not map to a stream connection listener.")
                 };
 
@@ -287,7 +287,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure);
+                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure, _limits, _interceptors);
 
                 await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -315,14 +315,18 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
     }
 
-    private static Http3Connection CreateHttp3Connection(IMultiplexedConnection connection, bool isSecure)
+    private static Http3Connection CreateHttp3Connection(
+        IMultiplexedConnection connection,
+        bool isSecure,
+        HttpServerLimits limits,
+        IHttpRequestInterceptor[] interceptors)
     {
         if (!IsHttp3SupportedPlatform())
         {
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return new Http3Connection(connection, isSecure);
+        return new Http3Connection(connection, isSecure, limits, interceptors);
     }
 
     [SupportedOSPlatformGuard("windows")]
