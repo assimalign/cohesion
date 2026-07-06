@@ -255,8 +255,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Sec-WebSocket-Key</c> HTTP header name.</summary>
     public static HttpHeaderKey SecWebSocketKey {get;}= new( "Sec-WebSocket-Key");
 
-    /// <summary>Gets the <c>Sec-WebSocket-ProtocolType</c> HTTP header name.</summary>
-    public static HttpHeaderKey SecWebSocketProtocol {get;}= new( "Sec-WebSocket-ProtocolType");
+    /// <summary>Gets the <c>Sec-WebSocket-Protocol</c> HTTP header name.</summary>
+    /// <remarks>
+    /// This is the single canonical key for the WebSocket sub-protocol negotiation header defined by
+    /// RFC 6455 §11.3.4. The same header name carries both the client's list of requested sub-protocols
+    /// and the server's single selected sub-protocol, so no separate key is required for either direction.
+    /// A former redundant <c>WebSocketSubProtocols</c> alias — which incorrectly emitted a non-standard
+    /// header name that appears in no specification — was removed in favor of this key.
+    /// </remarks>
+    public static HttpHeaderKey SecWebSocketProtocol {get;}= new( "Sec-WebSocket-Protocol");
 
     /// <summary>Gets the <c>Sec-WebSocket-Version</c> HTTP header name.</summary>
     public static HttpHeaderKey SecWebSocketVersion {get;}= new( "Sec-WebSocket-Version");
@@ -311,9 +318,6 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>Warning</c> HTTP header name.</summary>
     public static HttpHeaderKey Warning {get;}= new( "Warning");
-
-    /// <summary>Gets the <c>Sec-WebSocket-ProtocolType</c> HTTP header name.</summary>
-    public static HttpHeaderKey WebSocketSubProtocols {get;}= new( "Sec-WebSocket-ProtocolType");
 
     /// <summary>Gets the <c>WWW-Authenticate</c> HTTP header name.</summary>
     public static HttpHeaderKey WWWAuthenticate {get;}= new( "WWW-Authenticate");
