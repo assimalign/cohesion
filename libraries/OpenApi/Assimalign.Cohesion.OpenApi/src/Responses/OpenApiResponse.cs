@@ -10,7 +10,10 @@ public sealed class OpenApiResponse : IOpenApiReferenceable, IOpenApiExtensible
     /// <inheritdoc/>
     public OpenApiReference? Reference { get; set; }
 
-    /// <summary>Gets or sets a description of the response. Required by the specification. CommonMark syntax may be used.</summary>
+    /// <summary>Gets or sets a short summary of the meaning of the response (OpenAPI 3.2+).</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>Gets or sets a description of the response. Required by the specification before OpenAPI 3.2. CommonMark syntax may be used.</summary>
     public string Description { get; set; } = string.Empty;
 
     /// <summary>Gets the headers returned with the response, keyed by header name.</summary>

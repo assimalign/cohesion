@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>A fluent authoring layer for the Cohesion OpenApi document model. Builds version-targeted OpenApiDocument graphs in code — documents, paths, operations, parameters, request bodies, responses, components, schemas, security schemes, examples, links, and tags — without manipulating the raw object model. Version-aware and NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+	</ItemGroup>
+</Project>

@@ -1,8 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Files</RootNamespace>
-		<Description>https://datatracker.ietf.org/doc/html/rfc8794#name-ebml-element-types</Description>
-	</PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Binary" />
 	</ItemGroup>

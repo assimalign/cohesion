@@ -19,12 +19,21 @@ sibling except through the model.
 | Package | Responsibility | Depends on | Status |
 |---|---|---|---|
 | [`Assimalign.Cohesion.OpenApi`](./Assimalign.Cohesion.OpenApi/) | Canonical version-aware model, capability matrix, `OpenApiNode` value tree | — | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON read/write (YAML fast-follow) | model | Implemented (JSON) |
+| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON and YAML read/write | model, Content.Yaml | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model | Implemented |
-| `Assimalign.Cohesion.OpenApi.Fluent` | Fluent authoring builders | model | Planned (Wave 2) |
-| `Assimalign.Cohesion.OpenApi.Attributes` | Attribute metadata model | model | Planned (Wave 2) |
-| `Assimalign.Cohesion.OpenApi.SourceGeneration` | AOT-safe attribute discovery → descriptors | attributes, model | Planned (Wave 2) |
-| `Assimalign.Cohesion.OpenApi.Generation` | Generation orchestration | model, serialization, attributes | Planned (Wave 2) |
+| [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | Implemented |
+| [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | Implemented |
+| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | attributes (analyzer) | Implemented |
+| [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | Implemented |
+| [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | Implemented |
+| [`Assimalign.Cohesion.OpenApi.Integration`](./Assimalign.Cohesion.OpenApi.Integration/) | Web/ApiManager integration contracts (endpoint source, description provider, import/export) | attributes, generation, serialization, versioning | Implemented |
+
+The **compliance suite** — the vendored official OpenAPI example corpus, round-trip/format-equivalence
+and validation over every example, version-upgrade fixtures, and the
+[coverage matrix](./Assimalign.Cohesion.OpenApi/docs/COVERAGE.md) — lives in the root model project's
+[`tests/`](./Assimalign.Cohesion.OpenApi/tests/). The corpus and its `CorpusFixtures` locator are shared
+assets under `tests/Shared/`, exposed through `tests/Shared/OpenApiCorpus.props` so any test project that
+needs the corpus imports the same files rather than duplicating them.
 
 These boundaries are advisory architecture guidance. They exist to preserve, respectively: additive
 format support (YAML and beyond) without touching the model; source-generator-first, reflection-free
@@ -37,11 +46,16 @@ Supports OpenAPI 3.0.4, 3.1.2, and 3.2.0 with version-aware authoring, serializa
 Where schema files and specification text disagree, the specification text is authoritative per the
 OpenAPI Initiative publications.
 
+The **version capability matrix** — which model surface applies to which OpenAPI line — is published in
+[`Assimalign.Cohesion.OpenApi/docs/DESIGN.md`](./Assimalign.Cohesion.OpenApi/docs/DESIGN.md) and enforced
+by `OpenApiVersionCapabilities`, the single source of truth consumed by both serialization (field
+emission) and validation (field placement).
+
 ## Status and roadmap
 
-Wave 1 (model + JSON serialization + validation) is implemented. The immediate fast-follow is **YAML
-serialization** (the node-tree seam is already in place). Subsequent work covers fluent authoring,
-the attribute model and AOT source generator, version transforms, advanced authoring surfaces, an
+Wave 1 (model + JSON/YAML serialization + validation) is implemented; YAML rides the Cohesion
+`Content.Yaml` engine through the node-tree seam. Subsequent work covers fluent authoring, the
+attribute model and AOT source generator, version transforms, advanced authoring surfaces, an
 official example/upgrade compliance corpus, and Web/ApiManager integration contracts.
 
 See each package's `docs/OVERVIEW.md` and `docs/DESIGN.md` for detail.

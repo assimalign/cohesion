@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>An attribute model for describing OpenApi metadata in application code: endpoint, parameter, request, response, schema, example, tag, and security attributes, plus a flat intermediate metadata representation and a mapper from attributes to that metadata. The intermediate layer is the contract the AOT-safe source generator emits and the generation pipeline consumes. NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+	</ItemGroup>
+</Project>

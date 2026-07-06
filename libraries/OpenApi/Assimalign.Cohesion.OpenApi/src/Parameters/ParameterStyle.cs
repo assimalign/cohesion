@@ -25,5 +25,8 @@ public enum ParameterStyle
     PipeDelimited,
 
     /// <summary>Nested object rendering using <c>param[property]</c> notation.</summary>
-    DeepObject
+    DeepObject,
+
+    /// <summary>Cookie-syntax name-value pairs per RFC 6265, without percent-encoding (OpenAPI 3.2+).</summary>
+    Cookie
 }

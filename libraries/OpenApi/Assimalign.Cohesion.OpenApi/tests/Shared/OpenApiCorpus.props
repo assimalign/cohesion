@@ -1,0 +1,21 @@
+<Project>
+	<!--
+		Shared OpenApi compliance corpus and fixtures.
+
+		Any test project that needs the vendored official OpenAPI example corpus imports this file and
+		gets (1) the CorpusFixtures locator compiled in and (2) the corpus JSON/YAML copied to its output
+		under Corpus/. Paths are anchored to this file's directory via $(MSBuildThisFileDirectory), so an
+		importer at any relative depth resolves the same shared assets rather than duplicating them.
+
+		Usage from another test project's csproj:
+		  <Import Project="..\..\Assimalign.Cohesion.OpenApi\tests\Shared\OpenApiCorpus.props" />
+		The host project must reference the serialization/validation/versioning libraries its corpus tests
+		exercise.
+	-->
+	<ItemGroup>
+		<Compile Include="$(MSBuildThisFileDirectory)CorpusFixtures.cs" Link="Shared\CorpusFixtures.cs" />
+		<None Include="$(MSBuildThisFileDirectory)Corpus\**\*.json;$(MSBuildThisFileDirectory)Corpus\**\*.yaml"
+		      Link="Corpus\%(RecursiveDir)%(Filename)%(Extension)"
+		      CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+</Project>
