@@ -78,9 +78,22 @@ internal sealed class UdpDatagramConnection : DatagramConnection
         ArgumentNullException.ThrowIfNull(remoteEndPoint);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
-        await _socket
-            .SendToAsync(payload, SocketFlags.None, remoteEndPoint, cancellationToken)
-            .ConfigureAwait(false);
+        if (_remoteEndPoint is not null)
+        {
+            // A connected UDP socket (client role) must use send(), not sendto(): passing an
+            // explicit destination to sendto() on a connected socket fails with EISCONN
+            // ("Socket is already connected") on macOS/BSD, though Linux and Windows tolerate it.
+            // A connected socket always targets its bound peer, so the destination is implicit.
+            await _socket
+                .SendAsync(payload, SocketFlags.None, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            await _socket
+                .SendToAsync(payload, SocketFlags.None, remoteEndPoint, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />
