@@ -947,11 +947,15 @@ otherwise-hard problems:
 
 ### Dynamic table (opt-in)
 
-Setting `Http3QPackOptions.MaxTableCapacity` above 0 opts in to the full
-dynamic table on the **decoder** side (inbound request field sections). The
-switch is entirely gated on that option: when it is 0 (the default) none of
-the machinery below is constructed and the static-only path above is taken
-verbatim. When it is enabled:
+Opting in is a per-listener, public configuration choice:
+`options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
+`Http3ListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
+capacity and blocked-stream limit; the HTTP/3 registration captures it in an
+`Http3ConnectionFactory` and threads it to the connection context. Setting
+`MaxTableCapacity` above 0 opts in to the full dynamic table on the **decoder**
+side (inbound request field sections). The switch is entirely gated on that
+option: when it is 0 (the default) none of the machinery below is constructed
+and the static-only path above is taken verbatim. When it is enabled:
 
 - **Dynamic table** (`QPackDynamicTable`). A capacity-bounded, absolutely
   indexed entry store (RFC 9204 §3.2) fed by the peer's encoder-stream

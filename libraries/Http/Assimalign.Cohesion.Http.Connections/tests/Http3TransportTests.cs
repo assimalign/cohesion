@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -437,11 +436,12 @@ public class Http3TransportTests
         // non-zero QPACK_MAX_TABLE_CAPACITY and QPACK_BLOCKED_STREAMS in SETTINGS.
         TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/s", "https", "a"));
         TestMultiplexedConnection connection = new(request);
-        HttpConnectionListenerOptions options = new()
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
         {
-            QPack = new Http3QPackOptions { MaxTableCapacity = 4096, MaxBlockedStreams = 16 },
-        };
-        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 16;
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -485,11 +485,12 @@ public class Http3TransportTests
             0));
 
         TestMultiplexedConnection connection = new(control, encoder, request);
-        HttpConnectionListenerOptions options = new()
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
         {
-            QPack = new Http3QPackOptions { MaxTableCapacity = 4096, MaxBlockedStreams = 16 },
-        };
-        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 16;
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -523,11 +524,12 @@ public class Http3TransportTests
             literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
             0));
         TestMultiplexedConnection connection = new(request);
-        HttpConnectionListenerOptions options = new()
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
         {
-            QPack = new Http3QPackOptions { MaxTableCapacity = 4096, MaxBlockedStreams = 0 },
-        };
-        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 0;
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
