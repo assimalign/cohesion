@@ -95,16 +95,24 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Http/Assimalign.Cohesion.Http.Identity/" />
-	<Folder Name="/Http/Assimalign.Cohesion.Http.Identity/src/">
-		<Project Path="Assimalign.Cohesion.Http.Identity/src/Assimalign.Cohesion.Http.Identity.csproj" />
-	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/" />
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/src/">
 		<Project Path="Assimalign.Cohesion.Http.ProtocolUpgrade/src/Assimalign.Cohesion.Http.ProtocolUpgrade.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLimits/">
+		<File Path="Assimalign.Cohesion.Http.RequestLimits/README.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLimits/docs/">
+		<File Path="Assimalign.Cohesion.Http.RequestLimits/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLimits/src/">
+		<Project Path="Assimalign.Cohesion.Http.RequestLimits/src/Assimalign.Cohesion.Http.RequestLimits.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.RequestLimits/tests/">
+		<Project Path="Assimalign.Cohesion.Http.RequestLimits/tests/Assimalign.Cohesion.Http.RequestLimits.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Sessions/">
 		<File Path="Assimalign.Cohesion.Http.Sessions/README.md" />

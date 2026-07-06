@@ -1,11 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+namespace Assimalign.Cohesion.Content.Binary;
 
-namespace Assimalign.Cohesion.Files;
-
+/// <summary>
+/// Represents structured binary content. The shared binary surface (exact reads, bounded slices) is
+/// designed under the parser-primitives feature; this contract currently anchors the package's
+/// dependency on the root content model.
+/// </summary>
 public interface IBinaryFile : IContent
 {
 }

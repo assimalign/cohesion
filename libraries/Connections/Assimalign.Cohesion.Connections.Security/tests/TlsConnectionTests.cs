@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -27,7 +28,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
         (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
@@ -50,7 +51,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
         (IConnection securedClient, IConnection securedServer) = await UpgradePairAsync(client, server, timeout.Token);
@@ -65,7 +66,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
         (IConnection securedClient, IConnection _) = await UpgradePairAsync(client, server, timeout.Token);
@@ -82,19 +83,19 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
         (IConnection securedClient, IConnection _) = await UpgradePairAsync(client, server, timeout.Token);
 
         // Act
         await securedClient.DisposeAsync();
 
         // Assert
-        client.IsDisposed.ShouldBeTrue();
+        client.State.ShouldBe(ConnectionState.Closed);
     }
 
     private async Task<(IConnection Client, IConnection Server)> UpgradePairAsync(
-        TestPipeConnection client,
-        TestPipeConnection server,
+        Connection client,
+        Connection server,
         CancellationToken cancellationToken)
     {
         TlsServerOptions serverOptions = new()

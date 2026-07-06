@@ -26,6 +26,13 @@ namespace Assimalign.Cohesion.Http;
 /// to keep peak memory bounded.
 /// </para>
 /// <para>
+/// The urlencoded path decodes the body with the encoding named by the
+/// Content-Type <c>charset</c> parameter (UTF-8 by default). Only built-in,
+/// AOT-safe encodings are honored (UTF-8, US-ASCII, ISO-8859-1, UTF-16);
+/// unrecognized charsets fall back to UTF-8. Multipart section text is always
+/// decoded as UTF-8.
+/// </para>
+/// <para>
 /// Cohesion's <see cref="IHttpFormCollection"/> stores one value per key
 /// (single <see cref="HttpQueryValue"/>); when a urlencoded body sends the
 /// same key multiple times, the values are comma-joined per RFC 7230 §3.2.2
@@ -34,6 +41,10 @@ namespace Assimalign.Cohesion.Http;
 /// indexer.
 /// </para>
 /// </remarks>
+// Deviates from AGENTS.md interface-first rule per design decision:
+// Assimalign.Cohesion.Web.Forms.UseForms() and the forms integration tests
+// construct this concrete feature directly across assembly boundaries, so it
+// stays public rather than an internal IHttpFormFeature impl. See docs/DESIGN.md.
 public sealed class HttpFormFeature : IHttpFormFeature
 {
     private const string UrlEncodedContentType = "application/x-www-form-urlencoded";
@@ -101,7 +112,11 @@ public sealed class HttpFormFeature : IHttpFormFeature
     public string Name => nameof(IHttpFormFeature);
 
     /// <inheritdoc />
-    public IHttpFormCollection? Form => _form;
+    public IHttpFormCollection? Form
+    {
+        get => _form;
+        set => _form = value;
+    }
 
     /// <inheritdoc />
     public Task<IHttpFormCollection> ReadFormAsync(CancellationToken cancellationToken = default)
@@ -139,10 +154,19 @@ public sealed class HttpFormFeature : IHttpFormFeature
 
         if (IsUrlEncoded(contentType))
         {
-            await ReadUrlEncodedAsync(request.Body, form, cancellationToken).ConfigureAwait(false);
+            await ReadUrlEncodedAsync(request.Body, contentType, form, cancellationToken).ConfigureAwait(false);
         }
         else if (TryGetMultipartBoundary(contentType, out string boundary))
         {
+            if (boundary.Length > _options.MultipartBoundaryLengthLimit)
+            {
+                // RFC 2046 §5.1.1 boundaries are bounded to 70 characters; a
+                // wildly long boundary is either malformed or an attempt to
+                // grow the look-ahead buffer unboundedly. Reject it up front.
+                throw new InvalidDataException(
+                    $"Multipart boundary length limit {_options.MultipartBoundaryLengthLimit} exceeded.");
+            }
+
             await ReadMultipartAsync(request.Body, boundary, form, cancellationToken).ConfigureAwait(false);
         }
         // Unknown content type — leave the empty collection. Callers that
@@ -153,9 +177,9 @@ public sealed class HttpFormFeature : IHttpFormFeature
         return form;
     }
 
-    private async Task ReadUrlEncodedAsync(Stream body, HttpFormCollection form, CancellationToken cancellationToken)
+    private async Task ReadUrlEncodedAsync(Stream body, string contentType, HttpFormCollection form, CancellationToken cancellationToken)
     {
-        using HttpFormReader reader = new(body, Encoding.UTF8)
+        using HttpFormReader reader = new(body, ResolveUrlEncodedCharset(contentType))
         {
             ValueCountLimit = _options.ValueCountLimit,
             KeyLengthLimit = _options.KeyLengthLimit,
@@ -320,6 +344,48 @@ public sealed class HttpFormFeature : IHttpFormFeature
     private static bool IsUrlEncoded(string contentType)
     {
         return contentType.StartsWith(UrlEncodedContentType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="Encoding"/> used to decode an
+    /// <c>application/x-www-form-urlencoded</c> body from the Content-Type
+    /// <c>charset</c> parameter (RFC 7231 §3.1.1.5), defaulting to UTF-8 (the
+    /// WHATWG URL default for this media type). Only built-in, AOT-safe
+    /// encodings are honored: <c>Encoding.GetEncoding</c> is deliberately not
+    /// called on arbitrary charset names because the code-pages provider it
+    /// would need is not NativeAOT-friendly. Unrecognized charsets fall back to
+    /// UTF-8 rather than throwing.
+    /// </summary>
+    private static Encoding ResolveUrlEncodedCharset(string contentType)
+    {
+        string? charset = TryGetContentTypeParameter(contentType, "charset");
+        if (string.IsNullOrEmpty(charset))
+        {
+            return Encoding.UTF8;
+        }
+
+        return charset.ToLowerInvariant() switch
+        {
+            "utf-8" or "utf8" => Encoding.UTF8,
+            "us-ascii" or "ascii" => Encoding.ASCII,
+            "iso-8859-1" or "iso8859-1" or "latin1" => Encoding.Latin1,
+            "utf-16" or "utf-16le" or "unicode" => Encoding.Unicode,
+            "utf-16be" or "unicodefffe" => Encoding.BigEndianUnicode,
+            _ => Encoding.UTF8,
+        };
+    }
+
+    private static string? TryGetContentTypeParameter(string contentType, string parameter)
+    {
+        foreach (string segment in contentType.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (TryGetParameter(segment, parameter, out string? value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static bool TryGetMultipartBoundary(string contentType, out string boundary)

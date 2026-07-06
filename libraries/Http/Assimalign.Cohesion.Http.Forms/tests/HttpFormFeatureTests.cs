@@ -59,11 +59,11 @@ public class HttpFormFeatureTests
     }
 
     [Fact]
-    public async Task ReadFormAsync_UrlEncodedBody_ShouldRespectCharsetParameter()
+    public async Task ReadFormAsync_UrlEncodedBodyWithCharsetParameter_ShouldStillDetectMediaType()
     {
         // The Content-Type may carry a charset parameter; the urlencoded
         // detection should still succeed because IsUrlEncoded checks the
-        // base media type only.
+        // base media type only (it does not require a bare media type).
         IHttpRequest request = new BareHttpRequest
         {
             ContentType = "application/x-www-form-urlencoded; charset=utf-8",
@@ -73,6 +73,40 @@ public class HttpFormFeatureTests
         IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync();
 
         form["name"].Value.ShouldBe("cohesion");
+    }
+
+    [Fact]
+    public async Task ReadFormAsync_UrlEncodedBodyWithLatin1Charset_ShouldDecodeUsingThatCharset()
+    {
+        // A raw high byte (0xE9 = 'é' in ISO-8859-1) is decoded per the
+        // Content-Type charset parameter, not as UTF-8 (where 0xE9 alone is
+        // invalid and would become U+FFFD). This proves the charset is honored.
+        byte[] latin1Body = { (byte)'n', (byte)'a', (byte)'m', (byte)'e', (byte)'=', (byte)'c', (byte)'a', (byte)'f', 0xE9 };
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = "application/x-www-form-urlencoded; charset=iso-8859-1",
+            Body = new MemoryStream(latin1Body),
+        };
+
+        IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync();
+
+        form["name"].Value.ShouldBe("café");
+    }
+
+    [Fact]
+    public async Task ReadFormAsync_MultipartBoundaryExceedingLimit_ShouldThrow()
+    {
+        // A boundary longer than MultipartBoundaryLengthLimit is rejected before
+        // the body is read, guarding against an unbounded look-ahead buffer.
+        const string boundary = "boundary-that-is-too-long";
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf($"--{boundary}--\r\n"),
+        };
+        HttpFormFeature feature = new(request, new HttpFormOptions { MultipartBoundaryLengthLimit = 8 });
+
+        await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
     }
 
     [Fact]

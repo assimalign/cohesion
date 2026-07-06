@@ -20,6 +20,17 @@
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections/tests/">
 		<Project Path="Assimalign.Cohesion.Connections/tests/Assimalign.Cohesion.Connections.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.InMemory/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.InMemory/docs/">
+		<File Path="Assimalign.Cohesion.Connections.InMemory/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.InMemory/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.InMemory/src/">
+		<Project Path="Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.InMemory/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.InMemory/tests/Assimalign.Cohesion.Connections.InMemory.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/" />
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/docs/">
 		<File Path="Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md" />

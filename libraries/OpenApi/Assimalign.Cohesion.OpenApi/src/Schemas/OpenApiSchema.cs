@@ -25,11 +25,45 @@ namespace Assimalign.Cohesion.OpenApi;
 /// </description>
 /// </item>
 /// </list>
+/// <para>
+/// From 3.1 onward a Schema Object is a full JSON Schema draft 2020-12 schema: <c>type</c> may carry
+/// multiple entries (<see cref="Types"/>), a schema may be the boolean form <c>true</c>/<c>false</c>
+/// (<see cref="BooleanValue"/>), and keywords may appear alongside <see cref="Reference"/>. Those surfaces
+/// are version-gated for 3.0 targets by <see cref="OpenApiVersionCapabilities"/>.
+/// </para>
 /// </remarks>
 public sealed class OpenApiSchema : IOpenApiReferenceable, IOpenApiExtensible
 {
     /// <inheritdoc/>
+    /// <remarks>From OpenAPI 3.1 onward other keywords may be set alongside the reference; in 3.0 they are invalid next to <c>$ref</c>.</remarks>
     public OpenApiReference? Reference { get; set; }
+
+    /// <summary>
+    /// Gets or sets the boolean schema form (OpenAPI 3.1+). When set, the schema serializes as the JSON
+    /// Schema literal <c>true</c> or <c>false</c> and every other member is ignored.
+    /// </summary>
+    public bool? BooleanValue { get; set; }
+
+    /// <summary>Gets or sets the schema resource identity URI (the <c>$id</c> keyword, OpenAPI 3.1+).</summary>
+    public string? Id { get; set; }
+
+    /// <summary>Gets or sets the dialect of this schema resource (the <c>$schema</c> keyword, OpenAPI 3.1+).</summary>
+    public string? Dialect { get; set; }
+
+    /// <summary>Gets or sets the plain-name fragment anchor (the <c>$anchor</c> keyword, OpenAPI 3.1+).</summary>
+    public string? Anchor { get; set; }
+
+    /// <summary>Gets or sets the dynamic reference (the <c>$dynamicRef</c> keyword, OpenAPI 3.1+).</summary>
+    public string? DynamicRef { get; set; }
+
+    /// <summary>Gets or sets the dynamic anchor (the <c>$dynamicAnchor</c> keyword, OpenAPI 3.1+).</summary>
+    public string? DynamicAnchor { get; set; }
+
+    /// <summary>Gets or sets a comment for schema maintainers (the <c>$comment</c> keyword, OpenAPI 3.1+).</summary>
+    public string? Comment { get; set; }
+
+    /// <summary>Gets the reusable schema definitions embedded in this schema resource (the <c>$defs</c> keyword, OpenAPI 3.1+), keyed by definition name.</summary>
+    public IDictionary<string, OpenApiSchema> Defs { get; } = new Dictionary<string, OpenApiSchema>();
 
     /// <summary>Gets or sets the title of the schema.</summary>
     public string? Title { get; set; }
@@ -37,8 +71,30 @@ public sealed class OpenApiSchema : IOpenApiReferenceable, IOpenApiExtensible
     /// <summary>Gets or sets a description of the schema. CommonMark syntax may be used.</summary>
     public string? Description { get; set; }
 
-    /// <summary>Gets or sets the instance type the schema describes.</summary>
-    public SchemaType? Type { get; set; }
+    /// <summary>
+    /// Gets the instance types the schema describes. A single entry is emitted as a string; multiple
+    /// entries require OpenAPI 3.1+ and are emitted as a type array. Nullability is expressed through
+    /// <see cref="Nullable"/> rather than a <see cref="SchemaType.Null"/> entry.
+    /// </summary>
+    public IList<SchemaType> Types { get; } = new List<SchemaType>();
+
+    /// <summary>
+    /// Gets or sets the primary instance type the schema describes. Reading returns the first entry of
+    /// <see cref="Types"/>; assigning replaces the whole list. Use <see cref="Types"/> directly for
+    /// multi-type schemas (OpenAPI 3.1+).
+    /// </summary>
+    public SchemaType? Type
+    {
+        get => Types.Count > 0 ? Types[0] : null;
+        set
+        {
+            Types.Clear();
+            if (value.HasValue)
+            {
+                Types.Add(value.Value);
+            }
+        }
+    }
 
     /// <summary>Gets or sets a value indicating whether the value may be null. See the remarks on <see cref="OpenApiSchema"/> for the version-specific emission.</summary>
     public bool Nullable { get; set; }
@@ -112,8 +168,56 @@ public sealed class OpenApiSchema : IOpenApiReferenceable, IOpenApiExtensible
     /// <summary>Gets or sets a value indicating whether additional properties are allowed, when expressed as a boolean rather than a schema.</summary>
     public bool? AdditionalPropertiesAllowed { get; set; }
 
+    /// <summary>Gets the schemas for properties whose names match a regular expression, keyed by pattern (the <c>patternProperties</c> keyword, OpenAPI 3.1+).</summary>
+    public IDictionary<string, OpenApiSchema> PatternProperties { get; } = new Dictionary<string, OpenApiSchema>();
+
+    /// <summary>Gets or sets the schema that every property name of an object instance must validate against (the <c>propertyNames</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? PropertyNames { get; set; }
+
+    /// <summary>Gets or sets the schema applied to object properties not evaluated by other keywords (the <c>unevaluatedProperties</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? UnevaluatedProperties { get; set; }
+
+    /// <summary>Gets the property names that become required when a given property is present, keyed by trigger property (the <c>dependentRequired</c> keyword, OpenAPI 3.1+).</summary>
+    public IDictionary<string, IList<string>> DependentRequired { get; } = new Dictionary<string, IList<string>>();
+
+    /// <summary>Gets the schemas applied when a given property is present, keyed by trigger property (the <c>dependentSchemas</c> keyword, OpenAPI 3.1+).</summary>
+    public IDictionary<string, OpenApiSchema> DependentSchemas { get; } = new Dictionary<string, OpenApiSchema>();
+
     /// <summary>Gets or sets the schema describing array items.</summary>
     public OpenApiSchema? Items { get; set; }
+
+    /// <summary>Gets the positional schemas for the leading items of a tuple-style array (the <c>prefixItems</c> keyword, OpenAPI 3.1+).</summary>
+    public IList<OpenApiSchema> PrefixItems { get; } = new List<OpenApiSchema>();
+
+    /// <summary>Gets or sets the schema that at least one array item must validate against (the <c>contains</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? Contains { get; set; }
+
+    /// <summary>Gets or sets the minimum number of array items that must validate against <see cref="Contains"/> (OpenAPI 3.1+).</summary>
+    public int? MinContains { get; set; }
+
+    /// <summary>Gets or sets the maximum number of array items that may validate against <see cref="Contains"/> (OpenAPI 3.1+).</summary>
+    public int? MaxContains { get; set; }
+
+    /// <summary>Gets or sets the schema applied to array items not evaluated by other keywords (the <c>unevaluatedItems</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? UnevaluatedItems { get; set; }
+
+    /// <summary>Gets or sets the schema applied when <see cref="If"/> validates successfully (the <c>then</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? Then { get; set; }
+
+    /// <summary>Gets or sets the conditional schema (the <c>if</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? If { get; set; }
+
+    /// <summary>Gets or sets the schema applied when <see cref="If"/> fails validation (the <c>else</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? Else { get; set; }
+
+    /// <summary>Gets or sets the encoding of a string instance's content, for example <c>base64</c> (the <c>contentEncoding</c> keyword, OpenAPI 3.1+).</summary>
+    public string? ContentEncoding { get; set; }
+
+    /// <summary>Gets or sets the media type of a string instance's content (the <c>contentMediaType</c> keyword, OpenAPI 3.1+).</summary>
+    public string? ContentMediaType { get; set; }
+
+    /// <summary>Gets or sets the schema describing a string instance's decoded content (the <c>contentSchema</c> keyword, OpenAPI 3.1+).</summary>
+    public OpenApiSchema? ContentSchema { get; set; }
 
     /// <summary>Gets the schemas this schema must all validate against.</summary>
     public IList<OpenApiSchema> AllOf { get; } = new List<OpenApiSchema>();

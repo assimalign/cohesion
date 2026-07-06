@@ -125,6 +125,7 @@ internal static class OpenApiNodeToModelConverter
         var server = new OpenApiServer
         {
             Url = GetString(node, "url") ?? string.Empty,
+            Name = GetString(node, "name"),
             Description = GetString(node, "description")
         };
 
@@ -288,12 +289,7 @@ internal static class OpenApiNodeToModelConverter
         parameter.Style = ParseParameterStyle(GetString(node, "style"));
         parameter.Explode = GetBoolNullable(node, "explode");
         parameter.AllowReserved = GetBool(node, "allowReserved");
-
-        if (AsObject(Get(node, "schema")) is { } schemaNode)
-        {
-            parameter.Schema = ReadSchema(schemaNode);
-        }
-
+        parameter.Schema = ReadSchemaOrNull(Get(node, "schema"));
         parameter.Example = Get(node, "example");
         ReadExampleMap(node, parameter.Examples);
         ReadContentMap(node, parameter.Content);
@@ -319,12 +315,7 @@ internal static class OpenApiNodeToModelConverter
         header.Style = ParseParameterStyle(GetString(node, "style"));
         header.Explode = GetBoolNullable(node, "explode");
         header.AllowReserved = GetBool(node, "allowReserved");
-
-        if (AsObject(Get(node, "schema")) is { } schemaNode)
-        {
-            header.Schema = ReadSchema(schemaNode);
-        }
-
+        header.Schema = ReadSchemaOrNull(Get(node, "schema"));
         header.Example = Get(node, "example");
         ReadExampleMap(node, header.Examples);
         ReadContentMap(node, header.Content);
@@ -354,17 +345,30 @@ internal static class OpenApiNodeToModelConverter
         var node = (OpenApiObjectNode)value;
         var media = new OpenApiMediaType();
 
-        if (AsObject(Get(node, "schema")) is { } schemaNode)
+        if (TryReadReference(node, out var reference))
         {
-            media.Schema = ReadSchema(schemaNode);
+            media.Reference = reference;
+            return media;
         }
 
+        media.Schema = ReadSchemaOrNull(Get(node, "schema"));
+        media.ItemSchema = ReadSchemaOrNull(Get(node, "itemSchema"));
         media.Example = Get(node, "example");
         ReadExampleMap(node, media.Examples);
 
         if (AsObject(Get(node, "encoding")) is { } encodingNode)
         {
             ReadObjectMap(encodingNode, ReadEncoding, media.Encoding);
+        }
+
+        foreach (var encoding in ReadList(Get(node, "prefixEncoding"), ReadEncoding))
+        {
+            media.PrefixEncoding.Add(encoding);
+        }
+
+        if (AsObject(Get(node, "itemEncoding")) is { } itemEncodingNode)
+        {
+            media.ItemEncoding = ReadEncoding(itemEncodingNode);
         }
 
         ReadExtensions(node, media.Extensions);
@@ -385,6 +389,21 @@ internal static class OpenApiNodeToModelConverter
         if (AsObject(Get(node, "headers")) is { } headersNode)
         {
             ReadObjectMap(headersNode, ReadHeader, encoding.Headers);
+        }
+
+        if (AsObject(Get(node, "encoding")) is { } nestedEncodingNode)
+        {
+            ReadObjectMap(nestedEncodingNode, ReadEncoding, encoding.Encoding);
+        }
+
+        foreach (var nested in ReadList(Get(node, "prefixEncoding"), ReadEncoding))
+        {
+            encoding.PrefixEncoding.Add(nested);
+        }
+
+        if (AsObject(Get(node, "itemEncoding")) is { } itemEncodingNode)
+        {
+            encoding.ItemEncoding = ReadEncoding(itemEncodingNode);
         }
 
         ReadExtensions(node, encoding.Extensions);
@@ -419,6 +438,7 @@ internal static class OpenApiNodeToModelConverter
             return response;
         }
 
+        response.Summary = GetString(node, "summary");
         response.Description = GetString(node, "description") ?? string.Empty;
 
         if (AsObject(Get(node, "headers")) is { } headersNode)
@@ -451,6 +471,8 @@ internal static class OpenApiNodeToModelConverter
         example.Summary = GetString(node, "summary");
         example.Description = GetString(node, "description");
         example.Value = Get(node, "value");
+        example.DataValue = Get(node, "dataValue");
+        example.SerializedValue = GetString(node, "serializedValue");
         example.ExternalValue = GetString(node, "externalValue");
         ReadExtensions(node, example.Extensions);
         return example;
@@ -530,20 +552,50 @@ internal static class OpenApiNodeToModelConverter
         ReadNamedMap(node, "links", ReadLink, components.Links);
         ReadNamedMap(node, "callbacks", n => ReadCallback((OpenApiObjectNode)n), components.Callbacks);
         ReadNamedMap(node, "pathItems", ReadPathItem, components.PathItems);
+        ReadNamedMap(node, "mediaTypes", ReadMediaType, components.MediaTypes);
         ReadExtensions(node, components.Extensions);
         return components;
     }
 
-    private static OpenApiSchema ReadSchemaValue(OpenApiNode value) => ReadSchema((OpenApiObjectNode)value);
+    private static OpenApiSchema ReadSchemaValue(OpenApiNode value)
+    {
+        // JSON Schema 2020-12 permits the boolean schema forms `true` and `false` anywhere a schema is expected.
+        if (value is OpenApiValueNode { Kind: OpenApiValueKind.Boolean } boolean)
+        {
+            return new OpenApiSchema { BooleanValue = boolean.GetBoolean() };
+        }
+
+        return ReadSchema((OpenApiObjectNode)value);
+    }
+
+    private static OpenApiSchema? ReadSchemaOrNull(OpenApiNode? node) => node switch
+    {
+        OpenApiObjectNode objectNode => ReadSchema(objectNode),
+        OpenApiValueNode { Kind: OpenApiValueKind.Boolean } boolean => new OpenApiSchema { BooleanValue = boolean.GetBoolean() },
+        _ => null
+    };
 
     private static OpenApiSchema ReadSchema(OpenApiObjectNode node)
     {
         var schema = new OpenApiSchema();
 
-        if (TryReadReference(node, out var reference))
+        // In a Schema Object, keywords may legally sit beside $ref (3.1+), so parsing continues after the
+        // reference is captured; a 3.0 document simply has nothing else to read.
+        if (GetString(node, "$ref") is { } refValue)
         {
-            schema.Reference = reference;
-            return schema;
+            schema.Reference = new OpenApiReference { Ref = refValue };
+        }
+
+        schema.Id = GetString(node, "$id");
+        schema.Dialect = GetString(node, "$schema");
+        schema.Anchor = GetString(node, "$anchor");
+        schema.DynamicRef = GetString(node, "$dynamicRef");
+        schema.DynamicAnchor = GetString(node, "$dynamicAnchor");
+        schema.Comment = GetString(node, "$comment");
+
+        if (AsObject(Get(node, "$defs")) is { } defsNode)
+        {
+            ReadObjectMap(defsNode, ReadSchemaValue, schema.Defs);
         }
 
         schema.Title = GetString(node, "title");
@@ -589,10 +641,41 @@ internal static class OpenApiNodeToModelConverter
 
         ReadAdditionalProperties(node, schema);
 
-        if (AsObject(Get(node, "items")) is { } itemsNode)
+        if (AsObject(Get(node, "patternProperties")) is { } patternPropertiesNode)
         {
-            schema.Items = ReadSchema(itemsNode);
+            ReadObjectMap(patternPropertiesNode, ReadSchemaValue, schema.PatternProperties);
         }
+
+        schema.PropertyNames = ReadSchemaOrNull(Get(node, "propertyNames"));
+        schema.UnevaluatedProperties = ReadSchemaOrNull(Get(node, "unevaluatedProperties"));
+
+        if (AsObject(Get(node, "dependentRequired")) is { } dependentRequiredNode)
+        {
+            foreach (var member in dependentRequiredNode)
+            {
+                if (!IsExtension(member.Key))
+                {
+                    schema.DependentRequired[member.Key] = ReadList(member.Value, n => ((OpenApiValueNode)n).GetString());
+                }
+            }
+        }
+
+        if (AsObject(Get(node, "dependentSchemas")) is { } dependentSchemasNode)
+        {
+            ReadObjectMap(dependentSchemasNode, ReadSchemaValue, schema.DependentSchemas);
+        }
+
+        schema.Items = ReadSchemaOrNull(Get(node, "items"));
+
+        foreach (var item in ReadList(Get(node, "prefixItems"), ReadSchemaValue))
+        {
+            schema.PrefixItems.Add(item);
+        }
+
+        schema.Contains = ReadSchemaOrNull(Get(node, "contains"));
+        schema.MinContains = GetInt(node, "minContains");
+        schema.MaxContains = GetInt(node, "maxContains");
+        schema.UnevaluatedItems = ReadSchemaOrNull(Get(node, "unevaluatedItems"));
 
         foreach (var item in ReadList(Get(node, "allOf"), ReadSchemaValue))
         {
@@ -609,10 +692,13 @@ internal static class OpenApiNodeToModelConverter
             schema.OneOf.Add(item);
         }
 
-        if (AsObject(Get(node, "not")) is { } notNode)
-        {
-            schema.Not = ReadSchema(notNode);
-        }
+        schema.Not = ReadSchemaOrNull(Get(node, "not"));
+        schema.If = ReadSchemaOrNull(Get(node, "if"));
+        schema.Then = ReadSchemaOrNull(Get(node, "then"));
+        schema.Else = ReadSchemaOrNull(Get(node, "else"));
+        schema.ContentEncoding = GetString(node, "contentEncoding");
+        schema.ContentMediaType = GetString(node, "contentMediaType");
+        schema.ContentSchema = ReadSchemaOrNull(Get(node, "contentSchema"));
 
         if (AsObject(Get(node, "discriminator")) is { } discriminatorNode)
         {
@@ -646,16 +732,23 @@ internal static class OpenApiNodeToModelConverter
                     {
                         schema.Nullable = true;
                     }
-                    else if (schema.Type is null)
+                    else
                     {
-                        schema.Type = ParseSchemaType(text);
+                        schema.Types.Add(ParseSchemaType(text));
                     }
                 }
             }
         }
         else if (GetString(node, "type") is { } single)
         {
-            schema.Type = ParseSchemaType(single);
+            if (single == "null")
+            {
+                schema.Nullable = true;
+            }
+            else
+            {
+                schema.Types.Add(ParseSchemaType(single));
+            }
         }
 
         if (GetBool(node, "nullable"))
@@ -734,7 +827,8 @@ internal static class OpenApiNodeToModelConverter
     {
         var discriminator = new OpenApiDiscriminator
         {
-            PropertyName = GetString(node, "propertyName") ?? string.Empty
+            PropertyName = GetString(node, "propertyName") ?? string.Empty,
+            DefaultMapping = GetString(node, "defaultMapping")
         };
 
         if (AsObject(Get(node, "mapping")) is { } mappingNode)
@@ -759,6 +853,7 @@ internal static class OpenApiNodeToModelConverter
             Name = GetString(node, "name"),
             Namespace = GetString(node, "namespace"),
             Prefix = GetString(node, "prefix"),
+            NodeType = ParseXmlNodeType(GetString(node, "nodeType")),
             Attribute = GetBool(node, "attribute"),
             Wrapped = GetBool(node, "wrapped")
         };
@@ -784,7 +879,9 @@ internal static class OpenApiNodeToModelConverter
         scheme.In = GetString(node, "in") is { } location ? ParseParameterLocation(location) : null;
         scheme.Scheme = GetString(node, "scheme");
         scheme.BearerFormat = GetString(node, "bearerFormat");
+        scheme.OAuth2MetadataUrl = GetString(node, "oauth2MetadataUrl");
         scheme.OpenIdConnectUrl = GetString(node, "openIdConnectUrl");
+        scheme.Deprecated = GetBool(node, "deprecated");
 
         if (AsObject(Get(node, "flows")) is { } flowsNode)
         {
@@ -833,6 +930,7 @@ internal static class OpenApiNodeToModelConverter
         var flow = new OpenApiOAuthFlow
         {
             AuthorizationUrl = GetString(node, "authorizationUrl"),
+            DeviceAuthorizationUrl = GetString(node, "deviceAuthorizationUrl"),
             TokenUrl = GetString(node, "tokenUrl"),
             RefreshUrl = GetString(node, "refreshUrl")
         };
@@ -1016,12 +1114,14 @@ internal static class OpenApiNodeToModelConverter
         ("options", OperationType.Options),
         ("head", OperationType.Head),
         ("patch", OperationType.Patch),
-        ("trace", OperationType.Trace)
+        ("trace", OperationType.Trace),
+        ("query", OperationType.Query)
     ];
 
     private static ParameterLocation ParseParameterLocation(string? value) => value switch
     {
         "query" => ParameterLocation.Query,
+        "querystring" => ParameterLocation.Querystring,
         "header" => ParameterLocation.Header,
         "path" => ParameterLocation.Path,
         "cookie" => ParameterLocation.Cookie,
@@ -1037,6 +1137,17 @@ internal static class OpenApiNodeToModelConverter
         "spaceDelimited" => ParameterStyle.SpaceDelimited,
         "pipeDelimited" => ParameterStyle.PipeDelimited,
         "deepObject" => ParameterStyle.DeepObject,
+        "cookie" => ParameterStyle.Cookie,
+        _ => null
+    };
+
+    private static XmlNodeType? ParseXmlNodeType(string? value) => value switch
+    {
+        "element" => XmlNodeType.Element,
+        "attribute" => XmlNodeType.Attribute,
+        "text" => XmlNodeType.Text,
+        "cdata" => XmlNodeType.Cdata,
+        "none" => XmlNodeType.None,
         _ => null
     };
 

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Version targeting and transforms for the OpenApi model. Converts a document between the supported OpenAPI lines (3.0.4, 3.1.2, 3.2.0), applying the documented construct changes and emitting diagnostics for lossy or manual-intervention cases. NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+	</ItemGroup>
+</Project>

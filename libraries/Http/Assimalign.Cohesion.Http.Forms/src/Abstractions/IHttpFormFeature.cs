@@ -31,9 +31,11 @@ public interface IHttpFormFeature : IHttpFeature
 {
     /// <summary>
     /// Gets or sets the parsed form collection. <see langword="null"/> when
-    /// the form has not yet been parsed or attached.
+    /// the form has not yet been parsed or attached. Assigning a non-null
+    /// collection pre-attaches it so <see cref="ReadFormAsync"/> short-circuits
+    /// and returns that instance without touching the request body.
     /// </summary>
-    IHttpFormCollection? Form { get; }
+    IHttpFormCollection? Form { get; set; }
 
     /// <summary>
     /// Returns the parsed form collection, parsing the request body and

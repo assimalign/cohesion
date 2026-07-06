@@ -1,3 +1,5 @@
+using System;
+
 using Shouldly;
 using Xunit;
 
@@ -17,6 +19,9 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(OpenApiFeature.SchemaNumericExclusiveBounds)]
     [InlineData(OpenApiFeature.SchemaConst)]
     [InlineData(OpenApiFeature.SchemaExamples)]
+    [InlineData(OpenApiFeature.SchemaExtendedVocabulary)]
+    [InlineData(OpenApiFeature.SchemaReferenceSiblingKeywords)]
+    [InlineData(OpenApiFeature.SchemaBooleanForm)]
     public void Supports_ThreeOneFeatures_DisabledInThreeZero(OpenApiFeature feature)
     {
         OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).ShouldBeFalse();
@@ -37,11 +42,37 @@ public class OpenApiVersionCapabilitiesTests
     [InlineData(OpenApiFeature.DocumentSelf)]
     [InlineData(OpenApiFeature.TagExtendedMetadata)]
     [InlineData(OpenApiFeature.OAuthDeviceAuthorizationFlow)]
+    [InlineData(OpenApiFeature.ServerName)]
+    [InlineData(OpenApiFeature.PathItemQueryOperation)]
+    [InlineData(OpenApiFeature.ParameterQuerystringLocation)]
+    [InlineData(OpenApiFeature.ParameterCookieStyle)]
+    [InlineData(OpenApiFeature.MediaTypeStreamingFields)]
+    [InlineData(OpenApiFeature.MediaTypeReference)]
+    [InlineData(OpenApiFeature.ResponseSummary)]
+    [InlineData(OpenApiFeature.ExampleDataAndSerializedValues)]
+    [InlineData(OpenApiFeature.DiscriminatorDefaultMapping)]
+    [InlineData(OpenApiFeature.XmlNodeType)]
+    [InlineData(OpenApiFeature.SecuritySchemeOAuth2MetadataUrl)]
+    [InlineData(OpenApiFeature.SecuritySchemeDeprecated)]
+    [InlineData(OpenApiFeature.ComponentsMediaTypes)]
+    [InlineData(OpenApiFeature.SecurityRequirementUriReference)]
     public void Supports_ThreeTwoFeatures_OnlyThreeTwo(OpenApiFeature feature)
     {
         OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_0).ShouldBeFalse();
         OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_1).ShouldBeFalse();
         OpenApiVersionCapabilities.Supports(feature, OpenApiSpecVersion.V3_2).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [OpenApi] - Capabilities: every feature has a matrix entry for every line")]
+    public void Supports_EveryFeature_HasMatrixEntry()
+    {
+        foreach (var feature in Enum.GetValues<OpenApiFeature>())
+        {
+            foreach (var version in Enum.GetValues<OpenApiSpecVersion>())
+            {
+                Should.NotThrow(() => OpenApiVersionCapabilities.Supports(feature, version));
+            }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [OpenApi] - Capabilities: canonical version strings")]

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Integration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Versioning" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- Exercise the full Web path: annotated sample -> source-generated registry -> endpoint source. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+	</ItemGroup>
+</Project>

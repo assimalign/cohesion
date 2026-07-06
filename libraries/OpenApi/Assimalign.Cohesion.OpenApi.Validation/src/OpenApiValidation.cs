@@ -31,4 +31,16 @@ public static class OpenApiValidation
         new VersionPlacementRule(),
         new SemanticValidationRule()
     ];
+
+    /// <summary>
+    /// Creates the official-schema conformance stage: the document is serialized for its declared
+    /// version and evaluated against the vendored official OpenAPI meta-schema for that line
+    /// (3.0: <c>schema/2024-10-18</c>; 3.1 and 3.2: <c>schema/2025-11-23</c>). Findings are
+    /// <see cref="OpenApiDiagnosticSeverity.Warning"/> diagnostics with code
+    /// <see cref="OpenApiValidationRuleCodes.SchemaViolation"/>, because the specification text — not
+    /// the schema files — is authoritative. The stage is not part of the default pipeline; compose it
+    /// in with <c>Create([.. DefaultRules(), CreateOfficialSchemaRule()])</c>.
+    /// </summary>
+    /// <returns>The pluggable official-schema rule.</returns>
+    public static IOpenApiValidationRule CreateOfficialSchemaRule() => new OpenApiSchemaConformanceRule();
 }
