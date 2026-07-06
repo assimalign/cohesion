@@ -330,3 +330,42 @@ the default overridable without a dedicated opt-out knob.
 No other interceptor ships by default. Parse-time features under design
 (digest fields, request decompression) register through the same seam when
 their packages land, but each is an explicit opt-in.
+
+## Pipeline terminal — the 404 fallback
+
+### What it is
+
+`WebApplication`'s pipeline builder terminates the middleware chain with
+`TerminalAsync` instead of the former silent `_ => Task.CompletedTask`. Reaching
+the terminal means every registered middleware chained to `next` and none
+produced a terminal response — the request went unhandled. Rather than hand the
+transport an empty 200, the terminal writes a **404 `application/problem+json`**
+body via `IHttpResponse.WriteProblemDetailsAsync` (from
+`Assimalign.Cohesion.Web.Results`, issue #776).
+
+### Why here, and the no-clobber guard
+
+The terminal is baked into `WebApplication.Build` because it is the one middleware
+the host always installs; it is the always-on "nothing matched" floor. It is
+distinct from the opt-in `UseExceptionHandler()` boundary (which converts *thrown*
+faults into a 500): the terminal handles the *silent fall-through* case, the
+boundary handles the *exception* case, and the two never overlap because a middleware
+that throws never reaches the terminal.
+
+The terminal only writes when the response is genuinely untouched — status still
+200, no `Content-Type`, no redirect `Location`, and an empty (seekable) body. A
+middleware that already chose a non-200 status, wrote a body, or set a redirect is
+left exactly as it was, so the fallback never clobbers a deliberate empty-bodied
+response (a 204, a 302, a `HEAD` 200). This heuristic stands in for a response
+`HasStarted` flag the message model does not yet expose; when routing lands
+(#150/#28) the "unhandled" signal becomes explicit (no endpoint matched) and the
+terminal can rely on that instead of inferring it.
+
+### Dependency direction
+
+`Web.Hosting` takes a `CohesionProjectReference` on `Web.Results` for the
+`ProblemDetails` model and the problem+json writer. The direction is one-way
+(`Web.Hosting → Web.Results`); the middleware and their `UseXxx()` registration
+verbs live in `Web.Results` and never reference the host. See
+`Assimalign.Cohesion.Web.Results/docs/DESIGN.md` for the boundary/ProblemDetails
+design and the placement rationale.

@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Results;
 
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
 {
@@ -60,10 +61,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The web host is already built.");
 
-        var middleware = new WebApplicationMiddleware(context =>
-        {
-            return Task.CompletedTask;
-        });
+        var middleware = new WebApplicationMiddleware(TerminalAsync);
 
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
@@ -71,6 +69,30 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         }
 
         return new WebApplicationPipeline(middleware);
+    }
+
+    /// <summary>
+    /// The pipeline terminal. Reaching it means every middleware chained to the next and none
+    /// produced a terminal response, so the request went unhandled — emit a 404 problem+json rather
+    /// than silently completing (which would hand the transport an empty 200). A middleware that
+    /// already chose a non-200 status, wrote a body, or set a redirect <c>Location</c> is left
+    /// untouched.
+    /// </summary>
+    private static Task TerminalAsync(IHttpContext context)
+    {
+        IHttpResponse response = context.Response;
+
+        if (response.StatusCode.Value != HttpStatusCode.Ok.Value ||
+            response.Headers.ContainsKey(HttpHeaderKey.Location) ||
+            response.Headers.ContainsKey(HttpHeaderKey.ContentType) ||
+            (response.Body.CanSeek && response.Body.Length > 0))
+        {
+            return Task.CompletedTask;
+        }
+
+        return response.WriteProblemDetailsAsync(
+            ProblemDetails.FromStatus(HttpStatusCode.NotFound),
+            context.RequestCancelled);
     }
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {

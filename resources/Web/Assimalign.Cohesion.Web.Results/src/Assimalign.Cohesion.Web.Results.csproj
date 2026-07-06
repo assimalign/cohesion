@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Result and error-response types for the Cohesion Web pipeline: the RFC 9457 ProblemDetails model, an AOT-safe problem+json writer built directly on Utf8JsonWriter (no reflection), the last-chance exception-boundary and status-code-pages middleware, and their builder-time pipeline-registration extensions.</Description>
+	</PropertyGroup>
 	<ItemGroup>
-		
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
 </Project>
