@@ -377,6 +377,47 @@ escape-free strings directly. Builds clean under the trim/AOT analyzers
   bytes; `Serialize()` always emits the §4.1 canonical form. A parse→serialize round-trip
   therefore normalizes (e.g. `1.50` → `1.5`, `-0` → `0`) rather than preserving the wire
   spelling.
+
+## Priority (RFC 9218 extensible priorities)
+
+### The value object
+
+`HttpPriority` is the field-specific consumer the Structured Field Values non-goals point at:
+it projects the RFC 9218 *Priority Field Value* — the `u`/`i` structured-field dictionary
+carried by the `Priority` request header **and** by HTTP/2 / HTTP/3 `PRIORITY_UPDATE` frames —
+onto the two things a scheduler consumes: an **urgency** 0–7 (`u`, default 3) and an
+**incremental** flag (`i`, default false). It is a `readonly struct` with `TryParse`, `Serialize`,
+and value equality, matching the shape of the other core value objects (`HttpMediaType`,
+`HttpQuality`).
+
+Parsing goes **through** `StructuredFieldDictionary` rather than around it — there is one
+structured-field parser in the stack, and `HttpPriority` only adds the field's semantics on top
+of it. The header name is exposed as the typed `HttpHeaderKey.Priority`.
+
+### Tolerant field semantics, strict syntax
+
+The structured-field *syntax* is strict (a malformed dictionary fails `TryParse`, which returns
+the default and `false`), but the *field members* are tolerant exactly as RFC 9218 §4 requires: an
+absent, out-of-range (not 0–7), or wrong-typed `u` falls back to urgency 3; an absent or
+non-boolean `i` falls back to non-incremental; and unrecognized members are ignored. This split
+lets a transport treat a well-formed-but-nonsensical `Priority` value as "no signal" (the default)
+without raising a protocol error, while still rejecting genuinely malformed structured fields.
+
+### Why a value object here and the scheduler elsewhere
+
+`HttpPriority` is pure parsing/representation and therefore lives in the protocol core (Lane B).
+*Acting* on the priority — urgency-ordered, non-incremental-first response scheduling, the
+`PRIORITY_UPDATE` frame engine, per-stream priority state — is wire behavior and lives in
+`Assimalign.Cohesion.Http.Connections` (Lane A). The value object is the seam between the two: the
+transport parses header and frame field values into `HttpPriority` and schedules on its
+`Urgency`/`Incremental`.
+
+### AOT posture
+
+No reflection or dynamic serialization; parsing is span-based via the structured-field toolkit and
+the ASCII→`char` bridge on the transport side is stack-allocated for the small field values that
+occur in practice. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
+
 ## Request-parse interception seam
 
 ### What it is

@@ -21,5 +21,10 @@ internal enum Http3FrameType : long
     GoAway = 0x7,
     ReservedHttp2WindowUpdate = 0x8,
     ReservedHttp2Continuation = 0x9,
-    MaxPushId = 0xD
+    MaxPushId = 0xD,
+    // RFC 9218 §7.2 — PRIORITY_UPDATE frames sent on the control stream.
+    // 0xF0700 re-prioritizes a request stream; 0xF0701 re-prioritizes a push,
+    // which the server rejects because it issues no pushes.
+    PriorityUpdateRequest = 0xF0700,
+    PriorityUpdatePush = 0xF0701,
 }

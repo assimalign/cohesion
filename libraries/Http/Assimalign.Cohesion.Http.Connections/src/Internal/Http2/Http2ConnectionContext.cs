@@ -46,11 +46,22 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // RFC 9113 §4.1 + §6.8 — a single TCP connection multiplexes many
     // logical streams. Frames from concurrent senders MUST NOT interleave
     // on the wire, or the peer's parser will see a corrupted frame
-    // sequence. This semaphore serializes every outbound frame write on
-    // the connection, regardless of whether it originated from a
-    // SendAsync, a SETTINGS/PING ACK, a WINDOW_UPDATE, a GOAWAY, or
-    // graceful shutdown.
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    // sequence. This scheduler serializes every outbound frame write on
+    // the connection (exactly one holder at a time), regardless of whether
+    // it originated from a SendAsync, a streaming body writer, a
+    // SETTINGS/PING ACK, a WINDOW_UPDATE, a GOAWAY, or graceful shutdown.
+    // It additionally grants the gate to contending writers in RFC 9218 §10
+    // priority order rather than FIFO: control frames first, then response
+    // writes by ascending urgency, non-incremental before incremental,
+    // round-robin among same-urgency incremental streams.
+    private readonly Http2WriteScheduler _writeScheduler = new();
+    // RFC 9218 §7.1 — a PRIORITY_UPDATE may reference a request stream in
+    // the idle state (the client sends it before HEADERS). The signal is
+    // retained here and applied when the stream is opened. Bounded to avoid
+    // an unbounded-buffer DoS from a peer that never opens the streams.
+    // Guarded by _syncRoot alongside the stream table.
+    private readonly Dictionary<int, HttpPriority> _bufferedPriorities = new();
+    private const int MaxBufferedPriorities = 128;
     // Ready request heads produced by the frame pump and consumed by ReceiveAsync.
     // The pump dispatches a context as soon as a stream's header block is complete
     // (RFC 9113 lets the server respond before the body arrives), then keeps
@@ -440,10 +451,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave.
         // The whole HEADERS [+ CONTINUATION...] [+ DATA...] sequence MUST be
-        // emitted contiguously on the wire. Hold the connection write lock
+        // emitted contiguously on the wire. Hold the connection write gate
         // for the duration so concurrent SendAsync calls, pump ACK/WINDOW_UPDATE
         // frames, and body-consumption WINDOW_UPDATEs cannot tear the sequence.
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // RFC 9218 §10 — when multiple responses contend for the gate, the
+        // scheduler grants it in urgency order (non-incremental first) using
+        // this stream's effective priority.
+        HttpPriority priority = http2Context.Stream.EffectivePriority;
+        await _writeScheduler.AcquireAsync(http2Context.StreamId, priority.Urgency, priority.Incremental, cancellationToken).ConfigureAwait(false);
         try
         {
             await WriteHeaderBlockAsync(http2Context.StreamId, headerBlock, endStream: bodyBytes.Length == 0, cancellationToken).ConfigureAwait(false);
@@ -452,12 +467,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // the response bytes have been handed off to the transport pipe
             // before SendAsync returns. Flush the pipe writer here so the
             // bytes are durably committed to the send-side of the underlying
-            // transport before the lock is released.
+            // transport before the gate is released.
             await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
 
         // RFC 9113 §5.1 — every server response ends with END_STREAM (either
@@ -525,6 +540,19 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         await EmitWindowUpdateAsync(streamId, flowControlLength, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Acquires the connection write gate for a connection-control frame
+    /// (SETTINGS/PING ACK, WINDOW_UPDATE, RST_STREAM, GOAWAY). Control frames use
+    /// <see cref="Http2WriteScheduler.ControlUrgency"/> so they are never starved
+    /// behind response DATA writes (RFC 9218 §10).
+    /// </summary>
+    private Task AcquireControlWriteAsync(CancellationToken cancellationToken)
+        => _writeScheduler.AcquireAsync(
+            streamId: 0,
+            urgency: Http2WriteScheduler.ControlUrgency,
+            incremental: false,
+            cancellationToken);
+
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
         if (_initialized)
@@ -553,7 +581,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         byte[] settingsPayload = EncodeLocalSettings();
         Http2Frame settingsFrame = new();
         settingsFrame.PrepareSettings(Http2SettingsFrameFlags.None);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, settingsFrame, settingsPayload, cancellationToken).ConfigureAwait(false);
@@ -561,7 +589,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
 
         _initialized = true;
@@ -608,6 +636,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             case Http2FrameType.GoAway:
                 ProcessGoAwayFrame(receivedFrame);
                 return null;
+            case Http2FrameType.PriorityUpdate:
+                ProcessPriorityUpdateFrame(receivedFrame);
+                return null;
             case Http2FrameType.PushPromise:
                 // RFC 9113 §8.4 / §6.6 — only servers send PUSH_PROMISE, and a
                 // client cannot push. A server MUST treat the receipt of a
@@ -648,6 +679,80 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // because we treat GOAWAY as a unidirectional close signal — the
         // peer is telling us "don't open new streams beyond X."
         _peerLastStreamId = receivedFrame.Frame.GoAwayLastStreamId;
+    }
+
+    /// <summary>
+    /// Applies an inbound RFC 9218 §7.1 PRIORITY_UPDATE frame. The frame MUST be
+    /// on stream 0 and reference a client-initiated (odd, non-zero) request
+    /// stream; both are connection errors of type PROTOCOL_ERROR otherwise. The
+    /// Priority Field Value is parsed tolerantly (a value that cannot be parsed
+    /// leaves the frame with no effect), and the resulting priority overrides the
+    /// referenced stream's Priority-header value. A frame that references a stream
+    /// not yet opened is retained until the stream is created.
+    /// </summary>
+    private void ProcessPriorityUpdateFrame(ReceivedFrame receivedFrame)
+    {
+        // RFC 9218 §7.1 — PRIORITY_UPDATE MUST be sent on stream 0.
+        if (receivedFrame.Frame.StreamId != 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PRIORITY_UPDATE received on stream {receivedFrame.Frame.StreamId}; PRIORITY_UPDATE MUST use stream 0.");
+        }
+
+        int prioritizedStreamId = receivedFrame.Frame.PriorityUpdatePrioritizedStreamId;
+
+        // RFC 9218 §7.1 — the Prioritized Stream ID must identify a request
+        // stream the client is allowed to open: non-zero and odd. Stream 0 or an
+        // even (server-initiated) id is a connection error.
+        if (prioritizedStreamId == 0 || (prioritizedStreamId & 1) == 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PRIORITY_UPDATE referenced invalid prioritized stream {prioritizedStreamId}.");
+        }
+
+        // RFC 9218 §7.1 — a Priority Field Value that cannot be parsed leaves the
+        // frame without effect (it is not a stream or connection error).
+        if (!HttpPriorityFieldValue.TryParse(receivedFrame.Payload, out HttpPriority priority))
+        {
+            return;
+        }
+
+        // The stream table and the buffered-priority map are shared with the
+        // application threads (SendAsync / streaming completions remove streams),
+        // so both are read and written under _syncRoot.
+        lock (_syncRoot)
+        {
+            if (_streams.TryGetValue(prioritizedStreamId, out Http2Stream? stream))
+            {
+                stream.ApplyPriorityUpdate(priority);
+                return;
+            }
+
+            // An idle stream (id above every id we have observed) has not opened
+            // yet; retain the signal to apply when it does. A lower id we no
+            // longer track is closed — applying a priority to it has no effect,
+            // so drop it.
+            if (prioritizedStreamId > _lastInboundStreamId)
+            {
+                BufferPriorityUpdateLocked(prioritizedStreamId, priority);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retains a PRIORITY_UPDATE for a not-yet-opened stream, bounded by
+    /// <see cref="MaxBufferedPriorities"/> so a peer that announces priorities for
+    /// streams it never opens cannot grow the buffer without limit. Must be
+    /// called while holding <see cref="_syncRoot"/>.
+    /// </summary>
+    private void BufferPriorityUpdateLocked(int streamId, HttpPriority priority)
+    {
+        if (_bufferedPriorities.ContainsKey(streamId) || _bufferedPriorities.Count < MaxBufferedPriorities)
+        {
+            _bufferedPriorities[streamId] = priority;
+        }
     }
 
     private void ProcessWindowUpdateFrame(ReceivedFrame receivedFrame)
@@ -972,7 +1077,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame acknowledgement = new();
         acknowledgement.PrepareSettings(Http2SettingsFrameFlags.Acknowledge);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, acknowledgement, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -980,7 +1085,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
     }
 
@@ -1202,7 +1307,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame acknowledgement = new();
         acknowledgement.PreparePing(Http2PingFrameFlags.Acknowledge);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, acknowledgement, receivedFrame.Payload, cancellationToken).ConfigureAwait(false);
@@ -1210,7 +1315,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
     }
 
@@ -1268,6 +1373,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 initialSendWindow: _remoteSettings.InitialWindowSize,
                 initialReceiveWindow: _localSettings.InitialWindowSize);
             _streams.Add(streamId, stream);
+
+            // RFC 9218 §7.1 — apply any PRIORITY_UPDATE that arrived while this
+            // stream was still idle. It pins the effective priority so the
+            // Priority header cannot later override it (RFC 9218 §8).
+            if (_bufferedPriorities.Remove(streamId, out HttpPriority buffered))
+            {
+                stream.ApplyPriorityUpdate(buffered);
+            }
         }
 
         return stream;
@@ -1384,20 +1497,32 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // ---- Streaming response write path (the raw body sink's wire hooks) ----------
     // Http2ResponseBodyStream forwards here. The application thread runs these
     // concurrently with the frame pump; shared state is guarded by _syncRoot (send
-    // windows, stream table) and _writeLock (wire frame sequences).
+    // windows, stream table) and the write scheduler (wire frame sequences).
+
+    /// <summary>
+    /// Acquires the connection write gate for a response write on
+    /// <paramref name="context"/>'s stream, using the stream's RFC 9218 effective
+    /// priority so contending response writers are granted the gate in urgency
+    /// order (RFC 9218 §10).
+    /// </summary>
+    private Task AcquireResponseWriteAsync(Http2Context context, CancellationToken cancellationToken)
+    {
+        HttpPriority priority = context.Stream.EffectivePriority;
+        return _writeScheduler.AcquireAsync(context.StreamId, priority.Urgency, priority.Incremental, cancellationToken);
+    }
 
     /// <summary>
     /// Commits the response head for an incrementally-streamed response: encodes the
     /// field section with <b>no</b> synthesized <c>Content-Length</c> (the body is
     /// delimited by <c>END_STREAM</c>) and writes the HEADERS block without the
     /// <c>END_STREAM</c> flag so DATA frames can follow. Holds the connection write
-    /// lock for frame-sequence atomicity (RFC 9113 §4.1).
+    /// gate for frame-sequence atomicity (RFC 9113 §4.1).
     /// </summary>
     internal async Task WriteStreamingHeadersAsync(Http2Context context, CancellationToken cancellationToken)
     {
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
 
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
         try
         {
             await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, cancellationToken).ConfigureAwait(false);
@@ -1405,7 +1530,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
     }
 
@@ -1427,7 +1552,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             int granted = await AcquireSendWindowAsync(context.Stream, maxChunk, cancellationToken).ConfigureAwait(false);
             ReadOnlyMemory<byte> chunk = data.Slice(offset, granted);
 
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // The gate is acquired per DATA frame — AFTER the send-window credit,
+            // so a writer parked on flow control never blocks the connection —
+            // which is what lets the scheduler interleave same-urgency incremental
+            // streams frame-by-frame and always favour lower urgencies (RFC 9218 §10).
+            await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
             try
             {
                 Http2Frame frame = new();
@@ -1437,7 +1566,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
 
             offset += granted;
@@ -1454,7 +1583,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// </summary>
     internal async Task CompleteStreamingAsync(Http2Context context, CancellationToken cancellationToken)
     {
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
         try
         {
             Http2Frame frame = new();
@@ -1465,7 +1594,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
 
         context.Stream.SendEndStream();
@@ -1591,7 +1720,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             Http2Frame frame = new();
             frame.PrepareWindowUpdate(streamId, increment);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1599,7 +1728,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1621,7 +1750,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             Http2Frame rstStream = new();
             rstStream.PrepareRstStream(streamId, errorCode);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, rstStream, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1629,7 +1758,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1664,7 +1793,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             Http2Frame goAway = new();
             goAway.PrepareGoAway(_lastInboundStreamId, errorCode);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, goAway, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1672,7 +1801,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1704,6 +1833,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // so peers may bootstrap WebSocket (and other protocols) over a
             // single stream via CONNECT + :protocol.
             EnableConnectProtocol = 1,
+            // RFC 9218 §2.1 — advertise NO_RFC7540_PRIORITIES = 1 so peers use the
+            // extensible-priorities scheme (Priority header + PRIORITY_UPDATE) and
+            // do not expect the deprecated RFC 7540 stream-priority tree.
+            NoRfc7540Priorities = 1,
         };
     }
 
@@ -1728,6 +1861,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 tells the peer
             // it MAY use extended CONNECT (CONNECT + :protocol).
             (Http2SettingsParameter.SETTINGS_ENABLE_CONNECT_PROTOCOL, _localSettings.EnableConnectProtocol),
+            // RFC 9218 §2.1 — SETTINGS_NO_RFC7540_PRIORITIES = 1 tells the peer the
+            // server uses the extensible-priorities scheme, not RFC 7540 priorities.
+            (Http2SettingsParameter.SETTINGS_NO_RFC7540_PRIORITIES, _localSettings.NoRfc7540Priorities),
         };
 
         byte[] payload = new byte[entries.Length * Http2FrameReader.SettingSize];
@@ -1839,7 +1975,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     {
         await GracefulCloseAsync().ConfigureAwait(false);
         _pumpCts?.Dispose();
-        _writeLock.Dispose();
+        _writeScheduler.Dispose();
     }
 
     private readonly struct ReceivedFrame

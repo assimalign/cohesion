@@ -644,7 +644,9 @@ is ever held across an await or a wire read:
 
 All outbound frames — response HEADERS/DATA, SETTINGS/PING ACKs, GOAWAY, and both
 receipt-side and consumption-side `WINDOW_UPDATE`s — serialize through the
-existing `_writeLock`, so nothing tears a frame sequence (RFC 9113 §4.1).
+connection write gate (`Http2WriteScheduler`), so nothing tears a frame sequence
+(RFC 9113 §4.1). The gate additionally grants contending writers in RFC 9218 §10
+priority order — see the extensible-priorities section below.
 
 ### Lifecycle: dispatch-at-headers, abandoned bodies, teardown
 
@@ -1155,6 +1157,103 @@ class resolved through the existing feature collection.
 - **WebSocket framing / the data tunnel.** See above.
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
   as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
+
+## RFC 9218 extensible priorities
+
+### What it is
+
+The server implements the RFC 9218 Extensible Prioritization Scheme and
+**replaces** — does not extend — the deprecated RFC 7540 tree-priority handling
+(RFC 9113 §5.3.2 permits ignoring it). Three moving parts:
+
+- **Signals in, priority out.** The `Priority` request header and the
+  `PRIORITY_UPDATE` frame both carry the same `u`/`i` Priority Field Value. Both
+  are parsed through the core-Http structured-field toolkit into an
+  `HttpPriority` (urgency 0–7, incremental flag) — no field-value parsing is
+  reimplemented in the transport (Lane B owns parsing, Lane A owns scheduling).
+  The shared `HttpPriorityFieldValue` helper bridges the ASCII frame octets to
+  the `char` span the toolkit consumes.
+- **Per-stream effective priority.** Each stream carries an effective priority:
+  the `Priority` header initialises it, and a `PRIORITY_UPDATE` overrides it and
+  pins it so a later header parse cannot clobber it (RFC 9218 §8), regardless of
+  arrival order.
+- **Urgency-ordered write scheduling** on the contended HTTP/2 write path.
+
+### Replacing the legacy PRIORITY frame
+
+The RFC 7540 `PRIORITY` frame (type `0x2`) and its stream-dependency/weight/
+exclusive model are gone from the engine: the frame model, its reader fields, and
+its writer case were deleted, and `0x2` is now simply ignored (RFC 9113 §5.3.2).
+The HEADERS frame's optional priority fields are still *skipped* during parsing —
+they must be, to locate the header block — but they are no longer read as a
+scheduling signal. HTTP/2 advertises `SETTINGS_NO_RFC7540_PRIORITIES = 1`
+(RFC 9218 §2.1) in its initial SETTINGS so peers know to use the header +
+`PRIORITY_UPDATE` scheme; an inbound value other than 0/1 is a `PROTOCOL_ERROR`.
+
+### HTTP/2 PRIORITY_UPDATE (frame type 0x10)
+
+Dispatched like any other connection-control frame. A `PRIORITY_UPDATE` on a
+non-zero stream is a connection error (`PROTOCOL_ERROR`, RFC 9218 §7.1), as is a
+Prioritized Stream ID that is zero or even (a client cannot open those). The
+4-octet Prioritized Stream ID is parsed as a fixed frame-prefix field (the same
+mechanism GOAWAY uses), leaving the ASCII Priority Field Value as the frame
+payload. A field value that cannot be parsed leaves the frame **without effect**
+(not an error). A frame referencing a stream that has not opened yet is retained
+in a small bounded buffer and applied when the stream is created; a frame
+referencing an already-closed stream is dropped.
+
+### The write scheduler
+
+`Http2WriteScheduler` replaces the plain FIFO write semaphore. It preserves the
+non-interleaving invariant (RFC 9113 §4.1 — exactly one writer holds the gate at a
+time) and, when writers contend, grants the gate in RFC 9218 §10 order instead of
+first-come-first-served:
+
+1. connection-control frames first (a sentinel urgency below 0, so ACKs / window
+   updates / GOAWAY are never starved behind response data);
+2. then response writes by ascending urgency;
+3. non-incremental before incremental at the same urgency;
+4. round-robin by stream id among same-urgency incremental streams.
+
+The ordering policy is a pure, synchronous function (`SelectNextWaiterIndex`) so
+it is unit-tested in isolation, separate from the async gate. Both response write
+paths go through it:
+
+- The **buffered** path (`SendAsync`) holds the gate for the whole contiguous
+  HEADERS [+ CONTINUATION…] [+ DATA…] sequence, so the scheduler orders **which
+  stream's queued response proceeds next** under contention.
+- The **streaming** path acquires the gate **per DATA frame** — and only after
+  the send-window credit for that frame has been granted, so a writer parked on
+  flow control never holds the gate. This is what delivers real frame-level
+  interleaving: same-urgency incremental streams round-robin DATA frame by DATA
+  frame, and a newly-arrived lower-urgency (more urgent) response preempts
+  between frames of a less urgent one.
+
+### HTTP/3 posture
+
+HTTP/3 multiplexes streams at the QUIC layer, so there is no shared connection
+write gate to schedule — response ordering across streams is delegated to the QUIC
+transport. What the HTTP/3 engine owns is the **priority signal as observable
+state**:
+
+- The peer's control-stream drain now parses post-SETTINGS `PRIORITY_UPDATE`
+  frames instead of discarding them: a request-stream update (`0xF0700`) records
+  the referenced stream's effective priority in the connection's priority map;
+  the request `Priority` header sets the per-request effective priority on the
+  context. Both are observable to the engine.
+- A push `PRIORITY_UPDATE` (`0xF0701`) references a push id that cannot exist (the
+  server issues no pushes — see the server-push scope decision below). It is
+  rejected and draining stops. Consistent with this drain's existing
+  parse-and-discard posture, the rejection is recorded and connection teardown
+  closes the QUIC connection; strict HTTP/3 would signal `H3_ID_ERROR`.
+
+### AOT posture
+
+No reflection or dynamic dispatch. Frame parsing is span-based; the priority
+field-value bridge stack-allocates for the small values that occur in practice and
+falls back to a pooled buffer otherwise. The scheduler is a plain lock + list with
+a pure selection function. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
 
 ## Scope decision: server push (de-scoped)
 

@@ -50,6 +50,11 @@ internal sealed class Http2Stream
     // request was abandoned. This token source backs IHttpContext's
     // RequestAborted and is fired whenever the stream is reset.
     private readonly CancellationTokenSource _abortedSource = new();
+    // RFC 9218 §8 — a PRIORITY_UPDATE frame takes precedence over the
+    // Priority request header for the same stream, regardless of arrival
+    // order. Once an update is applied, a later header parse must not
+    // clobber it.
+    private bool _priorityFromUpdate;
 
     // 0 = body channel still open, 1 = completed. Interlocked because both the
     // pump (END_STREAM / peer reset) and the request handler (local reset on an
@@ -120,6 +125,15 @@ internal sealed class Http2Stream
 
     /// <summary>The stream identifier (RFC 9113 §5.1.1).</summary>
     public int StreamId { get; }
+
+    /// <summary>
+    /// The effective RFC 9218 priority the connection engine uses to schedule this
+    /// stream's response write. Initialised to <see cref="HttpPriority.Default"/>
+    /// (urgency 3, non-incremental), refined from the <c>Priority</c> request
+    /// header when the request materialises, and overridden by any
+    /// <c>PRIORITY_UPDATE</c> frame (RFC 9218 §8).
+    /// </summary>
+    public HttpPriority EffectivePriority { get; private set; } = HttpPriority.Default;
 
     /// <summary>Current lifecycle state per RFC 9113 §5.1.</summary>
     public Http2StreamState State { get; private set; }
@@ -445,6 +459,32 @@ internal sealed class Http2Stream
         }
     }
 
+    /// <summary>
+    /// Applies a priority derived from the <c>Priority</c> request header. It is a
+    /// no-op once a <c>PRIORITY_UPDATE</c> has been applied, because an update
+    /// takes precedence over the header regardless of order (RFC 9218 §8).
+    /// </summary>
+    /// <param name="priority">The header-derived priority.</param>
+    public void SetPriorityFromHeader(HttpPriority priority)
+    {
+        if (!_priorityFromUpdate)
+        {
+            EffectivePriority = priority;
+        }
+    }
+
+    /// <summary>
+    /// Applies a priority carried by a <c>PRIORITY_UPDATE</c> frame. This overrides
+    /// any header-derived value and pins the effective priority so a subsequently
+    /// parsed header cannot clobber it (RFC 9218 §8).
+    /// </summary>
+    /// <param name="priority">The update-derived priority.</param>
+    public void ApplyPriorityUpdate(HttpPriority priority)
+    {
+        EffectivePriority = priority;
+        _priorityFromUpdate = true;
+    }
+
     private void AppendHeaderBytes(ReadOnlySpan<byte> payload)
     {
         if (!payload.IsEmpty)
@@ -514,6 +554,16 @@ internal sealed class Http2Stream
             query,
             decodedHeaders.Headers,
             body);
+
+        // RFC 9218 §4 / §8 — the request's Priority header initialises the
+        // effective priority. Parsing is tolerant: a malformed header value is
+        // ignored (the default urgency 3, non-incremental stands), and a
+        // PRIORITY_UPDATE that already arrived for this stream is not overridden.
+        if (decodedHeaders.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
+        {
+            SetPriorityFromHeader(headerPriority);
+        }
 
         Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted);
 

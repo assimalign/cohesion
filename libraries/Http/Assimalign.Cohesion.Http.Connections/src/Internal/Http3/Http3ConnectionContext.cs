@@ -31,6 +31,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    // RFC 9218 §7.2 — the effective priority of request streams the peer has
+    // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
+    // engine's observable priority state; response ordering across streams is
+    // otherwise delegated to the QUIC transport (see docs/DESIGN.md). Guarded
+    // because the control-stream drain runs on a background task.
+    private readonly Dictionary<long, HttpPriority> _requestStreamPriorities = new();
+    private readonly object _priorityLock = new();
+    private volatile bool _pushPriorityUpdateRejected;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
@@ -51,6 +59,37 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
     public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    /// <summary>
+    /// Attempts to read the effective priority recorded for a request stream by a
+    /// control-stream PRIORITY_UPDATE frame (RFC 9218 §7.2). Exposes the HTTP/3
+    /// engine's observable priority state.
+    /// </summary>
+    /// <param name="streamId">The prioritized request-stream identifier.</param>
+    /// <param name="priority">The recorded priority when present.</param>
+    /// <returns><see langword="true"/> if a priority was recorded for the stream; otherwise <see langword="false"/>.</returns>
+    internal bool TryGetRequestStreamPriority(long streamId, out HttpPriority priority)
+    {
+        lock (_priorityLock)
+        {
+            return _requestStreamPriorities.TryGetValue(streamId, out priority);
+        }
+    }
+
+    /// <summary>
+    /// Whether a push PRIORITY_UPDATE (frame type 0xF0701) has been received and
+    /// rejected. The server issues no pushes, so such a frame references a push id
+    /// that cannot exist (RFC 9218 §7.2 / H3_ID_ERROR).
+    /// </summary>
+    internal bool PushPriorityUpdateRejected => _pushPriorityUpdateRejected;
+
+    private void RecordRequestStreamPriority(long streamId, HttpPriority priority)
+    {
+        lock (_priorityLock)
+        {
+            _requestStreamPriorities[streamId] = priority;
+        }
+    }
 
     /// <summary>
     /// Yields HTTP/3 request contexts for the lifetime of this connection.
@@ -408,14 +447,16 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Drains post-SETTINGS frames from the peer's control stream for the
-    /// connection lifetime, parsing and discarding each frame (RFC 9114 §7.2).
-    /// GOAWAY (§7.2.6) and MAX_PUSH_ID (§7.2.7) are read but inert in this
-    /// subset: GOAWAY-driven graceful drain is deferred, and the server never
-    /// pushes, so MAX_PUSH_ID has no effect. Draining prevents unread control
-    /// frames from accumulating in the pipe. The loop stops on end-of-stream,
-    /// connection teardown, or a per-stream parse failure, and never throws
-    /// into the receive loop.
+    /// Processes post-SETTINGS frames from the peer's control stream for the
+    /// connection lifetime (RFC 9114 §7.2). RFC 9218 §7.2 PRIORITY_UPDATE frames
+    /// are parsed and applied: a request-stream update (0xF0700) records the
+    /// referenced stream's effective priority; a push update (0xF0701) is rejected
+    /// (the server issues no pushes) and stops the drain. GOAWAY (§7.2.6) and
+    /// MAX_PUSH_ID (§7.2.7) are read but inert in this subset, and every other
+    /// frame is discarded. Processing prevents unread control frames from
+    /// accumulating in the pipe. The loop stops on end-of-stream, connection
+    /// teardown, or a per-stream parse failure, and never throws into the receive
+    /// loop.
     /// </summary>
     private async Task DrainPeerControlStreamAsync(PipeReader reader, CancellationToken receiveToken)
     {
@@ -440,7 +481,35 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                     break;
                 }
 
-                await SkipAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
+                int length = checked((int)frameLength.Value);
+
+                if (frameType.Value == (long)Http3FrameType.PriorityUpdateRequest)
+                {
+                    // RFC 9218 §7.2 — read the payload (Prioritized Element ID +
+                    // Priority Field Value) and apply it to the referenced stream.
+                    byte[] priorityPayload = await ReadExactAsync(reader, length, cancellationToken).ConfigureAwait(false);
+                    if (Http3PriorityUpdate.TryParse(priorityPayload, out long prioritizedStreamId, out HttpPriority priority))
+                    {
+                        RecordRequestStreamPriority(prioritizedStreamId, priority);
+                    }
+
+                    continue;
+                }
+
+                if (frameType.Value == (long)Http3FrameType.PriorityUpdatePush)
+                {
+                    // RFC 9218 §7.2 — the server advertises no push capacity, so a
+                    // push PRIORITY_UPDATE references a push id that cannot exist.
+                    // Reject it consistently with the server-push de-scope: record
+                    // the rejection and stop draining so connection teardown closes
+                    // the QUIC connection. (Strict HTTP/3 would signal H3_ID_ERROR;
+                    // this drain keeps its parse-and-discard posture — see docs/DESIGN.md.)
+                    await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
+                    _pushPriorityUpdateRejected = true;
+                    break;
+                }
+
+                await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -899,6 +968,15 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
         Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection);
+
+        // RFC 9218 §4 — the request's Priority header sets the effective priority.
+        // Parsing is tolerant: a malformed value leaves the default (urgency 3,
+        // non-incremental) in place.
+        if (request.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
+        {
+            context.EffectivePriority = headerPriority;
+        }
 
         // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
         // provides backpressure) to registered response interceptors so a feature package
