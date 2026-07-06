@@ -4,18 +4,23 @@
 
 This library turns a set of registered route templates into a deterministic decision:
 given an inbound `IHttpContext`, which handler (if any) should run, and — when none
-should — whether that is a *no route* (404) or a *wrong method* (405) situation. It is a
-foundation primitive: the API, function, controller, and metadata programming models
-(issues #149, #150, #151, #786–#789, #796) all build on the matcher defined here, so the
-matcher's behavior must be predictable and standards-aware before those layers are added.
+should — whether that is a *no route* (404) or a *wrong method* (405) situation. It also
+carries the **endpoint metadata** each route declares and surfaces the **route-match
+result** to the rest of the pipeline as a typed feature. It is a foundation primitive: the
+API, function, controller, and metadata programming models (issues #149, #151, #786–#789,
+#796) all build on the matcher and the metadata seam defined here, so their behavior must
+be predictable, standards-aware, and reflection-free before those layers are added.
 
 Scope of this library:
 
 - Route **template parsing** into an immutable `RoutePattern` (`Patterns/`).
 - Route **parameter policies / constraints** (`Policies/`) evaluated during matching.
-- A **route** (`Route`) that binds a pattern, the HTTP methods it accepts, and a handler.
+- A **route** (`Route`) that binds a pattern, the HTTP methods it accepts, a handler, and
+  its **endpoint metadata**.
 - A **router** (`Router`) that evaluates routes against a request with correct precedence
   and HTTP method semantics.
+- An **endpoint metadata bag** (`IRouterRouteMetadataCollection`) and a **route-match feature**
+  (`IRouteMatchFeature`) — the reflection-free seam auth, docs, and observability consume (#150).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
 
@@ -32,8 +37,8 @@ raw template ──RoutePatternParser──▶ RoutePattern ──┐
 - **`RoutePattern`** is the parsed, immutable shape of a template: an ordered list of path
   segments (literals, separators, parameters), the parameters and their inline policies,
   defaults, required values, and the precomputed inbound/outbound precedence.
-- **`Route`** pairs a pattern with the set of HTTP methods it accepts and the handler to
-  invoke. Matching is split into two phases (see below).
+- **`Route`** pairs a pattern with the set of HTTP methods it accepts, the handler to
+  invoke, and its endpoint metadata. Matching is split into two phases (see below).
 - **`Router`** owns the collection of routes and produces a `RouteMatch` for a request.
 
 ### Two-phase matching (path, then method)
@@ -116,6 +121,104 @@ membership so the route's declared surface stays honest; the router layers the R
 top. This keeps `Methods` a truthful description of what was registered while still serving HEAD
 correctly end-to-end.
 
+## Endpoint metadata (#150)
+
+### Intent
+
+Authorization, content negotiation, OpenAPI/documentation and observability all need to answer
+"what policy applies to *this* endpoint?" The wrong way to do that under NativeAOT is to reflect
+over handler-method attributes at request time — reflection is exactly what trimming and AOT make
+unreliable. The right way is to make metadata an **explicit, first-class property of the route**,
+populated at build/map time and read back by type at request time.
+
+`IRouterRouteMetadataCollection` is that property. It is:
+
+- **Immutable.** Contents are fixed at construction; there is no `Add`/`Remove`. Composition
+  (e.g. a route group merging its metadata into each child) is done by building a *new* collection
+  from concatenated items, never by mutating a shared one. Immutability makes a route safe to
+  share across concurrent requests without copying.
+- **Ordered.** Items keep their registration order. Order is the composition primitive: producers
+  layer broader-scope metadata first and narrower-scope metadata last.
+- **Typed and reflection-free.** `GetMetadata<T>()` and `GetOrderedMetadata<T>()` resolve purely by
+  `is`-tests (assignability), never by reflection, dynamic activation, or attribute scanning. This
+  is the Lane-F AOT guardrail: metadata is discovered, never inferred at runtime.
+
+### `GetMetadata<T>` is last-wins
+
+`GetMetadata<T>()` scans **from the end** and returns the first (i.e. last-registered) item
+assignable to `T`. This gives the intuitive "most specific declaration wins" behavior when metadata
+is layered by scope:
+
+```
+[ group-level AuthMetadata("members"), endpoint-level AuthMetadata("admins") ]
+GetMetadata<AuthMetadata>()  ->  AuthMetadata("admins")   // endpoint overrides group
+```
+
+`GetOrderedMetadata<T>()` returns **all** matches in registration order, for consumers that
+genuinely aggregate. Both accept `where T : class` so the return type is a clean nullable reference,
+matching the well-established endpoint-metadata idiom.
+
+### Why a public concrete companion, not a fully-hidden impl
+
+The repo convention is interface-first with `internal` implementations. Value-carrying collections
+that downstream code must *construct* are the sanctioned exception, and the library already applies
+it (`RouteValueDictionary` is public concrete; `HttpFeatureCollection` is a public concrete companion
+to `IHttpFeatureCollection`). `RouterRouteMetadataCollection` follows the same pattern:
+`IRouterRouteMetadataCollection` is the read contract consumers depend on, and the public sealed
+`RouterRouteMetadataCollection` is the constructor producers (route mapping, route groups, source
+generators — some in *other* assemblies) use to build the bag. It rejects `null` items, copies its
+source array defensively, and exposes a value-type `Enumerator` for allocation-free `foreach`,
+mirroring `RouteValueDictionary.Enumerator` in this same library.
+
+### Metadata lives on the route
+
+`IRouterRoute.Metadata` exposes the bag. `Route` accepts it through metadata-aware constructors; the
+pre-existing constructors default to `RouterRouteMetadataCollection.Empty`, so `Metadata` is **never
+null**. This keeps the addition additive: existing call sites that build a `Route` without metadata
+compile and behave unchanged, and the matcher (`Route.TryMatch`/`TryMatchPath`) is untouched by the
+metadata seam.
+
+## Route-match state as a typed feature (#150)
+
+### From `Items` strings to `Features` types
+
+Route match state was previously stashed in `IHttpContext.Items` under two magic-string keys. That is
+the loosely-typed, ad-hoc extensibility channel; route match state is neither ad-hoc nor loosely-typed.
+It now lives in the strongly-typed `IHttpContext.Features` collection as a single `IRouteMatchFeature`:
+
+```csharp
+public interface IRouteMatchFeature : IHttpFeature
+{
+    IRouterRoute? Route { get; }                   // the matched endpoint
+    RouteValueDictionary? Values { get; }          // captured route values
+    IRouterRouteMetadataCollection Metadata { get; }  // Route?.Metadata ?? Empty
+}
+```
+
+`Metadata` is surfaced directly on the feature because, in this routing model, **the matched route
+*is* the endpoint** — there is no separate `Endpoint` type to indirect through. Consumers therefore
+read one feature and reach the endpoint-metadata seam without a second hop.
+
+Both `Router.RouteAsync` and the `UseRouting` middleware install the feature via `SetRouteMatch` on a
+successful match. Resolution is type-keyed (`context.Features.Get<IRouteMatchFeature>()`), so there are
+no shared string constants across assemblies and no reflection — `Get<TFeature>()` is an `OfType` scan.
+
+### Extension surface
+
+`HttpContextRoutingExtensions` is the ergonomic skin over the feature:
+
+| Member | Returns | Notes |
+|---|---|---|
+| `SetRouteMatch(route, values)` | `void` | Installs/replaces the `IRouteMatchFeature`. |
+| `GetRouteMatch()` | `IRouteMatchFeature?` | The whole feature, or `null` when unmatched. |
+| `TryGetRoute(out route)` | `bool` | Matched route, from the feature. |
+| `TryGetRouteValues(out values)` | `bool` | Captured values, from the feature. |
+| `GetEndpointMetadata()` | `IRouterRouteMetadataCollection` | Matched route's metadata, or `Empty`. |
+| `GetEndpointMetadata<T>()` | `T?` | Last-wins metadata lookup for the matched endpoint. |
+
+When nothing has matched, the `GetEndpointMetadata*` accessors degrade to `Empty`/`null` rather than
+throwing — metadata queries are safe to make unconditionally.
+
 ## Pipeline integration (`UseRouting`)
 
 The `UseRouting` middleware resolves the `IRouterFeature`, calls `router.Match(context)` once,
@@ -140,25 +243,42 @@ the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls throug
 
 ## AOT posture
 
-- No reflection, no runtime code generation, no dynamic activation anywhere in the match path —
-  the library is `IsAotCompatible` and trim-safe.
+- No reflection, no runtime code generation, no dynamic activation anywhere in the match path or the
+  metadata seam — the library is `IsAotCompatible` and trim-safe.
 - Parameter policies are explicit objects resolved through a map, not reflected constructors.
-- Source-generated endpoint **binding** (turning a matched route into typed handler arguments)
-  is intentionally out of scope here and is delivered by the analyzer work in #796; the matcher
-  produces a `RouteValueDictionary` of strings and lets that layer bind.
+- Endpoint-metadata discovery (`GetMetadata<T>`, feature resolution) is `is`-test / `OfType` based, so
+  it is safe for #796 (source-generated binding) to emit metadata objects at build time and for #790
+  (auth) to read them at request time under NativeAOT and trimming.
+- Source-generated endpoint **binding** (turning a matched route into typed handler arguments) is
+  intentionally out of scope here and is delivered by the analyzer work in #796; the matcher produces a
+  `RouteValueDictionary` of strings and lets that layer bind.
 
 ## Lifecycle and immutability
 
-- `RoutePattern` and `Route` are immutable once constructed.
+- `RoutePattern`, `Route`, and `IRouterRouteMetadataCollection` are immutable once constructed.
 - `Router` snapshots its routes into an immutable list and precomputes the precedence-ordered
   evaluation array in its constructor. A router instance is therefore safe to share across
   concurrent requests; there is no per-request mutable router state.
-- `RouteMatch` is an immutable value; the only mutable output is the per-request
-  `RouteValueDictionary`.
+- `RouteMatch` is an immutable value; the only mutable per-request outputs are the
+  `RouteValueDictionary` and the installed `IRouteMatchFeature`.
+- Metadata construction throws `ArgumentException` on a `null` item so a malformed metadata list fails
+  at the producer, not at a later consumer.
+
+## Family relationships / fan-out
+
+The endpoint-metadata seam (#150) is consumed by:
+
+- **#786 Route groups (`MapGroup`)** — compose group metadata into each child route by concatenating
+  into a new `RouterRouteMetadataCollection` (last-wins makes endpoint-level override group-level).
+- **#788 Host-based matching (`RequireHost`)** — contributes host metadata the matcher consults.
+- **#790 Auth scheme model / handlers** — read authorization metadata off the matched endpoint via
+  `GetEndpointMetadata<T>()`.
+- **#796 Source-generated binding** — emits metadata objects at build time instead of reflecting over
+  handler signatures at runtime.
+- **#789 Typed route values / per-app router state** — builds on the route model and match feature here.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 
-- **Endpoint metadata bag** — #150 (`IRouterRoute` metadata seam that auth/CORS/OpenAPI consume).
 - **Typed route values, richer constraints, per-app router state** — #789.
 - **Route groups (`MapGroup`)** — #786.
 - **Named routes + link generation (outbound URL building)** — #787. `OutboundPrecedence` is
@@ -166,6 +286,8 @@ the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls throug
 - **Host-based matching (`RequireHost`)** — #788.
 - **Source-generated binding + validation** — #796.
 - **Result writers / content negotiation** — #149.
+- **A separate `IEndpoint`/`Endpoint` type** — the matched route is the endpoint. A dedicated endpoint
+  abstraction can be layered later if named routes (#787) require it; it is not introduced speculatively.
 
 ## Standards
 

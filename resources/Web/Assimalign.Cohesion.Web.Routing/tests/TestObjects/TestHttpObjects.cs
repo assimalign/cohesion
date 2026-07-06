@@ -62,11 +62,14 @@ internal sealed class RecordingRouterRouteHandler : IRouterRouteHandler
 {
     public bool WasInvoked { get; private set; }
 
+    public int InvocationCount { get; private set; }
+
     public IHttpContext? Context { get; private set; }
 
     public Task InvokeAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         WasInvoked = true;
+        InvocationCount++;
         Context = context;
         return Task.CompletedTask;
     }
