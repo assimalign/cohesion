@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 /// A read-only <see cref="Stream"/> over the inbound DATA of a single HTTP/2
 /// stream. The frame pump writes decoded <see cref="Http2DataChunk"/>s to the
 /// backing channel as they arrive; the application reads them here, and each
-/// fully-consumed chunk credits its flow-control cost back to the peer via
-/// <see cref="IHttp2RequestBodySink"/>.
+/// fully-consumed chunk credits its flow-control cost back to the peer through
+/// the connection's consume callback.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -34,7 +34,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 internal sealed class Http2RequestBodyStream : Stream
 {
     private readonly ChannelReader<Http2DataChunk> _reader;
-    private readonly IHttp2RequestBodySink _sink;
+    // Invoked as each chunk is fully consumed to credit its flow-control cost
+    // back to the peer — (streamId, flowControlLength, cancellationToken).
+    // A plain delegate rather than a one-method interface: the connection context
+    // is the only implementer, matching how the HTTP/1.1 reader takes its
+    // timeout-phase signals as delegates.
+    private readonly Func<int, int, CancellationToken, ValueTask> _onConsumed;
     private readonly int _streamId;
     private readonly CancellationToken _requestAborted;
 
@@ -44,12 +49,12 @@ internal sealed class Http2RequestBodyStream : Stream
 
     public Http2RequestBodyStream(
         ChannelReader<Http2DataChunk> reader,
-        IHttp2RequestBodySink sink,
+        Func<int, int, CancellationToken, ValueTask> onConsumed,
         int streamId,
         CancellationToken requestAborted)
     {
         _reader = reader;
-        _sink = sink;
+        _onConsumed = onConsumed;
         _streamId = streamId;
         _requestAborted = requestAborted;
     }
@@ -211,7 +216,7 @@ internal sealed class Http2RequestBodyStream : Stream
 
         if (debt > 0)
         {
-            await _sink.OnRequestBodyConsumedAsync(_streamId, debt, cancellationToken).ConfigureAwait(false);
+            await _onConsumed(_streamId, debt, cancellationToken).ConfigureAwait(false);
         }
     }
 }

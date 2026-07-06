@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
@@ -457,7 +458,7 @@ internal sealed class Http2Stream
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
         CancellationToken connectionAborted,
-        IHttp2RequestBodySink bodySink)
+        Func<int, int, CancellationToken, ValueTask> onBodyConsumed)
     {
         if (!HeadersCompleted)
         {
@@ -495,7 +496,7 @@ internal sealed class Http2Stream
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
         // bounded by the advertised receive window and paced by the reader.
-        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, bodySink, StreamId, requestAborted);
+        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted);
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3

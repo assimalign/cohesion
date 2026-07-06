@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 
-internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable, IHttp2RequestBodySink
+internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
 {
     private static readonly byte[] ClientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
@@ -425,7 +425,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Credits back the flow-control cost of a request-body chunk the application
+    /// has finished consuming. Wired into each stream's <see cref="Http2RequestBodyStream"/>
+    /// as its consume callback.
+    /// </summary>
     /// <remarks>
     /// RFC 9113 §5.2 / §6.9 — request-body flow control is receiver-driven and
     /// consumption-paced. As the application drains a buffered <see cref="Http2DataChunk"/>,
@@ -434,7 +438,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// emitted, which is what resumes a sender that stalled because the reader was
     /// slow.
     /// </remarks>
-    public async ValueTask OnRequestBodyConsumedAsync(int streamId, int flowControlLength, CancellationToken cancellationToken)
+    private async ValueTask OnRequestBodyConsumedAsync(int streamId, int flowControlLength, CancellationToken cancellationToken)
     {
         if (flowControlLength <= 0)
         {
@@ -1103,7 +1107,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // fire RequestAborted on the application's IHttpContext.
         try
         {
-            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None, this);
+            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None, OnRequestBodyConsumedAsync);
         }
         catch (HPack.HPackDecodingException error)
         {
