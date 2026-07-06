@@ -1,19 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<IsPackable>false</IsPackable>
-	</PropertyGroup>
-	<ItemGroup>
-		<CohesionPackageReference Include="coverlet.collector" />
-		<CohesionPackageReference Include="Shouldly" />
-		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-		<CohesionPackageReference Include="Shouldly" />
-		<CohesionPackageReference Include="xunit" />
-		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
-	</ItemGroup>
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="EnsureVSTestSupportFiles" AfterTargets="Build">
+    <Copy SourceFiles="$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll"
+          DestinationFiles="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(OutputPath)xunit.runner.visualstudio.testadapter.dll'))"
+          SkipUnchangedFiles="true"
+          Condition="'$(Pkgxunit_runner_visualstudio)' != '' and Exists('$(Pkgxunit_runner_visualstudio)\build\net8.0\xunit.runner.visualstudio.testadapter.dll')" />
+  </Target>
+
 </Project>
