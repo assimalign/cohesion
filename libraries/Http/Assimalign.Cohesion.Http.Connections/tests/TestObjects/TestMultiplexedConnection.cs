@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 internal sealed class TestMultiplexedConnection : MultiplexedConnection
 {
     private readonly Queue<Connection> _pendingStreams;
+    private readonly List<TestConnection> _openedStreams = new();
     private readonly CancellationTokenSource _closedSource = new();
     private readonly ConnectionId _id = ConnectionId.New();
     private ConnectionState _state = ConnectionState.Open;
@@ -27,6 +28,19 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
     }
 
     public bool IsDisposed { get; private set; }
+
+    /// <summary>
+    /// The outbound streams the holder opened via <see cref="OpenStreamAsync"/>,
+    /// in the order they were opened. The HTTP/3 engine opens its control stream
+    /// first, so <see cref="ControlStream"/> is the first entry.
+    /// </summary>
+    public IReadOnlyList<TestConnection> OpenedStreams => _openedStreams;
+
+    /// <summary>
+    /// The first outbound stream opened by the holder — the server's HTTP/3
+    /// control stream — or <see langword="null"/> if none has been opened yet.
+    /// </summary>
+    public TestConnection? ControlStream => _openedStreams.Count > 0 ? _openedStreams[0] : null;
 
     public override ConnectionId Id => _id;
 
@@ -72,6 +86,11 @@ internal sealed class TestMultiplexedConnection : MultiplexedConnection
 
     public override ValueTask<Connection> OpenStreamAsync(ConnectionDirection direction = ConnectionDirection.Bidirectional, CancellationToken cancellationToken = default)
     {
-        return ValueTask.FromResult<Connection>(new TestConnection(direction: direction));
+        // Capture the opened outbound stream so tests can inspect what the
+        // holder wrote to it (e.g. the server control stream's SETTINGS frame)
+        // and observe that it stays open while requests are served.
+        TestConnection stream = new(direction: direction);
+        _openedStreams.Add(stream);
+        return ValueTask.FromResult<Connection>(stream);
     }
 }
