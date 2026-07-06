@@ -19,6 +19,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
     private readonly Http3PeerSettings _peerSettings = new();
+    private readonly CancellationTokenSource _teardownSource = new();
+    private IConnection? _controlStream;
+    private Task? _peerControlDrainTask;
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
@@ -41,6 +44,15 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// </summary>
     /// <remarks>
     /// <para>
+    /// Before accepting any inbound stream the server opens its own outbound
+    /// unidirectional control stream and sends SETTINGS as the first frame
+    /// (RFC 9114 §6.2.1). That control stream stays open for the connection's
+    /// lifetime — it is a critical stream — and is torn down connection-first
+    /// (see <see cref="ShutdownAsync"/>). SETTINGS emission is best-effort: if
+    /// the QUIC connection is already gone, the accept loop below observes the
+    /// same failure and terminates.
+    /// </para>
+    /// <para>
     /// Failure handling is split between two scopes. Per-stream failures —
     /// truncated frames, malformed QPACK, varint overflow, a per-stream
     /// <see cref="IOException"/> — let the loop continue accepting more
@@ -56,47 +68,160 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            StreamAcceptOutcome accept = await TryAcceptInboundAsync(cancellationToken).ConfigureAwait(false);
+            // RFC 9114 §6.2.1 — each peer MUST open a control stream and send
+            // SETTINGS as its first frame. Do this before (and independently
+            // of) accepting request streams.
+            await SendControlStreamSettingsAsync(cancellationToken).ConfigureAwait(false);
 
-            if (accept.TerminateConnection)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                yield break;
-            }
-            if (accept.StreamConnection is null)
-            {
-                // Non-terminating accept failure is not expected, but guard
-                // anyway: skip and try the next inbound.
-                continue;
-            }
+                StreamAcceptOutcome accept = await TryAcceptInboundAsync(cancellationToken).ConfigureAwait(false);
 
-            IConnection streamConnection = accept.StreamConnection;
-
-            // RFC 9114 §6 — a bidirectional stream is a request stream; the
-            // peer's unidirectional streams carry a type prefix (control,
-            // QPACK encoder/decoder, push) and are demultiplexed separately.
-            if (streamConnection.Direction != ConnectionDirection.Bidirectional)
-            {
-                if (await TryHandleUnidirectionalStreamAsync(streamConnection, cancellationToken).ConfigureAwait(false))
+                if (accept.TerminateConnection)
                 {
-                    // A control-stream protocol violation — duplicate control
-                    // or QPACK stream, missing/!SETTINGS first frame, or a
-                    // client-created push stream — is a connection error
-                    // (RFC 9114 §6.2). Terminate the connection.
                     yield break;
                 }
+                if (accept.StreamConnection is null)
+                {
+                    // Non-terminating accept failure is not expected, but guard
+                    // anyway: skip and try the next inbound.
+                    continue;
+                }
 
-                continue;
-            }
+                IConnection streamConnection = accept.StreamConnection;
 
-            Http3Context? context = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+                // RFC 9114 §6 — a bidirectional stream is a request stream; the
+                // peer's unidirectional streams carry a type prefix (control,
+                // QPACK encoder/decoder, push) and are demultiplexed separately.
+                if (streamConnection.Direction != ConnectionDirection.Bidirectional)
+                {
+                    if (await TryHandleUnidirectionalStreamAsync(streamConnection, cancellationToken).ConfigureAwait(false))
+                    {
+                        // A control-stream protocol violation — duplicate control
+                        // or QPACK stream, missing/!SETTINGS first frame, or a
+                        // client-created push stream — is a connection error
+                        // (RFC 9114 §6.2). Terminate the connection.
+                        yield break;
+                    }
 
-            if (context is not null)
-            {
-                yield return context;
+                    continue;
+                }
+
+                Http3Context? context = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+
+                if (context is not null)
+                {
+                    yield return context;
+                }
             }
         }
+        finally
+        {
+            await ShutdownAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Opens the server's outbound unidirectional control stream and writes the
+    /// stream-type prefix (0x00) followed by a SETTINGS frame as its first frame
+    /// (RFC 9114 §6.2.1 / §7.2.4). The stream is retained and deliberately left
+    /// open — it is a critical stream (RFC 9114 §6.2.1) that must not be
+    /// completed, aborted, or FIN'd until connection teardown, or a peer fails
+    /// the connection with <c>H3_CLOSED_CRITICAL_STREAM</c>.
+    /// </summary>
+    /// <remarks>
+    /// Best-effort: opening an outbound stream requires a live QUIC connection.
+    /// If the connection is already gone the accept loop observes the same
+    /// failure and terminates, so a setup failure here is swallowed rather than
+    /// surfaced into the consumer's enumeration.
+    /// </remarks>
+    private async Task SendControlStreamSettingsAsync(CancellationToken cancellationToken)
+    {
+        if (_controlStream is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            IConnection controlStream = await _connection
+                .OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken)
+                .ConfigureAwait(false);
+            _controlStream = controlStream;
+
+            // Write the control-stream preamble directly to the outbound pipe.
+            // PipeWriter.WriteAsync flushes, so the SETTINGS frame reaches the
+            // transport as the stream's first bytes. The output is not completed
+            // — the critical stream stays open for the connection lifetime.
+            byte[] preamble = BuildControlStreamPreamble();
+            await controlStream.Output.WriteAsync(preamble, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (QuicException)
+        {
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+        }
+    }
+
+    /// <summary>
+    /// Builds the bytes for the server control stream's opening: the RFC 9114
+    /// §6.2 unidirectional stream-type prefix (0x00 = control) followed by a
+    /// SETTINGS frame (type 0x04) carrying the server's advertised settings.
+    /// </summary>
+    private static byte[] BuildControlStreamPreamble()
+    {
+        using MemoryStream buffer = new();
+
+        // RFC 9114 §6.2 — the control stream is identified by a stream-type
+        // varint of 0x00 as its first bytes.
+        QuicVariableLengthInteger.Write(buffer, Http3StreamType.Control);
+
+        // RFC 9114 §6.2.1 / §7.2.4 — the first frame MUST be SETTINGS.
+        byte[] settings = Http3LocalSettings.EncodePayload();
+        QuicVariableLengthInteger.Write(buffer, (long)Http3FrameType.Settings);
+        QuicVariableLengthInteger.Write(buffer, settings.Length);
+        buffer.Write(settings, 0, settings.Length);
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Tears the connection context down when the receive enumerable completes:
+    /// signals the inbound control-stream drain to stop and waits for it to
+    /// finish. The outbound control stream is deliberately not completed here —
+    /// teardown stays connection-first, so the multiplexed connection's own
+    /// disposal (via <see cref="Http3Connection.DisposeAsync"/>) closes the QUIC
+    /// connection before releasing its streams, and a peer never observes
+    /// <c>H3_CLOSED_CRITICAL_STREAM</c> ahead of <c>CONNECTION_CLOSE</c>.
+    /// </summary>
+    private async Task ShutdownAsync()
+    {
+        if (!_teardownSource.IsCancellationRequested)
+        {
+            _teardownSource.Cancel();
+        }
+
+        if (_peerControlDrainTask is not null)
+        {
+            // The drain swallows its own failures, so awaiting it here cannot
+            // throw; it just lets the background loop unwind before teardown
+            // completes.
+            await _peerControlDrainTask.ConfigureAwait(false);
+        }
+
+        _teardownSource.Dispose();
     }
 
     /// <summary>
@@ -174,7 +299,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Reads and applies the peer's control stream. Enforces a single control
-    /// stream and that its first frame is SETTINGS (RFC 9114 §6.2.1 / §7.2.4).
+    /// stream and that its first frame is SETTINGS (RFC 9114 §6.2.1 / §7.2.4),
+    /// then hands the stream to a background drain for the connection lifetime.
     /// Returns <see langword="true"/> on a protocol violation.
     /// </summary>
     private async Task<bool> TryHandleControlStreamAsync(PipeReader reader, CancellationToken cancellationToken)
@@ -190,8 +316,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         try
         {
             // RFC 9114 §6.2.1 / §7.2.4 — the first frame on the control stream
-            // MUST be SETTINGS. The frame is read and applied; later control
-            // frames are not acted on in this supported subset.
+            // MUST be SETTINGS. Read and apply it synchronously so a missing or
+            // non-SETTINGS opening frame terminates the connection inline.
             long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
             long? frameLength = frameType is null
                 ? null
@@ -205,13 +331,68 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
             byte[] payload = await ReadExactAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
             ApplySettings(payload);
-            return false;
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
-            // The control stream is critical; a read/parse failure is a
-            // connection error (H3_FRAME_ERROR / H3_CLOSED_CRITICAL_STREAM).
+            // The control stream is critical; a read/parse failure on the
+            // mandatory SETTINGS frame is a connection error
+            // (H3_FRAME_ERROR / H3_CLOSED_CRITICAL_STREAM).
             return true;
+        }
+
+        // RFC 9114 §6.2.1 — the control stream stays open for the connection
+        // lifetime. Drain any post-SETTINGS frames on a background task so they
+        // cannot accumulate unread in the pipe and so the accept loop is never
+        // blocked waiting on the long-lived control stream.
+        _peerControlDrainTask = DrainPeerControlStreamAsync(reader, cancellationToken);
+        return false;
+    }
+
+    /// <summary>
+    /// Drains post-SETTINGS frames from the peer's control stream for the
+    /// connection lifetime, parsing and discarding each frame (RFC 9114 §7.2).
+    /// GOAWAY (§7.2.6) and MAX_PUSH_ID (§7.2.7) are read but inert in this
+    /// subset: GOAWAY-driven graceful drain is deferred, and the server never
+    /// pushes, so MAX_PUSH_ID has no effect. Draining prevents unread control
+    /// frames from accumulating in the pipe. The loop stops on end-of-stream,
+    /// connection teardown, or a per-stream parse failure, and never throws
+    /// into the receive loop.
+    /// </summary>
+    private async Task DrainPeerControlStreamAsync(PipeReader reader, CancellationToken receiveToken)
+    {
+        using CancellationTokenSource linked =
+            CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
+        CancellationToken cancellationToken = linked.Token;
+
+        try
+        {
+            while (true)
+            {
+                long? frameType = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+                if (frameType is null)
+                {
+                    // Clean end of the peer control stream — nothing more to drain.
+                    break;
+                }
+
+                long? frameLength = await ReadVarintAsync(reader, cancellationToken).ConfigureAwait(false);
+                if (frameLength is null)
+                {
+                    break;
+                }
+
+                await SkipAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Connection teardown, or the receive token firing — stop draining.
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+            // A malformed post-SETTINGS control frame. Strict HTTP/3 would treat
+            // this as a connection error; in this parse-and-discard subset the
+            // drain stops and connection teardown closes the QUIC connection.
         }
     }
 
@@ -296,6 +477,38 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             }
 
             reader.AdvanceTo(buffer.Start, buffer.End);
+        }
+    }
+
+    /// <summary>
+    /// Reads and discards exactly <paramref name="length"/> bytes off the pipe,
+    /// buffering across reads. Used to drain the payload of a post-SETTINGS
+    /// control frame without allocating a buffer for bytes that are thrown away.
+    /// Throws <see cref="EndOfStreamException"/> when the stream ends first.
+    /// </summary>
+    private static async Task SkipAsync(PipeReader reader, int length, CancellationToken cancellationToken)
+    {
+        int remaining = length;
+
+        while (remaining > 0)
+        {
+            ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            ReadOnlySequence<byte> buffer = result.Buffer;
+
+            if (buffer.Length >= remaining)
+            {
+                reader.AdvanceTo(buffer.GetPosition(remaining));
+                return;
+            }
+
+            if (result.IsCompleted)
+            {
+                reader.AdvanceTo(buffer.End);
+                throw new EndOfStreamException("An HTTP/3 control frame was truncated.");
+            }
+
+            remaining -= (int)buffer.Length;
+            reader.AdvanceTo(buffer.End);
         }
     }
 

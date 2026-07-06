@@ -17,22 +17,28 @@ internal abstract class TransportHttpContext : HttpContext
         TransportHttpRequest request,
         TransportHttpResponse response,
         HttpConnectionInfo connectionInfo,
-        CancellationToken requestAborted)
+        CancellationToken requestAborted,
+        IHttpFeatureCollection? features = null)
     {
         Version = version;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo;
         _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
-        // If the listener's HttpConnectionListenerOptions.CreateFeatures
-        // factory returned a collection, wrap it as the defaults source for
-        // the per-request collection so features the user supplied are
-        // visible via Get/iteration, but middleware Set calls land on the
-        // local layer (they do not mutate the factory's collection). On
-        // disposal the effective collection (local + defaults) is walked
-        // and every feature implementing IDisposable / IAsyncDisposable is
-        // disposed, regardless of which layer it lives on.
-        Features = new HttpFeatureCollection();
+        // The parser pre-populates the feature collection when request-parse interceptors
+        // attached features during the read (see IHttpRequestInterceptor); it is used directly —
+        // no defaults-wrapper layer, which would add a second dictionary probe to every Get on
+        // the hot path. A null/foreign collection degrades gracefully: null gets a fresh empty
+        // collection (the zero-interceptor fast path), and a non-HttpFeatureCollection
+        // implementation is wrapped as a read-through defaults source. On disposal the effective
+        // collection is walked and every feature implementing IDisposable / IAsyncDisposable is
+        // disposed.
+        Features = features switch
+        {
+            null => new HttpFeatureCollection(),
+            HttpFeatureCollection concrete => concrete,
+            _ => new HttpFeatureCollection(features),
+        };
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
 
         // Wire the back-references last so the request and response can resolve
@@ -101,10 +107,10 @@ internal abstract class TransportHttpContext : HttpContext
     /// in <see cref="Features"/> is disposed), then disposing the request
     /// and response body streams. The contract is request-scoped: a
     /// feature whose state needs deterministic cleanup at request end
-    /// implements one of the disposal interfaces and is wired up at
-    /// construction time via the
-    /// <see cref="HttpConnectionListenerOptions.CreateFeatures"/> factory
-    /// (or attached by middleware).
+    /// implements one of the disposal interfaces and is attached either at
+    /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
+    /// (via <see cref="HttpConnectionListenerOptions.Interceptors"/>) or
+    /// later by middleware.
     /// </summary>
     public override async ValueTask DisposeAsync()
     {

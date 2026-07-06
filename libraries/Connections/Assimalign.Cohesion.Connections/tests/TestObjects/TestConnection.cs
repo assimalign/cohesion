@@ -4,93 +4,65 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.InMemory;
+
 namespace Assimalign.Cohesion.Connections.Tests;
 
 /// <summary>
-/// An in-memory <see cref="Connection"/> double built over two <see cref="Pipe"/> instances.
-/// The far ends are exposed so a test can play the remote peer: bytes written to
-/// <see cref="PeerOutput"/> appear on the connection's <see cref="Input"/>, and bytes the
+/// An in-memory <see cref="Connection"/> double backed by the shared
+/// <see cref="InMemoryConnectionPair"/> driver. The near end is exposed through the standard
+/// connection surface, and the far (peer) end is exposed so a test can play the remote peer: bytes
+/// written to <see cref="PeerOutput"/> appear on the connection's <see cref="Input"/>, and bytes the
 /// connection writes to <see cref="Output"/> can be observed on <see cref="PeerInput"/>.
 /// </summary>
 internal sealed class TestConnection : Connection
 {
-    private readonly Pipe _receivePipe;
-    private readonly Pipe _sendPipe;
-    private readonly CancellationTokenSource _closedSource = new();
+    private readonly Connection _self;
+    private readonly Connection _peer;
     private readonly ConnectionDirection _direction;
-    private readonly ConnectionCapabilities _capabilities;
-    private readonly ConnectionId _id = ConnectionId.New();
-    private ConnectionState _state = ConnectionState.Open;
 
     public TestConnection(
         ConnectionDirection direction = ConnectionDirection.Bidirectional,
         ConnectionCapabilities? capabilities = null)
     {
         _direction = direction;
-        _capabilities = capabilities ?? DefaultCapabilities;
-        _receivePipe = new Pipe(new PipeOptions(useSynchronizationContext: false));
-        _sendPipe = new Pipe(new PipeOptions(useSynchronizationContext: false));
+        (_self, _peer) = InMemoryConnectionPair.Create(
+            capabilities ?? DefaultCapabilities,
+            clientEndPoint: new IPEndPoint(IPAddress.Loopback, 11000),
+            serverEndPoint: new IPEndPoint(IPAddress.Loopback, 12000));
     }
 
-    public static ConnectionCapabilities DefaultCapabilities { get; } = new(
-        ConnectionProtocol.Memory,
-        ConnectionDelivery.Stream,
-        IsReliable: true,
-        IsOrdered: true,
-        IsMultiplexed: false,
-        Security: ConnectionSecurity.None);
+    public static ConnectionCapabilities DefaultCapabilities => InMemoryConnectionPair.DefaultCapabilities;
 
     /// <summary>
     /// Gets the far-end writer; bytes written here arrive on the connection's <see cref="Input"/>.
     /// </summary>
-    public PipeWriter PeerOutput => _receivePipe.Writer;
+    public PipeWriter PeerOutput => _peer.Output;
 
     /// <summary>
     /// Gets the far-end reader; it observes the bytes the connection wrote to <see cref="Output"/>.
     /// </summary>
-    public PipeReader PeerInput => _sendPipe.Reader;
+    public PipeReader PeerInput => _peer.Input;
 
-    public bool IsAborted { get; private set; }
+    public override ConnectionId Id => _self.Id;
 
-    public bool IsDisposed { get; private set; }
+    public override EndPoint? LocalEndPoint => _self.LocalEndPoint;
 
-    public Exception? AbortReason { get; private set; }
+    public override EndPoint? RemoteEndPoint => _self.RemoteEndPoint;
 
-    public override ConnectionId Id => _id;
+    public override PipeReader Input => _self.Input;
 
-    public override EndPoint? LocalEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 11000);
-
-    public override EndPoint? RemoteEndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 12000);
-
-    public override PipeReader Input => _receivePipe.Reader;
-
-    public override PipeWriter Output => _sendPipe.Writer;
+    public override PipeWriter Output => _self.Output;
 
     public override ConnectionDirection Direction => _direction;
 
-    public override ConnectionCapabilities Capabilities => _capabilities;
+    public override ConnectionCapabilities Capabilities => _self.Capabilities;
 
-    public override ConnectionState State => _state;
+    public override ConnectionState State => _self.State;
 
-    public override CancellationToken ConnectionClosed => _closedSource.Token;
+    public override CancellationToken ConnectionClosed => _self.ConnectionClosed;
 
-    public override void Abort(Exception? reason = null)
-    {
-        IsAborted = true;
-        AbortReason = reason;
-        _state = ConnectionState.Aborted;
-        _closedSource.Cancel();
-    }
+    public override void Abort(Exception? reason = null) => _self.Abort(reason);
 
-    public override ValueTask DisposeAsync()
-    {
-        IsDisposed = true;
-        _state = ConnectionState.Closed;
-        _receivePipe.Writer.Complete();
-        _receivePipe.Reader.Complete();
-        _sendPipe.Writer.Complete();
-        _sendPipe.Reader.Complete();
-        _closedSource.Cancel();
-        return ValueTask.CompletedTask;
-    }
+    public override ValueTask DisposeAsync() => _self.DisposeAsync();
 }

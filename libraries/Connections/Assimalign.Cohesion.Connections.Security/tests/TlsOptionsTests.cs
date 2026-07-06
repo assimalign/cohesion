@@ -7,6 +7,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -47,7 +48,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_AsClientAgainstSilentPeer_ShouldCancelAfterHandshakeTimeout()
     {
         // Arrange: the server end never participates, so the client handshake can only time out.
-        (TestPipeConnection client, TestPipeConnection _) = InMemoryConnectionPair.Create();
+        (Connection client, Connection _) = InMemoryConnectionPair.Create();
         TlsClientOptions options = new()
         {
             HandshakeTimeout = TimeSpan.FromMilliseconds(100),
@@ -70,7 +71,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_AsServerAgainstSilentPeer_ShouldCancelAfterHandshakeTimeout()
     {
         // Arrange: no client hello ever arrives, so the server handshake can only time out.
-        (TestPipeConnection _, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection _, Connection server) = InMemoryConnectionPair.Create();
         TlsServerOptions options = new()
         {
             HandshakeTimeout = TimeSpan.FromMilliseconds(100),
@@ -92,7 +93,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_WithAlreadyCanceledToken_ShouldThrowOperationCanceledException()
     {
         // Arrange
-        (TestPipeConnection client, TestPipeConnection _) = InMemoryConnectionPair.Create();
+        (Connection client, Connection _) = InMemoryConnectionPair.Create();
         TlsClientOptions options = new()
         {
             AuthenticationOptions =

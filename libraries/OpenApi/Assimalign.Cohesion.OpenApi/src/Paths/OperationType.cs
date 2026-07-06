@@ -31,5 +31,8 @@ public enum OperationType
     Patch,
 
     /// <summary>The HTTP TRACE method.</summary>
-    Trace
+    Trace,
+
+    /// <summary>The HTTP QUERY method (OpenAPI 3.2+), as defined by the IETF safe-method-with-body draft or its RFC successor.</summary>
+    Query
 }

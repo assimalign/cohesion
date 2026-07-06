@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>The OpenApi document generation pipeline. Consumes the flat intermediate metadata produced by the attribute mapper or the AOT-safe source generator and assembles a version-targeted canonical OpenApiDocument, coexisting with fluent and manual model construction. NativeAOT- and trimming-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+	</ItemGroup>
+</Project>

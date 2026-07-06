@@ -55,10 +55,27 @@ explicit through two cooperating pieces:
 | `SchemaNumericExclusiveBounds` | – | ✅ | ✅ | numeric `exclusiveMinimum/Maximum` (3.0 = boolean) |
 | `SchemaConst` | – | ✅ | ✅ | JSON Schema `const` |
 | `SchemaExamples` | – | ✅ | ✅ | schema-level `examples` array |
+| `SchemaExtendedVocabulary` | – | ✅ | ✅ | 2020-12 keywords: `$defs`, `$id`, `$schema`, `$anchor`, `$dynamicRef`/`$dynamicAnchor`, `$comment`, `if`/`then`/`else`, `dependentRequired`/`dependentSchemas`, `prefixItems`, `contains`/`minContains`/`maxContains`, `patternProperties`, `propertyNames`, `unevaluatedItems`/`unevaluatedProperties`, `contentEncoding`/`contentMediaType`/`contentSchema` |
+| `SchemaReferenceSiblingKeywords` | – | ✅ | ✅ | keywords beside `$ref` in Schema Objects |
+| `SchemaBooleanForm` | – | ✅ | ✅ | boolean schemas `true`/`false` |
 | `PathItemAdditionalOperations` | – | – | ✅ | `additionalOperations` |
 | `DocumentSelf` | – | – | ✅ | top-level `$self` |
 | `TagExtendedMetadata` | – | – | ✅ | tag `summary`/`parent`/`kind` |
-| `OAuthDeviceAuthorizationFlow` | – | – | ✅ | OAuth `deviceAuthorization` flow |
+| `OAuthDeviceAuthorizationFlow` | – | – | ✅ | OAuth `deviceAuthorization` flow (+ `deviceAuthorizationUrl`) |
+| `ServerName` | – | – | ✅ | `server.name` |
+| `PathItemQueryOperation` | – | – | ✅ | `query` fixed operation field (HTTP QUERY) |
+| `ParameterQuerystringLocation` | – | – | ✅ | `in: querystring` |
+| `ParameterCookieStyle` | – | – | ✅ | `style: cookie` |
+| `MediaTypeStreamingFields` | – | – | ✅ | `itemSchema`, `prefixEncoding`, `itemEncoding` on Media Type; nested `encoding`/`prefixEncoding`/`itemEncoding` on Encoding |
+| `MediaTypeReference` | – | – | ✅ | Reference Object as a `content` map value |
+| `ResponseSummary` | – | – | ✅ | `response.summary` |
+| `ExampleDataAndSerializedValues` | – | – | ✅ | example `dataValue`/`serializedValue` |
+| `DiscriminatorDefaultMapping` | – | – | ✅ | discriminator `defaultMapping` |
+| `XmlNodeType` | – | – | ✅ | xml `nodeType` (deprecates `attribute`/`wrapped`) |
+| `SecuritySchemeOAuth2MetadataUrl` | – | – | ✅ | `oauth2MetadataUrl` (RFC 8414) |
+| `SecuritySchemeDeprecated` | – | – | ✅ | security scheme `deprecated` |
+| `ComponentsMediaTypes` | – | – | ✅ | `components.mediaTypes` |
+| `SecurityRequirementUriReference` | – | – | ✅ | Security Requirement names as Security Scheme URIs |
 
 ### Two normalized version differences
 
@@ -70,9 +87,22 @@ callers to think per-version. The serializer adapts them on the way out:
 - **Exclusive bounds** — `ExclusiveMinimum`/`ExclusiveMaximum` are numeric. 3.0 emits the paired
   `minimum`/`maximum` value plus a boolean flag; 3.1+ emits the numeric keyword directly.
 
-> Non-goal for Wave 1: arbitrary multi-type unions beyond the nullable idiom (e.g.
-> `type: ["string","integer"]`). The `Type` + `Nullable` shape covers the dominant case; broader unions
-> are a documented follow-up.
+### Full JSON Schema surfaces (3.1+)
+
+From 3.1 onward a Schema Object is a superset of JSON Schema draft 2020-12, which forces three shapes
+onto the model beyond the keyword list itself:
+
+- **Multi-type unions** — `Types` (an ordered list) is the authoritative surface; `Type` remains as a
+  convenience accessor over the head of the list so the dominant single-type case stays ergonomic.
+  `SchemaType.Null` is never stored: readers strip a `"null"` entry into `Nullable`, and writers add it
+  back for 3.1+ targets, so both spellings normalize to one wire form. A multi-entry list targeting 3.0
+  emits only the first type; validation flags the rest (`SchemaTypeArray`).
+- **Boolean schema forms** — `BooleanValue` marks the whole schema as the JSON Schema literal `true` or
+  `false`. Targeting 3.0 (which has no boolean form) the writer falls back to the structural
+  equivalents `{}` and `{"not": {}}`; validation flags the placement (`SchemaBooleanForm`).
+- **Keywords beside `$ref`** — a schema may carry `Reference` *and* other keywords (3.1+). Writing for
+  3.0 emits `$ref` alone (siblings are meaningless there and are dropped); validation flags the
+  combination (`SchemaReferenceSiblingKeywords`).
 
 ## The neutral node tree (`OpenApiNode`)
 
@@ -83,8 +113,8 @@ it belongs to the model.
 
 Critically, the serialization package reuses this same tree as its intermediate representation for the
 **entire** document: model → node tree (all version logic) → text. JSON and YAML differ only in the
-final node-tree-to-text renderer. That is the seam that makes a YAML reader/writer a drop-in addition
-(tracked as the required fast-follow, issue #532) without touching the model or the version logic.
+final node-tree-to-text renderer. That is the seam that made the YAML reader/writer (#532, built on
+the Cohesion `Content.Yaml` engine) a drop-in addition without touching the model or the version logic.
 
 ## Error model
 
@@ -101,7 +131,7 @@ package depends on the root model; no package depends on a sibling except throug
 | Package | Responsibility | Depends on | Status |
 |---|---|---|---|
 | `Assimalign.Cohesion.OpenApi` | Canonical model, version capability matrix, node tree | — | **this wave** |
-| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON I/O (YAML fast-follow) | model | **this wave** |
+| `…OpenApi.Serialization` | Model ↔ node-tree mapping; JSON and YAML I/O | model, Content.Yaml | **this wave** |
 | `…OpenApi.Validation` | Diagnostics + structural/semantic/version rules | model | **this wave** |
 | `…OpenApi.Fluent` | Fluent authoring builders | model | Wave 2 |
 | `…OpenApi.Attributes` | Attribute metadata model | model | Wave 2 |
@@ -125,6 +155,10 @@ is trimming- and NativeAOT-safe.
 
 - Fluent authoring, attribute model, source generation, version *transforms*, advanced authoring
   surfaces, official-example compliance corpus, and Web/ApiManager integration (later waves).
-- YAML I/O — architected for but deferred to the immediate fast-follow (#532).
 - A full JSON Schema 2020-12 conformance engine — the official-schema validation stage is an exposed
   extension point, not yet implemented.
+- The JSON Schema `$vocabulary` keyword — meta-schema authoring is out of scope; unknown `$` keywords
+  are not round-tripped.
+- *Resolution* semantics for `$self`, `$id`, `$anchor`, and `$dynamicRef` — the fields are modeled and
+  round-tripped verbatim; base-URI computation and reference resolution across documents are a later
+  concern (they matter to the compliance corpus, not to the model shape).

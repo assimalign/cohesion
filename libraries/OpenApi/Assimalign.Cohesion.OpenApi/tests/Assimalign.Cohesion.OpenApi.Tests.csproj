@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
@@ -10,6 +10,15 @@
 		<CohesionPackageReference Include="Shouldly" />
 	</ItemGroup>
 	<ItemGroup>
+		<!-- The compliance suite hosted here exercises the whole family end to end. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Versioning" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- The shared corpus fixtures are included through OpenApiCorpus.props, not the default glob. -->
+		<Compile Remove="Shared\**\*.cs" />
+	</ItemGroup>
+	<Import Project="Shared\OpenApiCorpus.props" />
 </Project>
