@@ -61,6 +61,16 @@ internal sealed class Http2Stream
     // undrained body) can race to complete it.
     private int _bodyCompleted;
 
+    // RFC 9113 §6.8 — graceful-close drain accounting, a tri-state latch:
+    // 0 = this stream was never counted as an in-flight exchange;
+    // 1 = counted (the pump dispatched its context and incremented the
+    //     connection's active-exchange count);
+    // 2 = accounted complete (exactly one completion path — response sent,
+    //     stream reset, or a truncated-input shutdown abort — claimed the
+    //     decrement). Interlocked because the pump, the request handler, and
+    //     the graceful-close path race for the transitions.
+    private int _exchangeAccounting;
+
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
     /// may transmit on this stream before the peer credits us with a
@@ -158,6 +168,31 @@ internal sealed class Http2Stream
     /// block is complete and it has not already been dispatched or closed.
     /// </summary>
     public bool IsHeadReady => HeadersCompleted && !ContextDispatched && State != Http2StreamState.Closed;
+
+    /// <summary>
+    /// Marks this stream as counted toward the connection's in-flight exchange
+    /// total for the RFC 9113 §6.8 graceful-close drain. Called by the pump,
+    /// paired with the connection-level increment, immediately before the
+    /// request context is handed to the consumer.
+    /// </summary>
+    public void MarkExchangeCounted()
+    {
+        Interlocked.CompareExchange(ref _exchangeAccounting, 1, 0);
+    }
+
+    /// <summary>
+    /// Atomically claims the single "exchange complete" accounting slot for this
+    /// stream. Returns <see langword="true"/> only for the first caller — and only
+    /// when the stream was previously counted via <see cref="MarkExchangeCounted"/>
+    /// — so the connection decrements its in-flight exchange count at most once
+    /// per counted stream and never for a stream that was refused, reset, or torn
+    /// down before dispatch.
+    /// </summary>
+    /// <returns><see langword="true"/> if the caller won the accounting slot.</returns>
+    public bool TryClaimExchangeAccounting()
+    {
+        return Interlocked.CompareExchange(ref _exchangeAccounting, 2, 1) == 1;
+    }
 
     /// <summary>
     /// Whether the stream has reached the terminal <see cref="Http2StreamState.Closed"/>
@@ -436,7 +471,14 @@ internal sealed class Http2Stream
     /// reading the body observes cancellation — not a clean end-of-stream, which
     /// would let it mistake a truncated body for a complete one.
     /// </summary>
-    public void AbortOnShutdown()
+    /// <returns>
+    /// <see langword="true"/> when the request was actually aborted (its input was
+    /// still incoming — the exchange can no longer complete normally, so the
+    /// graceful-close drain should stop waiting on it); <see langword="false"/>
+    /// when the fully-received request remains answerable and the drain should
+    /// keep waiting for its response.
+    /// </returns>
+    public bool AbortOnShutdown()
     {
         CompleteBody();
 
@@ -446,7 +488,10 @@ internal sealed class Http2Stream
         if (!InputCompleted)
         {
             TryFireAbort();
+            return true;
         }
+
+        return false;
     }
 
     private void CompleteBody()

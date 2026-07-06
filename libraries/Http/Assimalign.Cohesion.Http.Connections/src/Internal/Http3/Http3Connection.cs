@@ -57,9 +57,21 @@ internal sealed class Http3Connection : HttpConnection
         return new ValueTask<HttpConnectionContext>(Open());
     }
 
-    public override ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
-        return _connection.DisposeAsync();
+        // RFC 9114 §5.2 — announce graceful shutdown by writing GOAWAY on the
+        // server's control stream before the QUIC CONNECTION_CLOSE, so streams
+        // at or below the announced ID may finish their responses. GOAWAY
+        // emission lives here in the HTTP/3 layer; the connection-first close
+        // ordering (bidirectional streams drained, then CONNECTION_CLOSE, then
+        // the critical unidirectional streams released) stays in the QUIC
+        // driver's DisposeAsync. Emission is best-effort and precedes it.
+        if (_openContext is not null)
+        {
+            await _openContext.SendGoAwayAsync().ConfigureAwait(false);
+        }
+
+        await _connection.DisposeAsync().ConfigureAwait(false);
     }
 
     [SupportedOSPlatformGuard("windows")]

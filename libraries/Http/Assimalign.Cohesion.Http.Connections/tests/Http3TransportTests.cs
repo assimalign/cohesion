@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -280,6 +282,108 @@ public class Http3TransportTests
 
         // ...and the connection then completes cleanly — draining did not error.
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit GOAWAY on the control stream before the connection is disposed")]
+    public async Task Http3_OnDispose_ShouldEmitControlStreamGoAwayBeforeClose()
+    {
+        // RFC 9114 §5.2 / §7.2.6 — during connection teardown the server sends
+        // GOAWAY on its control stream (carrying the lowest client-initiated
+        // bidirectional stream id it will not process) before the QUIC
+        // CONNECTION_CLOSE. One request was surfaced (client-bidi stream 0), so
+        // the announced boundary is 4 — stream 0 may complete, streams >= 4 are
+        // rejected.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
+
+        // Surface the request so the server opens its control stream (SETTINGS)
+        // and counts one processed request stream.
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+        httpContext.Request.Path.Value.ShouldBe("/g");
+
+        // Dispose the HTTP/3 connection — GOAWAY is written on the control stream
+        // before the underlying multiplexed connection is disposed.
+        await httpConnection.DisposeAsync();
+        connection.IsDisposed.ShouldBeTrue();
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+
+        (long streamType, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream!.ReadOutputAsync());
+
+        streamType.ShouldBe(0x00L); // control stream
+
+        // The control stream carries SETTINGS then GOAWAY (0x07).
+        byte[]? goAwayPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == (long)Http3FrameType.GoAway)
+            {
+                goAwayPayload = payload;
+            }
+        }
+
+        goAwayPayload.ShouldNotBeNull();
+        goAwayPayload!.Length.ShouldBeGreaterThan(0); // RFC 9114 §5.2 varint payload
+
+        int index = 0;
+        long announcedStreamId = QuicVariableLengthInteger.Decode(goAwayPayload, ref index);
+        announcedStreamId.ShouldBe(4L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should announce the processed-stream boundary in the teardown GOAWAY")]
+    public async Task Http3_OnDisposeAfterTwoRequests_GoAwayShouldAnnounceProcessedBoundary()
+    {
+        // RFC 9114 §5.2 — the GOAWAY id marks the boundary of what was processed:
+        // streams below it may have been processed, streams at or above it are
+        // rejected. Two requests surfaced (client-bidi streams 0 and 4), so the
+        // announced boundary is 8: streams 0 and 4 may finish, stream 8+ will not.
+        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/1", "https", "a"));
+        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/2", "https", "a"));
+        TestMultiplexedConnection connection = new(first, second);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
+
+        await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
+        {
+            (await enumerator.MoveNextAsync()).ShouldBeTrue();
+            enumerator.Current.Request.Path.Value.ShouldBe("/1");
+            (await enumerator.MoveNextAsync()).ShouldBeTrue();
+            enumerator.Current.Request.Path.Value.ShouldBe("/2");
+        }
+
+        await httpConnection.DisposeAsync();
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+
+        (_, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream!.ReadOutputAsync());
+
+        byte[]? goAwayPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == (long)Http3FrameType.GoAway)
+            {
+                goAwayPayload = payload;
+            }
+        }
+
+        goAwayPayload.ShouldNotBeNull();
+        int index = 0;
+        long announcedStreamId = QuicVariableLengthInteger.Decode(goAwayPayload!, ref index);
+        announcedStreamId.ShouldBe(8L);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should decode a Huffman-coded request field section")]

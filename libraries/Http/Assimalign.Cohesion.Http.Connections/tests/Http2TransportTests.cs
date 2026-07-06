@@ -126,6 +126,153 @@ public class Http2TransportTests
         lastStreamId.ShouldBe(1u);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should drain an in-flight response before completing the connection output")]
+    public async Task Http2_OnGracefulCloseWithInFlightStream_ShouldDrainBeforeCompletingOutput()
+    {
+        // RFC 9113 §6.8 — after GOAWAY, streams already accepted continue to
+        // completion within a bounded drain window before the connection output
+        // is completed. Without the drain, GracefulCloseAsync would complete the
+        // output writer immediately and cut off a response still being written.
+        // The finite input also exercises the pump-exit path: the frame pump
+        // observes end-of-stream during the drain, but the fully-received
+        // request stays answerable (only truncated requests are abandoned), so
+        // the drain keeps holding until the response is sent.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        Http2ConnectionContext http2Context = (Http2ConnectionContext)httpConnectionContext;
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext request = enumerator.Current;
+
+        // Begin the graceful close while the request is dispatched but not yet
+        // answered. It emits GOAWAY, then blocks in the bounded drain window
+        // waiting for this in-flight exchange — it MUST NOT complete the output
+        // and cut the response off.
+        Task closeTask = http2Context.GracefulCloseAsync().AsTask();
+        await Task.Delay(100);
+        closeTask.IsCompleted.ShouldBeFalse();
+
+        // Sending the response completes the exchange, which releases the drain
+        // and lets the graceful close finish (completing the output).
+        request.Response.StatusCode = HttpStatusCode.Ok;
+        request.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes("drained"));
+        await httpConnectionContext.SendAsync(request);
+
+        await closeTask;
+
+        // The wire carries the in-flight response's HEADERS + DATA ("drained")
+        // and a graceful GOAWAY(NO_ERROR); the response was not truncated.
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        bool sawResponseData = false;
+        bool sawGoAway = false;
+        foreach ((long frameType, byte[] framePayload) in frames)
+        {
+            if (frameType == 0 && Encoding.UTF8.GetString(framePayload) == "drained")
+            {
+                sawResponseData = true;
+            }
+
+            if (frameType == 7) // GOAWAY
+            {
+                sawGoAway = true;
+                uint errorCode = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(framePayload.AsSpan(4, 4));
+                errorCode.ShouldBe(0u); // NO_ERROR
+            }
+        }
+
+        sawResponseData.ShouldBeTrue();
+        sawGoAway.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should refuse a new stream after graceful close with RST_STREAM(REFUSED_STREAM)")]
+    public async Task Http2_OnNewStreamAfterGracefulClose_ShouldRefuseWithRstStream()
+    {
+        // RFC 9113 §6.8 — once graceful close has started, a HEADERS frame that
+        // opens a NEW stream is answered with RST_STREAM(REFUSED_STREAM) while
+        // the connection survives to finish draining the streams already
+        // accepted. The client may safely retry the refused request on a fresh
+        // connection (RFC §8.1.4). The input stays live (completeInput: false)
+        // so the frame pump — which deliberately keeps running through the
+        // drain window — processes a stream opened AFTER the close began.
+        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
+        TestConnection connection = new(first, completeInput: false);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        Http2ConnectionContext http2Context = (Http2ConnectionContext)httpConnectionContext;
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext firstRequest = enumerator.Current;
+        firstRequest.Request.Path.Value.ShouldBe("/one");
+
+        // Start the graceful close (the _gracefulCloseStarted flag is set
+        // synchronously before the first await). Stream 1 is still in flight, so
+        // the drain holds the pump and output open — the connection stays alive
+        // to refuse new streams on the wire.
+        Task closeTask = http2Context.GracefulCloseAsync().AsTask();
+
+        // The peer now opens stream 3 — a NEW stream after graceful close began.
+        // The still-running pump must answer it with RST_STREAM(REFUSED_STREAM).
+        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] secondWithoutPreface = new byte[second.Length - 24];
+        Array.Copy(second, 24, secondWithoutPreface, 0, secondWithoutPreface.Length);
+        await connection.WriteInputAsync(secondWithoutPreface);
+
+        // Accumulate wire output until the refusal appears (each read blocks
+        // until the holder writes more; a partial trailing frame just means
+        // "keep reading"). Bound the wait so a missing refusal fails the test
+        // rather than hanging it.
+        List<byte> accumulated = new();
+        bool sawRefusedStream = false;
+        while (!sawRefusedStream)
+        {
+            Task<byte[]> readTask = connection.ReadOutputAsync();
+            Task completedTask = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(10)));
+            completedTask.ShouldBe(readTask); // expected RST_STREAM(REFUSED_STREAM) on the wire
+            accumulated.AddRange(await readTask);
+
+            try
+            {
+                foreach ((long frameType, byte[] framePayload) in HttpProtocolPayloadFactory.ParseHttp2Frames(accumulated.ToArray()))
+                {
+                    if (frameType == 3 // RST_STREAM
+                        && framePayload.Length == 4
+                        && System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(framePayload) == (uint)Http2ErrorCode.RefusedStream)
+                    {
+                        sawRefusedStream = true;
+                    }
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // A frame is split across reads; accumulate more bytes.
+            }
+        }
+
+        // The refusal happened while the close was still draining — the
+        // connection survived the refused stream to keep serving stream 1.
+        closeTask.IsCompleted.ShouldBeFalse();
+
+        // Answer stream 1 to release the drain and let the close finish.
+        firstRequest.Response.StatusCode = HttpStatusCode.Ok;
+        await httpConnectionContext.SendAsync(firstRequest);
+        await closeTask;
+
+        connection.CompleteInput();
+        sawRefusedStream.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should serialize concurrent SendAsync writes without frame interleaving")]
     public async Task Http2_OnConcurrentSendAsync_ShouldNotInterleaveFrames()
     {
