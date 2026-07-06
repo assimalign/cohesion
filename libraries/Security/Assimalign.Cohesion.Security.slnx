@@ -20,6 +20,17 @@
 	<Folder Name="/Security/Assimalign.Cohesion.Security/tests/">
 		<Project Path="Assimalign.Cohesion.Security/tests/Assimalign.Cohesion.Security.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security.DataProtection/" />
+	<Folder Name="/Security/Assimalign.Cohesion.Security.DataProtection/docs/">
+		<File Path="Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security.DataProtection/src/">
+		<Project Path="Assimalign.Cohesion.Security.DataProtection/src/Assimalign.Cohesion.Security.DataProtection.csproj" />
+	</Folder>
+	<Folder Name="/Security/Assimalign.Cohesion.Security.DataProtection/tests/">
+		<Project Path="Assimalign.Cohesion.Security.DataProtection/tests/Assimalign.Cohesion.Security.DataProtection.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Security/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
