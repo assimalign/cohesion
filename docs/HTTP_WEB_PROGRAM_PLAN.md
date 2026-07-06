@@ -17,9 +17,9 @@ The safe unit of work is **one GitHub issue = one session = one branch = one PR*
 1. **Pick an issue that is unblocked.** An issue is workable only if every entry in its *Blocked by* column (§4) is merged. Never start a blocked issue — its prerequisites define types/seams you would otherwise invent and later fight.
 2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) `AGENTS.md` + the area's `docs/DESIGN.md`. Invoke the `cohesion-coding-rules` skill at the start.
 3. **Branch:** `feature/<wbs>-<slug>` naming the issue's WBS (e.g. `feature/L03.01.01.05-problem-details`). The `cohesion-work-items` skill infers scope-creep placement from this branch.
-4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and add a row to §4 here if it changes sequencing.
+4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and call it out in your PR description so the orchestrator can slot it into §4.
 5. **Open a PR** with the `Closes #NNNN` block (use `New-CohesionWorkItem.ps1 -EmitClosesBlock` from the same worktree). Close the parent feature manually only when all its children are done.
-6. **Update this file:** move the issue to Done in the §5 Progress Log with the PR link and date. This is how the *next* session knows it's unblocked. Commit that doc change with the PR.
+6. **Do not edit this plan file.** The orchestrator reconciles the §5 Progress Log from merged PRs — this removes shared-doc merge conflicts when many sessions run in parallel. Just make sure your PR's `Closes #NNNN` block is correct; that is the signal the orchestrator reconciles from.
 
 **Golden rule for parallelism:** issues in different **lanes** (§3) at the same **stage** (§2) can run concurrently in separate sessions with no coordination. Two sessions in the *same* lane touching the same project should be serialized — check the Progress Log for an in-flight sibling before starting.
 
@@ -132,6 +132,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #756 | B | RFC 9530 Digest Fields | #747 |
 | #746 | B | RFC 10008 HTTP QUERY method semantics | #747, #755 |
 | #754 | A | Alt-Svc advertisement (RFC 7838) | — |
+| #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
 | #776 | E | Pipeline exception boundary + RFC 9457 ProblemDetails | #762 |
 | #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771 |
 | #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
@@ -156,6 +157,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #795 | E | `Web.Caching` (server-owned output caching) | #762, #755, #792 |
 | #782 | E | `Web.Rewrite` (URL rewriting/redirects) | #762 + request-mutation seam decision (#24/#25) |
 | #775 | C/E | Health-check framework + `/healthz` endpoint | #762 (endpoint half), host-lifecycle epics |
+| #810 | A | h1 request-body data-rate limits + per-request body-size override | #769 (streaming-body rework) |
 | #786 | F | Route groups (MapGroup) | #148, #150 |
 | #787 | F | Named routes + LinkGenerator | #148 |
 | #788 | F | Host-based route matching (RequireHost) | #150 |
@@ -169,14 +171,17 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
 | #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #796 |
 
+### Post-v1 follow-ups (filed, not scheduled)
+Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
+
 ### Deliberately NOT in this program (ADR-gated)
 Real-time hub framework (SignalR-analogue) and gRPC hosting are **decisions, not features** — each needs an ADR first (real-time gates on the #765 WebSocket outcome; gRPC gates on a protobuf-vs-code-first serialization decision). Do not start either without a recorded decision. Skipped entirely: IIS/HTTP.sys, OWIN, SPA dev-proxy, Razor/Blazor UI, request localization.
 
 ---
 
-## 5. Progress Log (update as PRs merge)
+## 5. Progress Log (orchestrator-reconciled from merged PRs)
 
-Move an item here with its PR link + date the moment it merges — this is the signal that its dependents are unblocked.
+The orchestrator maintains this table by reconciling merged PRs from GitHub; sessions do not edit it (that avoids shared-doc merge conflicts when many run in parallel). Each row is a merged item and the dependents it unblocks. **Wave 1 (2026-07-03): 13 items merged — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup. Wave 2 dispatched (see the open-PR list).**
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
