@@ -232,12 +232,19 @@ public readonly partial struct HttpHeaderValue :
     /// </summary>
     /// <returns>A string array represented by this instance.</returns>
     /// <remarks>
-    /// <para>If the <see cref="HttpHeaderValue"/> contains a single string internally, it is copied to a new array.</para>
-    /// <para>If the <see cref="HttpHeaderValue"/> contains an array internally it returns that array instance.</para>
+    /// The returned array is always a defensive copy — never the internal backing array —
+    /// so callers cannot mutate header state in place through it. Read-only header views
+    /// (for example the one handed to request-parse interceptors) rely on this: handing out
+    /// the live backing array would let multi-valued headers be rewritten around the
+    /// collection's fail-loud read-only guard.
     /// </remarks>
     public string?[] ToArray()
     {
-        return GetArrayValue() ?? Array.Empty<string>();
+        string?[]? values = GetArrayValue();
+
+        return values is null || values.Length == 0
+            ? Array.Empty<string>()
+            : (string?[])values.Clone();
     }
 
     private string?[]? GetArrayValue()
@@ -596,11 +603,14 @@ public readonly partial struct HttpHeaderValue :
 
     /// <summary>
     /// Defines an implicit conversion of a given <see cref="HttpHeaderValue"/> to a string array.
+    /// The result is a defensive copy (see <see cref="ToArray"/>), never the internal backing array.
     /// </summary>
     /// <param name="value">A <see cref="HttpHeaderValue"/> to implicitly convert.</param>
     public static implicit operator string?[]?(HttpHeaderValue value)
     {
-        return value.GetArrayValue();
+        // GetArrayValue() returns the live backing array for multi-valued headers; escaping it
+        // here would let callers mutate header state in place, bypassing read-only views.
+        return value.GetArrayValue() is null ? null : value.ToArray();
     }
 
     /// <summary>

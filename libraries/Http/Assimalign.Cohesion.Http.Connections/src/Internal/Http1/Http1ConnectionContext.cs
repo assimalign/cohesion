@@ -12,9 +12,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
-    public Http1ConnectionContext(IConnection connection, bool isSecure)
+    private readonly HttpServerLimits _limits;
+    private readonly IHttpRequestInterceptor[] _interceptors;
+
+    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
         : base(connection, isSecure)
     {
+        _limits = limits;
+        _interceptors = interceptors;
     }
 
     /// <summary>
@@ -72,22 +77,60 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 
     /// <summary>
     /// Attempts to read the next request from the wire. Returns
-    /// <see langword="null"/> for both a clean end-of-stream (the peer
-    /// closed gracefully between requests) and a wire-level failure
-    /// (truncated line, malformed header, socket error). The receive
-    /// enumerable treats both the same way: the connection is done.
+    /// <see langword="null"/> for a clean end-of-stream (the peer closed
+    /// gracefully between requests), a wire-level failure (truncated line,
+    /// malformed header, socket error), a configured-limit rejection
+    /// (414 / 431 / 413, after emitting the status response), and a
+    /// read-timeout (idle keep-alive or slow-header Slowloris, after
+    /// emitting a 408 when mid-headers). The receive enumerable treats
+    /// them all the same way: the connection is done.
     /// </summary>
     private async Task<Http1Context?> TryReadRequestAsync(CancellationToken cancellationToken)
     {
+        using Http1ReadTimeout readTimeout = new(cancellationToken, _limits.KeepAliveTimeout, _limits.RequestHeadersTimeout);
+
         try
         {
             Http1Context? context = await Http1MessageReader.ReadRequestAsync(
                 Stream,
                 ConnectionInfo,
                 GetScheme(),
+                _limits,
+                _interceptors,
+                readTimeout,
                 cancellationToken).ConfigureAwait(false);
 
             return context;
+        }
+        catch (Http1LimitExceededException rejection)
+        {
+            // RFC 9110 §15.5 — a request that violates a configured limit gets the matching
+            // status response (414 / 431 / 413) before the connection is closed, rather than a
+            // silent drop, so a conformant client learns why.
+            await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (HttpRequestRejectedException rejection)
+        {
+            // A request-parse interceptor rejected the request. Caught explicitly — ahead of the
+            // wire-level classifier — so a rejection is always answered with its 4xx/5xx status
+            // rather than being silently swallowed. The connection is not reused afterwards: the
+            // request's remaining wire state is indeterminate, so keep-alive would desynchronize
+            // the framing.
+            await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (OperationCanceledException) when (readTimeout.TimedOut)
+        {
+            // An idle keep-alive or slow-header (Slowloris) peer exceeded its deadline. When we
+            // were mid-headers, emit 408 Request Timeout (RFC 9110 §15.5.9) before closing;
+            // an idle keep-alive connection (no request bytes yet) is simply reclaimed.
+            if (readTimeout.IsHeadersPhase)
+            {
+                await TryWriteErrorResponseAsync(HttpStatusCode.RequestTimeout, cancellationToken).ConfigureAwait(false);
+            }
+
+            return null;
         }
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
@@ -96,6 +139,22 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // `await using` disposes the connection) and let the
             // listener keep accepting subsequent connections.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort write of a minimal error response to the connection stream. Any I/O failure is
+    /// swallowed: the peer may already be gone, and the connection is being closed regardless.
+    /// </summary>
+    private async Task TryWriteErrorResponseAsync(HttpStatusCode statusCode, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Http1MessageWriter.WriteErrorResponseAsync(Stream, statusCode, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex) || ex is OperationCanceledException)
+        {
+            // The response could not be delivered; the connection is dropped anyway.
         }
     }
 

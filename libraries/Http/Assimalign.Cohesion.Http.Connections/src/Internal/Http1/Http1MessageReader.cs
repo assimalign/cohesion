@@ -1,21 +1,64 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http.Connections.Internal;
+
 namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 internal static class Http1MessageReader
 {
+    /// <summary>
+    /// Reads a single HTTP/1.1 request from the wire, enforcing the configured server limits,
+    /// invoking the registered request-parse interceptors, and driving the read-timeout phase
+    /// transitions.
+    /// </summary>
+    /// <param name="stream">The connection stream to read from.</param>
+    /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
+    /// <param name="scheme">The connection scheme (derived from the transport's security).</param>
+    /// <param name="limits">The server limits enforced on the request line, headers, and body.</param>
+    /// <param name="interceptors">
+    /// The listener's snapshotted request-parse interceptors. When empty the parser takes a fast
+    /// path with no per-request interception state allocated.
+    /// </param>
+    /// <param name="readTimeout">
+    /// The read-timeout controller. Signalled when the request line begins and once the header
+    /// section has been fully received; its token bounds every read.
+    /// </param>
+    /// <param name="connectionToken">
+    /// The ambient connection token used as the request's abort token. Distinct from
+    /// <paramref name="readTimeout"/>'s token, which is disposed when the read completes.
+    /// </param>
+    /// <returns>The parsed request context, or <see langword="null"/> on a clean end-of-stream.</returns>
+    /// <exception cref="Http1LimitExceededException">
+    /// Thrown when the request violates a configured limit (414 / 431 / 413).
+    /// </exception>
+    /// <exception cref="HttpRequestRejectedException">
+    /// Thrown when an interceptor rejects the request (4xx / 5xx).
+    /// </exception>
     public static async ValueTask<Http1Context?> ReadRequestAsync(
         Stream stream,
         HttpConnectionInfo connectionInfo,
         HttpScheme scheme,
-        CancellationToken cancellationToken)
+        HttpServerLimits limits,
+        IHttpRequestInterceptor[] interceptors,
+        Http1ReadTimeout readTimeout,
+        CancellationToken connectionToken)
     {
-        string? requestLine = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
+        CancellationToken readToken = readTimeout.Token;
+
+        // RFC 9112 §3 — the request line is size-bounded; an over-long line is 414 (RFC 9110
+        // §15.5.15). Signal the timeout controller on the first byte so the keep-alive idle window
+        // tightens to the request-headers deadline (Slowloris defence).
+        string? requestLine = await ReadLineAsync(
+            stream,
+            limits.MaxRequestLineSize,
+            HttpStatusCode.RequestUriTooLong,
+            "request line",
+            readTimeout.OnRequestLineStarted,
+            readToken).ConfigureAwait(false);
 
         if (requestLine is null)
         {
@@ -48,7 +91,12 @@ internal static class Http1MessageReader
                 $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {targetError}");
         }
 
-        HttpHeaderCollection headers = await ReadHeadersAsync(stream, cancellationToken).ConfigureAwait(false);
+        HttpHeaderCollection headers = await ReadHeadersAsync(stream, limits, readToken).ConfigureAwait(false);
+
+        // The header section is fully received; disarm the request-headers deadline so the body
+        // read is not bounded by it (body-read data-rate limits are deferred behind the
+        // streaming-body rework).
+        readTimeout.OnHeadReceived();
 
         // RFC 9110 §9.3.6 — CONNECT requests MUST NOT consume octets past the request
         // headers; the bytes that follow belong to the tunnel. Detect this before any
@@ -58,37 +106,12 @@ internal static class Http1MessageReader
         // (tracked as follow-up).
         bool isConnectTunnel = method == HttpMethod.Connect && target.Form == HttpRequestTargetForm.Authority;
 
-        byte[] bodyBytes;
-        HttpTrailerCollection? requestTrailers = null;
-        if (isConnectTunnel)
-        {
-            // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
-            // or Transfer-Encoding. Anything after the headers is tunnel traffic.
-            bodyBytes = Array.Empty<byte>();
-        }
-        else
-        {
-            // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
-            // headers, rejecting ambiguous combinations and malformed Content-Length /
-            // chunked encodings.
-            Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(stream, headers, cancellationToken).ConfigureAwait(false);
-            bodyBytes = messageBody.Body;
-            // RFC 9112 §7.1.2 — only chunked transfer can carry a trailer
-            // section. Surface the parsed trailers (possibly empty) as a
-            // supported trailer collection on the request; non-chunked requests
-            // cannot carry trailers and keep the default unsupported collection.
-            if (HeaderContainsToken(headers, HttpHeaderKey.TransferEncoding, "chunked"))
-            {
-                requestTrailers = new HttpTrailerCollection(messageBody.Trailers, isSupported: true);
-            }
-        }
-
-        HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
-
         // Host resolution depends on the request-target form (RFC 9112 §3.2.2 / §3.2.3):
         //   - absolute-form  → authority component of the target supersedes any Host header
         //   - authority-form → the target itself IS the authority (CONNECT)
         //   - origin-form / asterisk → fall back to the Host header
+        // Derived before the interceptor phase because the interception context carries them;
+        // hooks observe headers through a read-only view, so the derivations cannot go stale.
         HttpHost host = target.Form switch
         {
             HttpRequestTargetForm.Absolute => target.Host,
@@ -103,34 +126,182 @@ internal static class Http1MessageReader
             ? target.Scheme
             : scheme;
 
-        Http1Request request = new(
-            host,
-            target.Path,
-            method,
-            requestScheme,
-            queryCollection,
-            headers,
-            new MemoryStream(bodyBytes, writable: false),
-            requestTrailers);
-        Http1Response response = new();
+        // Interceptor phase (head hooks). Zero registered interceptors is the fast path: no
+        // interception context, no feature collection, no per-request interception allocations —
+        // the transport enforces the listener-wide limits exactly as before the seam existed.
+        HttpFeatureCollection? features = null;
+        HttpRequestInterceptorContext? interception = null;
 
-        bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
+        if (interceptors.Length > 0)
+        {
+            features = new HttpFeatureCollection();
+            interception = new HttpRequestInterceptorContext
+            {
+                Version = HttpVersion.Http11,
+                Method = method,
+                Path = target.Path,
+                Scheme = requestScheme,
+                Host = host,
+                Headers = headers.AsReadOnly(),
+                Features = features,
+                ConnectionInfo = connectionInfo,
+                MaxRequestBodySize = limits.MaxRequestBodySize,
+            };
+        }
 
-        return new Http1Context(
-            request,
-            response,
-            connectionInfo,
-            cancellationToken,
-            keepAlive);
+        Stream? bodyStream = null;
+
+        try
+        {
+            if (interception is not null)
+            {
+                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                {
+                    interceptor.OnRequestHead(interception);
+                }
+            }
+
+            // The head hooks have run; the transport now starts consuming the body, so the
+            // effective cap is fixed for the exchange (write-through features observe the
+            // freeze immediately).
+            interception?.FreezeMaxRequestBodySize();
+            long? maxBodySize = interception is not null
+                ? interception.MaxRequestBodySize
+                : limits.MaxRequestBodySize;
+
+            byte[] bodyBytes;
+            HttpTrailerCollection? requestTrailers = null;
+            if (isConnectTunnel)
+            {
+                // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
+                // or Transfer-Encoding. Anything after the headers is tunnel traffic.
+                bodyBytes = Array.Empty<byte>();
+            }
+            else
+            {
+                // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
+                // headers, rejecting ambiguous combinations and malformed Content-Length /
+                // chunked encodings, and enforcing the effective body-size cap (413).
+                Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(
+                    stream,
+                    headers,
+                    maxBodySize,
+                    readToken).ConfigureAwait(false);
+                bodyBytes = messageBody.Body;
+                // RFC 9112 §7.1.2 — only chunked transfer can carry a trailer
+                // section. Surface the parsed trailers (possibly empty) as a
+                // supported trailer collection on the request; non-chunked requests
+                // cannot carry trailers and keep the default unsupported collection.
+                if (HeaderContainsToken(headers, HttpHeaderKey.TransferEncoding, "chunked"))
+                {
+                    requestTrailers = new HttpTrailerCollection(messageBody.Trailers, isSupported: true);
+                }
+            }
+
+            bodyStream = new MemoryStream(bodyBytes, writable: false);
+
+            // Interceptor phase (body hooks): each hook receives the previous result, so the last
+            // registered interceptor produces the outermost wrapper. CONNECT tunnels are skipped —
+            // the post-head octets are tunnel traffic, not a message body — but empty bodies still
+            // run so wrappers over the (empty) representation stay meaningful.
+            if (interception is not null && !isConnectTunnel)
+            {
+                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                {
+                    bodyStream = interceptor.OnRequestBody(interception, bodyStream);
+                }
+            }
+
+            HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
+
+            Http1Request request = new(
+                host,
+                target.Path,
+                method,
+                requestScheme,
+                queryCollection,
+                headers,
+                bodyStream,
+                requestTrailers);
+            Http1Response response = new();
+
+            bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
+
+            return new Http1Context(
+                request,
+                response,
+                connectionInfo,
+                connectionToken,
+                keepAlive,
+                features);
+        }
+        catch when (features is not null)
+        {
+            // The request failed after interceptors started participating (limit rejection,
+            // hook rejection, malformed body, wire failure, timeout) and no Http1Context — the
+            // owner of the feature-disposal walk — will ever exist for this exchange. Honor the
+            // seam's disposal contract here instead: tear down the partially-built wrapper chain
+            // (the outermost wrapper owns its inner stream) and dispose every hook-attached
+            // feature, then let the failure surface unchanged. The exception filter keeps the
+            // zero-interceptor fast path entirely outside this handler.
+            bodyStream?.Dispose();
+            await DisposeFeaturesAsync(features).ConfigureAwait(false);
+            throw;
+        }
     }
 
-    private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(Stream stream, CancellationToken cancellationToken)
+    /// <summary>
+    /// Best-effort disposal of hook-attached features for a request that failed before its
+    /// <see cref="Http1Context"/> was constructed. Mirrors the exchange's normal disposal walk
+    /// (snapshot first; prefer <see cref="IAsyncDisposable"/>; one throwing feature does not
+    /// abort the rest).
+    /// </summary>
+    private static async ValueTask DisposeFeaturesAsync(HttpFeatureCollection features)
+    {
+        IHttpFeature[] snapshot = [.. features];
+
+        foreach (IHttpFeature feature in snapshot)
+        {
+            try
+            {
+                if (feature is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (feature is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+            catch
+            {
+                // Best-effort: cleanup of one feature must not mask the original failure or
+                // prevent the remaining features from being disposed.
+            }
+        }
+    }
+
+    private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(
+        Stream stream,
+        HttpServerLimits limits,
+        CancellationToken cancellationToken)
     {
         HttpHeaderCollection headers = new();
 
+        int headerCount = 0;
+        int totalBytesRemaining = limits.MaxRequestHeadersTotalSize;
+
         while (true)
         {
-            string? line = await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
+            // The per-line cap is the remaining header budget: a single line can never push the
+            // header section past its total-size bound (RFC 9110 §15.5.22 → 431).
+            string? line = await ReadLineAsync(
+                stream,
+                totalBytesRemaining,
+                HttpStatusCode.RequestHeaderFieldsTooLarge,
+                "request header section",
+                onFirstByte: null,
+                cancellationToken).ConfigureAwait(false);
 
             if (line is null)
             {
@@ -140,6 +311,24 @@ internal static class Http1MessageReader
             if (line.Length == 0)
             {
                 return headers;
+            }
+
+            // Account this field line (and its CRLF) against the total header-section budget.
+            int consumed = line.Length + 2;
+            if (consumed > totalBytesRemaining)
+            {
+                throw new Http1LimitExceededException(
+                    HttpStatusCode.RequestHeaderFieldsTooLarge,
+                    $"The request header section exceeds the configured maximum size ({limits.MaxRequestHeadersTotalSize} octets).");
+            }
+            totalBytesRemaining -= consumed;
+
+            headerCount++;
+            if (headerCount > limits.MaxRequestHeaderCount)
+            {
+                throw new Http1LimitExceededException(
+                    HttpStatusCode.RequestHeaderFieldsTooLarge,
+                    $"The request contains more than the configured maximum of {limits.MaxRequestHeaderCount} header fields.");
             }
 
             int separatorIndex = line.IndexOf(':');
@@ -192,10 +381,32 @@ internal static class Http1MessageReader
         return false;
     }
 
-    private static async ValueTask<string?> ReadLineAsync(Stream stream, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads a single CRLF-terminated line, capping its length so an unbounded line cannot be
+    /// buffered into an ever-growing <see cref="MemoryStream"/> (a live memory-exhaustion vector).
+    /// </summary>
+    /// <param name="stream">The connection stream.</param>
+    /// <param name="maxLineSize">The maximum number of payload octets the line may contain.</param>
+    /// <param name="overflowStatus">The HTTP status to reject with when the cap is exceeded.</param>
+    /// <param name="subject">A short description of the line for the rejection message.</param>
+    /// <param name="onFirstByte">
+    /// Invoked once when the first byte of the line is read; used to signal the read-timeout phase
+    /// transition. May be <see langword="null"/>.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The decoded line, or <see langword="null"/> on a clean end-of-stream before any byte.</returns>
+    /// <exception cref="Http1LimitExceededException">Thrown when the line exceeds <paramref name="maxLineSize"/>.</exception>
+    private static async ValueTask<string?> ReadLineAsync(
+        Stream stream,
+        int maxLineSize,
+        HttpStatusCode overflowStatus,
+        string subject,
+        Action? onFirstByte,
+        CancellationToken cancellationToken)
     {
         using MemoryStream buffer = new();
         bool sawCarriageReturn = false;
+        bool signaledFirstByte = false;
 
         while (true)
         {
@@ -211,6 +422,12 @@ internal static class Http1MessageReader
                 throw new EndOfStreamException("The connection closed while an HTTP line was being read.");
             }
 
+            if (!signaledFirstByte)
+            {
+                signaledFirstByte = true;
+                onFirstByte?.Invoke();
+            }
+
             if (sawCarriageReturn)
             {
                 if (value == '\n')
@@ -218,7 +435,7 @@ internal static class Http1MessageReader
                     return Encoding.ASCII.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
                 }
 
-                buffer.WriteByte((byte)'\r');
+                AppendByte(buffer, (byte)'\r', maxLineSize, overflowStatus, subject);
                 sawCarriageReturn = false;
             }
 
@@ -228,8 +445,20 @@ internal static class Http1MessageReader
                 continue;
             }
 
-            buffer.WriteByte((byte)value);
+            AppendByte(buffer, (byte)value, maxLineSize, overflowStatus, subject);
         }
+    }
+
+    private static void AppendByte(MemoryStream buffer, byte value, int maxLineSize, HttpStatusCode overflowStatus, string subject)
+    {
+        if (buffer.Length >= maxLineSize)
+        {
+            throw new Http1LimitExceededException(
+                overflowStatus,
+                $"The {subject} exceeds the configured maximum size ({maxLineSize} octets).");
+        }
+
+        buffer.WriteByte(value);
     }
 
     private static async ValueTask<int> ReadByteAsync(Stream stream, CancellationToken cancellationToken)

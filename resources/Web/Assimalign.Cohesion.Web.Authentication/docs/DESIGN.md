@@ -91,6 +91,36 @@ that needs a richer feature implementation should install it
 directly through the feature collection before any code paths assign
 through `context.User`.
 
+## Why there is no `request.User` accessor
+
+Retiring the vestigial `Assimalign.Cohesion.Http.Identity` skeleton
+(issue #759) raised the question of whether its one non-defective
+trait &mdash; a get-only `request.User` extension on `IHttpRequest`
+&mdash; should be absorbed here. It is deliberately **not** added, for
+three reasons:
+
+1. **It would be redundant.** `IHttpRequest` already exposes
+   `HttpContext`, so `request.HttpContext.User` already resolves the
+   principal through the existing `context.User` accessor. A
+   `request.User` property would be one-hop sugar over a path that
+   already works.
+2. **It diverges from the precedent this package mirrors.** ASP.NET
+   Core exposes the principal as `HttpContext.User`, not
+   `HttpRequest.User`. Adding a request-level accessor would introduce
+   a shape callers do not expect from the framework this design
+   deliberately tracks.
+3. **The surface stays minimal by design.** This package is "one
+   feature contract, one default implementation, one extension
+   property." A second accessor is additive and can be introduced
+   later if a concrete consumer needs it; locking it in now on
+   speculation contradicts the same minimalism that shaped the feature
+   itself (see "Why the feature is minimal").
+
+Had such an accessor been added, it would use the empty-principal
+default like `context.User` &mdash; **never** the retired skeleton's
+`ClaimsPrincipal.Current` fallback, which reads ambient thread state
+and has no place in a per-exchange model.
+
 ## Family map
 
 | Package | Role | Dependencies |
