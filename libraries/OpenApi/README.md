@@ -26,7 +26,13 @@ sibling except through the model.
 | [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | attributes (analyzer) | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | Implemented |
 | [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | Implemented |
-| `Assimalign.Cohesion.OpenApi.Compliance.Tests` | Official example corpus, schema-backed conformance, upgrade fixtures | serialization, validation | Planned (Wave 3) |
+
+The **compliance suite** — the vendored official OpenAPI example corpus, round-trip/format-equivalence
+and validation over every example, version-upgrade fixtures, and the
+[coverage matrix](./Assimalign.Cohesion.OpenApi/docs/COVERAGE.md) — lives in the root model project's
+[`tests/`](./Assimalign.Cohesion.OpenApi/tests/). The corpus and its `CorpusFixtures` locator are shared
+assets under `tests/Shared/`, exposed through `tests/Shared/OpenApiCorpus.props` so any test project that
+needs the corpus imports the same files rather than duplicating them.
 
 These boundaries are advisory architecture guidance. They exist to preserve, respectively: additive
 format support (YAML and beyond) without touching the model; source-generator-first, reflection-free
