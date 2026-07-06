@@ -141,7 +141,7 @@ public sealed class HttpConnectionListenerOptions
     /// </exception>
     public HttpConnectionListenerOptions UseHttp2(IConnectionListener listener)
     {
-        return UseStreamListener(HttpProtocol.Http20, listener, static (_, _, responseInterceptors) => new Http2ConnectionFactory(responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listener, static (limits, _, responseInterceptors) => new Http2ConnectionFactory(limits.Http2, responseInterceptors));
     }
 
     /// <summary>
@@ -155,7 +155,7 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
     public HttpConnectionListenerOptions UseHttp2(Func<IConnectionListener> listenerFactory)
     {
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory, static (_, _, responseInterceptors) => new Http2ConnectionFactory(responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, static (limits, _, responseInterceptors) => new Http2ConnectionFactory(limits.Http2, responseInterceptors));
     }
 
     /// <summary>

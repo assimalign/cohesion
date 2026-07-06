@@ -37,6 +37,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 internal sealed class Http2Stream
 {
     private readonly MemoryStream _headerBlock;
+    // RFC 9113 §6.10 / §10.5.1 — cap the raw header-block bytes accumulated across a HEADERS frame
+    // and its CONTINUATION frames. Without this bound a CONTINUATION flood — an endless run of
+    // CONTINUATION frames with no END_HEADERS — grows this buffer without limit. The cap is the
+    // advertised SETTINGS_MAX_HEADER_LIST_SIZE; exceeding it is a connection-level ENHANCE_YOUR_CALM.
+    private readonly int _maxHeaderBlockSize;
     // RFC 9113 §5.2 — inbound DATA is queued here for the application to drain
     // rather than buffered whole before dispatch. Unbounded at the channel level
     // (the flow-control window is the real bound); single-writer (the frame pump)
@@ -105,11 +110,12 @@ internal sealed class Http2Stream
     /// </summary>
     public bool ReceiveReclaimed { get; set; }
 
-    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow)
+    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize)
     {
         StreamId = streamId;
         InitialReceiveWindow = initialReceiveWindow;
         _headerBlock = new MemoryStream();
+        _maxHeaderBlockSize = maxHeaderBlockSize;
         // SingleWriter is false: the frame pump writes DATA chunks (ReceiveData),
         // but a local reset from the application thread (SendReset via an
         // abandoned-body / cancel RST_STREAM) can complete the writer concurrently
@@ -532,10 +538,23 @@ internal sealed class Http2Stream
 
     private void AppendHeaderBytes(ReadOnlySpan<byte> payload)
     {
-        if (!payload.IsEmpty)
+        if (payload.IsEmpty)
         {
-            _headerBlock.Write(payload);
+            return;
         }
+
+        // RFC 9113 §6.10 / §10.5.1 — reject a header block whose accumulated raw bytes exceed the
+        // advertised SETTINGS_MAX_HEADER_LIST_SIZE. This is the CONTINUATION-flood defence: it trips
+        // before decode, so an attacker cannot pin memory by streaming CONTINUATION frames that
+        // never carry END_HEADERS. ENHANCE_YOUR_CALM signals excessive load (RFC 9113 §7).
+        if (_headerBlock.Length + payload.Length > _maxHeaderBlockSize)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 header block on stream {StreamId} exceeded the maximum of {_maxHeaderBlockSize} octets (CONTINUATION flood).");
+        }
+
+        _headerBlock.Write(payload);
     }
 
     public Http2Context CreateContext(

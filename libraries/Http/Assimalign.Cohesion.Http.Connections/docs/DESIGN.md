@@ -602,17 +602,153 @@ body byte and opens the window to middleware without changing this contract.
 ### Scope boundary
 
 These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
-(rapid-reset, CONTINUATION flood, header-list size) are governed by the
-frame machinery and tracked separately; HTTP/2 request-body buffering is
-bounded by flow-control backpressure, documented in "HTTP/2 request-body flow
-control and backpressure" below. `MaxConcurrentConnections` is an accept-loop
-concern owned by the Web-runtime rewrite, not this surface.
+(rapid-reset, CONTINUATION flood, header-list size, SETTINGS/PING floods) are
+governed by the frame machinery and live under `HttpServerLimits.Http2`
+(`Http2Limits`) — see "HTTP/2 abuse limits" below. HTTP/2 request-body
+buffering is bounded by flow-control backpressure, documented in "HTTP/2
+request-body flow control and backpressure" below. `MaxConcurrentConnections`
+is an accept-loop concern owned by the Web-runtime rewrite, not this surface.
 
 ### AOT posture
 
 No reflection, no codegen. The limits are plain properties with guard-clause
 validation; enforcement is byte counting and `CancellationTokenSource.CancelAfter`
 timer arithmetic.
+
+## HTTP/2 abuse limits
+
+### Why the frame machinery isn't enough
+
+The HTTP/2 transport already enforces the RFC 9113 structural caps —
+`SETTINGS_MAX_CONCURRENT_STREAMS`, `MAX_FRAME_SIZE`, the connection/stream
+flow-control windows, and the HPACK dynamic-table bound. None of those defend
+against the *known HTTP/2 abuse classes*, where a client sends a trivially cheap
+message that forces the server into unbounded (or amplified) work:
+
+- **Rapid reset (CVE-2023-44487).** A client opens a stream and immediately
+  `RST_STREAM`s it. Each cycle costs the client one HEADERS + one RST_STREAM but
+  makes the server allocate, dispatch, and tear down a stream — and because the
+  stream is closed, it never counts against `MAX_CONCURRENT_STREAMS`. Unbounded,
+  this is a CPU/allocation DoS.
+- **CONTINUATION flood.** A HEADERS frame without `END_HEADERS` followed by an
+  endless run of `CONTINUATION` frames grew an *unbounded* `MemoryStream` — the
+  header block was accumulated with no cap at all. (The request *body* is bounded
+  by flow control — see the flow-control section below — but header blocks sit
+  outside flow control per RFC 9113 §6.9, so they need their own bound.)
+- **Oversized decoded header list.** HPACK amplifies: a few indexed references
+  can expand into a huge decoded field list. The decode path had no
+  `MAX_HEADER_LIST_SIZE` enforcement (it was advertised but never checked on the
+  way in), so a small encoded block could materialise a large list.
+- **SETTINGS / PING floods.** Each inbound SETTINGS frame forces a re-parse and
+  an ACK; each inbound PING forces a PING ACK (an amplification vector). Neither
+  was rate-limited.
+
+### The limits surface
+
+`HttpServerLimits.Http2` (`Http2Limits`) is the operator-tunable surface, with
+conservative Kestrel-`Http2Limits`-parity defaults so a listener is protected
+out of the box:
+
+| Limit | Default | Enforced by | Vector |
+|---|---|---|---|
+| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)` | concurrency exhaustion |
+| `MaxRequestHeaderListSize` | 16 KB | advertised `SETTINGS_MAX_HEADER_LIST_SIZE`; raw-byte cap in `Http2Stream.AppendHeaderBytes`; decoded-size cap in `HPackDecoder` | CONTINUATION flood + header-list amplification |
+| `MaxResetStreamsPerWindow` | 200 | `ProcessRstStreamFrameAsync` via `Http2FloodGuard` | rapid reset (CVE-2023-44487) |
+| `MaxSettingsFramesPerWindow` | 100 | `ProcessSettingsFrameAsync` via `Http2FloodGuard` | SETTINGS flood |
+| `MaxPingFramesPerWindow` | 100 | `ProcessPingFrameAsync` via `Http2FloodGuard` | PING flood |
+| `FloodDetectionWindow` | 5 s | the trailing window shared by the three flood counters | — |
+
+The limits flow `UseHttp2` → `Http2ConnectionFactory` → `Http2Connection` →
+`Http2ConnectionContext` as a plain object reference; there is no DI, config, or
+logging dependency in this package (Lane A guardrail — config binding is a
+Web.Hosting builder-time concern), exactly as with the HTTP/1.1
+`HttpServerLimits`.
+
+### Escalation: GOAWAY(ENHANCE_YOUR_CALM), mirroring Kestrel
+
+Every abuse trip escalates the same way Kestrel does: a connection-level
+`Http2ConnectionException(ENHANCE_YOUR_CALM)` (RFC 9113 §7, error code `0x0b`),
+which the frame pump's existing failure-isolation path turns into a `GOAWAY`
+carrying that code before the connection tears down. `ENHANCE_YOUR_CALM` is the
+RFC's "your peer is generating excessive load" signal, so a well-behaved client
+learns to back off and can retry its in-flight streams on a fresh connection.
+The **frame-size** violation (PING length ≠ 8) is the one exception — it is a
+structural fault, so it escalates as `FRAME_SIZE_ERROR` per RFC 9113 §6.7.
+
+### The two header-list caps are complementary, not redundant
+
+`MaxRequestHeaderListSize` bounds *two different things* because encoded and
+decoded sizes diverge:
+
+- **Raw accumulation** (`Http2Stream.AppendHeaderBytes`) bounds the on-the-wire
+  header-block bytes across a HEADERS frame and all its CONTINUATION frames. It
+  trips *before* HPACK decode, so a CONTINUATION flood can never pin memory in
+  the `MemoryStream` — the buffer is capped, replacing the previously-unbounded
+  growth. This is the CONTINUATION-flood defence.
+- **Decoded size** (`HPackDecoder.DecodeRequestHeaders`) bounds the RFC 9113
+  §10.5.1 header-list size — the running sum of `name-length + value-length + 32`
+  across the fields. This catches HPACK *amplification*: a small encoded block of
+  indexed references whose decoded list is large. The decode aborts the moment
+  the running total exceeds the cap, so the oversized list is never fully
+  materialised.
+
+Because the decode aborts early, the HPACK dynamic-table state is left
+indeterminate, so the overflow is a **connection** error (GOAWAY), not a
+recoverable stream reset — the decoder is connection-global and cannot be
+trusted for subsequent streams once a decode was abandoned mid-block. The
+distinct `HPackHeaderListSizeExceededException` (a subclass of
+`HPackDecodingException`) lets `TryDispatchStream` map the size overflow to
+`ENHANCE_YOUR_CALM` while genuinely malformed field sections keep mapping to
+`PROTOCOL_ERROR`.
+
+### The flood detectors are sliding windows
+
+`Http2FloodGuard` owns three `Http2SlidingWindowCounter`s (reset / SETTINGS /
+PING), one per rate-limited frame class, all sharing `FloodDetectionWindow`.
+Each counter records event timestamps (`Environment.TickCount64`, monotonic and
+allocation-free) and, on every event, evicts timestamps older than
+`now - window` before comparing the in-window count to the maximum. The window
+is a genuine *sliding* window rather than a tumbling one, so a burst straddling a
+fixed bucket boundary cannot slip past the limit; the backing `Queue<long>` only
+ever holds the events currently inside the window (at most `max + 1` before the
+trip), so memory tracks live traffic, not the configured maximum. The guard is
+driven solely from the frame pump — the connection's single inbound frame
+processor — so it needs no synchronization.
+
+The rapid-reset counter counts only inbound `RST_STREAM`s that target a stream
+the server has actually opened (or recently retired). Two deliberate
+exclusions keep the accounting honest:
+
+- A `RST_STREAM` on a never-opened (idle) stream is a *different* violation —
+  the RFC 9113 §6.4 `PROTOCOL_ERROR` handled just below — and is excluded so
+  the two failure modes stay distinct.
+- The server's **own** `RST_STREAM(NO_ERROR)` emissions (the routine
+  undrained-body reset on the response path) never pass through
+  `ProcessRstStreamFrameAsync`, so ordinary server operation cannot trip the
+  peer-abuse detector.
+
+### PING validation
+
+`ProcessPingFrameAsync` now also enforces the two RFC 9113 §6.7 structural rules
+that were previously unchecked: a PING payload length other than 8 octets is a
+`FRAME_SIZE_ERROR` (checked ahead of the ACK short-circuit so a malformed ACK is
+rejected too), and a PING on any stream other than 0 is a `PROTOCOL_ERROR`.
+
+### Scope boundary — HTTP/2 only, not HTTP/3
+
+These are HTTP/2 frame-machinery limits. HTTP/3's equivalent stream-churn and
+flow-control limits live in the QUIC transport (`MAX_STREAMS`, QUIC flow
+control), not here — deliberately, per the guardrail that h3 stream limits are a
+QUIC-transport concern. HTTP/2 request-body buffering is bounded by the
+flow-control backpressure documented in the next section; the two surfaces are
+complementary (frame-rate abuse here, byte-volume abuse there).
+
+### AOT posture
+
+No reflection, no runtime codegen. The limits are plain properties with
+guard-clause validation; the flood detectors are queue arithmetic over
+`Environment.TickCount64`; the header-list caps are byte counting and a running
+integer sum during decode.
 
 ## HTTP/2 request-body flow control and backpressure
 

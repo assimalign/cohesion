@@ -16,10 +16,12 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <c>KestrelServerLimits</c> so a deployment is protected without any explicit configuration.
 /// </para>
 /// <para>
-/// The size limits are enforced by the HTTP/1.1 read path
+/// The size limits below are enforced by the HTTP/1.1 read path
 /// (<c>Http1MessageReader</c> / <c>Http1MessageBodyReader</c>); the timeouts are enforced by the
-/// HTTP/1.1 connection loop. HTTP/2 and HTTP/3 abuse limits are governed separately by their
-/// own frame/flow-control machinery and are out of scope for this surface.
+/// HTTP/1.1 connection loop. HTTP/2 abuse limits (rapid reset, CONTINUATION flood, header-list
+/// size, SETTINGS/PING floods) are governed by the frame machinery and exposed on the nested
+/// <see cref="Http2"/> surface. HTTP/3 stream limits live in the QUIC transport and are out of
+/// scope here.
 /// </para>
 /// </remarks>
 public sealed class HttpServerLimits
@@ -30,6 +32,14 @@ public sealed class HttpServerLimits
     private long? _maxRequestBodySize = 30_000_000;
     private TimeSpan _keepAliveTimeout = TimeSpan.FromSeconds(130);
     private TimeSpan _requestHeadersTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets the HTTP/2 abuse-mitigation limits enforced on every accepted HTTP/2 connection
+    /// (rapid reset, CONTINUATION flood, decoded header-list size, SETTINGS/PING floods, and the
+    /// concurrent-stream cap). The bounds carry conservative Kestrel-parity defaults; mutate the
+    /// returned instance to tune them. See <see cref="Http2Limits"/> for the individual limits.
+    /// </summary>
+    public Http2Limits Http2 { get; } = new Http2Limits();
 
     /// <summary>
     /// Gets or sets the maximum allowed size, in octets, of the HTTP/1.1 request line

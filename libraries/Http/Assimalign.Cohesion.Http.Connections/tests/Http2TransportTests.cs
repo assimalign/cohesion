@@ -716,10 +716,11 @@ public class Http2TransportTests
     /// the wire then yields nothing — by contract a malformed peer must never
     /// crash the listener, so the enumerable completes without throwing.
     /// </summary>
-    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode)
+    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode, Action<Http2Limits>? configureLimits = null)
     {
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
+        configureLimits?.Invoke(options.Limits.Http2);
         options.UseHttp2(new TestConnectionListener(connection));
 
         await using HttpConnectionListener listener = new(options);
@@ -1490,6 +1491,277 @@ public class Http2TransportTests
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(payload, (uint)prioritizedStreamId);
         ascii.CopyTo(payload, 4);
         return payload;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on rapid stream reset")]
+    public async Task Http2_OnRapidStreamReset_ShouldGoAwayEnhanceYourCalm()
+    {
+        // CVE-2023-44487 (HTTP/2 Rapid Reset) — a client that opens a stream and immediately
+        // resets it churns server work for near-zero cost. Once the create-then-reset count
+        // exceeds the per-window budget the connection is torn down with
+        // GOAWAY(ENHANCE_YOUR_CALM), mirroring Kestrel's escalation.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+
+        // Six create-then-reset cycles trip a limit of five (the sixth reset is the (max+1)-th
+        // event in the window). Each HEADERS carries END_HEADERS but NOT END_STREAM, so the
+        // stream opens (and its head dispatches) while the following RST_STREAM closes it.
+        for (int cycle = 0; cycle < 6; cycle++)
+        {
+            int streamId = 1 + (cycle * 2);
+            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4 /* END_HEADERS */, streamId, Array.Empty<byte>()));
+            parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 } /* CANCEL */));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxResetStreamsPerWindow = 5);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should tolerate stream resets up to the rapid-reset limit")]
+    public async Task Http2_OnStreamResetsWithinLimit_ShouldNotGoAwayEnhanceYourCalm()
+    {
+        // Legitimate cancellation (e.g. a client aborting a fetch) MUST NOT be penalised: resets
+        // at or below the per-window budget leave the connection alive. Exactly five resets with a
+        // limit of five stay under the (max+1) trip threshold.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+
+        for (int cycle = 0; cycle < 5; cycle++)
+        {
+            int streamId = 1 + (cycle * 2);
+            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4, streamId, Array.Empty<byte>()));
+            parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 }));
+        }
+
+        TestConnection connection = new(Combine(parts.ToArray()));
+        HttpConnectionListenerOptions options = new();
+        options.Limits.Http2.MaxResetStreamsPerWindow = 5;
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // The pump dispatches each opened head before its reset arrives; drain them all.
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+        }
+
+        // No ENHANCE_YOUR_CALM GOAWAY was emitted — the connection drained cleanly.
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 7 /* GOAWAY */ && payload.Length >= 8)
+            {
+                uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4, 4));
+                code.ShouldNotBe((uint)Http2ErrorCode.EnhanceYourCalm);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a CONTINUATION flood")]
+    public async Task Http2_OnContinuationFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // A HEADERS frame without END_HEADERS followed by an endless run of CONTINUATION frames
+        // grows the header-block buffer without bound. The accumulated raw bytes are capped at the
+        // advertised MAX_HEADER_LIST_SIZE; exceeding it is a connection-level ENHANCE_YOUR_CALM
+        // (trips before decode, so no oversized block is ever materialised).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Leading HEADERS opens the block (no END_HEADERS), then one oversized CONTINUATION.
+        byte[] headers = Http2TestSettings.RawFrame(0x1, 0x0, 1, new byte[16]);
+        byte[] continuation = Http2TestSettings.RawFrame(0x9 /* CONTINUATION */, 0x0, 1, new byte[2048]);
+
+        await AssertGoAwayAsync(
+            Combine(preface, settings, headers, continuation),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxRequestHeaderListSize = 1024);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) when the decoded header list exceeds MAX_HEADER_LIST_SIZE")]
+    public async Task Http2_OnHeaderListSizeExceeded_ShouldGoAwayEnhanceYourCalm()
+    {
+        // RFC 9113 §10.5.1 — the decoded header list is bounded by the advertised
+        // MAX_HEADER_LIST_SIZE, counting name + value + 32 per field. This is enforced on the
+        // *decoded* size, independent of the raw-byte cap: two fully-indexed references to a
+        // static entry (content-length, index 28) are 2 octets on the wire but account for
+        // 2 × (14 + 0 + 32) = 92 octets of header list, tripping an 80-octet limit.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] amplified = { 0x9C, 0x9C }; // 0x80 | 28 — indexed 'content-length', twice
+        byte[] headers = Http2TestSettings.RawFrame(0x1, 0x4 | 0x1 /* END_HEADERS + END_STREAM */, 1, amplified);
+
+        await AssertGoAwayAsync(
+            Combine(preface, settings, headers),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxRequestHeaderListSize = 80);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept a request whose decoded header list is within MAX_HEADER_LIST_SIZE")]
+    public async Task Http2_OnHeaderListWithinLimit_ShouldYieldRequest()
+    {
+        // RFC 9113 §10.5.1 — a request whose decoded header list stays within the advertised
+        // MAX_HEADER_LIST_SIZE decodes normally. A standard GET's field list is 174 octets
+        // (:method+GET+32=42, :path+/+32=38, :scheme+https+32=44, :authority+api.test+32=50),
+        // comfortably under a 200-octet cap — the "just under succeeds" companion to the
+        // over-the-limit rejection above.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.Limits.Http2.MaxRequestHeaderListSize = 200;
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Path.Value.ShouldBe("/");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a SETTINGS flood")]
+    public async Task Http2_OnSettingsFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // A peer that streams SETTINGS frames forces repeated re-parsing and ACK emission. Beyond
+        // the per-window budget the connection is closed with ENHANCE_YOUR_CALM.
+        byte[] preface = Http2TestSettings.Preface();
+        List<byte[]> parts = new() { preface };
+        for (int i = 0; i < 5; i++)
+        {
+            parts.Add(Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>()));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxSettingsFramesPerWindow = 3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a PING flood")]
+    public async Task Http2_OnPingFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // Each inbound PING forces the server to emit a PING acknowledgement, so an unbounded PING
+        // stream is an amplification vector. Beyond the per-window budget → ENHANCE_YOUR_CALM.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+        for (int i = 0; i < 5; i++)
+        {
+            parts.Add(Http2TestSettings.RawFrame(0x6 /* PING */, 0, 0, new byte[8]));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxPingFramesPerWindow = 3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a PING with a payload length other than 8 with FRAME_SIZE_ERROR")]
+    public async Task Http2_OnPingWrongPayloadLength_ShouldGoAwayFrameSizeError()
+    {
+        // RFC 9113 §6.7 — a PING frame MUST carry exactly 8 octets of opaque data; any other
+        // length is a connection-level FRAME_SIZE_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] shortPing = Http2TestSettings.RawFrame(0x6, 0, 0, new byte[7]);
+        await AssertGoAwayAsync(Combine(preface, settings, shortPing), Http2ErrorCode.FrameSizeError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a PING on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPingOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.7 — PING is a connection-control frame and MUST use stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] pingOnStream1 = Http2TestSettings.RawFrame(0x6, 0, 1, new byte[8]);
+        await AssertGoAwayAsync(Combine(preface, settings, pingOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should refuse a stream beyond MAX_CONCURRENT_STREAMS with REFUSED_STREAM")]
+    public async Task Http2_OnStreamBeyondConcurrencyLimit_ShouldEmitRefusedStream()
+    {
+        // RFC 9113 §5.1.2 — a stream opened beyond SETTINGS_MAX_CONCURRENT_STREAMS is refused with
+        // RST_STREAM(REFUSED_STREAM); the connection survives so the client can retry the refused
+        // stream elsewhere. With the concurrency cap set to one, an already-open stream 1 (HEADERS
+        // without END_STREAM keeps it active) makes a concurrent stream 3 exceed the cap.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Stream 1: END_HEADERS but NOT END_STREAM — stays open (in the active map) awaiting a body.
+        byte[] openStream = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4,
+            (":method", "POST"),
+            (":scheme", "https"),
+            (":path", "/upload"),
+            (":authority", "api.test"));
+        // Stream 3: a second concurrent stream that exceeds the cap of one.
+        byte[] refusedStream = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            3,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, openStream, refusedStream));
+        HttpConnectionListenerOptions options = new();
+        options.Limits.Http2.MaxStreamsPerConnection = 1;
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+            // Stream 1's head dispatches (its body never completes); stream 3 is refused. The
+            // loop drains at end-of-input.
+        }
+
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        bool foundRefusedStream = false;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 3 /* RST_STREAM */)
+            {
+                foundRefusedStream = true;
+                payload.Length.ShouldBe(4);
+                uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload);
+                code.ShouldBe((uint)Http2ErrorCode.RefusedStream);
+            }
+        }
+
+        foundRefusedStream.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2SlidingWindowCounter should trip when the in-window count exceeds the maximum")]
+    public void Http2_SlidingWindowCounter_TripsWhenInWindowCountExceedsMaximum()
+    {
+        // The (max+1)-th event within the window trips; the events up to the maximum do not.
+        Http2SlidingWindowCounter counter = new(maxEventsPerWindow: 3, windowMilliseconds: 1000);
+
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 1
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 2
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 3
+        counter.RecordAndCheckExceeded(100).ShouldBeTrue();  // 4 > 3
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2SlidingWindowCounter should evict events older than the window")]
+    public void Http2_SlidingWindowCounter_EvictsEventsOutsideWindow()
+    {
+        // Events that age out of the trailing window are evicted before the count is compared, so
+        // a slow trickle never trips even though the cumulative count exceeds the maximum.
+        Http2SlidingWindowCounter counter = new(maxEventsPerWindow: 3, windowMilliseconds: 1000);
+
+        counter.RecordAndCheckExceeded(0).ShouldBeFalse();   // {0}
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // {0,100}
+        counter.RecordAndCheckExceeded(200).ShouldBeFalse(); // {0,100,200}
+        // At t=1500 the cutoff is 500, so the first three events age out; only {1500} remains.
+        counter.RecordAndCheckExceeded(1500).ShouldBeFalse();
     }
 
     private static byte[] Combine(params byte[][] buffers)
