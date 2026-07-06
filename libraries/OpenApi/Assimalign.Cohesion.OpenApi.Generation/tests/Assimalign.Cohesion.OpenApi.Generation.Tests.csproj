@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Generation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- Activate the source generator on this test project's own annotated sample so the
+		     generated OpenApiMetadataRegistry can be driven end-to-end through the pipeline. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
+	</ItemGroup>
+</Project>
+

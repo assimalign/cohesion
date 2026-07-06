@@ -54,5 +54,67 @@ public enum OpenApiFeature
     TagExtendedMetadata,
 
     /// <summary>The OAuth2 <c>deviceAuthorization</c> flow (3.2+).</summary>
-    OAuthDeviceAuthorizationFlow
+    OAuthDeviceAuthorizationFlow,
+
+    /// <summary>The <c>name</c> field on the Server Object (3.2+).</summary>
+    ServerName,
+
+    /// <summary>The <c>query</c> fixed operation field on a Path Item Object (3.2+).</summary>
+    PathItemQueryOperation,
+
+    /// <summary>The <c>querystring</c> parameter location (3.2+).</summary>
+    ParameterQuerystringLocation,
+
+    /// <summary>The <c>cookie</c> parameter style (3.2+).</summary>
+    ParameterCookieStyle,
+
+    /// <summary>
+    /// The sequential and multipart streaming fields (3.2+): <c>itemSchema</c>, <c>prefixEncoding</c>, and
+    /// <c>itemEncoding</c> on the Media Type Object, and the nested <c>encoding</c>, <c>prefixEncoding</c>,
+    /// and <c>itemEncoding</c> fields on the Encoding Object.
+    /// </summary>
+    MediaTypeStreamingFields,
+
+    /// <summary>A Reference Object used as a <c>content</c> map value in place of a Media Type Object (3.2+).</summary>
+    MediaTypeReference,
+
+    /// <summary>The <c>summary</c> field on the Response Object (3.2+).</summary>
+    ResponseSummary,
+
+    /// <summary>The <c>dataValue</c> and <c>serializedValue</c> fields on the Example Object (3.2+).</summary>
+    ExampleDataAndSerializedValues,
+
+    /// <summary>The <c>defaultMapping</c> field on the Discriminator Object (3.2+).</summary>
+    DiscriminatorDefaultMapping,
+
+    /// <summary>The <c>nodeType</c> field on the XML Object (3.2+).</summary>
+    XmlNodeType,
+
+    /// <summary>The <c>oauth2MetadataUrl</c> field on the Security Scheme Object (3.2+).</summary>
+    SecuritySchemeOAuth2MetadataUrl,
+
+    /// <summary>The <c>deprecated</c> field on the Security Scheme Object (3.2+).</summary>
+    SecuritySchemeDeprecated,
+
+    /// <summary>The <c>mediaTypes</c> map inside the Components Object (3.2+).</summary>
+    ComponentsMediaTypes,
+
+    /// <summary>A Security Requirement Object name given as the URI of a Security Scheme Object rather than a component name (3.2+).</summary>
+    SecurityRequirementUriReference,
+
+    /// <summary>
+    /// The JSON Schema draft 2020-12 vocabulary available to Schema Objects from 3.1 onward:
+    /// <c>$defs</c>, <c>$id</c>, <c>$anchor</c>, <c>$dynamicRef</c>, <c>$dynamicAnchor</c>, <c>$comment</c>,
+    /// <c>$schema</c>, <c>if</c>/<c>then</c>/<c>else</c>, <c>dependentSchemas</c>, <c>dependentRequired</c>,
+    /// <c>prefixItems</c>, <c>contains</c>/<c>minContains</c>/<c>maxContains</c>, <c>patternProperties</c>,
+    /// <c>propertyNames</c>, <c>unevaluatedItems</c>/<c>unevaluatedProperties</c>, and
+    /// <c>contentEncoding</c>/<c>contentMediaType</c>/<c>contentSchema</c>.
+    /// </summary>
+    SchemaExtendedVocabulary,
+
+    /// <summary>Keywords alongside <c>$ref</c> within a Schema Object (3.1+). In 3.0 any siblings of <c>$ref</c> are ignored.</summary>
+    SchemaReferenceSiblingKeywords,
+
+    /// <summary>The boolean schema forms <c>true</c> and <c>false</c> (3.1+).</summary>
+    SchemaBooleanForm
 }

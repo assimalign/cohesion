@@ -104,153 +104,131 @@ per accept loop. There is no registration-time `isSecure` parameter, no
 capability is the single source of truth, and the scheme
 (`http`/`https`) flows from it.
 
-## Per-request feature injection
+## Per-request feature injection — request-parse interceptors
 
 ### What it is
 
-`HttpConnectionListenerOptions.CreateFeatures` is the single injection
-hook the transport layer exposes for application code to pre-populate the
-feature collection on every `IHttpContext`:
+`HttpConnectionListenerOptions.Interceptors` is the injection seam the transport
+exposes for code outside this package to participate at request-parse time. The
+contract — `IHttpRequestInterceptor`, `HttpRequestInterceptorContext`, and the
+typed rejection `HttpRequestRejectedException` — lives in core
+`Assimalign.Cohesion.Http` (a generic seam, like `IHttpFeature`), so feature
+packages implement hooks without referencing this transport package and this
+transport never references them:
 
 ```csharp
-HttpConnectionListenerOptions options = new()
-{
-    CreateFeatures = () =>
-    {
-        HttpFeatureCollection features = new();
-        features.Set(new SessionFeature(/* scoped per-request state */));
-        features.Set(new TracingFeature(/* request-scoped tracer */));
-        return features;
-    }
-};
+HttpConnectionListenerOptions options = new();
+options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+options.Interceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
-The factory is invoked once per `IHttpContext` being constructed — once
-per HTTP/1.1 request, once per HTTP/2 / HTTP/3 stream. The returned
-collection becomes the defaults source of the per-request
-`IHttpContext.Features` so the features it carries are immediately
-visible to the first middleware to read them.
+Per HTTP/1.1 request the parser:
+
+1. Parses the head (request line + headers) under the configured limits, then
+   derives host/scheme.
+2. Builds one `HttpRequestInterceptorContext` — head data, a **read-only**
+   header view (`HttpHeaderCollection.AsReadOnly()`), a fresh feature
+   collection, and the body-size knob seeded from
+   `HttpServerLimits.MaxRequestBodySize` — and runs every head hook in
+   registration order.
+3. Freezes the knob and reads the body under whatever cap the hooks left
+   (413 on violation, as ever).
+4. Materializes the body stream and runs every body hook in registration
+   order, each receiving the previous result — the last registered interceptor
+   produces the outermost wrapper. CONNECT tunnels skip body hooks; empty
+   bodies still run them.
+5. Constructs the exchange, flowing the hook-populated feature collection in
+   through the context constructors (the previously-dormant `features`
+   parameters on `Http1Context`/`Http2Context`/`Http3Context` and
+   `TransportHttpContext` now forward it).
+
+**Zero registered interceptors is a true fast path**: no context, no feature
+collection, no read-only header view, no hook dispatch — the parser enforces
+the listener-wide limits exactly as it did before the seam existed.
+
+> Historical note: an earlier revision of this document described a
+> `HttpConnectionListenerOptions.CreateFeatures` factory. That factory was
+> never implemented — the doc ran ahead of the code — and the interceptor seam
+> supersedes it: `OnRequestHead` + `Features.Set` covers feature seeding and
+> adds cap adjustment, stream wrapping, and typed rejection that a
+> feature-collection factory could never express.
 
 ### Why per-request, not per-connection
 
-A previous iteration of this surface bound features to the *connection*
-lifetime via a `ConfigureConnectionFeatures` callback that fired once per
-accepted connection. That shape was wrong:
+Unchanged from the original design reasoning: `IHttpContext` is
+`IAsyncDisposable` and tears down at the end of every request, so per-request
+scoping gives features deterministic cleanup; HTTP/2 and HTTP/3 multiplex many
+requests over one connection, so connection-scoped mutable state is a data race
+by construction; and application code reasons in requests, not connections.
+Interceptor *instances* are the inverse: registered once on the options,
+snapshotted into an array when the `HttpConnectionListener` is constructed
+(later registrations are inert — no racing the accept loops), and shared across
+every connection and request. Implementations must therefore be stateless and
+thread-safe; all per-request state belongs in the context's feature collection.
 
-- `IHttpContext` is `IAsyncDisposable` and tears down at the end of every
-  request. Features whose state needs deterministic cleanup
-  (cryptographic material, scoped service providers, file handles, span
-  buffers) only get that cleanup if the framework can dispose them
-  per-request. A connection-scoped collection has no equivalent dispose
-  hook — connection teardown happens on a different timeline (keep-alive
-  pooling, HTTP/2 GOAWAY, HTTP/3 idle timeout) and would force every
-  feature author to invent their own cleanup signalling.
-- HTTP/2 and HTTP/3 multiplex many requests over one connection. A
-  connection-scoped feature with mutable state quickly becomes a shared
-  data race waiting to happen. Per-request scoping eliminates that
-  category of bug by construction.
-- The connection lifetime is invisible to most consumers. Application
-  code reasons in terms of requests; binding feature lifetime to the
-  request matches what middleware actually expects.
+### Exception classification on the parse path
 
-The `CreateFeatures` factory therefore fires per-request, the returned
-collection lives only as long as the `IHttpContext` does, and disposal
-is the framework's contract — not the feature author's.
+- **`HttpRequestRejectedException`** (4xx/5xx-constrained) is caught explicitly
+  in `Http1ConnectionContext.TryReadRequestAsync` — ahead of the wire-level
+  classifier — answered with a minimal bodyless status response, and the
+  connection is closed (never reused: remaining wire state is indeterminate).
+  This is the sanctioned way for a hook to refuse a request.
+- **`IOException`-family exceptions** thrown by a hook are indistinguishable
+  from wire failures and get silently classified as such (connection dropped,
+  no response). This is a documented hazard, not a feature: hooks must use the
+  typed rejection for control flow.
+- **Anything else** propagates — programmer errors are not masked, matching the
+  receive-loop failure-isolation philosophy.
+
+Hooks run inline on the parse path at a point where the request-headers
+deadline has been disarmed, so they must be CPU-only; a blocking hook stalls
+the connection and pins a thread-pool thread.
 
 ### Disposal contract
 
 When `IHttpContext.DisposeAsync` runs, the transport walks the effective
-feature collection (the local layer plus the factory-supplied defaults)
-and disposes every feature that implements `IAsyncDisposable` or
-`IDisposable`:
+feature collection and disposes every feature implementing `IAsyncDisposable`
+or `IDisposable` (async preferred; one throwing feature does not abort the
+walk; the list is snapshotted before disposal so a mutating `DisposeAsync`
+cannot break iteration). Features attached by head hooks and by middleware are
+treated identically. A body-stream wrapper owns the stream it wraps: disposing
+the outermost stream (which the exchange's disposal triggers via
+`Request.Body.Dispose()`) must dispose the whole chain.
 
-- `IAsyncDisposable.DisposeAsync` is preferred over `IDisposable.Dispose`
-  when the feature implements both.
-- A single feature throwing during disposal does **not** abort the
-  disposal walk. The exception is swallowed and the remaining features
-  (and the request / response body streams) are disposed normally. This
-  prevents one faulty feature from leaking the rest of the request's
-  resources.
-- Replaced features (a `Set` call that overwrites a same-named feature)
-  are no longer reachable through enumeration and therefore are not
-  disposed by the framework. Middleware that replaces a feature is
-  responsible for disposing the old instance explicitly.
-- Snapshot semantics: the feature list is enumerated once into an array
-  before disposal begins so a feature whose `DisposeAsync` mutates the
-  collection cannot break iteration.
+The contract also covers requests that never become an exchange. If the parse
+fails **after** head hooks ran — a limit rejection (413/431), a hook rejection,
+a malformed body, a wire failure, or a timeout — no `IHttpContext` exists to
+own the disposal walk, so the parser itself tears down the partially-built
+wrapper chain and disposes every hook-attached feature (same walk semantics)
+before the failure surfaces. Hook-attached disposables therefore never leak on
+the rejection paths an attacker can drive for free (e.g. an oversized
+`Content-Length` declaration, rejected before any body byte is read).
 
-### Why a factory rather than a callback
+### Feature-collection plumbing
 
-`CreateFeatures` returns a new `IHttpFeatureCollection` rather than
-populating one the framework hands in. The factory shape is the
-right primitive for two reasons:
+The parser hands its `HttpFeatureCollection` to the context constructor, which
+uses it **directly** — no defaults-wrapper layer, which would add a second
+dictionary probe to every `Get` on the hot path. A `null` collection (the
+fast path) gets a fresh empty one; a foreign `IHttpFeatureCollection`
+implementation is wrapped as a read-through defaults source for safety.
 
-1. **Disposal scope is unambiguous.** The framework owns the returned
-   collection's lifetime: it wraps it as defaults for the request
-   collection and disposes its features when the context disposes. With
-   a populate-callback the caller would need to coordinate disposal of
-   the framework-owned collection, which inverts the ownership model.
-2. **Per-request state stays in the closure.** Many useful features
-   capture per-request constructor arguments (a fresh tracer, a fresh
-   scoped service provider). A factory naturally allocates fresh
-   per-request state on each call; a populate callback would force the
-   caller to manage per-request allocation themselves.
+### Protocol coverage
 
-### Wrapping semantics
-
-`HttpContext.Features` is typed as the concrete `HttpFeatureCollection`,
-but `CreateFeatures` returns the `IHttpFeatureCollection` interface so
-the user can supply any implementation. The transport reconciles this by
-wrapping the factory result with
-`new HttpFeatureCollection(factoryResult)`, which uses the factory
-result as a read-through defaults source:
-
-- Reads (`Get`, enumeration) pass through to the factory's collection
-  when no local override exists.
-- Mutations (`Set`, `Remove`) on `IHttpContext.Features` land on the
-  local layer only — the factory's collection is not modified by
-  middleware. This is the safer default: factory-attached features
-  cannot be silently replaced or removed by downstream middleware.
-- Disposal walks the effective collection (local + defaults) so
-  features attached by either layer get cleaned up uniformly.
-
-### Synchronous, no transport-context input
-
-The factory is `Func<IHttpFeatureCollection>?` — no parameters, no
-async. This is deliberate:
-
-- Async would mean the receive loop has to await on the request-build
-  path, which would interleave with the protocol parser and complicate
-  reasoning about flow-control and back-pressure. The factory's job is
-  to allocate per-request state, not to do I/O.
-- Connection metadata (endpoints, IsSecure) is not passed in because the
-  factory's caller typically does not need it; what they need
-  (per-request service provider, per-request diagnostics scope) is
-  captured in the closure. Pushing transport state into the factory
-  signature would invite features that depend on connection lifetime,
-  which is exactly the lifetime mismatch we are walking away from.
+The hooks are wired into the HTTP/1.1 parser. HTTP/2 and HTTP/3 currently
+buffer a stream's body before decoding its head (`Http2Stream.CreateContext`
+runs only once the stream is complete; the h3 request stream is drained before
+header decode), so the same two hook points exist conceptually but the
+"cap adjustable before enforcement" property is not implementable there until
+those paths enforce body caps at all — tracked as follow-up work alongside the
+h2/h3 abuse-limit items. Until then the seam is h1-only at runtime, which
+matches the pre-seam behavior (the transport-seeded body-size feature was also
+h1-only).
 
 ### AOT posture
 
-No reflection, no runtime code generation. The factory is a plain
-delegate invocation and the feature lookup chains through
-`HttpFeatureCollection`'s dictionary reads.
-
-### Non-goals
-
-- **Connection-scoped state.** If a feature genuinely needs to live for
-  the lifetime of the connection (a TLS handshake projection, for
-  example), it belongs in the application layer's own sidecar map keyed
-  on the connection (e.g. by `IHttpConnection.Id`) — *not* on the
-  request's feature collection. This package does not surface a
-  connection-feature collection (or a connection-level `Items` bag)
-  at all.
-- **Multiple registered factories.** A pipeline of feature contributors
-  can be composed by the caller — the single `CreateFeatures` slot can
-  invoke any number of internal helpers.
-- **Async initialization.** See above. If a concrete use case for
-  per-request async feature setup emerges, the factory signature can be
-  widened without breaking existing callers.
+No reflection, no runtime code generation. Hook dispatch is interface calls
+over a snapshotted array; the context is one small allocation per request,
+only when at least one interceptor is registered.
 
 ## IsSecure: capability-derived, single-source
 
@@ -331,6 +309,130 @@ exception so accepts that begin after cancellation rethrow it too. The
 host therefore sees the transport's root-cause exception from
 `AcceptOrListenAsync`, never a bare `ObjectDisposedException`.
 
+## HTTP/1.1 server limits and timeouts
+
+### Why this lives in the transport
+
+An HTTP server that reads request bytes off a socket without bounding them is
+trivially DoS-able. Two vectors are specific to the HTTP/1.1 read path and must
+be closed *inside the transport*, before a request ever reaches the application:
+
+- **Unbounded buffering (memory exhaustion).** `Http1MessageReader` reads the
+  request line and each header line via a byte-at-a-time `ReadLineAsync` that
+  accumulates into a `MemoryStream`. With no cap, a peer that opens a connection
+  and streams an endless request line — or an endless run of header bytes with
+  no terminating CRLF — grows that buffer without bound and exhausts the heap.
+  This is a *live* memory-exhaustion vector, not a theoretical one.
+- **Idle / slow peers (Slowloris).** The receive loop was previously bounded
+  only by the ambient connection token. A peer that connects and then dribbles
+  (or never sends) request bytes ties up a connection indefinitely; enough of
+  them starve the server of connection slots.
+
+Both are wire-level concerns the application layer cannot see (by the time a
+context is dispatched the head is already parsed), so enforcement belongs here,
+alongside the existing framing / smuggling defences.
+
+### The limits surface
+
+`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`) is the tuning
+surface, with conservative Kestrel-`KestrelServerLimits`-parity defaults so a
+listener is protected out of the box:
+
+| Limit | Default | Enforced by | Rejection |
+|---|---|---|---|
+| `MaxRequestLineSize` | 8 KB | `Http1MessageReader` request-line read | `414` URI Too Long (RFC 9110 §15.5.15) |
+| `MaxRequestHeaderCount` | 100 | header loop | `431` Request Header Fields Too Large (§15.5.22) |
+| `MaxRequestHeadersTotalSize` | 32 KB | per-line cap = remaining budget | `431` |
+| `MaxRequestBodySize` | ~28.6 MB (`null` = unbounded) | `Http1MessageBodyReader` | `413` Content Too Large (§15.5.14) |
+| `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
+| `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
+
+The limits flow listener → `Http1Connection` → `Http1ConnectionContext` →
+reader as a plain object reference; there is no DI, config, or logging
+dependency in this package (Lane A guardrail — config binding of these limits is
+a Web.Hosting builder-time concern).
+
+### 414 / 431 / 413 semantics, not a silent drop
+
+The pre-existing behaviour for a malformed request is to classify it as a
+wire-level failure and drop the connection silently (the receive enumerable
+yields nothing). For a *limit* violation that is user-hostile: a conformant
+client gets no signal about why its connection died. So limit violations throw a
+dedicated `Http1LimitExceededException` carrying the HTTP status to emit;
+`Http1ConnectionContext.TryReadRequestAsync` catches it *before* the generic
+wire-level catch, writes a minimal bodyless status response
+(`Http1MessageWriter.WriteErrorResponseAsync` — status line + `Content-Length: 0`
++ `Connection: close`), and then ends the connection. The write is best-effort:
+if the peer is already gone the I/O error is swallowed and the connection is
+dropped anyway.
+
+`Http1LimitExceededException` derives from `IOException` (not the sealed
+`InvalidDataException`) precisely so that if it ever escapes the dedicated catch
+it still degrades to the existing wire-level-drop path rather than faulting the
+host — belt-and-suspenders on top of the explicit catch.
+
+### The two-phase read timeout
+
+`Http1ReadTimeout` reclaims idle and slow peers with a single
+`CancellationTokenSource` (linked to the ambient connection token) whose deadline
+moves through the request lifecycle:
+
+1. **Keep-alive idle wait.** Armed with `KeepAliveTimeout` while the transport
+   waits for the *first byte* of the next request. A connection that goes idle
+   between requests (or never sends its first request) is reclaimed here — with
+   no response, because there is no request to answer.
+2. **Request-headers deadline.** The reader signals `OnRequestLineStarted` on the
+   first request byte, which re-arms the CTS with `RequestHeadersTimeout`. This
+   single deadline covers the entire head (request line + all header fields), so
+   a Slowloris peer that dribbles headers is reclaimed — with a `408` because it
+   is mid-request.
+3. **Disarmed for the body.** After the blank line terminating the header
+   section, the reader signals `OnHeadReceived`, which disables the timer so the
+   body read is bounded only by the ambient connection token. Body-read data-rate
+   limits (`MinRequestBodyDataRate`) are deliberately deferred behind the
+   streaming-body rework — the reader fully buffers bodies today, so a data-rate
+   gate is meaningless until the read is incremental.
+
+Every read on the connection stream uses `Http1ReadTimeout.Token`. When the
+timer fires, `PipeReader.ReadAsync` throws `OperationCanceledException`; the
+context distinguishes a *timeout* cancel from a *shutdown* cancel via
+`TimedOut` (`this CTS fired && the connection token did not`) so cooperative
+shutdown still propagates normally and is never mistaken for a Slowloris.
+
+The read-timeout controller's token must **not** become the request's abort
+token — the controller is disposed when the read completes, but the dispatched
+context outlives it. The reader therefore threads the *connection* token
+through to `Http1Context` as `requestAborted` and uses the controller's token
+only for the reads it bounds.
+
+### Per-request body-size override
+
+The transport no longer seeds any feature itself. The per-request override
+flows through the request-parse interceptor seam (see "Per-request feature
+injection" above): the parser seeds `HttpRequestInterceptorContext
+.MaxRequestBodySize` from `Limits.MaxRequestBodySize`, head hooks may adjust
+it, the parser freezes it and enforces whatever value remains (413 on
+violation). The typed `IHttpMaxRequestBodySizeFeature` lives in the
+`Assimalign.Cohesion.Http.RequestLimits` package, whose interceptor attaches a
+write-through view over the context knob; this transport knows nothing about
+it. Today the read is fully buffered before dispatch, so the writable window is
+the head-hook phase; the streaming-body rework moves the freeze to the first
+body byte and opens the window to middleware without changing this contract.
+
+### Scope boundary
+
+These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
+(rapid-reset, CONTINUATION flood, header-list size) and HTTP/2 body-buffering
+backpressure are governed by the frame/flow-control machinery and tracked
+separately; `MaxConcurrentConnections` is an accept-loop concern owned by the
+Web-runtime rewrite, not this surface.
+
+### AOT posture
+
+No reflection, no codegen. The limits are plain properties with guard-clause
+validation; enforcement is byte counting and `CancellationTokenSource.CancelAfter`
+timer arithmetic.
+
 ## HTTP/3 stream model and SETTINGS engine
 
 ### What it is
@@ -338,14 +440,19 @@ host therefore sees the transport's root-cause exception from
 HTTP/3 (RFC 9114) runs over QUIC, which surfaces two kinds of
 peer-initiated streams: **bidirectional** streams carry requests, and
 **unidirectional** streams carry control data, QPACK table
-synchronisation, and (from a server) pushes. `Http3ConnectionContext`
-demultiplexes the two off a single accept loop:
+synchronisation, and (from a server) pushes. RFC 9114 §6.2.1 also requires
+each peer to open **its own** unidirectional control stream and send
+SETTINGS first, so `Http3ConnectionContext` both emits an outbound control
+stream and demultiplexes inbound streams off a single accept loop:
 
 ```
+on receive start → open outbound control stream (WriteOnly):
+     write stream-type 0x00 + SETTINGS frame, keep open (critical stream)
+
 accept inbound QUIC stream
   ├─ bidirectional → request stream → parse HEADERS/DATA → yield IHttpContext
   └─ unidirectional → read stream-type varint (RFC 9114 §6.2):
-       0x00 control      → read SETTINGS, apply, then keep open
+       0x00 control      → read+apply SETTINGS, then drain later frames
        0x02 QPACK encoder→ accept (no instructions; dynamic table disabled)
        0x03 QPACK decoder→ accept (no instructions; dynamic table disabled)
        0x01 push         → connection error (client must not push)
@@ -356,11 +463,50 @@ The stream direction is reported by the transport via
 `IConnection.Direction` on each accepted stream (see below); the HTTP
 layer never inspects QUIC stream IDs directly.
 
-### Control stream and SETTINGS
+### The server control stream and SETTINGS emission
 
-RFC 9114 §6.2.1 / §7.2.4 impose two hard rules that the engine enforces
-as connection errors (the loop stops yielding and the connection tears
-down):
+RFC 9114 §6.2.1 requires **each** peer — including the server — to open a
+unidirectional control stream and send SETTINGS as its first frame. At the
+start of the receive loop the engine opens one outbound stream via
+`IMultiplexedConnection.OpenStreamAsync(ConnectionDirection.WriteOnly)`,
+writes the stream-type varint `0x00` (control) followed by a SETTINGS frame,
+and then **leaves the stream open** for the connection lifetime. The frame
+is written straight to the stream's `Output` `PipeWriter` (whose `WriteAsync`
+flushes), the symmetric counterpart to reading inbound control frames off
+`Input`; the outbound `Output` is never completed while the connection
+serves requests.
+
+`Http3LocalSettings.EncodePayload` serialises the advertised payload — the
+same posture as the HTTP/2 transport's initial SETTINGS:
+
+- **`SETTINGS_ENABLE_CONNECT_PROTOCOL` (0x08) = 1** (RFC 9220 §3) tells peers
+  they may initiate extended CONNECT (`CONNECT` + `:protocol`) over HTTP/3,
+  matching the HTTP/2 transport's RFC 8441/9220 stance. This is what
+  unblocks WebSocket-over-HTTP/3 clients, which will not send an extended
+  CONNECT until the server advertises the capability.
+- **`QPACK_MAX_TABLE_CAPACITY` (0x01) = 0** (RFC 9204 §5) states explicitly
+  that the QPACK dynamic table is disabled (see the QPACK section), rather
+  than relying on the peer to assume the default.
+
+Emission is best-effort: opening an outbound stream requires a live QUIC
+connection, so if the connection is already gone the setup failure is
+swallowed and the accept loop terminates on the same underlying failure —
+the exception never surfaces into the consumer's enumeration.
+
+Setting **identifiers** are defined once in `Http3SettingId` (the shared
+wire registry) and referenced by both `Http3LocalSettings` (what the server
+sends) and `Http3PeerSettings` (what the peer sent), so the two directions
+never duplicate the identifier literals.
+
+> Beyond the extended-CONNECT enabler, emitting SETTINGS closes an RFC 9114
+> §6.2.1 conformance gap: a server that sent no SETTINGS at all could be
+> failed by a strict client with `H3_MISSING_SETTINGS`.
+
+### The peer control stream and SETTINGS
+
+RFC 9114 §6.2.1 / §7.2.4 impose two hard rules the engine enforces on the
+**peer's** control stream as connection errors (the loop stops yielding and
+the connection tears down):
 
 - **At most one control stream per peer.** A second control stream is
   `H3_STREAM_CREATION_ERROR`.
@@ -368,12 +514,20 @@ down):
   or non-SETTINGS first frame is `H3_MISSING_SETTINGS`.
 
 The SETTINGS payload is parsed into `Http3PeerSettings`, a small
-identifier→value store that recognises `QPACK_MAX_TABLE_CAPACITY`
-(0x01), `MAX_FIELD_SECTION_SIZE` (0x06), `QPACK_BLOCKED_STREAMS` (0x07),
-and `SETTINGS_ENABLE_CONNECT_PROTOCOL` (0x08). Unknown identifiers are
-retained-but-ignored per RFC 9114 §7.2.4.1. Later control frames are not
-acted on in this supported subset — the engine reads and applies the
-mandatory opening SETTINGS frame and leaves the stream open.
+identifier→value store keyed by the `Http3SettingId` registry. Unknown
+identifiers are retained-but-ignored per RFC 9114 §7.2.4.1. The opening
+SETTINGS frame is read and applied synchronously (so a missing/non-SETTINGS
+first frame terminates the connection inline); the stream is then handed to
+a **background drain** (`DrainPeerControlStreamAsync`) that parses and
+discards subsequent control frames for the connection lifetime. Draining on
+a background task is load-bearing: the control stream is long-lived, so
+draining it inline would block the accept loop from ever serving another
+request. Post-SETTINGS frames are read but inert in this subset — `GOAWAY`
+(§7.2.6) is discarded (graceful-drain handling is deferred to the GOAWAY
+work item), and `MAX_PUSH_ID` (§7.2.7) is discarded because the server never
+pushes. The drain exists so those frames cannot accumulate unread in the
+pipe; it stops on end-of-stream, connection teardown, or a per-stream parse
+failure and never throws into the receive loop.
 
 ### QPACK encoder/decoder streams
 
@@ -392,22 +546,31 @@ A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
 
 ### Connection teardown — critical streams and close ordering
 
-The accepted control and QPACK streams stay open for the connection's
-lifetime; RFC 9114 §6.2.1 and RFC 9204 §4.2 make them *critical*
-streams — a peer that observes one of them terminate (FIN, RESET, or a
-STOP_SENDING request) before the connection close MUST fail the whole
-connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is therefore
-connection-first: `Http3Connection.DisposeAsync` delegates to the
+Three long-lived unidirectional streams stay open for the connection's
+lifetime: the server's **own outbound control stream**, and the accepted
+**peer control and QPACK** streams. RFC 9114 §6.2.1 and RFC 9204 §4.2 make
+them all *critical* streams — a peer that observes one of them terminate
+(FIN, RESET, or a STOP_SENDING request) before the connection close MUST
+fail the whole connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is
+therefore connection-first: `Http3Connection.DisposeAsync` delegates to the
 multiplexed connection, whose dispose completes bidirectional (request)
 streams — delivering any in-flight response data — then closes the QUIC
 connection (`CONNECTION_CLOSE` with the transport's configured close
 code, `H3_NO_ERROR` by default on the QUIC driver's options), and only
-then releases the inbound unidirectional streams locally, after the
-close means no stream-level frames can reach the peer. The ordering
-lives in the QUIC driver (`QuicMultiplexedConnection`), not here: any
-multiplexed protocol with long-lived unidirectional control channels
-needs the same discipline. A `GOAWAY`-announced graceful drain ahead of
-the close remains future work (see Non-goals).
+then releases the unidirectional streams locally, after the close means no
+stream-level frames can reach the peer. The ordering lives in the QUIC
+driver (`QuicMultiplexedConnection`), not here: any multiplexed protocol
+with long-lived unidirectional control channels needs the same discipline.
+
+The context's own teardown (`ShutdownAsync`, run from the receive loop's
+`finally`) is deliberately minimal: it cancels the inbound control-stream
+drain and awaits it, but **never completes, aborts, or FINs the outbound
+control stream**. Completing it early — before the connection close — is
+exactly the `H3_CLOSED_CRITICAL_STREAM` violation the connection-first
+ordering exists to avoid, so the context leaves the outbound critical stream
+for the multiplexed connection's dispose to release alongside the close. A
+`GOAWAY`-announced graceful drain ahead of the close remains future work
+(see Non-goals).
 
 ### Incremental reads off the PipeReader
 
@@ -467,9 +630,13 @@ the peer-settings store is a plain dictionary.
 ### Non-goals
 
 - **Acting on post-SETTINGS control frames.** `GOAWAY`, `MAX_PUSH_ID`,
-  and friends are read off the wire where they appear but are not acted
-  on in this subset (the server never pushes, so `MAX_PUSH_ID` is inert;
-  graceful `GOAWAY`-driven drain is future work).
+  and friends are now *drained* (parsed and discarded by the background
+  control-stream drain, so they cannot accumulate unread) but are not
+  *acted on* in this subset: the server never pushes, so `MAX_PUSH_ID` is
+  inert, and graceful `GOAWAY`-driven drain is future work.
+- **Emitting server GOAWAY / MAX_PUSH_ID.** The server control stream
+  carries only the opening SETTINGS frame today; sending `GOAWAY` (for
+  graceful drain) rides on it as future work.
 - **QPACK dynamic table.** Encoder/decoder streams are accepted but not
   processed; the static-table + Huffman + literal field-section support
   (#335) runs with the dynamic table disabled.
@@ -628,16 +795,15 @@ connection `PROTOCOL_ERROR` (GOAWAY); HTTP/3 drops the offending stream
 - **HTTP/2** advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` (id `0x8`)
   in its initial SETTINGS (RFC 8441 §3), telling peers they may use
   extended CONNECT.
-- **HTTP/3** does **not** yet advertise it. Doing so requires the server to
-  open its own *unidirectional* control stream and send a SETTINGS frame on
-  it. The connection contract now supports exactly that —
+- **HTTP/3** advertises the same. The server opens its own *unidirectional*
+  control stream via
   `IMultiplexedConnection.OpenStreamAsync(ConnectionDirection.WriteOnly)`
-  opens an outbound unidirectional stream — so the former API obstacle is
-  gone; emitting the server control stream is simply not yet implemented
-  (future work alongside GOAWAY-driven drain). The omission is safe: a
-  conformant client will simply not initiate extended CONNECT over HTTP/3,
-  and if one does anyway, the request is still recognized, validated, and
-  modeled exactly as on HTTP/2 — there is no silent downgrade.
+  and sends a SETTINGS frame carrying `SETTINGS_ENABLE_CONNECT_PROTOCOL`
+  (0x08) = 1 as its first frame — see "The server control stream and
+  SETTINGS emission" above. This matches the HTTP/2 posture, so a client
+  may initiate extended CONNECT (`CONNECT` + `:protocol`) over HTTP/3, and
+  the request is then recognized, validated, and modeled identically to
+  HTTP/2 — there is no silent downgrade in either direction.
 
 ### No tunnel — scope boundary
 
@@ -659,8 +825,6 @@ class resolved through the existing feature collection.
 ### Non-goals
 
 - **WebSocket framing / the data tunnel.** See above.
-- **HTTP/3 advertisement.** Deferred pending unidirectional outbound stream
-  support in the multiplex transport.
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
   as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
 

@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<Description>JSON serialization for the Cohesion OpenApi document model. Maps the canonical OpenApiDocument graph to and from a format-agnostic OpenApiNode tree (version-aware, gated by the model's capability matrix) and renders that tree to and from JSON using System.Text.Json's Utf8JsonReader/Utf8JsonWriter with no reflection. The neutral node-tree seam is deliberately format-independent so a YAML reader/writer can be added without touching the model mapping. NativeAOT- and trimming-safe.</Description>
+		<Description>JSON and YAML serialization for the Cohesion OpenApi document model. Maps the canonical OpenApiDocument graph to and from a format-agnostic OpenApiNode tree (version-aware, gated by the model's capability matrix) and renders that tree through two thin formatters: JSON via System.Text.Json's Utf8JsonReader/Utf8JsonWriter and YAML via the Cohesion Content.Yaml engine. No reflection; NativeAOT- and trimming-safe.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Yaml" />
 	</ItemGroup>
 </Project>

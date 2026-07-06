@@ -1,7 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Files</RootNamespace>
-	</PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Content" />
 	</ItemGroup>

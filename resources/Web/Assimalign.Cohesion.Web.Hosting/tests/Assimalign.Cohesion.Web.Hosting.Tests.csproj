@@ -4,11 +4,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <CohesionProjectReference Include="Assimalign.Cohesion.Web" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />

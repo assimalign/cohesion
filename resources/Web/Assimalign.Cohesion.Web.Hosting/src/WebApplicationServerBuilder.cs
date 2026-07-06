@@ -6,6 +6,7 @@ using System.Text;
 namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
@@ -27,6 +28,8 @@ public sealed class WebApplicationServerBuilder
         {
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
+                ApplyDefaultInterceptors(options);
+
                 foreach (var action in _configurations)
                 {
                     action.Invoke(serviceProvider, options);
@@ -126,5 +129,20 @@ public sealed class WebApplicationServerBuilder
         _configurations.Add(configure);
 
         return this;
+    }
+
+    /// <summary>
+    /// Installs the web host's default request-parse interceptors. Runs before any user
+    /// configuration so the defaults occupy the front of the interceptor order: the
+    /// max-request-body-size interceptor is registered first, guaranteeing every HTTP/1.1
+    /// request carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
+    /// interceptors' head hooks can observe it (HTTP/1.1 is currently the only protocol whose
+    /// parse path invokes interceptors). User configurations may still inspect or clear
+    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
+    /// </summary>
+    /// <param name="options">The listener options being composed.</param>
+    internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
+    {
+        options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
     }
 }

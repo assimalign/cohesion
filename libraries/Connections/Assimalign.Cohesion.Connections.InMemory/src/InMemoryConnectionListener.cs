@@ -1,0 +1,117 @@
+using System;
+using System.Net;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.Connections.InMemory;
+
+/// <summary>
+/// Accepts inbound in-memory connections dialed by an <see cref="InMemoryConnectionFactory"/> bound to
+/// this listener (the server side of the in-memory transport).
+/// </summary>
+/// <remarks>
+/// Each dial creates a fresh cross-wired connection pair: the client end is returned to the dialer and
+/// the server end is queued here for the next <see cref="AcceptAsync(CancellationToken)"/>. When no
+/// connection is pending, <see cref="AcceptAsync(CancellationToken)"/> waits (like a real listener)
+/// until one is dialed, the accept is cancelled, or the listener is disposed.
+/// </remarks>
+public sealed class InMemoryConnectionListener : ConnectionListener
+{
+    private readonly Channel<Connection> _inbound = Channel.CreateUnbounded<Connection>(
+        new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
+
+    private readonly InMemoryEndPoint _endPoint;
+    private readonly ConnectionCapabilities _capabilities;
+    private readonly Lock _gate = new();
+    private bool _isDisposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InMemoryConnectionListener"/> class.
+    /// </summary>
+    /// <param name="endPoint">The endpoint the listener is bound to, or <see langword="null"/> for the default in-memory endpoint.</param>
+    /// <param name="capabilities">
+    /// The capabilities connections produced by this listener advertise, or <see langword="null"/> to use
+    /// <see cref="InMemoryConnectionPair.DefaultCapabilities"/>.
+    /// </param>
+    public InMemoryConnectionListener(InMemoryEndPoint? endPoint = null, ConnectionCapabilities? capabilities = null)
+    {
+        _endPoint = endPoint ?? new InMemoryEndPoint(InMemoryEndPoint.DefaultName);
+        _capabilities = capabilities ?? InMemoryConnectionPair.DefaultCapabilities;
+    }
+
+    /// <inheritdoc />
+    public override EndPoint EndPoint => _endPoint;
+
+    /// <inheritdoc />
+    public override ConnectionCapabilities Capabilities => _capabilities;
+
+    /// <inheritdoc />
+    public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _inbound.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+            // The listener was disposed while an accept was pending or before one arrived.
+            throw new OperationCanceledException("The in-memory listener has been disposed.", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Creates an <see cref="InMemoryConnectionFactory"/> that dials this listener.
+    /// </summary>
+    /// <returns>A new factory bound to this listener.</returns>
+    public InMemoryConnectionFactory CreateFactory() => new(this);
+
+    /// <inheritdoc />
+    public override ValueTask DisposeAsync()
+    {
+        lock (_gate)
+        {
+            if (_isDisposed)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            _isDisposed = true;
+            _inbound.Writer.TryComplete();
+        }
+
+        // Tear down any server ends that were dialed but never accepted.
+        while (_inbound.Reader.TryRead(out Connection? pending))
+        {
+            _ = pending.DisposeAsync();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Dials this listener, producing a cross-wired connection pair: the server end is queued for the
+    /// next accept and the client end is returned to the caller.
+    /// </summary>
+    /// <returns>The client end of the newly created connection.</returns>
+    /// <exception cref="ConnectionAbortedException">Thrown when the listener has been disposed.</exception>
+    internal Connection Connect()
+    {
+        InMemoryEndPoint clientEndPoint = InMemoryEndPoint.CreateEphemeral();
+
+        (Connection client, Connection server) = InMemoryConnectionPair.Create(_capabilities, clientEndPoint, _endPoint);
+
+        lock (_gate)
+        {
+            if (!_isDisposed && _inbound.Writer.TryWrite(server))
+            {
+                return client;
+            }
+        }
+
+        _ = client.DisposeAsync();
+        _ = server.DisposeAsync();
+
+        throw new ConnectionAbortedException("The in-memory listener has been disposed and is no longer accepting connections.");
+    }
+}

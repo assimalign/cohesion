@@ -38,6 +38,9 @@ public sealed class OpenApiComponents : IOpenApiExtensible
     /// <summary>Gets the reusable path items, keyed by component name (OpenAPI 3.1+).</summary>
     public IDictionary<string, OpenApiPathItem> PathItems { get; } = new Dictionary<string, OpenApiPathItem>();
 
+    /// <summary>Gets the reusable media types, keyed by component name (OpenAPI 3.2+).</summary>
+    public IDictionary<string, OpenApiMediaType> MediaTypes { get; } = new Dictionary<string, OpenApiMediaType>();
+
     /// <inheritdoc/>
     public IDictionary<string, OpenApiNode> Extensions { get; } = new Dictionary<string, OpenApiNode>();
 }

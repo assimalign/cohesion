@@ -92,11 +92,13 @@ internal sealed class StructuralValidationRule : IOpenApiValidationRule
 
             foreach (var response in responses.Items)
             {
-                if (response.Value.Reference is null && string.IsNullOrEmpty(response.Value.Description))
+                // OpenAPI 3.2 made the response description optional.
+                if (document.SpecVersion != OpenApiSpecVersion.V3_2
+                    && response.Value.Reference is null && string.IsNullOrEmpty(response.Value.Description))
                 {
                     context.Error(
                         OpenApiValidationRuleCodes.RequiredField,
-                        "The Response Object requires a non-empty 'description'.",
+                        "The Response Object requires a non-empty 'description' before OpenAPI 3.2.",
                         JsonPointer.Append(entry.Pointer, "responses", response.Key, "description"));
                 }
             }

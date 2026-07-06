@@ -183,6 +183,105 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should open a control stream and emit SETTINGS with ENABLE_CONNECT_PROTOCOL = 1")]
+    public async Task Http3_OnConnectionOpen_ShouldEmitControlStreamSettings()
+    {
+        // RFC 9114 §6.2.1 — the server opens its own unidirectional control
+        // stream (type 0x00) and sends SETTINGS as its first frame. RFC 9220 §3
+        // — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 advertises extended CONNECT
+        // support; RFC 9204 §5 — QPACK_MAX_TABLE_CAPACITY = 0 states the
+        // dynamic-table-disabled posture.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/s", "https", "a"));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // Driving the receive loop opens and writes the control stream at start.
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+        httpContext.Request.Path.Value.ShouldBe("/s");
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+        controlStream!.Direction.ShouldBe(ConnectionDirection.WriteOnly);
+
+        (long streamType, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream.ReadOutputAsync());
+
+        // First bytes: the control stream-type prefix, then a SETTINGS frame.
+        streamType.ShouldBe(0x00L);
+        frames.Count.ShouldBeGreaterThanOrEqualTo(1);
+        frames[0].FrameType.ShouldBe(0x04L);
+
+        IReadOnlyDictionary<long, long> settings = HttpProtocolPayloadFactory.DecodeHttp3Settings(frames[0].Payload);
+        settings.ContainsKey(0x08).ShouldBeTrue(); // SETTINGS_ENABLE_CONNECT_PROTOCOL
+        settings[0x08].ShouldBe(1L);
+        settings.ContainsKey(0x01).ShouldBeTrue(); // QPACK_MAX_TABLE_CAPACITY
+        settings[0x01].ShouldBe(0L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should keep the control stream open while a request is served")]
+    public async Task Http3_WhileServingRequest_ShouldKeepControlStreamOpen()
+    {
+        // RFC 9114 §6.2.1 — the control stream is a critical stream; completing,
+        // aborting, or FIN'ing it before connection close is
+        // H3_CLOSED_CRITICAL_STREAM at the peer. It must stay open while
+        // requests are being served.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/k", "https", "a"));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/k");
+
+        // The enumerator is still alive (request in flight), so teardown has not
+        // run: the control stream must not have been completed or disposed.
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+        controlStream!.State.ShouldBe(ConnectionState.Open);
+        controlStream.IsDisposed.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should drain post-SETTINGS GOAWAY and MAX_PUSH_ID without erroring")]
+    public async Task Http3_OnPeerControlStreamWithTrailingFrames_ShouldDrainAndServe()
+    {
+        // RFC 9114 §7.2 — post-SETTINGS control frames (GOAWAY §7.2.6,
+        // MAX_PUSH_ID §7.2.7) are drained (parse-and-discard) so they cannot
+        // accumulate unread. Draining runs on a background task, so the accept
+        // loop keeps serving the request; were it inline the accept loop would
+        // block on the long-lived control stream and this request would never
+        // surface. MAX_PUSH_ID stays inert (the server never pushes).
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStreamWithControlFrames(
+                new (long, long)[] { (0x01, 0), (0x08, 1) },
+                (0x07 /* GOAWAY */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0)),
+                (0x0D /* MAX_PUSH_ID */, HttpProtocolPayloadFactory.CreateHttp3VarintPayload(0))),
+            ConnectionDirection.ReadOnly);
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
+        TestMultiplexedConnection connection = new(control, request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // The request is served despite the trailing control frames...
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/g");
+
+        // ...and the connection then completes cleanly — draining did not error.
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should decode a Huffman-coded request field section")]
     public async Task Http3_OnHuffmanEncodedRequest_ShouldParseFields()
     {

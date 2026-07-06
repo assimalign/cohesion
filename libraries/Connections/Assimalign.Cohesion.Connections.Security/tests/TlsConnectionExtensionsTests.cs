@@ -10,6 +10,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Connections.Security.Tests;
 
@@ -46,7 +47,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TestConnectionListener listener = new();
         listener.Enqueue(server);
         await using SslStream clientSsl = new(
@@ -91,7 +92,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     {
         // Arrange
         using CancellationTokenSource timeout = new(TestTimeout);
-        (TestPipeConnection client, TestPipeConnection server) = InMemoryConnectionPair.Create();
+        (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TestConnectionFactory factory = new();
         factory.Enqueue(client);
         await using SslStream serverSsl = new(server.AsStream(), leaveInnerStreamOpen: false);
@@ -121,7 +122,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
         // Arrange
         TestConnectionListener listener = new();
         TestConnectionFactory factory = new();
-        (TestPipeConnection client, TestPipeConnection _) = InMemoryConnectionPair.Create();
+        (Connection client, Connection _) = InMemoryConnectionPair.Create();
 
         // Act & Assert
         Should.Throw<ArgumentNullException>(() => listener.UseTls(null!));

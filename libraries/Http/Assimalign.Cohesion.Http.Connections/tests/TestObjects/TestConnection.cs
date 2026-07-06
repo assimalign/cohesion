@@ -6,183 +6,114 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
-/// An in-memory <see cref="Connection"/> double built over two cross-wired
-/// <see cref="Pipe"/> instances. The supplied payload is preloaded onto the
-/// connection's <see cref="Input"/> (as if the remote peer had already sent
-/// it), and everything the holder writes to <see cref="Output"/> can be
-/// observed via <see cref="ReadOutputAsync"/>.
+/// An in-memory <see cref="Connection"/> double backed by the shared <see cref="InMemoryConnectionPair"/>
+/// driver. The supplied payload is preloaded onto the connection's <see cref="Input"/> (as if the
+/// remote peer had already sent it, then finished), and everything the holder writes to
+/// <see cref="Output"/> can be observed via <see cref="ReadOutputAsync"/>.
 /// </summary>
+/// <remarks>
+/// This preserves the single-shot shape the HTTP protocol tests were written against: a finite input
+/// stream plus a captured output. The transport mechanics — cross-wired pipes, the
+/// <c>Open → Closing</c> transition when the holder completes <see cref="Output"/>, and close/dispose
+/// propagation — now live in the driver rather than in a bespoke pipe-pair implementation.
+/// </remarks>
 internal sealed class TestConnection : Connection
 {
-    private readonly Pipe _receivePipe;
-    private readonly Pipe _sendPipe;
-    private readonly DrainSignalingPipeWriter _output;
-    private readonly CancellationTokenSource _closedSource = new();
+    private readonly Connection _self;
+    private readonly Connection _peer;
     private readonly ConnectionDirection _direction;
-    private readonly ConnectionCapabilities _capabilities;
-    private readonly ConnectionId _id = ConnectionId.New();
-    private ConnectionState _state = ConnectionState.Open;
+    private bool _isAborted;
+    private bool _isDisposed;
 
     public TestConnection(
         byte[]? input = null,
         ConnectionDirection direction = ConnectionDirection.Bidirectional,
         ConnectionCapabilities? capabilities = null,
         EndPoint? localEndPoint = null,
-        EndPoint? remoteEndPoint = null)
+        EndPoint? remoteEndPoint = null,
+        bool completeInput = true)
     {
         _direction = direction;
-        _capabilities = capabilities ?? DefaultCapabilities;
-        LocalEndPoint = localEndPoint ?? new IPEndPoint(IPAddress.Loopback, 8080);
-        RemoteEndPoint = remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 5000);
 
-        // Pipes default to pauseWriterThreshold = 64 KB, which blocks the
-        // synchronous prime write below for any input larger than that.
-        // Tests for flow-control / large-frame scenarios need bigger
-        // buffers; disable the threshold so all test payloads land
-        // immediately.
-        PipeOptions pipeOptions = new(
-            pauseWriterThreshold: 0,
-            resumeWriterThreshold: 0,
-            useSynchronizationContext: false);
-        _receivePipe = new Pipe(pipeOptions);
-        _sendPipe = new Pipe(pipeOptions);
-        _output = new DrainSignalingPipeWriter(this, _sendPipe.Writer);
+        // The pair is created bidirectional (the pipes are always fully functional); the requested
+        // direction is only reported, matching the original double, so read-only preloaded streams
+        // still capture output if a test inspects it.
+        (_self, _peer) = InMemoryConnectionPair.Create(
+            capabilities ?? DefaultCapabilities,
+            clientEndPoint: localEndPoint ?? new IPEndPoint(IPAddress.Loopback, 8080),
+            serverEndPoint: remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 5000));
 
         if (input is { Length: > 0 })
         {
-            _receivePipe.Writer.WriteAsync(input).GetAwaiter().GetResult();
+            // Non-pausing driver pipes let the prime write complete synchronously for any payload size.
+            _peer.Output.WriteAsync(input).AsTask().GetAwaiter().GetResult();
         }
 
-        // The peer has sent everything it ever will; the parser observes a
-        // finite stream that ends after the preloaded payload.
-        _receivePipe.Writer.Complete();
+        if (completeInput)
+        {
+            // The peer has sent everything it ever will; the parser observes a finite stream that
+            // ends after the preloaded payload (the single-shot shape).
+            _peer.Output.Complete();
+        }
+
+        // When completeInput is false the peer's writer is left open, so the connection's Input stays
+        // live: a read blocks waiting for more bytes rather than seeing end-of-stream. This lets the
+        // holder exercise read timeouts / keep-alive deadlines (a stalled peer), where the connection
+        // is reclaimed by the server's deadline instead of by end-of-stream.
     }
 
-    public static ConnectionCapabilities DefaultCapabilities { get; } = new(
-        ConnectionProtocol.Memory,
-        ConnectionDelivery.Stream,
-        IsReliable: true,
-        IsOrdered: true,
-        IsMultiplexed: false,
-        Security: ConnectionSecurity.None);
+    public static ConnectionCapabilities DefaultCapabilities => InMemoryConnectionPair.DefaultCapabilities;
 
-    public bool IsAborted { get; private set; }
+    public bool IsAborted => _isAborted;
 
-    public bool IsDisposed { get; private set; }
+    public bool IsDisposed => _isDisposed;
 
     public Exception? AbortReason { get; private set; }
 
-    public override ConnectionId Id => _id;
+    public override ConnectionId Id => _self.Id;
 
-    public override EndPoint? LocalEndPoint { get; }
+    public override EndPoint? LocalEndPoint => _self.LocalEndPoint;
 
-    public override EndPoint? RemoteEndPoint { get; }
+    public override EndPoint? RemoteEndPoint => _self.RemoteEndPoint;
 
-    public override PipeReader Input => _receivePipe.Reader;
+    public override PipeReader Input => _self.Input;
 
-    public override PipeWriter Output => _output;
+    public override PipeWriter Output => _self.Output;
 
     public override ConnectionDirection Direction => _direction;
 
-    public override ConnectionCapabilities Capabilities => _capabilities;
+    public override ConnectionCapabilities Capabilities => _self.Capabilities;
 
-    public override ConnectionState State => _state;
+    public override ConnectionState State => _self.State;
 
-    public override CancellationToken ConnectionClosed => _closedSource.Token;
+    public override CancellationToken ConnectionClosed => _self.ConnectionClosed;
 
     /// <summary>
     /// Reads the bytes the connection holder has written to <see cref="Output"/> so far.
     /// </summary>
     public async Task<byte[]> ReadOutputAsync()
     {
-        ReadResult result = await _sendPipe.Reader.ReadAsync();
+        ReadResult result = await _peer.Input.ReadAsync();
         byte[] output = result.Buffer.ToArray();
-        _sendPipe.Reader.AdvanceTo(result.Buffer.End);
+        _peer.Input.AdvanceTo(result.Buffer.End);
         return output;
     }
 
     public override void Abort(Exception? reason = null)
     {
-        IsAborted = true;
+        _isAborted = true;
         AbortReason = reason;
-        _state = ConnectionState.Aborted;
-        _closedSource.Cancel();
+        _self.Abort(reason);
     }
 
     public override ValueTask DisposeAsync()
     {
-        if (IsDisposed)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        IsDisposed = true;
-        _state = ConnectionState.Closed;
-        _receivePipe.Reader.Complete();
-        // The send pipe's WRITER is completed so no further bytes can be
-        // queued, but its READER is intentionally left open: tests inspect
-        // the captured wire output (via ReadOutputAsync) after disposing
-        // the HTTP connection that owned this transport connection.
-        _sendPipe.Writer.Complete();
-        _closedSource.Cancel();
-        return ValueTask.CompletedTask;
-    }
-
-    private void OnOutputCompleted()
-    {
-        // A real transport's send loop drains its backlog and tears the
-        // connection down once the holder completes the output writer. The
-        // double mirrors that by leaving ConnectionState.Open immediately,
-        // which lets the protocol connections' bounded drain-wait
-        // (WaitForTransportDrainAsync) observe the transition without
-        // burning its timeout.
-        if (_state == ConnectionState.Open)
-        {
-            _state = ConnectionState.Closing;
-        }
-    }
-
-    /// <summary>
-    /// A delegating <see cref="PipeWriter"/> that signals the owning
-    /// <see cref="TestConnection"/> when the holder completes the output,
-    /// emulating a transport send loop's post-drain state transition.
-    /// </summary>
-    private sealed class DrainSignalingPipeWriter : PipeWriter
-    {
-        private readonly TestConnection _connection;
-        private readonly PipeWriter _inner;
-
-        public DrainSignalingPipeWriter(TestConnection connection, PipeWriter inner)
-        {
-            _connection = connection;
-            _inner = inner;
-        }
-
-        public override void Advance(int bytes) => _inner.Advance(bytes);
-
-        public override Memory<byte> GetMemory(int sizeHint = 0) => _inner.GetMemory(sizeHint);
-
-        public override Span<byte> GetSpan(int sizeHint = 0) => _inner.GetSpan(sizeHint);
-
-        public override void CancelPendingFlush() => _inner.CancelPendingFlush();
-
-        public override ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
-            => _inner.FlushAsync(cancellationToken);
-
-        public override void Complete(Exception? exception = null)
-        {
-            _inner.Complete(exception);
-            _connection.OnOutputCompleted();
-        }
-
-        public override async ValueTask CompleteAsync(Exception? exception = null)
-        {
-            await _inner.CompleteAsync(exception).ConfigureAwait(false);
-            _connection.OnOutputCompleted();
-        }
+        _isDisposed = true;
+        return _self.DisposeAsync();
     }
 }
