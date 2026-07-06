@@ -5,7 +5,10 @@ using Assimalign.Cohesion.IdentityModel.Token;
 namespace Assimalign.Cohesion.IdentityModel.Token.Saml;
 
 /// <summary>
-/// Represents a SAML token.
+/// Represents a SAML assertion token: a normalized identity token with the typed SAML assertion
+/// structure downstream services need. The <c>object?</c> condition bag the earlier shape carried
+/// is replaced by the typed <see cref="SamlConditions" />; the SAML token surface is now
+/// <c>object?</c>-free.
 /// </summary>
 public interface ISamlToken : IIdentityToken
 {
@@ -20,30 +23,32 @@ public interface ISamlToken : IIdentityToken
     string? Version { get; }
 
     /// <summary>
-    /// Gets the SAML name identifier for the subject.
+    /// Gets the subject NameID, preserved with wire fidelity.
     /// </summary>
-    string? NameIdentifier { get; }
+    SamlNameId? NameId { get; }
 
     /// <summary>
-    /// Gets the assertion confirmation method.
+    /// Gets the assertion conditions (the authoritative audience surface and temporal window).
     /// </summary>
-    string? ConfirmationMethod { get; }
+    SamlConditions? Conditions { get; }
 
     /// <summary>
-    /// Gets the original SAML assertion XML.
+    /// Gets the subject confirmations.
+    /// </summary>
+    IReadOnlyList<SamlSubjectConfirmation> SubjectConfirmations { get; }
+
+    /// <summary>
+    /// Gets the encrypted subject identifier marker, when the subject's NameID is encrypted.
+    /// </summary>
+    SamlEncryptedElement? EncryptedId { get; }
+
+    /// <summary>
+    /// Gets the encrypted attribute markers the descriptive layer cannot open.
+    /// </summary>
+    IReadOnlyList<SamlEncryptedElement> EncryptedAttributes { get; }
+
+    /// <summary>
+    /// Gets the original SAML assertion XML, preserved for signature re-verification.
     /// </summary>
     string? AssertionXml { get; }
-
-    /// <summary>
-    /// Gets the SAML assertion conditions.
-    /// </summary>
-    IReadOnlyDictionary<string, object?> Conditions { get; }
-
-    /// <summary>
-    /// Attempts to read a SAML condition value.
-    /// </summary>
-    /// <param name="conditionName">The condition name.</param>
-    /// <param name="value">When this method returns, contains the condition value, if one exists.</param>
-    /// <returns><see langword="true" /> when the condition exists; otherwise <see langword="false" />.</returns>
-    bool TryGetCondition(string conditionName, out object? value);
 }

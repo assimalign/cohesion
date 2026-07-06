@@ -97,9 +97,12 @@ other protocols, and so each protocol is built and tested in isolation.
 - **`…Token.JsonWebToken`** owns: concrete JWT document fidelity — JOSE
   header shape, compact serialization, registered and OIDC ID-token claims,
   JWT-specific validation descriptors and negative-case behavior.
-- **`…Token.Saml`** owns: concrete SAML assertion token fidelity —
-  statements, conditions, subject confirmation, NameID semantics, raw
-  assertion context.
+- **`…Token.Saml`** owns: concrete SAML assertion token fidelity — typed
+  NameID, conditions, subject confirmation, and encrypted-element markers,
+  normalized onto the root canonical model (subject via the re-minted recipe,
+  attributes to claims, authentication statement to `AuthenticationContext`),
+  plus token-substrate validation (composed neutral rules + the bearer
+  confirmation-data window). It does not reference the SAML protocol branch.
 
 Two placement rules resolve every "where does this type go?" question:
 
@@ -691,12 +694,12 @@ assertion shapes and against the JWT/SAML token packages that build on it.
   decision above: branch independence forbids the token branch from referencing
   `…Protocols`, so the token validation result/diagnostic/severity mirror the
   protocol contract as independent types.
-- **Scope of the AOT purge.** `[L01.01.12.06]` removed `object?` from the
-  neutral token base; `[L01.01.12.07]` replaced the JWT JOSE-header bag with a
-  typed `JoseHeader` over an `IdentityClaimValue` record. The last `object?`
-  surface is the SAML condition dictionary (`ISamlToken.Conditions`), deferred
-  to `[L01.01.12.08]` (#612), after which `IdentityClaimValue` is the single
-  value currency family-wide.
+- **Scope of the AOT purge (complete).** `[L01.01.12.06]` removed `object?`
+  from the neutral token base; `[L01.01.12.07]` replaced the JWT JOSE-header bag
+  with a typed `JoseHeader` over an `IdentityClaimValue` record; `[L01.01.12.08]`
+  replaced the SAML condition dictionary (`ISamlToken.Conditions`) with a typed
+  `SamlConditions`. No `object?` remains on any shipped IdentityModel surface —
+  `IdentityClaimValue` is now the single value currency family-wide.
 
 ## JSON Web Token package decisions
 
@@ -752,6 +755,60 @@ to OIDC grade. The decisions below were stress-tested against RFC 7515/7517/
   depth. Signature verification, JWE, and the unencoded-payload (`b64:false`)
   variant are out of scope; the compatibility matrix in the package
   `docs/DESIGN.md` records implemented-vs-deferred.
+
+## SAML token package decisions
+
+Feature `[L01.01.12.08]` brought `Assimalign.Cohesion.IdentityModel.Token.Saml`
+to assertion grade. It is the SAML sibling of the JWT package's OIDC-grade work,
+and shares its branch-independence discipline.
+
+- **Re-model vs reuse is decided by who owns the concept.** The token branch
+  cannot reference the protocol branch, which already models the assertion. It
+  **reuses root** where root owns the concept — subject = `SubjectIdentifier`,
+  attributes = `IdentityAttribute`→claims, authentication statement =
+  `AuthenticationContext` (no parallel authn-statement type), NameID **formats**
+  = `SubjectIdentifierFormats` (never a copy, because format participates in
+  `SubjectIdentifier` equality) — and **mints a branch-local mirror** only where
+  root cannot hold the SAML shape losslessly: `SamlNameId`, `SamlConditions`
+  (the per-restriction AND-across audience grouping), `SamlSubjectConfirmation`/
+  `SamlSubjectConfirmationData` (the bearer window), `SamlEncryptedElement`, and
+  the bearer confirmation-**method** URI. The distinction: canonical-model
+  vocabulary lives in root; SAML-protocol vocabulary root does not own gets a
+  branch-local mirror.
+- **Two drift hazards, both root-test-guarded.** The re-minted NameID→
+  `SubjectIdentifier` recipe (field-for-field from `SamlSubjectExtensions`,
+  including the `SPProvidedID` property key and the `NameQualifier ?? issuer`
+  default) and the bearer confirmation-method URI are pinned equal to the
+  protocol branch by a guard in the root test project — the only assembly that
+  may reference both branches. A recipe divergence would silently break
+  single-logout correlation, so the guard asserts recipe *output equivalence*,
+  not just constant equality.
+- **`Claims` materializes by the protocol branch's exact rule.** `sub` from the
+  NameID + one claim per attribute value keyed by the raw SAML name with saml2
+  provenance (`originalNameFormat`/`originalFriendlyName`); authentication/
+  session data flows to `AuthenticationContext`, never the claim bag. "Don't
+  collapse to a minimal claim bag" (the feature's ask) is answered by the typed
+  `SamlConditions`/`SamlSubjectConfirmation`/`SamlNameId` accessors, not by
+  widening `Claims` — so a JWT- and a SAML-normalized principal resolve to the
+  same canonical shape.
+- **The audience surface is `SamlConditions`, not base `Audiences`.** SAML's
+  AND-across / OR-within audience-restriction rule cannot be expressed by a flat
+  list, so base `Audiences` is only a lossy union projection; `SamlToken.Validate`
+  evaluates the audience through `SamlConditions.IsAudienceSatisfied`, never the
+  base's flat membership check. The base temporal window derives only from
+  `Conditions` (never a bearer confirmation), and the bearer window lives only on
+  `SamlSubjectConfirmationData`.
+- **The validation split mirrors JWT/OIDC.** `SamlToken.Validate` owns the token
+  substrate — composed neutral issuer/temporal + the bearer confirmation-data
+  window (freshness, plus recipient/in-response-to when the caller expects them)
+  — and deliberately does **not** impose the profile's require-a-bearer posture,
+  which is `SamlAssertion.Validate`'s. The temporal overlap between the two is by
+  design (document substrate vs SAML Core profile) and must not be consolidated.
+  Encrypted markers are preserved (decryption is a deferred keyed seam); the
+  verbatim `AssertionXml` is the signature-reverification seam.
+- **The `object?` purge is complete.** Re-typing `ISamlToken.Conditions` to
+  `SamlConditions` (and dropping `TryGetCondition(out object?)`) removed the last
+  `object?` surface in the family.
 
 ## Error model
 
