@@ -1,3 +1,16 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
+
+	<!--
+	    The IdentityModel family promotes the trim/AOT analyzer diagnostics to errors in its
+	    own source projects (WarningsAsErrors is project-scoped, so promoting them only in the
+	    AOT sample would not gate the family assemblies' own compilations). Together with the
+	    sample build in CI, this is the continuous half of the family's NativeAOT evidence:
+	    a reflection-based or trim-unsafe call on any shipped family path fails that project's
+	    build. Scoped to src so test projects (which use deliberate, suppressed reflection for
+	    the architecture guards) keep the default warning behavior.
+	-->
+	<PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('src'))">
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+	</PropertyGroup>
 </Project>

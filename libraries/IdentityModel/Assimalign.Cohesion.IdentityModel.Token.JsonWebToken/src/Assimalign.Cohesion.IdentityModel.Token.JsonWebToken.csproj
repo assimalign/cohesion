@@ -1,5 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Concrete JSON Web Token (JOSE/JWT) document layer for Cohesion IdentityModel: typed JOSE header, compact-serialization parsing (reflection-free System.Text.Json), OIDC ID-token claim accessors, and document-level validation (algorithm, required claims, keyless at_hash/c_hash comparison). Signature verification is an exposed seam, not executed. Builds on Assimalign.Cohesion.IdentityModel.Token.</Description>
+  </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Tests" />
   </ItemGroup>
 </Project>

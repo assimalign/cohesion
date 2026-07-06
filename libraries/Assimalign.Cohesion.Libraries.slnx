@@ -672,6 +672,33 @@
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel/tests/Assimalign.Cohesion.IdentityModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/" />
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/Assimalign.Cohesion.IdentityModel.Protocols.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/tests/Assimalign.Cohesion.IdentityModel.Protocols.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/" />
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/" />
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/src/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/src/Assimalign.Cohesion.IdentityModel.Protocols.Saml.csproj" />
+	</Folder>
+	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/tests/">
+		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/tests/Assimalign.Cohesion.IdentityModel.Protocols.Saml.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
