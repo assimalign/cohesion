@@ -32,6 +32,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     private readonly HttpServerLimits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly Http3QPackOptions _qpackOptions;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
@@ -57,6 +58,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         _streamListeners = new List<(HttpProtocol, IConnectionListener)>();
         _multiplexedListeners = new List<IMultiplexedConnectionListener>();
         _limits = options.Limits;
+        _qpackOptions = options.QPack;
         // Snapshot: registrations after this point must not race the accept loops or observe a
         // half-mutated list; the empty snapshot keeps the parser's zero-interceptor fast path.
         _interceptors = [.. options.Interceptors];
@@ -289,7 +291,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure, _responseInterceptors);
+                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure, _responseInterceptors, _qpackOptions);
 
                 await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -317,14 +319,14 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
     }
 
-    private static Http3Connection CreateHttp3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors)
+    private static Http3Connection CreateHttp3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors, Http3QPackOptions qpackOptions)
     {
         if (!IsHttp3SupportedPlatform())
         {
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return new Http3Connection(connection, isSecure, responseInterceptors);
+        return new Http3Connection(connection, isSecure, responseInterceptors, qpackOptions);
     }
 
     [SupportedOSPlatformGuard("windows")]

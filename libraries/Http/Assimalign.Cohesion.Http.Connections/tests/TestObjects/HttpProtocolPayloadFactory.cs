@@ -194,6 +194,107 @@ internal static class HttpProtocolPayloadFactory
     }
 
     /// <summary>
+    /// Builds the bytes a peer would send on its QPACK encoder stream (RFC 9204
+    /// §4.2): the stream-type prefix (0x02) followed by the supplied encoder
+    /// instructions concatenated in order.
+    /// </summary>
+    public static byte[] CreateHttp3QPackEncoderStream(params byte[][] instructions)
+    {
+        using MemoryStream body = new();
+        foreach (byte[] instruction in instructions)
+        {
+            body.Write(instruction, 0, instruction.Length);
+        }
+
+        return CreateHttp3UnidirectionalStream(0x02 /* QPACK encoder */, body.ToArray());
+    }
+
+    /// <summary>Set Dynamic Table Capacity encoder instruction (RFC 9204 §4.3.1): <c>001</c> + 5-bit prefix.</summary>
+    public static byte[] QPackSetCapacity(long capacity)
+    {
+        using MemoryStream buffer = new();
+        WritePrefixedInteger(buffer, checked((int)capacity), 5, 0b0010_0000);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Insert with Literal Name encoder instruction (RFC 9204 §4.3.3): <c>01</c> + H + 5-bit name, then value.</summary>
+    public static byte[] QPackInsertWithLiteralName(string name, string value)
+    {
+        using MemoryStream buffer = new();
+        WritePrefixedString(buffer, name, 5, 0b0100_0000); // 01 H(=0) name-len(5).
+        WritePrefixedString(buffer, value, 7, 0x00);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Insert with (static) Name Reference encoder instruction (RFC 9204 §4.3.2): <c>1</c> T(=1) + 6-bit index, then value.</summary>
+    public static byte[] QPackInsertWithStaticName(int staticIndex, string value)
+    {
+        using MemoryStream buffer = new();
+        WritePrefixedInteger(buffer, staticIndex, 6, 0b1100_0000); // 1 T(=1) index(6).
+        WritePrefixedString(buffer, value, 7, 0x00);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Duplicate encoder instruction (RFC 9204 §4.3.4): <c>000</c> + 5-bit relative index.</summary>
+    public static byte[] QPackDuplicate(int relativeIndex)
+    {
+        using MemoryStream buffer = new();
+        WritePrefixedInteger(buffer, relativeIndex, 5, 0x00);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds a QPACK field section (no HEADERS frame wrapper) with a zero Field
+    /// Section Prefix followed by the supplied literal field lines. Used to drive
+    /// the decoder-state path directly.
+    /// </summary>
+    public static byte[] CreateHttp3FieldSection(params (string Name, string Value)[] fields)
+    {
+        using MemoryStream section = new();
+        section.WriteByte(0x00); // Required Insert Count = 0.
+        section.WriteByte(0x00); // S = 0, Delta Base = 0.
+
+        foreach ((string name, string value) in fields)
+        {
+            WriteHttp3LiteralFieldLine(section, name, value, huffman: false);
+        }
+
+        return section.ToArray();
+    }
+
+    /// <summary>
+    /// Builds an HTTP/3 request HEADERS frame whose QPACK field section carries a
+    /// custom Field Section Prefix, literal field lines, then dynamic indexed
+    /// field lines (RFC 9204 §4.5.2, T = 0) referencing the supplied relative
+    /// indices. Used to drive the dynamic-table decode path.
+    /// </summary>
+    public static byte[] CreateHttp3DynamicRequest(
+        long encodedRequiredInsertCount,
+        byte deltaBaseByte,
+        (string Name, string Value)[] literalFields,
+        params int[] dynamicRelativeIndices)
+    {
+        using MemoryStream section = new();
+        WritePrefixedInteger(section, checked((int)encodedRequiredInsertCount), 8, 0x00); // Encoded Required Insert Count.
+        section.WriteByte(deltaBaseByte);                                                  // Delta Base (S + 7-bit).
+
+        foreach ((string name, string value) in literalFields)
+        {
+            WriteHttp3LiteralFieldLine(section, name, value, huffman: false);
+        }
+
+        foreach (int relativeIndex in dynamicRelativeIndices)
+        {
+            // §4.5.2 Indexed Field Line, dynamic (T = 0): 1 0 index(6).
+            WritePrefixedInteger(section, relativeIndex, 6, 0b1000_0000);
+        }
+
+        using MemoryStream buffer = new();
+        WriteHttp3Frame(buffer, 0x1 /* HEADERS */, section.ToArray());
+        return buffer.ToArray();
+    }
+
+    /// <summary>
     /// Huffman-codes an ASCII string using the canonical HPACK/QPACK code
     /// (RFC 7541 Appendix B), MSB-first with all-ones EOS padding.
     /// </summary>
@@ -554,10 +655,16 @@ internal static class HttpProtocolPayloadFactory
 
     private static string DecodePrefixedString(byte[] buffer, ref int index, int prefixLength)
     {
+        // RFC 7541 §5.2 — the bit immediately above the length prefix is the
+        // Huffman flag. Capture it before the length prefix advances the index.
+        bool huffman = (buffer[index] & (1 << prefixLength)) != 0;
         int length = DecodePrefixedInteger(buffer, ref index, prefixLength);
-        string value = Encoding.ASCII.GetString(buffer, index, length);
+        ReadOnlySpan<byte> octets = buffer.AsSpan(index, length);
         index += length;
-        return value;
+
+        return huffman
+            ? Encoding.Latin1.GetString(Internal.Http2.HPack.HPackHuffmanDecoder.Decode(octets))
+            : Encoding.ASCII.GetString(octets);
     }
 
     private static int DecodePrefixedInteger(byte[] buffer, ref int index, int prefixLength)

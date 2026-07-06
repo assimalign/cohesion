@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
 namespace Assimalign.Cohesion.Http.Connections;
 
@@ -28,6 +29,14 @@ public sealed class HttpConnectionListenerOptions
     private int _backlogCapacity = 512;
 
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
+
+    /// <summary>
+    /// Gets or sets the HTTP/3 QPACK configuration — the decoder's dynamic table
+    /// capacity and blocked-stream limit advertised in SETTINGS. Defaults to the
+    /// static-only profile (<see cref="Http3QPackOptions.StaticOnly"/>): the
+    /// dynamic table is disabled unless a non-zero capacity is opted in.
+    /// </summary>
+    internal Http3QPackOptions QPack { get; set; } = Http3QPackOptions.StaticOnly;
 
     /// <summary>
     /// Gets the request-shaping and timeout limits enforced on accepted connections.

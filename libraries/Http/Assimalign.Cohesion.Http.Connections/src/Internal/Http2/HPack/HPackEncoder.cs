@@ -210,39 +210,54 @@ internal static partial class HPackEncoder
             return false;
         }
 
-        destination[0] = 0;
-        int encodedStringLength = valueEncoding is null || ReferenceEquals(valueEncoding, Encoding.Latin1)
-            ? value.Length
-            : valueEncoding.GetByteCount(value);
+        byte[] octets;
 
-        if (!IntegerEncoder.Encode(encodedStringLength, 7, destination, out int integerLength))
+        if (valueEncoding is null || ReferenceEquals(valueEncoding, Encoding.Latin1))
         {
-            bytesWritten = 0;
-            return false;
-        }
+            octets = new byte[value.Length];
 
-        destination = destination.Slice(integerLength);
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
 
-        if (encodedStringLength > destination.Length)
-        {
-            bytesWritten = 0;
-            return false;
-        }
+                // The null-encoding path preserves the historical ASCII-only
+                // guard; Latin1 accepts the full 0-255 octet range.
+                if (valueEncoding is null && (character & 0xFF80) != 0)
+                {
+                    throw new InvalidOperationException("Only ASCII HPACK literals are currently supported.");
+                }
 
-        if (valueEncoding is null)
-        {
-            EncodeValueStringPart(value, destination);
+                octets[index] = (byte)character;
+            }
         }
         else
         {
-            valueEncoding.GetBytes(value, destination);
+            octets = valueEncoding.GetBytes(value);
         }
 
-        bytesWritten = integerLength + encodedStringLength;
-        return true;
+        return EncodeStringLiteralShortest(octets, destination, out bytesWritten);
     }
 
     private static bool EncodeLiteralHeaderName(string value, Span<byte> destination, out int bytesWritten)
+    {
+        byte[] octets = new byte[value.Length];
+
+        for (int index = 0; index < value.Length; index++)
+        {
+            char character = value[index];
+            octets[index] = (byte)((uint)(character - 'A') <= ('Z' - 'A') ? character | 0x20 : character);
+        }
+
+        return EncodeStringLiteralShortest(octets, destination, out bytesWritten);
+    }
+
+    /// <summary>
+    /// Writes an HPACK string literal (RFC 7541 §5.2) choosing the shorter of
+    /// the raw and Huffman (RFC 7541 Appendix B) forms. The Huffman flag (H) is
+    /// set only when the Huffman encoding is strictly shorter than the raw
+    /// octets; both forms decode through <see cref="HPackHuffmanDecoder"/>.
+    /// </summary>
+    private static bool EncodeStringLiteralShortest(ReadOnlySpan<byte> octets, Span<byte> destination, out int bytesWritten)
     {
         if (destination.IsEmpty)
         {
@@ -250,45 +265,50 @@ internal static partial class HPackEncoder
             return false;
         }
 
-        destination[0] = 0;
+        int huffmanLength = HPackHuffmanEncoder.GetEncodedLength(octets);
 
-        if (!IntegerEncoder.Encode(value.Length, 7, destination, out int integerLength))
+        if (huffmanLength < octets.Length)
         {
-            bytesWritten = 0;
-            return false;
-        }
+            destination[0] = 0x80; // H = 1
 
-        destination = destination.Slice(integerLength);
-
-        if (value.Length > destination.Length)
-        {
-            bytesWritten = 0;
-            return false;
-        }
-
-        for (int index = 0; index < value.Length; index++)
-        {
-            char character = value[index];
-            destination[index] = (byte)((uint)(character - 'A') <= ('Z' - 'A') ? character | 0x20 : character);
-        }
-
-        bytesWritten = integerLength + value.Length;
-        return true;
-    }
-
-    private static void EncodeValueStringPart(string value, Span<byte> destination)
-    {
-        for (int index = 0; index < value.Length; index++)
-        {
-            char character = value[index];
-
-            if ((character & 0xFF80) != 0)
+            if (!IntegerEncoder.Encode(huffmanLength, 7, destination, out int prefixLength))
             {
-                throw new InvalidOperationException("Only ASCII HPACK literals are currently supported.");
+                bytesWritten = 0;
+                return false;
             }
 
-            destination[index] = (byte)character;
+            Span<byte> tail = destination.Slice(prefixLength);
+
+            if (huffmanLength > tail.Length)
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            HPackHuffmanEncoder.Encode(octets, tail);
+            bytesWritten = prefixLength + huffmanLength;
+            return true;
         }
+
+        destination[0] = 0; // H = 0
+
+        if (!IntegerEncoder.Encode(octets.Length, 7, destination, out int rawPrefixLength))
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        Span<byte> rawTail = destination.Slice(rawPrefixLength);
+
+        if (octets.Length > rawTail.Length)
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        octets.CopyTo(rawTail);
+        bytesWritten = rawPrefixLength + octets.Length;
+        return true;
     }
 
     private static void WriteStatusHeader(Stream stream, int statusCode)
