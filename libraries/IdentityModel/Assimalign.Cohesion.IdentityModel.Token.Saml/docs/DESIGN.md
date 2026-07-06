@@ -37,7 +37,8 @@ the assertion richly. The line drawn:
 ## `Claims` is authoritative; the typed members are its projection
 
 Claims materialize by the same rule as the protocol branch's `SamlAssertion.BuildClaims`: `sub`
-from the NameID (saml2 provenance, `originalType` = format), and one claim per attribute **value**
+from the NameID (saml2 provenance with the NameID format on `originalNameFormat` —
+`originalType` is reserved for original wire names), and one claim per attribute **value**
 keyed by the raw SAML attribute name with `originalNameFormat`/`originalFriendlyName` provenance.
 Authentication/session data is **not** forced into claims — it flows to `AuthenticationContext`.
 This keeps a JWT- and a SAML-normalized principal resolving to the same canonical shape.

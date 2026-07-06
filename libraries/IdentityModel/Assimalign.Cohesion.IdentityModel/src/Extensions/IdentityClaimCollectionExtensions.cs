@@ -43,6 +43,27 @@ public static class IdentityClaimCollectionExtensions
         }
 
         /// <summary>
+        /// Canonicalizes the claims with the default cross-protocol mappings (see
+        /// <see cref="IdentityClaimMappings.Default" />): strictly equivalent wire names are
+        /// re-typed to their canonical claim type with values byte-identical and provenance
+        /// preserved; everything else passes through unchanged.
+        /// </summary>
+        /// <returns>The canonicalized collection, or the collection itself when nothing mapped.</returns>
+        public IIdentityClaimCollection Canonicalize() => IdentityClaimMapper.Default.Canonicalize(claims);
+
+        /// <summary>
+        /// Canonicalizes the claims with the provided mapper.
+        /// </summary>
+        /// <param name="mapper">The mapper carrying the resolved mappings to apply.</param>
+        /// <returns>The canonicalized collection, or the collection itself when nothing mapped.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="mapper" /> is null.</exception>
+        public IIdentityClaimCollection Canonicalize(IdentityClaimMapper mapper)
+        {
+            ArgumentNullException.ThrowIfNull(mapper);
+            return mapper.Canonicalize(claims);
+        }
+
+        /// <summary>
         /// Determines whether any claim of the provided type carries the provided string
         /// value, comparing flattened values ordinally so that duplicate-claim and
         /// array-claim representations of multi-value data behave identically.

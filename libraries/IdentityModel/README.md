@@ -9,7 +9,7 @@ inventing service-local identity types.
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.IdentityModel` | The dependency anchor. Canonical identity domain model: subjects, application identities, credentials, claims and attributes, sessions, authentication results. |
+| `Assimalign.Cohesion.IdentityModel` | The dependency anchor. Canonical identity domain model: subjects, application identities, credentials, claims and attributes, sessions, authentication results — plus the cross-protocol claim canonicalization seam (`IdentityClaimMapper` / `Canonicalize`) that maps OpenID Connect claims and SAML attributes onto one canonical vocabulary with provenance preserved. |
 | `Assimalign.Cohesion.IdentityModel.Protocols` | Shared, transport-agnostic protocol abstractions: party roles, published-entity metadata, message envelopes, response status, validation results, logout semantics, binding descriptors. |
 | `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contract branch: discovery/client metadata, authorization/token/ID token/UserInfo/logout contracts, spec-oriented validation. |
 | `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contract branch: assertions, protocol messages, entity metadata, bindings. |

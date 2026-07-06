@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+        NativeAOT validation smoke for the IdentityModel family. Two complementary layers:
+        (1) continuous — the family's Directory.Build.props promotes the trim/AOT analyzer
+        diagnostics (IL2026/IL2070/IL2072/IL2075/IL2087/IL3050/IL3051) to errors in every
+        family SRC project (WarningsAsErrors is project-scoped, so the promotion must live
+        where the family code compiles), and this project promotes the same set for its own
+        compilation while exercising the family surfaces; (2) point-in-time — the project is
+        published with PublishAot and RUN to record the evidence the family docs reference:
+
+            dotnet publish libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj -c Release -r win-x64
+
+        (On LongPathsEnabled=0 machines, run from a short path — the main checkout or a
+        subst-mapped drive — because ILC intermediate paths are long.)
+    -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
+  </ItemGroup>
+</Project>

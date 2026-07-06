@@ -223,7 +223,9 @@ public sealed class SamlAssertionTests
         assertion.Claims.TryGet(IdentityClaimTypes.Subject, out var subject).ShouldBeTrue();
         subject!.Value.ToString().ShouldBe(SamlAssertionFixtures.SubjectValue);
         subject.Provenance!.Protocol.ShouldBe(AuthenticationProtocol.Saml2);
-        subject.Provenance.OriginalType.ShouldBe(SamlNameIdFormats.EmailAddress);
+        // The NameID format is a name format, not a wire name, so it rides OriginalNameFormat.
+        subject.Provenance.OriginalNameFormat.ShouldBe(SamlNameIdFormats.EmailAddress);
+        subject.Provenance.OriginalType.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - SAML: Claims should keep raw attribute names with provenance")]

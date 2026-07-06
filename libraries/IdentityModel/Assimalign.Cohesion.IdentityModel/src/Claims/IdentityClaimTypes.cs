@@ -3,10 +3,10 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// <summary>
 /// Defines the starter canonical claim-type vocabulary. The canonical vocabulary adopts the
 /// IANA-registered JWT claim names, because that registry is the only cross-vendor claim
-/// vocabulary in wide use; SAML attribute names map onto these canonical types during
-/// normalization, with the original names preserved in <see cref="IdentityClaimProvenance" />.
-/// The cross-protocol mapping tables that populate these types are owned by the epic's
-/// cross-protocol normalization feature.
+/// vocabulary in wide use; SAML attribute names map onto these canonical types through
+/// <see cref="IdentityClaimMappings" /> and the <c>Canonicalize</c> extension on
+/// <see cref="IIdentityClaimCollection" />, with the original names preserved in
+/// <see cref="IdentityClaimProvenance" />.
 /// </summary>
 public static class IdentityClaimTypes
 {

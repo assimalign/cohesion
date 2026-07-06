@@ -19,31 +19,32 @@ none defines a parallel foundational identity abstraction. See the area
 
 ## Status
 
-Epic `[L01.01.12]` (#105) is in delivery. This root package currently ships:
+Epic `[L01.01.12]` (#105) is delivered. This root package ships:
 
 - Family design, namespace map, ownership boundaries, and dependency rules
   (`docs/DESIGN.md`), enforced by architecture tests in
   `Assimalign.Cohesion.IdentityModel.Tests`.
-- The canonical identity domain model (`[L01.01.12.02]`), replacing the
-  legacy thin markers: `IIdentitySubject`/`IdentitySubject` with actor
-  delegation chains, `SubjectIdentifier` + `SubjectIdentifierFormats`,
-  `IdentityKind` (with an honest `Unknown` default), the typed claim layer
-  (`IIdentityClaim`, `IdentityClaimValue` + `IdentityValueKind`,
-  `IdentityClaimProvenance`, `IIdentityClaimCollection`,
-  `IdentityAttribute`, `IdentityClaimTypes`), credentials
-  (`IdentityCredential` + kind/state), and the authentication layer
-  (`AuthenticationProtocol`, `AuthenticationContext`,
-  `AuthenticationSession`, `AuthenticationResult`, `AuthenticationFailure`),
-  plus the `IdentityModelException` area root and claim-collection
-  `extension(…)` accessors.
+- The canonical identity domain model (`[L01.01.12.02]`):
+  `IIdentitySubject`/`IdentitySubject` with actor delegation chains,
+  `SubjectIdentifier` + `SubjectIdentifierFormats`, `IdentityKind` (with an
+  honest `Unknown` default), the typed claim layer (`IIdentityClaim`,
+  `IdentityClaimValue` + `IdentityValueKind`, `IdentityClaimProvenance`,
+  `IIdentityClaimCollection`, `IdentityAttribute`, `IdentityClaimTypes`),
+  credentials (`IdentityCredential` + kind/state), and the authentication layer
+  (`AuthenticationProtocol`, `AuthenticationContext`, `AuthenticationSession`,
+  `AuthenticationResult`, `AuthenticationFailure`), plus the
+  `IdentityModelException` area root and claim-collection `extension(…)`
+  accessors.
+- The cross-protocol claim canonicalization seam (`[L01.01.12.09]`):
+  `IdentityClaimMappings`, `IdentityClaimMapper`, and the `Canonicalize`
+  extension — strictly equivalent wire names normalize onto the canonical
+  vocabulary with provenance preserved.
 
-The shared protocol abstractions (`[L01.01.12.03]`) ship in the
-`Assimalign.Cohesion.IdentityModel.Protocols` project, and the OpenID Connect
-contracts (`[L01.01.12.04]`) in
-`Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` — each with its own
-`docs/`. Remaining features land in dependency order: SAML branch, then
-token-package alignment and cross-protocol normalization. See the delivery
-roadmap table in `docs/DESIGN.md`.
+The other six family assemblies ship in their own projects — the shared
+protocol abstractions, the OpenID Connect and SAML 2.0 contract branches, and
+the token normalization layer with its JWT and SAML document packages — each
+with its own `docs/`. The family's NativeAOT validation evidence lives in
+`docs/DESIGN.md` (AOT posture) with the smoke project under `samples/`.
 
 ## Scope
 
@@ -67,13 +68,20 @@ the README for the branch diagram).
 the root domain-model suites:
 
 - `IdentityModelFamilyBoundaryTests` — dependency-direction guards across all
-  six family assemblies: the root references no Cohesion assemblies, each
+  seven family assemblies: the root references no Cohesion assemblies, each
   branch references only its parent chain, the protocol and token branches
   never cross-reference, siblings never reference each other, and no family
   assembly references `Microsoft.Extensions.*`.
 - `IdentityModelNamespaceAlignmentTests` — every public type in every family
   assembly lives under its assembly-name namespace, keeping the documented
   namespace map honest.
+- Cross-branch drift guards — `IdentityModelClaimVocabularyTests` (the JWT and
+  OpenID Connect claim-name mirrors stay equal) and
+  `IdentityModelSamlMirrorTests` (the SAML token branch's NameID recipe and
+  bearer method stay equivalent to the protocol branch's).
+- Cross-protocol suites — `IdentityClaimMapperTests` (the canonicalization
+  invariants) and `IdentityModelCrossProtocolTests` (paired OIDC/SAML fixtures
+  proving one canonical surface, with non-equivalences explicit).
 - Domain-model suites — claim value shapes, snapshot/defensive-copy and
   depth-cap invariants, subject kind differentiation and actor chains,
   identifier equality semantics, credential and session lifecycle validity,

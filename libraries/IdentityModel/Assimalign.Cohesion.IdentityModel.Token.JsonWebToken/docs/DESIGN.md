@@ -84,9 +84,10 @@ layering; do not consolidate them, or standalone JWT validation breaks.
 `<IsAotCompatible>true</IsAotCompatible>`. Parsing uses `System.Text.Json`'s reflection-free
 `JsonDocument`/`Utf8JsonReader` — never `JsonSerializer` over unannotated graphs; hashing uses
 `System.Security.Cryptography` one-shot `HashData`; base64url uses `System.Buffers.Text.Base64Url`
-— all in-box for `net10.0`, no package references, no reflection. Representative NativeAOT
-publish evidence for the family is the epic's final feature; this package is AOT-clean by
-construction.
+— all in-box for `net10.0`, no package references, no reflection. The family's recorded NativeAOT
+publish-and-run evidence (see the root `docs/DESIGN.md`, AOT posture) exercises this package's
+compact-parse and at_hash paths specifically — they are the family's only wire-format parse
+surface.
 
 ## Non-goals
 

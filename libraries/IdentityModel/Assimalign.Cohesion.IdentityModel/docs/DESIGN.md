@@ -571,8 +571,8 @@ OIDC branch settled.
   required).
 - **Claims keep raw SAML names; authentication data does not become claims.**
   `BuildClaims` emits `sub` from the subject NameID and one claim per attribute
-  *value*, keyed by the **raw** SAML attribute name (the cross-protocol mapper
-  remaps to canonical types later), with provenance carrying the protocol
+  *value*, keyed by the **raw** SAML attribute name (`Canonicalize` remaps the
+  strictly equivalent ones to canonical types), with provenance carrying the protocol
   (`saml2`), original name, name format, and friendly name so nothing is lost;
   multi-value and repeated attributes become duplicate claims, per the family's
   canonical multi-value rule. Authentication-statement data (authn instant,
@@ -810,6 +810,69 @@ and shares its branch-independence discipline.
   `SamlConditions` (and dropping `TryGetCondition(out object?)`) removed the last
   `object?` surface in the family.
 
+## Cross-protocol normalization decisions
+
+Feature `[L01.01.12.09]` delivered the cross-protocol claim mapping — the seam
+that lets resources consume one normalized identity surface while protocols
+evolve. It lives in the **root** (`IdentityClaimMappings`, `IdentityClaimMapper`,
+and the `Canonicalize` extension on `IIdentityClaimCollection`): the mapping is
+string-keyed over root claim types only, so the anchor stays dependency-free,
+and both branches' outputs flow through it.
+
+- **The default table holds strict equivalences only.** Wire names (LDAP/X.500
+  OID URNs, WS-Federation claim URIs) map to a canonical type only when the
+  meaning is the same on both sides: mail/emailAddress/emailaddress → `email`,
+  givenName/givenname → `given_name`, sn/surname → `family_name`,
+  displayName → `name`, telephoneNumber → `phone_number`,
+  preferredLanguage → `locale`. OpenID Connect standard claims need no mapping —
+  the canonical vocabulary *is* their IANA names.
+- **No mapping may target a structural claim.** Nothing maps onto
+  `sub`/`iss`/`aud`/`exp`/`iat`/`nbf`/`jti` — subject identity flows only
+  through the family's pinned NameID recipes, never the mapper (a second `sub`
+  claim would be a subject-correlation corruption). The mapper rejects custom
+  mappings that resolve to a structural target at materialization, and a table
+  invariant test pins the defaults.
+- **Explicitly excluded, never forced equivalences**: `nameidentifier`,
+  `eduPersonPrincipalName` (reassignable per eduPerson — never a `sub`),
+  `eduPersonTargetedID`, `upn` (an identifier, not a display preference), the
+  WS-Federation `…/claims/name` URI (a UPN/account name in practice), LDAP
+  `cn`, vendor role/group URIs and `eduPersonAffiliation` (an affiliation
+  vocabulary, not group membership), bare basic-format short names (`mail`,
+  `givenName` — extension-claim collision space), and verification/structured
+  concepts with no counterpart (`email_verified`, `phone_number_verified`, the
+  OIDC `address` object). All are custom-mapping territory for deployments that
+  know their provider's semantics; the cross-protocol fixtures pin each as an
+  explicit non-equivalence.
+- **Canonicalization is type-only, lossless, and idempotent.** Values pass
+  byte-identical (no E.164 coercion, no boolean parsing, no object
+  composition); unmapped claims pass through as the *same instances* (a
+  no-change canonicalization returns the input collection reference); two wire
+  names mapping to one type yield duplicate claims — the canonical multi-value
+  form — with provenance disambiguating. Provenance is fill-if-null, never
+  overwritten: a branch-recorded `OriginalType` is kept verbatim, a missing one
+  is filled with the pre-mapping wire name, and a provenance-less claim gains an
+  honest `Unknown`-protocol provenance. Idempotency is by construction: every
+  mapping resolves to its transitive fixed point at mapper materialization, and
+  cyclic chains fail with `IdentityModelException`.
+- **Mapping is name-based and provenance-blind**, keyed ordinally on
+  `IIdentityClaim.Type` with no friendly-name fallback (SAML defines
+  `FriendlyName` as display-only; matching on it would be an aliasing vector)
+  and no protocol gate (the key namespaces are disjoint by construction, and
+  OIDC providers legitimately emit `urn:oid:…` claim names that should
+  normalize identically). An `IIdentityClaimMapper` interface was rejected — no
+  second implementation exists (the `IIdentityTokenValidator` precedent); the
+  mapper is a sealed descriptor-materialized class with a `Default` singleton,
+  and `Canonicalize` is the single verb (the collection is already "normalized"
+  in the F6 sense; canonicalization is the claim-*vocabulary* step).
+- **Custom mappings compose deterministically**: ordinal keys, custom wins over
+  default on collision, an identity entry (name mapped to itself) suppresses a
+  single default, and `IncludeDefaultMappings=false` opts out wholesale. Both
+  layers feed the same fixed-point resolution.
+- **Scope: claims only.** NameID/subject-format normalization is F5/F8's
+  settled territory (the pinned recipes); the authentication statement flows
+  through `AuthenticationContext`, never claims — so no `acr` claim ever
+  materializes from a SAML authentication statement, and the fixtures pin that.
+
 ## Error model
 
 `IdentityModelException` (root namespace) is the area-scoped exception root,
@@ -836,9 +899,45 @@ it's not an exception.
   these are reflection-free and AOT-safe — but never
   `JsonSerializer` over unannotated object graphs.
 
-Representative NativeAOT publish validation for the family is a first-class
-deliverable of the epic's final feature and its evidence is recorded in the
-family docs when it lands.
+### NativeAOT validation evidence
+
+The family's NativeAOT evidence has two complementary layers, both delivered by
+`[L01.01.12.09]`:
+
+- **Continuous (analyzers as errors).** The family's `Directory.Build.props`
+  promotes the trim/AOT analyzer diagnostics
+  (`IL2026/IL2070/IL2072/IL2075/IL2087/IL3050/IL3051`) to errors in every
+  family **src** project — `WarningsAsErrors` is project-scoped, so the gate
+  lives where the family code compiles, and a reflection-based or trim-unsafe
+  call on any shipped path fails that project's own build. The committed smoke
+  project
+  `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/`
+  references all seven assemblies and exercises their representative surfaces
+  under the same promoted set; the IdentityModel CI workflow builds it (and all
+  seven projects) on every push.
+- **Point-in-time (publish and run).** Recorded 2026-07-05, SDK `10.0.301`
+  (global.json pin `10.0.300`), Visual Studio 2026 (v18) MSVC toolchain,
+  ARM64 host:
+
+  ```
+  dotnet publish libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj -c Release -r win-arm64
+  ```
+
+  Result: 0 IL warnings (the promoted diagnostic set —
+  `IL2026/IL2070/IL2072/IL2075/IL2087/IL3050/IL3051` — fails the build; other
+  IL diagnostics surface as log warnings and the recorded run emitted none),
+  a 1.87 MB native binary that runs to completion (exit 0) printing
+  the deterministic check output (claim-value kinds, JWT parse + at_hash spec
+  vector validation, SAML token materialization + validation, cross-protocol
+  canonicalization). Pick the RID matching the publishing host; on
+  `LongPathsEnabled=0` machines run from a short path (the main checkout or a
+  subst-mapped drive) because ILC intermediate paths are long.
+
+  Scope honesty: the JWT compact parse (`System.Text.Json` readers +
+  `Base64Url` + one-shot SHA-2) is the family's only wire-format parse path and
+  the only real trim-risk surface; everything else is POCO construction. SAML
+  XML parsing is out of scope because no XML parser exists in the family yet —
+  when one lands, the smoke carries the obligation to exercise it.
 
 ## Standards references
 

@@ -257,14 +257,16 @@ public sealed class SamlToken : IdentityToken, ISamlToken
         // so a JWT- and a SAML-normalized principal resolve to the same canonical shape.
         if (descriptor.NameId is { } nameId)
         {
+            // The NameID format rides OriginalNameFormat, not OriginalType — OriginalType is
+            // reserved for original wire names (mirrors SamlAssertion.BuildClaims).
             merged.Claims.Add(new IdentityClaim(
                 IdentityClaimTypes.Subject,
                 nameId.Value,
                 issuer,
                 new IdentityClaimProvenance(
                     AuthenticationProtocol.Saml2,
-                    originalType: nameId.Format,
-                    originalIssuer: issuer)));
+                    originalIssuer: issuer,
+                    originalNameFormat: nameId.Format)));
         }
 
         foreach (var attribute in descriptor.Attributes)

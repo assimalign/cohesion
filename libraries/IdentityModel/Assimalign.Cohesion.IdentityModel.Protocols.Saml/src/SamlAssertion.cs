@@ -338,14 +338,17 @@ public sealed class SamlAssertion
 
         if (descriptor.Subject?.NameId is { } nameId)
         {
+            // The NameID format is a name FORMAT, not a wire claim name, so it rides
+            // OriginalNameFormat — OriginalType is reserved for original wire names, the
+            // invariant the cross-protocol mapper's audit trail depends on.
             claims.Add(new IdentityClaim(
                 IdentityClaimTypes.Subject,
                 nameId.Value,
                 issuer,
                 new IdentityClaimProvenance(
                     AuthenticationProtocol.Saml2,
-                    originalType: nameId.Format,
-                    originalIssuer: issuer)));
+                    originalIssuer: issuer,
+                    originalNameFormat: nameId.Format)));
         }
 
         // Attribute claims keep their raw SAML attribute name (the cross-protocol mapper

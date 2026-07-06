@@ -73,6 +73,10 @@ public sealed class SamlTokenTests
         token.Claims.TryGet(IdentityClaimTypes.Subject, out var sub).ShouldBeTrue();
         sub!.Value.ToString().ShouldBe("user@example.com");
         sub.Provenance!.Protocol.ShouldBe(AuthenticationProtocol.Saml2);
+        // Mirrors SamlAssertion.BuildClaims: the NameID format rides OriginalNameFormat;
+        // OriginalType stays reserved for original wire names.
+        sub.Provenance.OriginalNameFormat.ShouldBe(SubjectIdentifierFormats.EmailAddress);
+        sub.Provenance.OriginalType.ShouldBeNull();
 
         token.Claims.TryGet("urn:oid:email", out var email).ShouldBeTrue();
         email!.Provenance!.OriginalNameFormat.ShouldBe("uri");
