@@ -6,6 +6,7 @@ using System.Text;
 namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
@@ -16,6 +17,10 @@ public sealed class WebApplicationServerBuilder
     private readonly WebApplicationBuilder _builder;
     private readonly List<Action<IServiceProvider, HttpConnectionListenerOptions>> _configurations = new();
 
+    // Null == unlimited (the default). Captured here at builder time and read by the default
+    // server's factory below; DI/Config integration for the Web server stays builder-time only.
+    private int? _maxConcurrentConnections;
+
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
@@ -23,6 +28,8 @@ public sealed class WebApplicationServerBuilder
         {
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
+                ApplyDefaultInterceptors(options);
+
                 foreach (var action in _configurations)
                 {
                     action.Invoke(serviceProvider, options);
@@ -31,8 +38,40 @@ public sealed class WebApplicationServerBuilder
 
             IWebApplicationPipeline pipeline = serviceProvider.GetRequiredService<IWebApplicationPipeline>();
 
-            return new WebApplicationServer(pipeline, listener);
+            return new WebApplicationServer(new WebApplicationServerOptions
+            {
+                Pipeline = pipeline,
+                Listener = listener,
+                MaxConcurrentConnections = _maxConcurrentConnections
+            });
         });
+    }
+
+    /// <summary>
+    /// Caps the number of connections the default server serves concurrently.
+    /// </summary>
+    /// <remarks>
+    /// By default the server is unlimited. When a cap is set, the accept loop reserves a slot
+    /// before accepting each connection, so once the cap is reached additional connections are left
+    /// in the listener backlog — accepted but not opened or served — until an active connection
+    /// completes and frees a slot.
+    /// </remarks>
+    /// <param name="maxConcurrentConnections">The maximum number of concurrently served connections. Must be greater than zero.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxConcurrentConnections"/> is less than one.</exception>
+    public WebApplicationServerBuilder LimitConcurrentConnections(int maxConcurrentConnections)
+    {
+        if (maxConcurrentConnections <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maxConcurrentConnections),
+                maxConcurrentConnections,
+                "The maximum concurrent connection count must be greater than zero.");
+        }
+
+        _maxConcurrentConnections = maxConcurrentConnections;
+
+        return this;
     }
 
     /// <summary>
@@ -90,5 +129,20 @@ public sealed class WebApplicationServerBuilder
         _configurations.Add(configure);
 
         return this;
+    }
+
+    /// <summary>
+    /// Installs the web host's default request-parse interceptors. Runs before any user
+    /// configuration so the defaults occupy the front of the interceptor order: the
+    /// max-request-body-size interceptor is registered first, guaranteeing every HTTP/1.1
+    /// request carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
+    /// interceptors' head hooks can observe it (HTTP/1.1 is currently the only protocol whose
+    /// parse path invokes interceptors). User configurations may still inspect or clear
+    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
+    /// </summary>
+    /// <param name="options">The listener options being composed.</param>
+    internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
+    {
+        options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
     }
 }

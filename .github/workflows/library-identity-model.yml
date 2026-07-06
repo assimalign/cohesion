@@ -1,7 +1,7 @@
 name: IdentityModel
 on:
   push:
-    paths: 
+    paths:
       - '**/Directory.Build.props'                        # When the Global Props File Changes
       - 'libraries/IdentityModel/**'
       - '.github/workflows/library-identity-model.yml'                 # When Pipeline File Changes
@@ -17,7 +17,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            'Assimalign.Cohesion.IdentityModel'
+            'Assimalign.Cohesion.IdentityModel',
+            'Assimalign.Cohesion.IdentityModel.Protocols',
+            'Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect',
+            'Assimalign.Cohesion.IdentityModel.Protocols.Saml',
+            'Assimalign.Cohesion.IdentityModel.Token',
+            'Assimalign.Cohesion.IdentityModel.Token.JsonWebToken',
+            'Assimalign.Cohesion.IdentityModel.Token.Saml'
         ]
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +31,36 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'IdentityModel'
           project: ${{ matrix.projects }}
+
+  # The AOT smoke is a plain build (no native publish). The family's Directory.Build.props
+  # promotes the trim/AOT analyzer diagnostics to errors in every family src project, so
+  # building the sample (which references all seven) re-compiles the family with that gate
+  # plus the sample's own promoted analyzers over the exercised surfaces — the continuous
+  # half of the family's NativeAOT evidence. The point-in-time publish-and-run evidence is
+  # recorded in the family docs (root DESIGN.md, AOT posture).
+  aot-analyzers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: AotSample"
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore build tasks
+        shell: pwsh
+        run: dotnet restore "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj"
+
+      - name: Build build tasks
+        shell: pwsh
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
+
+      - name: Build AotSample (trim/AOT analyzers as errors)
+        shell: pwsh
+        run: dotnet build "./libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj" --configuration Release

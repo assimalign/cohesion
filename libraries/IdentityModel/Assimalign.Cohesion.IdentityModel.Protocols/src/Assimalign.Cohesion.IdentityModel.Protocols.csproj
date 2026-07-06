@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Shared, transport-agnostic authentication protocol abstractions for Cohesion: protocol parties and roles, published-entity metadata, message envelopes, response status, logout semantics, binding descriptors, and validation results. The OpenID Connect and SAML contract branches build on these.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Protocol contract branches build on these abstractions and share the internal
+         endpoint-validation helper. Add each new protocol assembly here. -->
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,1 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- The protocol projects share the internal descriptor-materialization helper
+         (ModelSnapshot). Add each new protocol assembly here when it is created. -->
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Tests" />
+  </ItemGroup>
+</Project>

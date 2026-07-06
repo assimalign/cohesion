@@ -117,6 +117,12 @@ internal static class OpenApiModelToNodeConverter
     private static OpenApiObjectNode ConvertServer(OpenApiServer server, OpenApiSpecVersion version)
     {
         var node = new OpenApiObjectNode { ["url"] = server.Url };
+
+        if (server.Name is not null && OpenApiVersionCapabilities.Supports(OpenApiFeature.ServerName, version))
+        {
+            node["name"] = server.Name;
+        }
+
         SetString(node, "description", server.Description);
         SetMap(node, "variables", server.Variables, ConvertServerVariable);
         SetExtensions(node, server.Extensions);
@@ -158,6 +164,11 @@ internal static class OpenApiModelToNodeConverter
 
         foreach (var operation in item.Operations)
         {
+            if (operation.Key == OperationType.Query && !OpenApiVersionCapabilities.Supports(OpenApiFeature.PathItemQueryOperation, version))
+            {
+                continue;
+            }
+
             node[OperationTypeString(operation.Key)] = ConvertOperation(operation.Value, version);
         }
 
@@ -340,13 +351,23 @@ internal static class OpenApiModelToNodeConverter
         return node;
     }
 
-    private static OpenApiObjectNode ConvertMediaType(OpenApiMediaType media, OpenApiSpecVersion version)
+    private static OpenApiNode ConvertMediaType(OpenApiMediaType media, OpenApiSpecVersion version)
     {
+        if (media.Reference is not null)
+        {
+            return ConvertReference(media.Reference, version);
+        }
+
         var node = new OpenApiObjectNode();
 
         if (media.Schema is not null)
         {
             node["schema"] = ConvertSchema(media.Schema, version);
+        }
+
+        if (media.ItemSchema is not null && OpenApiVersionCapabilities.Supports(OpenApiFeature.MediaTypeStreamingFields, version))
+        {
+            node["itemSchema"] = ConvertSchema(media.ItemSchema, version);
         }
 
         if (media.Example is not null)
@@ -356,6 +377,17 @@ internal static class OpenApiModelToNodeConverter
 
         SetMap(node, "examples", media.Examples, e => ConvertExample(e, version));
         SetMap(node, "encoding", media.Encoding, e => ConvertEncoding(e, version));
+
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.MediaTypeStreamingFields, version))
+        {
+            SetList(node, "prefixEncoding", media.PrefixEncoding, e => (OpenApiNode)ConvertEncoding(e, version));
+
+            if (media.ItemEncoding is not null)
+            {
+                node["itemEncoding"] = ConvertEncoding(media.ItemEncoding, version);
+            }
+        }
+
         SetExtensions(node, media.Extensions);
         return node;
     }
@@ -366,6 +398,18 @@ internal static class OpenApiModelToNodeConverter
         SetString(node, "contentType", encoding.ContentType);
         SetMap(node, "headers", encoding.Headers, h => ConvertHeader(h, version));
         WriteParameterSerialization(node, encoding.Style, encoding.Explode, encoding.AllowReserved);
+
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.MediaTypeStreamingFields, version))
+        {
+            SetMap(node, "encoding", encoding.Encoding, e => (OpenApiNode)ConvertEncoding(e, version));
+            SetList(node, "prefixEncoding", encoding.PrefixEncoding, e => (OpenApiNode)ConvertEncoding(e, version));
+
+            if (encoding.ItemEncoding is not null)
+            {
+                node["itemEncoding"] = ConvertEncoding(encoding.ItemEncoding, version);
+            }
+        }
+
         SetExtensions(node, encoding.Extensions);
         return node;
     }
@@ -389,7 +433,14 @@ internal static class OpenApiModelToNodeConverter
             return ConvertReference(response.Reference, version);
         }
 
-        var node = new OpenApiObjectNode { ["description"] = response.Description };
+        var node = new OpenApiObjectNode();
+
+        if (response.Summary is not null && OpenApiVersionCapabilities.Supports(OpenApiFeature.ResponseSummary, version))
+        {
+            node["summary"] = response.Summary;
+        }
+
+        node["description"] = response.Description;
         SetMap(node, "headers", response.Headers, h => ConvertHeader(h, version));
         SetMap(node, "content", response.Content, m => ConvertMediaType(m, version));
         SetMap(node, "links", response.Links, l => ConvertLink(l, version));
@@ -411,6 +462,16 @@ internal static class OpenApiModelToNodeConverter
         if (example.Value is not null)
         {
             node["value"] = example.Value;
+        }
+
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.ExampleDataAndSerializedValues, version))
+        {
+            if (example.DataValue is not null)
+            {
+                node["dataValue"] = example.DataValue;
+            }
+
+            SetString(node, "serializedValue", example.SerializedValue);
         }
 
         SetString(node, "externalValue", example.ExternalValue);
@@ -481,18 +542,54 @@ internal static class OpenApiModelToNodeConverter
             SetMap(node, "pathItems", components.PathItems, p => ConvertPathItem(p, version));
         }
 
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.ComponentsMediaTypes, version))
+        {
+            SetMap(node, "mediaTypes", components.MediaTypes, m => ConvertMediaType(m, version));
+        }
+
         SetExtensions(node, components.Extensions);
         return node;
     }
 
     private static OpenApiNode ConvertSchema(OpenApiSchema schema, OpenApiSpecVersion version)
     {
-        if (schema.Reference is not null)
+        if (schema.BooleanValue.HasValue)
         {
-            return ConvertReference(schema.Reference, version);
+            if (OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaBooleanForm, version))
+            {
+                return schema.BooleanValue.Value;
+            }
+
+            // 3.0 has no boolean schema form; emit the closest structural equivalent.
+            return schema.BooleanValue.Value
+                ? new OpenApiObjectNode()
+                : new OpenApiObjectNode { ["not"] = new OpenApiObjectNode() };
         }
 
         var node = new OpenApiObjectNode();
+
+        if (schema.Reference is not null)
+        {
+            node["$ref"] = schema.Reference.Ref;
+
+            // In 3.0 keywords beside $ref are ignored by consumers, so emitting them would misstate intent.
+            if (!OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaReferenceSiblingKeywords, version))
+            {
+                return node;
+            }
+        }
+
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaExtendedVocabulary, version))
+        {
+            SetString(node, "$id", schema.Id);
+            SetString(node, "$schema", schema.Dialect);
+            SetString(node, "$anchor", schema.Anchor);
+            SetString(node, "$dynamicRef", schema.DynamicRef);
+            SetString(node, "$dynamicAnchor", schema.DynamicAnchor);
+            SetString(node, "$comment", schema.Comment);
+            SetMap(node, "$defs", schema.Defs, s => ConvertSchema(s, version));
+        }
+
         SetString(node, "title", schema.Title);
         WriteSchemaType(node, schema, version);
         SetString(node, "format", schema.Format);
@@ -541,9 +638,54 @@ internal static class OpenApiModelToNodeConverter
             node["additionalProperties"] = schema.AdditionalPropertiesAllowed.Value;
         }
 
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaExtendedVocabulary, version))
+        {
+            SetMap(node, "patternProperties", schema.PatternProperties, s => ConvertSchema(s, version));
+
+            if (schema.PropertyNames is not null)
+            {
+                node["propertyNames"] = ConvertSchema(schema.PropertyNames, version);
+            }
+
+            if (schema.UnevaluatedProperties is not null)
+            {
+                node["unevaluatedProperties"] = ConvertSchema(schema.UnevaluatedProperties, version);
+            }
+
+            SetMap(node, "dependentRequired", schema.DependentRequired, names =>
+            {
+                var array = new OpenApiArrayNode();
+                foreach (var name in names)
+                {
+                    array.Add(name);
+                }
+
+                return (OpenApiNode)array;
+            });
+            SetMap(node, "dependentSchemas", schema.DependentSchemas, s => ConvertSchema(s, version));
+        }
+
         if (schema.Items is not null)
         {
             node["items"] = ConvertSchema(schema.Items, version);
+        }
+
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaExtendedVocabulary, version))
+        {
+            SetList(node, "prefixItems", schema.PrefixItems, s => ConvertSchema(s, version));
+
+            if (schema.Contains is not null)
+            {
+                node["contains"] = ConvertSchema(schema.Contains, version);
+            }
+
+            WriteIntField(node, "minContains", schema.MinContains);
+            WriteIntField(node, "maxContains", schema.MaxContains);
+
+            if (schema.UnevaluatedItems is not null)
+            {
+                node["unevaluatedItems"] = ConvertSchema(schema.UnevaluatedItems, version);
+            }
         }
 
         SetList(node, "allOf", schema.AllOf, s => ConvertSchema(s, version));
@@ -555,9 +697,35 @@ internal static class OpenApiModelToNodeConverter
             node["not"] = ConvertSchema(schema.Not, version);
         }
 
+        if (OpenApiVersionCapabilities.Supports(OpenApiFeature.SchemaExtendedVocabulary, version))
+        {
+            if (schema.If is not null)
+            {
+                node["if"] = ConvertSchema(schema.If, version);
+            }
+
+            if (schema.Then is not null)
+            {
+                node["then"] = ConvertSchema(schema.Then, version);
+            }
+
+            if (schema.Else is not null)
+            {
+                node["else"] = ConvertSchema(schema.Else, version);
+            }
+
+            SetString(node, "contentEncoding", schema.ContentEncoding);
+            SetString(node, "contentMediaType", schema.ContentMediaType);
+
+            if (schema.ContentSchema is not null)
+            {
+                node["contentSchema"] = ConvertSchema(schema.ContentSchema, version);
+            }
+        }
+
         if (schema.Discriminator is not null)
         {
-            node["discriminator"] = ConvertDiscriminator(schema.Discriminator);
+            node["discriminator"] = ConvertDiscriminator(schema.Discriminator, version);
         }
 
         if (schema.ReadOnly)
@@ -572,7 +740,7 @@ internal static class OpenApiModelToNodeConverter
 
         if (schema.Xml is not null)
         {
-            node["xml"] = ConvertXml(schema.Xml);
+            node["xml"] = ConvertXml(schema.Xml, version);
         }
 
         if (schema.ExternalDocs is not null)
@@ -607,29 +775,66 @@ internal static class OpenApiModelToNodeConverter
 
     private static void WriteSchemaType(OpenApiObjectNode node, OpenApiSchema schema, OpenApiSpecVersion version)
     {
-        if (schema.Type is null)
+        // A SchemaType.Null entry is equivalent to Nullable; normalize it out so both spellings emit the same wire form.
+        var types = new List<SchemaType>();
+        var nullable = schema.Nullable;
+        foreach (var type in schema.Types)
+        {
+            if (type == SchemaType.Null)
+            {
+                nullable = true;
+            }
+            else if (!types.Contains(type))
+            {
+                types.Add(type);
+            }
+        }
+
+        if (types.Count == 0 && !nullable)
         {
             return;
         }
 
-        var typeName = SchemaTypeString(schema.Type.Value);
-
         if (version == OpenApiSpecVersion.V3_0)
         {
-            node["type"] = typeName;
-            if (schema.Nullable)
+            // 3.0 supports a single string type only; extra entries are diagnosed by validation.
+            if (types.Count > 0)
+            {
+                node["type"] = SchemaTypeString(types[0]);
+            }
+
+            if (nullable)
             {
                 node["nullable"] = true;
             }
+
+            return;
         }
-        else if (schema.Nullable)
+
+        if (types.Count == 1 && !nullable)
         {
-            node["type"] = new OpenApiArrayNode { typeName, "null" };
+            node["type"] = SchemaTypeString(types[0]);
+            return;
         }
-        else
+
+        if (types.Count == 0)
         {
-            node["type"] = typeName;
+            node["type"] = "null";
+            return;
         }
+
+        var array = new OpenApiArrayNode();
+        foreach (var type in types)
+        {
+            array.Add(SchemaTypeString(type));
+        }
+
+        if (nullable)
+        {
+            array.Add("null");
+        }
+
+        node["type"] = array;
     }
 
     private static void WriteNumberBounds(OpenApiObjectNode node, OpenApiSchema schema, OpenApiSpecVersion version)
@@ -680,7 +885,7 @@ internal static class OpenApiModelToNodeConverter
         }
     }
 
-    private static OpenApiObjectNode ConvertDiscriminator(OpenApiDiscriminator discriminator)
+    private static OpenApiObjectNode ConvertDiscriminator(OpenApiDiscriminator discriminator, OpenApiSpecVersion version)
     {
         var node = new OpenApiObjectNode { ["propertyName"] = discriminator.PropertyName };
 
@@ -695,25 +900,38 @@ internal static class OpenApiModelToNodeConverter
             node["mapping"] = mapping;
         }
 
+        if (discriminator.DefaultMapping is not null && OpenApiVersionCapabilities.Supports(OpenApiFeature.DiscriminatorDefaultMapping, version))
+        {
+            node["defaultMapping"] = discriminator.DefaultMapping;
+        }
+
         SetExtensions(node, discriminator.Extensions);
         return node;
     }
 
-    private static OpenApiObjectNode ConvertXml(OpenApiXml xml)
+    private static OpenApiObjectNode ConvertXml(OpenApiXml xml, OpenApiSpecVersion version)
     {
         var node = new OpenApiObjectNode();
         SetString(node, "name", xml.Name);
         SetString(node, "namespace", xml.Namespace);
         SetString(node, "prefix", xml.Prefix);
 
-        if (xml.Attribute)
+        // nodeType and the deprecated attribute/wrapped flags are mutually exclusive on the wire.
+        if (xml.NodeType.HasValue && OpenApiVersionCapabilities.Supports(OpenApiFeature.XmlNodeType, version))
         {
-            node["attribute"] = true;
+            node["nodeType"] = XmlNodeTypeString(xml.NodeType.Value);
         }
-
-        if (xml.Wrapped)
+        else
         {
-            node["wrapped"] = true;
+            if (xml.Attribute)
+            {
+                node["attribute"] = true;
+            }
+
+            if (xml.Wrapped)
+            {
+                node["wrapped"] = true;
+            }
         }
 
         SetExtensions(node, xml.Extensions);
@@ -744,7 +962,18 @@ internal static class OpenApiModelToNodeConverter
             node["flows"] = ConvertOAuthFlows(scheme.Flows, version);
         }
 
+        if (scheme.OAuth2MetadataUrl is not null && OpenApiVersionCapabilities.Supports(OpenApiFeature.SecuritySchemeOAuth2MetadataUrl, version))
+        {
+            node["oauth2MetadataUrl"] = scheme.OAuth2MetadataUrl;
+        }
+
         SetString(node, "openIdConnectUrl", scheme.OpenIdConnectUrl);
+
+        if (scheme.Deprecated && OpenApiVersionCapabilities.Supports(OpenApiFeature.SecuritySchemeDeprecated, version))
+        {
+            node["deprecated"] = true;
+        }
+
         SetExtensions(node, scheme.Extensions);
         return node;
     }
@@ -786,6 +1015,7 @@ internal static class OpenApiModelToNodeConverter
     {
         var node = new OpenApiObjectNode();
         SetString(node, "authorizationUrl", flow.AuthorizationUrl);
+        SetString(node, "deviceAuthorizationUrl", flow.DeviceAuthorizationUrl);
         SetString(node, "tokenUrl", flow.TokenUrl);
         SetString(node, "refreshUrl", flow.RefreshUrl);
 
@@ -943,6 +1173,7 @@ internal static class OpenApiModelToNodeConverter
         OperationType.Head => "head",
         OperationType.Patch => "patch",
         OperationType.Trace => "trace",
+        OperationType.Query => "query",
         _ => throw new OpenApiException($"Unknown operation type '{type}'.")
     };
 
@@ -952,6 +1183,7 @@ internal static class OpenApiModelToNodeConverter
         ParameterLocation.Header => "header",
         ParameterLocation.Path => "path",
         ParameterLocation.Cookie => "cookie",
+        ParameterLocation.Querystring => "querystring",
         _ => throw new OpenApiException($"Unknown parameter location '{location}'.")
     };
 
@@ -964,7 +1196,18 @@ internal static class OpenApiModelToNodeConverter
         ParameterStyle.SpaceDelimited => "spaceDelimited",
         ParameterStyle.PipeDelimited => "pipeDelimited",
         ParameterStyle.DeepObject => "deepObject",
+        ParameterStyle.Cookie => "cookie",
         _ => throw new OpenApiException($"Unknown parameter style '{style}'.")
+    };
+
+    private static string XmlNodeTypeString(XmlNodeType nodeType) => nodeType switch
+    {
+        XmlNodeType.Element => "element",
+        XmlNodeType.Attribute => "attribute",
+        XmlNodeType.Text => "text",
+        XmlNodeType.Cdata => "cdata",
+        XmlNodeType.None => "none",
+        _ => throw new OpenApiException($"Unknown XML node type '{nodeType}'.")
     };
 
     private static string SchemaTypeString(SchemaType type) => type switch

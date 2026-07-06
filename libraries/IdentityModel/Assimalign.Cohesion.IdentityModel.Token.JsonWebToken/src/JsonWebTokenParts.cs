@@ -69,6 +69,13 @@ public sealed class JsonWebTokenParts
     public string Signature { get; }
 
     /// <summary>
+    /// Gets the JWS signing input: the ASCII text <c>header.payload</c> using the encoded
+    /// segments exactly as received. A signature verifier must sign/verify over these octets —
+    /// never over a re-serialization of the parsed header — or the bytes will not match.
+    /// </summary>
+    public string SigningInput => string.Concat(Header, ".", Payload);
+
+    /// <summary>
     /// Attempts to parse a compact JSON Web Token.
     /// </summary>
     /// <param name="token">The compact token value.</param>

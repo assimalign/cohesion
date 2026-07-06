@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Concrete SAML 2.0 assertion token layer for Cohesion IdentityModel: typed NameID, conditions, subject confirmation, and encrypted-element markers, normalized onto the root canonical model (subject via the pinned recipe, attributes to claims, authentication statement to authentication context), with token-substrate validation (composed neutral rules + the bearer confirmation-data window). XML parsing, signature verification, and decryption are deferred seams. Builds on Assimalign.Cohesion.IdentityModel.Token.</Description>
+  </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
   </ItemGroup>

@@ -19,25 +19,54 @@ The classic double-submit cookie defense puts a random value in a cookie and
 requires the same value to be echoed in a header or form field. Its weakness
 is integrity: an attacker who can set a cookie (subdomain takeover, "cookie
 tossing") can also supply the matching request value. This package closes
-that gap by signing both halves with an application HMAC key:
+that gap by cryptographically protecting both halves:
 
-- **Cookie token** = `base64url(secret ‖ HMAC(key, 0x01 ‖ secret))`, where
-  `secret` is 32 random bytes. The signature lets the server detect an
-  injected/forged cookie token.
-- **Request token** = `base64url(nonce ‖ HMAC(key, 0x02 ‖ nonce ‖ secret))`,
-  where `nonce` is 16 random bytes and `secret` is the cookie token's secret.
-  The HMAC binds the request token to one specific cookie token and cannot be
-  produced without the key.
+- **Cookie token** = `base64url(Protect(0x01 ‖ secret))`, where `secret` is 32
+  random bytes. The protection lets the server detect an injected/forged
+  cookie token.
+- **Request token** = `base64url(Protect(0x02 ‖ nonce ‖ secret))`, where
+  `nonce` is 16 random bytes and `secret` is the cookie token's secret. The
+  protection binds the request token to one specific cookie secret.
 
-The two HMAC uses are **domain-separated** by a leading byte (`0x01` cookie,
+The two payloads are **domain-separated** by a leading byte (`0x01` cookie,
 `0x02` request) so a cookie token can never be replayed as a request token.
+`HttpAntiforgeryTokenEngine` owns this framing; the authenticated protection of
+each payload is delegated to a pluggable `IHttpAntiforgeryProtector` (see the
+next section), so the engine holds no key material.
 
-Validation recomputes each HMAC and compares with
-`CryptographicOperations.FixedTimeEquals` to avoid timing side channels. A
-forged, truncated, or wrong-key token is treated as a validation failure
-(return `false` / throw `AntiforgeryValidationException`), never as an
-exception bubbling out of the read path — `Base64Url` decode failures on
-untrusted input are caught and mapped to "invalid".
+Validation recovers each payload through the protector (which fails closed on
+tampering), checks the domain byte, and compares the recovered cookie secret in
+fixed time via `CryptographicOperations.FixedTimeEquals`. A forged, truncated,
+or wrong-key token is treated as a validation failure (return `false` / throw
+`AntiforgeryValidationException`), never as an exception bubbling out of the
+read path — `Base64Url` decode failures on untrusted input are caught and
+mapped to "invalid".
+
+## The protector seam: `IHttpAntiforgeryProtector`
+
+Cryptography is a **pluggable seam**, not a hard-wired HMAC. `Protect` returns
+an authenticated (and, for encrypting implementations, confidential) payload;
+`TryUnprotect` fails closed for untrusted input (returns `false`, never
+throws). The engine calls only these two operations.
+
+- **Default** (`HmacHttpAntiforgeryProtector`): `Protect(p) = p ‖ HMAC-SHA256(key, p)`
+  over `HttpAntiforgeryOptions.Key`, `TryUnprotect` recomputes and compares in
+  fixed time. This preserves the original zero-dependency, single-process
+  behavior — the cookie secret still travels in the clear inside the token,
+  exactly as before.
+- **Ring-backed** (recommended for multi-node / restart-stable): set
+  `HttpAntiforgeryOptions.Protector` to an implementation backed by a
+  persisted, rotating key ring. When set, `Protector` **supersedes `Key`
+  entirely**. The Cohesion data-protection provider
+  (`Assimalign.Cohesion.Security.DataProtection`) is the intended backing: its
+  versioned key-id header makes rotation transparent, and pointing every node at
+  a shared key repository means nodes validate each other's tokens **without
+  hand-distributing raw key bytes**.
+
+This package takes **no dependency** on any data-protection library. The
+adapter from `IDataProtector` to `IHttpAntiforgeryProtector` is a few lines and
+lives in the composition root (a `*.Hosting` project), keeping this package
+lean and free of key-management concerns.
 
 ## Why an application key, and the default
 
@@ -49,10 +78,12 @@ that are documented on the type:
 - Tokens minted before a process restart will not validate afterward.
 - Multiple instances behind a load balancer reject each other's tokens.
 
-Cross-process / restart-stable deployments **must** set a shared `Key`. We
-chose a secure-by-default-but-explicit-for-scale posture over silently
-persisting a key somewhere, because key storage is a deployment decision the
-library should not make.
+Cross-process / restart-stable deployments should set a ring-backed
+`Protector` (which supersedes `Key`) rather than hand-distributing a shared
+static `Key`. We chose a secure-by-default-but-explicit-for-scale posture over
+silently persisting a key somewhere, because key storage is a deployment
+decision the library should not make — the seam lets the host make it once, in
+the data-protection layer, for antiforgery and every other protected artifact.
 
 ## Service shape: stateless singleton over a passed-in context
 
@@ -115,8 +146,11 @@ small and use stack buffers, so the hot paths are allocation-light.
 
 ## Non-goals
 
-- **Key management / rotation.** The package consumes a key; it does not
-  persist, rotate, or distribute one. That belongs to the host.
+- **Key management / rotation.** The package protects payloads through the
+  `IHttpAntiforgeryProtector` seam; it does not persist, rotate, or distribute
+  keys itself. Ring-backed persistence and rotation are available by plugging a
+  data-protection-backed protector in at the host — that concern lives in the
+  key ring, not here.
 - **Identity binding.** ASP.NET Core's antiforgery can embed the
   authenticated username/claims in the token. This package binds the request
   token to the cookie token only. Identity binding can layer on later without

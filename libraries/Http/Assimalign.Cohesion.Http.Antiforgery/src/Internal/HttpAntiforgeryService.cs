@@ -24,7 +24,12 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _engine = new HttpAntiforgeryTokenEngine(options.Key);
+
+        // The pluggable protector seam supersedes the static Key. When no protector is
+        // configured, fall back to the built-in single-process HMAC protector over Key so the
+        // zero-config default is unchanged.
+        IHttpAntiforgeryProtector protector = options.Protector ?? new HmacHttpAntiforgeryProtector(options.Key);
+        _engine = new HttpAntiforgeryTokenEngine(protector);
     }
 
     /// <inheritdoc />

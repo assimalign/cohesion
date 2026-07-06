@@ -1,8 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<Description>Layered validation for the Cohesion OpenApi document model. Provides a diagnostics model (severity, machine code, JSON-pointer location) and a composable validator pipeline that runs structural rules (required fields, object shapes, reference resolvability, version-specific field placement via the capability matrix) and semantic rules (operation identifiers, path parameters, security scheme references, server consistency). The official-schema conformance stage is exposed as a pluggable validator extension point. NativeAOT- and trimming-safe.</Description>
+		<Description>Layered validation for the Cohesion OpenApi document model. Provides a diagnostics model (severity, machine code, JSON-pointer location) and a composable validator pipeline that runs structural rules (required fields, object shapes, reference resolvability, version-specific field placement via the capability matrix) and semantic rules (operation identifiers, path parameters, security scheme references, server consistency). The official-schema conformance stage evaluates the serialized document against the vendored official OpenAPI meta-schemas as a pluggable rule. NativeAOT- and trimming-safe.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+	</ItemGroup>
+	<ItemGroup>
+		<EmbeddedResource Include="Schemas\oas-3.0-schema.json" LogicalName="oas-3.0-schema.json" />
+		<EmbeddedResource Include="Schemas\oas-3.1-schema.json" LogicalName="oas-3.1-schema.json" />
+		<EmbeddedResource Include="Schemas\oas-3.2-schema.json" LogicalName="oas-3.2-schema.json" />
 	</ItemGroup>
 </Project>

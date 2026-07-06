@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Integration contracts that let the Web layer and ApiManager feed and consume OpenApi descriptions without leaking service-runtime concerns into the root model. Web endpoints implement an endpoint-metadata source; a description provider composes sources into a version-targeted document; ApiManager imports and exports documents. Reflection-free and NativeAOT-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Attributes" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Generation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Versioning" />
+	</ItemGroup>
+</Project>

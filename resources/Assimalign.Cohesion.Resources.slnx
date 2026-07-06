@@ -665,13 +665,6 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/src/">
-		<Project Path="Web/Assimalign.Cohesion.Web.Server/src/Assimalign.Cohesion.Web.Server.csproj" />
-	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Server/tests/">
-		<Project Path="Web/Assimalign.Cohesion.Web.Server/tests/Assimalign.Cohesion.Web.Server.Tests.csproj" />
-	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />

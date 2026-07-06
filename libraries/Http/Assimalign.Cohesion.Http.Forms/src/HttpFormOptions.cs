@@ -1,11 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Assimalign.Cohesion.Http;
+using System.IO;
 
 using Assimalign.Cohesion.Http.Internal;
 
+namespace Assimalign.Cohesion.Http;
+
+/// <summary>
+/// Per-parse limits applied by <see cref="HttpFormFeature"/> when reading an
+/// <c>application/x-www-form-urlencoded</c> or <c>multipart/form-data</c>
+/// request body. Every limit maps to a defence against unbounded memory or CPU
+/// use by a hostile or malformed body; exceeding one throws an
+/// <see cref="InvalidDataException"/> mid-parse.
+/// </summary>
 public class HttpFormOptions
 {
     internal static readonly HttpFormOptions Default = new HttpFormOptions();
@@ -15,12 +20,6 @@ public class HttpFormOptions
     /// Defaults to 65,536 bytes, which is approximately 64KB.
     /// </summary>
     public const int DefaultMemoryBufferThreshold = 1024 * 64;
-
-    /// <summary>
-    /// Default value for <see cref="BufferBodyLengthLimit"/>.
-    /// Defaults to 134,217,728 bytes, which is 128MB.
-    /// </summary>
-    public const int DefaultBufferBodyLengthLimit = 1024 * 1024 * 128;
 
     /// <summary>
     /// Default value for <see cref="MultipartBoundaryLengthLimit"/>.
@@ -35,25 +34,13 @@ public class HttpFormOptions
     public const long DefaultMultipartBodyLengthLimit = 1024 * 1024 * 128;
 
     /// <summary>
-    /// Enables full request body buffering. Use this if multiple components need to read the raw stream.
-    /// Defaults to <c>false</c>.
-    /// </summary>
-    public bool BufferBody { get; set; }
-
-    /// <summary>
-    /// If <see cref="BufferBody"/> is enabled, this many bytes of the body will be buffered in memory.
-    /// If this threshold is exceeded then the buffer will be moved to a temp file on disk instead.
-    /// This also applies when buffering individual multipart section bodies.
+    /// The number of bytes an individual <c>multipart/form-data</c> file section
+    /// is buffered in memory before it spills to a temporary file on disk. This
+    /// bounds peak memory for large uploads without forcing every upload through
+    /// the file system.
     /// Defaults to 65,536 bytes, which is approximately 64KB.
     /// </summary>
     public int MemoryBufferThreshold { get; set; } = DefaultMemoryBufferThreshold;
-
-    /// <summary>
-    /// If <see cref="BufferBody"/> is enabled, this is the limit for the total number of bytes that will
-    /// be buffered. Forms that exceed this limit will throw an <see cref="InvalidDataException"/> when parsed.
-    /// Defaults to 134,217,728 bytes, which is approximately 128MB.
-    /// </summary>
-    public long BufferBodyLengthLimit { get; set; } = DefaultBufferBodyLengthLimit;
 
     /// <summary>
     /// A limit for the number of form entries to allow.

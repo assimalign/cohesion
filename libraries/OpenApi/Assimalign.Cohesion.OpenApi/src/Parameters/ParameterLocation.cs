@@ -16,5 +16,12 @@ public enum ParameterLocation
     Path,
 
     /// <summary>A parameter passed in a cookie.</summary>
-    Cookie
+    Cookie,
+
+    /// <summary>
+    /// A parameter describing the entire query string (OpenAPI 3.2+). A <c>querystring</c> parameter must
+    /// use <c>content</c> rather than <c>schema</c>, and must not coexist with <c>query</c> parameters on
+    /// the same operation.
+    /// </summary>
+    Querystring
 }
