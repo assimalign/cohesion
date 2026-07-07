@@ -1,3 +1,52 @@
 <Project>
-    
+    <!--
+        Model-specific build tooling. The SDK loads the tool set that matches the
+        project's declared model ($(CohesionDatabaseModel), default Sql). Each
+        model targets file declares its schema-source items and any model-specific
+        compile/migration behavior. Adding a model = adding a targets file here.
+    -->
+    <Import
+        Project="$(MSBuildThisFileDirectory)Sdk.Database.$(CohesionDatabaseModel).targets"
+        Condition="'$(CohesionDatabaseModel)' != '' and Exists('$(MSBuildThisFileDirectory)Sdk.Database.$(CohesionDatabaseModel).targets')" />
+
+    <!--
+        Compiles the declarative schema sources into the schema model artifact
+        ($(CohesionDatabaseSchemaOutputPath)) as part of Build. Only runs for
+        database projects (CohesionDatabaseProject=true).
+    -->
+    <Target
+        Name="CohesionDatabaseCompileSchema"
+        BeforeTargets="BeforeBuild"
+        Condition="'$(CohesionDatabaseProject)' == 'true'"
+        Inputs="@(CohesionDatabaseSchema)"
+        Outputs="$(CohesionDatabaseSchemaOutputPath)">
+
+        <CompileDatabaseSchemaTask
+            SchemaFiles="@(CohesionDatabaseSchema)"
+            Model="$(CohesionDatabaseModel)"
+            OutputPath="$(CohesionDatabaseSchemaOutputPath)" />
+
+        <ItemGroup>
+            <FileWrites Include="$(CohesionDatabaseSchemaOutputPath)" />
+        </ItemGroup>
+    </Target>
+
+    <!--
+        Opt-in migration generation: diffs the compiled schema model against the
+        newest baseline under $(CohesionDatabaseMigrationsRoot) and emits an
+        ordered migration script. Invoke explicitly:
+
+            dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseMigrationName=<name>
+    -->
+    <Target
+        Name="CohesionDatabaseCreateMigration"
+        DependsOnTargets="CohesionDatabaseCompileSchema"
+        Condition="'$(CohesionDatabaseProject)' == 'true'">
+
+        <CreateDatabaseMigrationTask
+            SchemaModelPath="$(CohesionDatabaseSchemaOutputPath)"
+            MigrationsRoot="$(CohesionDatabaseMigrationsRoot)"
+            MigrationName="$(CohesionDatabaseMigrationName)"
+            Model="$(CohesionDatabaseModel)" />
+    </Target>
 </Project>

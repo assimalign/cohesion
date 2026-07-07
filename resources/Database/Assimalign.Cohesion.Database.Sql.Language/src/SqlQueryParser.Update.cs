@@ -57,7 +57,9 @@ public sealed partial class SqlQueryParser
 
         // =
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Equals)
+        {
             Advance(ref lexer);
+        }
 
         var value = ParseExpression(ref lexer);
 

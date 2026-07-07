@@ -51,7 +51,9 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "BY"))
+            {
                 Advance(ref lexer);
+            }
 
             groupBy.Add(ParseExpression(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -75,7 +77,9 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "BY"))
+            {
                 Advance(ref lexer);
+            }
 
             orderBy.Add(ParseOrderByColumn(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -115,7 +119,9 @@ public sealed partial class SqlQueryParser
         var columns = new List<SqlSelectColumn>();
 
         if (IsAtEnd(ref lexer))
+        {
             return columns;
+        }
 
         columns.Add(ParseSingleSelectColumn(ref lexer));
 
@@ -162,7 +168,9 @@ public sealed partial class SqlQueryParser
         {
             SqlJoinType? joinType = TryParseJoinType(ref lexer);
             if (!joinType.HasValue)
+            {
                 break;
+            }
 
             // Expect table reference after JOIN keyword
             SqlTableReference? table = null;
@@ -189,7 +197,9 @@ public sealed partial class SqlQueryParser
     private SqlJoinType? TryParseJoinType(ref TokenLexer lexer)
     {
         if (IsAtEnd(ref lexer))
+        {
             return null;
+        }
 
         if (IsKeyword(ref lexer, "JOIN") || IsKeyword(ref lexer, "INNER"))
         {
@@ -197,7 +207,9 @@ public sealed partial class SqlQueryParser
             {
                 Advance(ref lexer);
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
+                {
                     Advance(ref lexer);
+                }
             }
             else
             {
@@ -210,9 +222,15 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OUTER"))
+            {
                 Advance(ref lexer);
+            }
+
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
+            {
                 Advance(ref lexer);
+            }
+
             return SqlJoinType.LeftOuter;
         }
 
@@ -220,9 +238,15 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OUTER"))
+            {
                 Advance(ref lexer);
+            }
+
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
+            {
                 Advance(ref lexer);
+            }
+
             return SqlJoinType.RightOuter;
         }
 
@@ -230,9 +254,15 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OUTER"))
+            {
                 Advance(ref lexer);
+            }
+
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
+            {
                 Advance(ref lexer);
+            }
+
             return SqlJoinType.FullOuter;
         }
 
@@ -240,7 +270,10 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
+            {
                 Advance(ref lexer);
+            }
+
             return SqlJoinType.Cross;
         }
 

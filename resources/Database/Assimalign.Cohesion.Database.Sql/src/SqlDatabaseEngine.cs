@@ -43,6 +43,9 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     public EngineState State => _state;
 
+    /// <inheritdoc />
+    public EngineModel Model => EngineModel.Sql;
+
     /// <summary>
     /// Creates a new SQL database engine from options.
     /// </summary>
