@@ -2,7 +2,7 @@
 
 **Status:** active · **Created:** 2026-07-06 · **Owner:** Chase Crawford · **Scope:** the multi-model OLTP database platform — `resources/Database/*`, the `Assimalign.Cohesion.Sdk.Database` build tooling, and the `App.Database` framework family. GitHub epics **#31 / #4 / #5 / #50 / #57 / #856** (WBS `L03.02.*`).
 
-> **Why this file exists.** This program spans ~75 GitHub work items across 6 epics and will be implemented by many separate AI coding sessions. No single session holds the whole picture in context. This document is the **durable sequencing index**: it records what depends on what, what is safe to do in parallel, and the protocol each session follows. GitHub issues hold the *what* and *acceptance criteria*; this file holds the *when* and *in-what-order*. The architecture itself lives in `resources/Database/DESIGN.md` — read that first; this file assumes it.
+> **Why this file exists.** This program spans ~77 GitHub work items across 6 epics and will be implemented by many separate AI coding sessions. No single session holds the whole picture in context. This document is the **durable sequencing index**: it records what depends on what, what is safe to do in parallel, and the protocol each session follows. GitHub issues hold the *what* and *acceptance criteria*; this file holds the *when* and *in-what-order*. The architecture itself lives in `resources/Database/DESIGN.md` — read that first; this file assumes it.
 
 This file is temporary scaffolding for the duration of the program. When the five engines reach MVP and this backlog drains, fold anything durable into the relevant `docs/DESIGN.md` files and delete this doc.
 
@@ -141,6 +141,7 @@ Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReferen
 | #202 | MG | Graph client APIs and error surfaces | #852, #199 |
 | #176 | MS | Migration workflows, compatibility checks, rollback (catalog side) | #175 |
 | #191, #201, #206, #212 | M* | Per-model security rules and protected-operation checks | #177 (shared pattern), each model's catalog |
+| **#862** | **H** | **Embedded consumption: engine self-sufficiency + reference resource adoption** | #850; at least one engine with working lifecycle (#187 or #205 recommended first) |
 | #213 | MB | Tests: large-object persistence, metadata, access control | #211, #212 |
 
 ### Stage 5 — Tooling & post-MVP
@@ -150,6 +151,7 @@ Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReferen
 | **#859** | **D** | **Database project system: declarative schema compile** | #170 (stable AST), #172 (declared dialect) |
 | **#857** | **D** | **Migration engine: diff, script gen, transactional apply** | #859, #176 |
 | **#858** | **D** | **Model-specific build-tool loading + per-model targets** | #859 |
+| **#861** | **K** | **Encryption at rest (pages/WAL/backups) via the Security.DataProtection key ring** | #158, #160, #162 (crash suites must exist to re-run under encryption) |
 | #192, #203–#204, #215–#216 | M* | Per-model replication topology/consistency/tests | **post-MVP** — sequenced after every engine reaches MVP; shared log-shipping seam over the WAL comes first (new item to file when scheduled) |
 
 ### MVP definition (what "done" means for the first cut)
@@ -164,7 +166,7 @@ Sessions do not edit this table; the orchestrator reconciles it from merged PRs.
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
-| 2026-07-06 | #855 | (this PR) | Stage 0. Area scaffold: `resources/Database/DESIGN.md` (requirements + gap analysis + decision log) and README; new projects `Database.Transactions` (MVCC snapshot implemented+tested), `Database.Indexing` (IndexKey encoding implemented+tested), `Database.Protocol` (frame codec implemented+tested), `Database.Server`, `Database.ApplicationModel` (AddDatabase working), `Database.Sql.Replication`; model-root contracts + engine shells for Documents/Graph/KV/Blob; `Sdk.Database` migration targets + task skeletons; fixes: `StorageModel` restored (part of #157 — alignment remains open), `SqlDatabaseEngine.Model`, `Cataalog.csproj` typo, misplaced KVP.Security tests, IDE0011 breaks in Storage + Sql.Language. Filed #850–#854 (kernel features), #856 (tooling epic), #857–#859. |
+| 2026-07-06 | #855 | (this PR) | Stage 0. Area scaffold: `resources/Database/DESIGN.md` (requirements + gap analysis + decision log) and README; new projects `Database.Transactions` (MVCC snapshot implemented+tested), `Database.Indexing` (IndexKey encoding implemented+tested), `Database.Protocol` (frame codec implemented+tested), `Database.Server`, `Database.ApplicationModel` (AddDatabase working), `Database.Sql.Replication`; model-root contracts + engine shells for Documents/Graph/KV/Blob; `Sdk.Database` migration targets + task skeletons; fixes: `StorageModel` restored (part of #157 — alignment remains open), `SqlDatabaseEngine.Model`, `Cataalog.csproj` typo, misplaced KVP.Security tests, IDE0011 breaks in Storage + Sql.Language. Filed #850–#854 (kernel features), #856 (tooling epic), #857–#859. Second pass (same PR): `EmbeddedDatabase` facade implemented + tested (platform data-layer requirement R10), enterprise requirements captured as R11, filed #861 (encryption at rest) and #862 (embedded consumption + engine self-sufficiency). |
 
 ---
 
@@ -175,4 +177,5 @@ Sessions do not edit this table; the orchestrator reconciles it from merged PRs.
 - Fan-out prerequisites to land first: **#158, #160 → #850 → #851** (kernel spine) and **#852** (client spine)
 - Gating decision: **#193** (graph query standard) — until decided, only #193 itself is workable in the Graph lanes
 - Hosting model: `libraries/Hosting/.../docs/DESIGN.md` (execution menu) · Orchestration: `libraries/ApplicationModel/DESIGN.md`
+- Platform data layer: other resources consume engines **embedded-first** via `Database.Embedded` (DESIGN.md §3.7); engines must stay self-sufficient (#862)
 - Work-item mechanics: `.claude/skills/cohesion-work-items/` (`-EmitClosesBlock` for PR close-out)

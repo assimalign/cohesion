@@ -46,7 +46,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Governance` | Quotas, tenancy boundaries, audit events |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
-| `Assimalign.Cohesion.Database.Embedded` | In-process embedded facade (post-MVP) |
+| `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
 
 ## Dependencies on other areas
 
