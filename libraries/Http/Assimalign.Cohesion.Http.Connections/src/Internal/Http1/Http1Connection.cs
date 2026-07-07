@@ -11,14 +11,16 @@ internal sealed class Http1Connection : HttpConnection
     private readonly IConnection _connection;
     private readonly HttpServerLimits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    public Http1Connection(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(isSecure)
     {
         _connection = connection;
         _limits = limits;
         _interceptors = interceptors;
+        _responseInterceptors = responseInterceptors;
     }
 
     public override ConnectionId Id => _connection.Id;
@@ -36,7 +38,7 @@ internal sealed class Http1Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors);
+        return _openContext ??= new Http1ConnectionContext(_connection, IsSecure, _limits, _interceptors, _responseInterceptors);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

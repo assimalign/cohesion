@@ -58,19 +58,33 @@ public sealed partial class SqlQueryParser : QueryParser
             var keyword = lexer.Current.Value;
 
             if (keyword.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseSelect(ref lexer);
+            }
             else if (keyword.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseInsert(ref lexer);
+            }
             else if (keyword.Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseUpdate(ref lexer);
+            }
             else if (keyword.Equals("DELETE", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseDelete(ref lexer);
+            }
             else if (keyword.Equals("CREATE", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseCreateTable(ref lexer);
+            }
             else if (keyword.Equals("ALTER", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseAlterTable(ref lexer);
+            }
             else if (keyword.Equals("DROP", StringComparison.OrdinalIgnoreCase))
+            {
                 expression = ParseDropTable(ref lexer);
+            }
             else
             {
                 expression = new SqlQueryExpression(SqlQueryCommandType.Unknown, null,
@@ -219,7 +233,9 @@ public sealed partial class SqlQueryParser : QueryParser
     private static bool IsStatementBoundaryKeyword(ref TokenLexer lexer)
     {
         if (lexer.Current.Type != TokenType.Keyword)
+        {
             return false;
+        }
 
         var value = lexer.Current.Value;
         return value.Equals("WHERE", StringComparison.OrdinalIgnoreCase) ||

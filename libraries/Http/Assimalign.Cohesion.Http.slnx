@@ -79,12 +79,41 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Cookies/tests/">
 		<Project Path="Assimalign.Cohesion.Http.Cookies/tests/Assimalign.Cohesion.Http.Cookies.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/">
+		<File Path="Assimalign.Cohesion.Http.DigestFields/README.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/docs/">
+		<File Path="Assimalign.Cohesion.Http.DigestFields/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/src/">
+		<Project Path="Assimalign.Cohesion.Http.DigestFields/src/Assimalign.Cohesion.Http.DigestFields.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/tests/">
+		<Project Path="Assimalign.Cohesion.Http.DigestFields/tests/Assimalign.Cohesion.Http.DigestFields.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/" />
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
 		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/src/">
+		<Project Path="Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Streaming/tests/">
+		<Project Path="Assimalign.Cohesion.Http.Streaming/tests/Assimalign.Cohesion.Http.Streaming.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/" />
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/src/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/src/Assimalign.Cohesion.Http.ServerSentEvents.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/tests/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/tests/Assimalign.Cohesion.Http.ServerSentEvents.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/">
+		<Project Path="Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse.csproj" />
 	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/">
 		<File Path="Assimalign.Cohesion.Http.Forms/README.md" />

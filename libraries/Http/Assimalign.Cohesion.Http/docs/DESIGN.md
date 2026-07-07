@@ -380,6 +380,47 @@ escape-free strings directly. Builds clean under the trim/AOT analyzers
   bytes; `Serialize()` always emits the §4.1 canonical form. A parse→serialize round-trip
   therefore normalizes (e.g. `1.50` → `1.5`, `-0` → `0`) rather than preserving the wire
   spelling.
+
+## Priority (RFC 9218 extensible priorities)
+
+### The value object
+
+`HttpPriority` is the field-specific consumer the Structured Field Values non-goals point at:
+it projects the RFC 9218 *Priority Field Value* — the `u`/`i` structured-field dictionary
+carried by the `Priority` request header **and** by HTTP/2 / HTTP/3 `PRIORITY_UPDATE` frames —
+onto the two things a scheduler consumes: an **urgency** 0–7 (`u`, default 3) and an
+**incremental** flag (`i`, default false). It is a `readonly struct` with `TryParse`, `Serialize`,
+and value equality, matching the shape of the other core value objects (`HttpMediaType`,
+`HttpQuality`).
+
+Parsing goes **through** `StructuredFieldDictionary` rather than around it — there is one
+structured-field parser in the stack, and `HttpPriority` only adds the field's semantics on top
+of it. The header name is exposed as the typed `HttpHeaderKey.Priority`.
+
+### Tolerant field semantics, strict syntax
+
+The structured-field *syntax* is strict (a malformed dictionary fails `TryParse`, which returns
+the default and `false`), but the *field members* are tolerant exactly as RFC 9218 §4 requires: an
+absent, out-of-range (not 0–7), or wrong-typed `u` falls back to urgency 3; an absent or
+non-boolean `i` falls back to non-incremental; and unrecognized members are ignored. This split
+lets a transport treat a well-formed-but-nonsensical `Priority` value as "no signal" (the default)
+without raising a protocol error, while still rejecting genuinely malformed structured fields.
+
+### Why a value object here and the scheduler elsewhere
+
+`HttpPriority` is pure parsing/representation and therefore lives in the protocol core (Lane B).
+*Acting* on the priority — urgency-ordered, non-incremental-first response scheduling, the
+`PRIORITY_UPDATE` frame engine, per-stream priority state — is wire behavior and lives in
+`Assimalign.Cohesion.Http.Connections` (Lane A). The value object is the seam between the two: the
+transport parses header and frame field values into `HttpPriority` and schedules on its
+`Urgency`/`Incremental`.
+
+### AOT posture
+
+No reflection or dynamic serialization; parsing is span-based via the structured-field toolkit and
+the ASCII→`char` bridge on the transport side is stack-allocated for the small field values that
+occur in practice. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
+
 ## Request-parse interception seam
 
 ### What it is
@@ -584,3 +625,50 @@ dynamic member access. Builds clean under the trim/AOT analyzers
   rather than re-deriving them.
 - **Cookie `Max-Age`.** That is RFC 6265, a different grammar owned by the cookie
   model; the delta-seconds handling here is `Cache-Control`-specific.
+
+## The response interceptor seam
+
+`IHttpResponseInterceptor` (+ `HttpResponseInterceptorContext`) is the symmetric
+counterpart to `IHttpRequestInterceptor`: a generic hook the server transport
+invokes while an exchange's response pipeline is being set up, before the handler
+runs. It exists so **response-side capabilities stay out of both the protocol core
+and the transport**. Incremental response streaming — and Server-Sent Events on top
+of it — is the first consumer, and neither the core nor the transport carries any
+streaming/SSE type.
+
+### Why generic, and how a feature plugs in
+
+The request side already established the pattern: `Http.RequestLimits` participates
+in request parsing via an `IHttpRequestInterceptor` (registered on the listener
+options), and the transport enforces it without ever referencing that package. The
+response side mirrors it exactly:
+
+- The transport exposes its per-protocol **raw response body sink** as a plain
+  `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
+  frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
+  flow-control backpressure), commits the head on the first write/flush, and is
+  finalized by the transport when the exchange completes.
+- A feature package (`Assimalign.Cohesion.Http.Streaming`) ships an
+  `IHttpResponseInterceptor` that wraps that sink in a typed
+  `IHttpResponseStreamingFeature` and installs it on `context.Features`. A handler
+  resolves the feature (`context.Response.Streaming`) and writes.
+
+So the streaming write/flush API, its state machine, and the SSE wire format all
+live in feature packages; the core owns only the generic interceptor seam, and the
+transport owns only the framing. The one streaming-adjacent thing that stays in the
+core is the well-known **header-name constant** `HttpHeaderKey.LastEventId`,
+alongside the other feature-specific header names already centralized there
+(`Sec-WebSocket-*`, `Grpc-*`).
+
+### Header-commit timing
+
+Because the sink commits the head on the first write or flush, the status line and
+headers are committed exactly once and locked thereafter — a rule the streaming
+feature surfaces to callers and the SSE package relies on (set `Content-Type:
+text/event-stream` before the first write). The interceptor runs *before* any
+response byte is produced, so an interceptor may still set default response headers
+on `HttpResponseInterceptorContext.Headers`.
+
+### AOT posture
+
+Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.

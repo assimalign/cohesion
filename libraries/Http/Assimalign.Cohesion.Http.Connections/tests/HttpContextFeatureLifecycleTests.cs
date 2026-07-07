@@ -27,9 +27,9 @@ public class HttpContextFeatureLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose an empty per-request feature collection by default")]
     public async Task Features_OnRequest_ShouldExposeEmptyCollection()
     {
-        // Arrange + Act — no request-parse interceptors are registered, so the transport takes
+        // Arrange + Act — no request- or response-interceptors are registered, so the transport takes
         // the zero-interceptor fast path and seeds nothing (features are attached by registered
-        // IHttpRequestInterceptor implementations or by middleware).
+        // IHttpRequestInterceptor / IHttpResponseInterceptor implementations or by middleware).
         IHttpContext httpContext = await ReceiveSingleContextAsync();
 
         // Assert — Features is non-null but empty.

@@ -3,6 +3,9 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Http.Connections.Internal.Http1;
+using Assimalign.Cohesion.Http.Connections.Internal.Http2;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
 namespace Assimalign.Cohesion.Http.Connections;
 
@@ -60,6 +63,28 @@ public sealed class HttpConnectionListenerOptions
     public IList<IHttpRequestInterceptor> Interceptors { get; } = new List<IHttpRequestInterceptor>();
 
     /// <summary>
+    /// Gets the ordered list of response interceptors invoked while each exchange's response
+    /// pipeline is being set up, before the application handler runs. See
+    /// <see cref="IHttpResponseInterceptor"/> for the hook contract.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the symmetric counterpart to <see cref="Interceptors"/>: response-side feature
+    /// packages (incremental streaming, Server-Sent Events, later compression) plug in here so the
+    /// transport can expose its raw response body sink to them without depending on the feature
+    /// package. The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;
+    /// mutations after that point have no effect. A registered instance is shared across every
+    /// connection and request the listener serves, so implementations must be stateless and
+    /// thread-safe.
+    /// </para>
+    /// <para>
+    /// When the list is empty the transport takes the buffered fast path with no per-exchange
+    /// response-sink allocation at all.
+    /// </para>
+    /// </remarks>
+    public IList<IHttpResponseInterceptor> ResponseInterceptors { get; } = new List<IHttpResponseInterceptor>();
+
+    /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
     /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.
@@ -88,7 +113,7 @@ public sealed class HttpConnectionListenerOptions
     /// </exception>
     public HttpConnectionListenerOptions UseHttp1(IConnectionListener listener)
     {
-        return UseStreamListener(HttpProtocol.Http11, listener);
+        return UseStreamListener(HttpProtocol.Http11, listener, static (limits, interceptors, responseInterceptors) => new Http1ConnectionFactory(limits, interceptors, responseInterceptors));
     }
 
     /// <summary>
@@ -102,7 +127,7 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
     public HttpConnectionListenerOptions UseHttp1(Func<IConnectionListener> listenerFactory)
     {
-        return UseStreamListener(HttpProtocol.Http11, listenerFactory);
+        return UseStreamListener(HttpProtocol.Http11, listenerFactory, static (limits, interceptors, responseInterceptors) => new Http1ConnectionFactory(limits, interceptors, responseInterceptors));
     }
 
     /// <summary>
@@ -116,7 +141,7 @@ public sealed class HttpConnectionListenerOptions
     /// </exception>
     public HttpConnectionListenerOptions UseHttp2(IConnectionListener listener)
     {
-        return UseStreamListener(HttpProtocol.Http20, listener);
+        return UseStreamListener(HttpProtocol.Http20, listener, static (_, _, responseInterceptors) => new Http2ConnectionFactory(responseInterceptors));
     }
 
     /// <summary>
@@ -130,26 +155,42 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
     public HttpConnectionListenerOptions UseHttp2(Func<IConnectionListener> listenerFactory)
     {
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory);
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, static (_, _, responseInterceptors) => new Http2ConnectionFactory(responseInterceptors));
     }
 
     /// <summary>
-    /// Serves HTTP/3 over the supplied multiplexed connection listener.
+    /// Serves HTTP/3 over the supplied multiplexed connection listener, with default
+    /// (static-only QPACK) configuration.
     /// </summary>
     /// <param name="listener">The multiplexed listener producing the transport connections.</param>
     /// <returns>The current options instance.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
     public HttpConnectionListenerOptions UseHttp3(IMultiplexedConnectionListener listener)
     {
-        ArgumentNullException.ThrowIfNull(listener);
-
-        Registrations.Add(HttpListenerRegistration.ForMultiplexed(() => listener));
-
-        return this;
+        return UseHttp3(listener, static _ => { });
     }
 
     /// <summary>
-    /// Serves HTTP/3 over the multiplexed connection listener produced by the supplied factory.
+    /// Serves HTTP/3 over the supplied multiplexed connection listener, configured through
+    /// <paramref name="configure"/> (for example, to opt in to the QPACK dynamic table).
+    /// </summary>
+    /// <param name="listener">The multiplexed listener producing the transport connections.</param>
+    /// <param name="configure">Configures the HTTP/3-specific options (see <see cref="Http3ListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listener"/> or <paramref name="configure"/> is <see langword="null"/>.
+    /// </exception>
+    public HttpConnectionListenerOptions UseHttp3(IMultiplexedConnectionListener listener, Action<Http3ListenerOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        return UseMultiplexedListener(() => listener, configure);
+    }
+
+    /// <summary>
+    /// Serves HTTP/3 over the multiplexed connection listener produced by the supplied factory,
+    /// with default (static-only QPACK) configuration.
     /// </summary>
     /// <param name="listenerFactory">
     /// The factory producing the listener; it is invoked when the
@@ -159,29 +200,66 @@ public sealed class HttpConnectionListenerOptions
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
     public HttpConnectionListenerOptions UseHttp3(Func<IMultiplexedConnectionListener> listenerFactory)
     {
-        ArgumentNullException.ThrowIfNull(listenerFactory);
+        return UseHttp3(listenerFactory, static _ => { });
+    }
 
-        Registrations.Add(HttpListenerRegistration.ForMultiplexed(listenerFactory));
+    /// <summary>
+    /// Serves HTTP/3 over the multiplexed connection listener produced by the supplied factory,
+    /// configured through <paramref name="configure"/> (for example, to opt in to the QPACK dynamic table).
+    /// </summary>
+    /// <param name="listenerFactory">
+    /// The factory producing the listener; it is invoked when the
+    /// <see cref="HttpConnectionListener"/> is constructed.
+    /// </param>
+    /// <param name="configure">Configures the HTTP/3-specific options (see <see cref="Http3ListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listenerFactory"/> or <paramref name="configure"/> is <see langword="null"/>.
+    /// </exception>
+    public HttpConnectionListenerOptions UseHttp3(Func<IMultiplexedConnectionListener> listenerFactory, Action<Http3ListenerOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(listenerFactory);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        return UseMultiplexedListener(listenerFactory, configure);
+    }
+
+    private HttpConnectionListenerOptions UseMultiplexedListener(Func<IMultiplexedConnectionListener> listenerFactory, Action<Http3ListenerOptions> configure)
+    {
+        Http3ListenerOptions http3Options = new();
+        configure(http3Options);
+
+        // The QPACK options are captured now (registration time); the listener-wide
+        // response interceptors are bound when the HttpConnectionListener snapshots them.
+        Registrations.Add(HttpListenerRegistration.ForMultiplexed(
+            listenerFactory,
+            responseInterceptors => new Http3ConnectionFactory(responseInterceptors, http3Options.QPack)));
 
         return this;
     }
 
-    private HttpConnectionListenerOptions UseStreamListener(HttpProtocol protocol, IConnectionListener listener)
+    private HttpConnectionListenerOptions UseStreamListener(
+        HttpProtocol protocol,
+        IConnectionListener listener,
+        Func<HttpServerLimits, IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listener);
 
         HttpListenerRegistration.ValidateStreamCapabilities(listener.Capabilities, protocol, nameof(listener));
 
-        Registrations.Add(HttpListenerRegistration.ForStream(protocol, () => listener));
+        Registrations.Add(HttpListenerRegistration.ForStream(protocol, () => listener, connectionFactoryBuilder));
 
         return this;
     }
 
-    private HttpConnectionListenerOptions UseStreamListener(HttpProtocol protocol, Func<IConnectionListener> listenerFactory)
+    private HttpConnectionListenerOptions UseStreamListener(
+        HttpProtocol protocol,
+        Func<IConnectionListener> listenerFactory,
+        Func<HttpServerLimits, IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
 
-        Registrations.Add(HttpListenerRegistration.ForStream(protocol, listenerFactory));
+        Registrations.Add(HttpListenerRegistration.ForStream(protocol, listenerFactory, connectionFactoryBuilder));
 
         return this;
     }

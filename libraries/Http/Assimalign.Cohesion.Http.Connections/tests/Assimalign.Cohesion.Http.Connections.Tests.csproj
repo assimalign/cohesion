@@ -8,6 +8,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
+		<!-- Test-only: exercises the response-interceptor seam end-to-end (the transport LIBRARY has no
+		     dependency on this feature package), mirroring the ExtendedConnect/Cookies refs above. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionPackageReference Include="coverlet.collector" />

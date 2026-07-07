@@ -94,4 +94,27 @@ internal enum Http3ErrorCode : long
     /// The requested operation cannot be served over HTTP/3. The peer should retry over HTTP/1.1.
     /// </summary>
     VersionFallback = 0x110,
+
+    /// <summary>
+    /// QPACK_DECOMPRESSION_FAILED (0x0200):
+    /// The decoder failed to interpret an encoded field section and is not able to continue decoding
+    /// that field section (RFC 9204 §8.3). Also used when a field section's Required Insert Count is
+    /// unsatisfiable or when the peer exceeds the decoder's blocked-stream limit (§2.1.2 / §2.2).
+    /// </summary>
+    QPackDecompressionFailed = 0x0200,
+
+    /// <summary>
+    /// QPACK_ENCODER_STREAM_ERROR (0x0201):
+    /// The decoder failed to interpret an encoder instruction received on the QPACK encoder stream
+    /// (RFC 9204 §8.3), for example an insert that cannot fit the dynamic table or a capacity that
+    /// exceeds the decoder's advertised maximum.
+    /// </summary>
+    QPackEncoderStreamError = 0x0201,
+
+    /// <summary>
+    /// QPACK_DECODER_STREAM_ERROR (0x0202):
+    /// The encoder failed to interpret a decoder instruction received on the QPACK decoder stream
+    /// (RFC 9204 §8.3).
+    /// </summary>
+    QPackDecoderStreamError = 0x0202,
 }

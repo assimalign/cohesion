@@ -38,6 +38,7 @@ internal static class Http2TestSettings
         MaxFrameSize = 0x5,
         MaxHeaderListSize = 0x6,
         EnableConnectProtocol = 0x8,
+        NoRfc7540Priorities = 0x9,
     }
 
     /// <summary>The HTTP/2 client preface (RFC 9113 §3.4).</summary>

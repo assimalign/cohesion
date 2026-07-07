@@ -30,11 +30,12 @@ backed by features stored in `IHttpContext.Features`.
 
 | Type | Role |
 |------|------|
-| `HttpCookie` | Single cookie with name, value, and `HttpCookieOptions` |
+| `HttpCookie` | Single cookie with name, value, and `HttpCookieOptions`; validates the RFC 6265 §4.1.1 name/value grammar at construction and exposes `ClampLifetime` |
 | `HttpCookieOptions` | RFC 6265 §5.2 attributes &mdash; Domain, Path, Expires, MaxAge, Secure, HttpOnly, SameSite |
 | `HttpCookieSameSiteMode` | Enum: Unspecified / None / Lax / Strict |
+| `HttpCookieLimits` | RFC 6265bis parse-side size limits (name+value, attribute value, attribute count) and the 400-day lifetime cap |
 | `IHttpCookieCollection` | Mutable collection of `HttpCookie`; used on both request and response sides |
-| `HttpCookieCollection` | Default in-memory implementation |
+| `HttpCookieCollection` | Default in-memory implementation; enforces `HttpCookieLimits` and drops malformed cookies while parsing |
 | `IHttpRequestCookieFeature` | Per-exchange request-cookie state (parsed snapshot) stored in `IHttpContext.Features` |
 | `IHttpResponseCookieFeature` | Per-exchange response-cookie state (mutable, drained to `Set-Cookie` at flush) stored in `IHttpContext.Features` |
 | `HttpRequestCookieFeature` | Default request-feature implementation (internal) |
@@ -68,6 +69,37 @@ returns an empty collection (and installs the feature so subsequent reads
 are cheap) and `context.Response.Cookies` returns a fresh empty mutable
 collection (also installing the feature). The presence of the feature
 signals that cookie handling has been observed for this exchange.
+
+## Wire-safety hardening (RFC 6265bis)
+
+This is the **model** library, so it owns the rules that keep a cookie
+well-formed on the wire — not cookie *policy* (see the split below):
+
+- **Octet-grammar validation.** `HttpCookie` rejects a name outside the
+  RFC 6265 §4.1.1 `token` grammar or a value containing `;`, `,`,
+  whitespace, a control character, CR/LF, DQUOTE, or backslash — throwing
+  `ArgumentException` — so a hostile value can never split or corrupt the
+  emitted `Set-Cookie` line. The invariant holds for the object's lifetime
+  because `Name`/`Value` are immutable.
+- **Parse-side size limits.** `HttpCookieCollection` enforces
+  `HttpCookieLimits` (name+value ≤ 4096, attribute value ≤ 1024, bounded
+  attribute count) while parsing; oversized cookies/attributes are ignored,
+  not thrown. Pass a custom `HttpCookieLimits` to the constructor to tune
+  them.
+- **400-day lifetime cap.** `cookie.ClampLifetime(now)` returns a cookie
+  whose `Max-Age`/`Expires` is capped at 400 days (RFC 6265bis §5.5);
+  zero/negative `Max-Age` (deletion) round-trips unchanged.
+
+```csharp
+// Cap an outbound cookie's lifetime at emission time.
+HttpCookie capped = cookie.ClampLifetime(DateTimeOffset.UtcNow);
+```
+
+**Model vs. policy.** Prefix invariants (`__Host-`/`__Secure-`),
+`SameSite=None`+`Secure` pairing, and *deciding when* to apply the lifetime
+cap are **policy** and live in `Assimalign.Cohesion.Web.CookiePolicy`, which
+depends on this package (never the reverse). See `docs/DESIGN.md` for the
+full split.
 
 ## How the transports plug in
 

@@ -18,8 +18,27 @@ internal static class Http3HeaderCodec
 {
     public static Http3Request DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock, HttpScheme fallbackScheme, byte[] bodyBytes, out string? extendedConnectProtocol)
     {
+        // Static-only QPACK decode (dynamic table disabled): the field section
+        // resolves against the static table or literals only.
         List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(headerBlock);
+        return BuildRequest(fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
+    }
 
+    /// <summary>
+    /// Applies the HTTP/3 field-section rules (RFC 9114 §4.2 / §4.3) to an
+    /// already-decoded QPACK field section and builds the request. The dynamic
+    /// QPACK path (which resolves against the connection dynamic table) decodes
+    /// the field lines separately, then reuses this validation so static-only and
+    /// dynamic requests behave identically.
+    /// </summary>
+    /// <param name="fields">The decoded name/value field lines, in wire order.</param>
+    /// <param name="fallbackScheme">The scheme to use when no <c>:scheme</c> is present.</param>
+    /// <param name="bodyBytes">The request body octets.</param>
+    /// <param name="extendedConnectProtocol">The <c>:protocol</c> pseudo-header value, when present.</param>
+    /// <returns>The validated HTTP/3 request.</returns>
+    /// <exception cref="InvalidDataException">Thrown when the field section violates an HTTP/3 message rule.</exception>
+    public static Http3Request BuildRequest(List<(string Name, string Value)> fields, HttpScheme fallbackScheme, byte[] bodyBytes, out string? extendedConnectProtocol)
+    {
         HttpHeaderCollection headers = new();
         string? authority = null;
         string? method = null;
@@ -180,6 +199,22 @@ internal static class Http3HeaderCodec
         {
             headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+
+        return EncodeResponseHeaders(context);
+    }
+
+    /// <summary>
+    /// Encodes the response field section for an <em>incrementally streamed</em>
+    /// response: the <c>:status</c> pseudo-header followed by the response headers
+    /// verbatim, with <b>no</b> synthesized <c>Content-Length</c>. HTTP/3 delimits
+    /// the body with the stream end, so a length is neither known up front nor
+    /// required.
+    /// </summary>
+    /// <param name="context">The exchange whose response head is encoded.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    public static byte[] EncodeResponseHeaders(Http3Context context)
+    {
+        HttpHeaderCollection headers = context.Response.Headers;
 
         List<(string Name, string Value)> fields =
         [

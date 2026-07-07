@@ -27,7 +27,13 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// <inheritdoc />
     public int Count
     {
-        get { lock (_syncRoot) return _entries.Count; }
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _entries.Count;
+            }
+        }
     }
 
     /// <inheritdoc />
