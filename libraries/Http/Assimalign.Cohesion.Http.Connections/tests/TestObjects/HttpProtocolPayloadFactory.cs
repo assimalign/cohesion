@@ -754,6 +754,32 @@ internal static class HttpProtocolPayloadFactory
             return;
         }
 
-        throw new InvalidOperationException("The test payload factory only supports small QUIC integers.");
+        // 4-byte form (RFC 9000 §16) — needed for the RFC 9218 PRIORITY_UPDATE
+        // frame types (0xF0700 / 0xF0701), which exceed the 2-byte range.
+        if (value < 1_073_741_824)
+        {
+            uint encoded = (uint)(value | 0x80000000);
+            stream.WriteByte((byte)(encoded >> 24));
+            stream.WriteByte((byte)(encoded >> 16));
+            stream.WriteByte((byte)(encoded >> 8));
+            stream.WriteByte((byte)encoded);
+            return;
+        }
+
+        throw new InvalidOperationException("The test payload factory only supports QUIC integers below 2^30.");
+    }
+
+    /// <summary>
+    /// Builds an RFC 9218 §7.2 HTTP/3 PRIORITY_UPDATE frame payload: the
+    /// Prioritized Element ID as a QUIC variable-length integer followed by the
+    /// ASCII Priority Field Value.
+    /// </summary>
+    public static byte[] CreateHttp3PriorityUpdatePayload(long prioritizedElementId, string priorityFieldValue)
+    {
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, prioritizedElementId);
+        byte[] fieldValue = Encoding.ASCII.GetBytes(priorityFieldValue);
+        buffer.Write(fieldValue, 0, fieldValue.Length);
+        return buffer.ToArray();
     }
 }

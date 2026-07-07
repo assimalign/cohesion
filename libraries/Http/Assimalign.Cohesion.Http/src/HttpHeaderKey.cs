@@ -231,6 +231,9 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Pragma</c> HTTP header name.</summary>
     public static HttpHeaderKey Pragma {get;}= new( "Pragma");
 
+    /// <summary>Gets the <c>Priority</c> HTTP header name (RFC 9218 &#167; 4 — the extensible-priorities Priority Field Value).</summary>
+    public static HttpHeaderKey Priority {get;}= new( "Priority");
+
     /// <summary>Gets the <c>ProtocolType</c> HTTP header name.</summary>
     public static HttpHeaderKey Protocol {get;}= new( ":protocol");
 

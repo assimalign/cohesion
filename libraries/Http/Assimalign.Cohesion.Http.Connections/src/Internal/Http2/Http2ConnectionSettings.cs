@@ -55,6 +55,9 @@ internal sealed class Http2ConnectionSettings
     /// <summary>Default ENABLE_CONNECT_PROTOCOL (RFC 8441 §3). 0 = disabled.</summary>
     public const uint InitialEnableConnectProtocol = 0;
 
+    /// <summary>Default NO_RFC7540_PRIORITIES (RFC 9218 §2.1). 0 = RFC 7540 priorities in use.</summary>
+    public const uint InitialNoRfc7540Priorities = 0;
+
     /// <summary>Minimum legal MAX_FRAME_SIZE (RFC 9113 §6.5.2). 2^14.</summary>
     public const uint MinMaxFrameSize = 16_384;
 
@@ -90,6 +93,12 @@ internal sealed class Http2ConnectionSettings
 
     /// <summary>ENABLE_CONNECT_PROTOCOL — RFC 8441 extended CONNECT toggle. Must be 0 or 1.</summary>
     public uint EnableConnectProtocol { get; set; } = InitialEnableConnectProtocol;
+
+    /// <summary>
+    /// NO_RFC7540_PRIORITIES — RFC 9218 §2.1 toggle stating the deprecated
+    /// RFC 7540 stream-priority scheme is not in use. Must be 0 or 1.
+    /// </summary>
+    public uint NoRfc7540Priorities { get; set; } = InitialNoRfc7540Priorities;
 
     /// <summary>
     /// Validates a single peer-advertised setting per RFC 9113 §6.5.2
@@ -136,6 +145,15 @@ internal sealed class Http2ConnectionSettings
                         $"SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1; got {setting.Value}.");
                 }
                 break;
+
+            case Http2SettingsParameter.SETTINGS_NO_RFC7540_PRIORITIES:
+                // RFC 9218 §2.1 — a value other than 0 or 1 is a connection error.
+                if (setting.Value > 1)
+                {
+                    return (Http2ErrorCode.ProtocolError,
+                        $"SETTINGS_NO_RFC7540_PRIORITIES must be 0 or 1; got {setting.Value}.");
+                }
+                break;
         }
 
         return (Http2ErrorCode.NoError, null);
@@ -170,6 +188,9 @@ internal sealed class Http2ConnectionSettings
                 break;
             case Http2SettingsParameter.SETTINGS_ENABLE_CONNECT_PROTOCOL:
                 EnableConnectProtocol = setting.Value;
+                break;
+            case Http2SettingsParameter.SETTINGS_NO_RFC7540_PRIORITIES:
+                NoRfc7540Priorities = setting.Value;
                 break;
             // Unknown parameter IDs are intentionally ignored (RFC 9113 §6.5.2).
         }

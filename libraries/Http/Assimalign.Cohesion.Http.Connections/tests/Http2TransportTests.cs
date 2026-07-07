@@ -1148,6 +1148,203 @@ public class Http2TransportTests
         large.Available.ShouldBe((long)int.MaxValue - 5);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_NO_RFC7540_PRIORITIES = 1")]
+    public async Task Http2_OnConnect_ShouldAdvertiseNoRfc7540Priorities()
+    {
+        // RFC 9218 §2.1 — a server using the extensible-priorities scheme
+        // advertises SETTINGS_NO_RFC7540_PRIORITIES = 1 so peers do not fall back
+        // to the deprecated RFC 7540 stream-priority tree.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+
+        TestConnection connection = new(Combine(preface, settings));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+        }
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(await connection.ReadOutputAsync());
+        byte[]? settingsPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 0x4 && payload.Length > 0)
+            {
+                settingsPayload = payload;
+                break;
+            }
+        }
+
+        settingsPayload.ShouldNotBeNull();
+        Dictionary<Http2TestSettings.Parameter, uint> serverSettings = Http2TestSettings.ReadSettings(settingsPayload!);
+        serverSettings.ContainsKey(Http2TestSettings.Parameter.NoRfc7540Priorities).ShouldBeTrue();
+        serverSettings[Http2TestSettings.Parameter.NoRfc7540Priorities].ShouldBe(1u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should apply a PRIORITY_UPDATE received before HEADERS to the stream")]
+    public async Task Http2_OnPriorityUpdateBeforeHeaders_ShouldApplyToStream()
+    {
+        // RFC 9218 §7.1 — a PRIORITY_UPDATE may arrive before the referenced
+        // request stream is opened; the signal is retained and applied when
+        // HEADERS opens the stream, and is observable on the yielded context.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "u=1, i"));
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, priorityUpdate, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(1, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should initialize stream priority from the Priority request header")]
+    public async Task Http2_OnPriorityHeader_ShouldInitializeStreamPriority()
+    {
+        // RFC 9218 §4 — an absent PRIORITY_UPDATE leaves the Priority header as the
+        // effective priority for the stream.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"),
+            ("priority", "u=6, i"));
+
+        TestConnection connection = new(Combine(preface, settings, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(6, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should let a later PRIORITY_UPDATE override the Priority header")]
+    public async Task Http2_OnPriorityUpdateAfterHeader_ShouldOverrideHeaderPriority()
+    {
+        // RFC 9218 §8 — a PRIORITY_UPDATE takes precedence over the Priority
+        // header for the same stream, regardless of arrival order.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"),
+            ("priority", "u=5"));
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "u=1, i"));
+
+        TestConnection connection = new(Combine(preface, settings, headers, priorityUpdate));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        Http2Context http2Context = enumerator.Current.ShouldBeOfType<Http2Context>();
+
+        // The background frame pump processes frames independently of consumption,
+        // so the intermediate header-derived value (u=5) is not deterministically
+        // observable here. Drain the enumerable — the pump has then consumed the
+        // trailing PRIORITY_UPDATE, which must have overridden the header value.
+        // (The reverse pinning — a PRIORITY_UPDATE holding against a later header
+        // parse — is covered deterministically by OnPriorityUpdateBeforeHeaders.)
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(1, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject PRIORITY_UPDATE on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPriorityUpdateOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9218 §7.1 — PRIORITY_UPDATE MUST be sent on stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdateOnStream1 = Http2TestSettings.RawFrame(0x10, 0, 1, PriorityUpdatePayload(1, "u=1"));
+        await AssertGoAwayAsync(Combine(preface, settings, priorityUpdateOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject PRIORITY_UPDATE for an even prioritized stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPriorityUpdateForEvenStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9218 §7.1 — the Prioritized Stream ID must identify a stream the
+        // client can open: non-zero and odd. An even id is a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(2, "u=1"));
+        await AssertGoAwayAsync(Combine(preface, settings, priorityUpdate), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should ignore a PRIORITY_UPDATE with an unparseable field value")]
+    public async Task Http2_OnPriorityUpdateWithMalformedFieldValue_ShouldIgnoreWithoutError()
+    {
+        // RFC 9218 §7.1 — a Priority Field Value that cannot be parsed leaves the
+        // frame without effect (no stream or connection error); the connection
+        // keeps serving and the stream keeps its default priority.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "U=bad\""));
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, priorityUpdate, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Request.Path.Value.ShouldBe("/");
+        http2Context.Stream.EffectivePriority.ShouldBe(HttpPriority.Default);
+    }
+
+    /// <summary>
+    /// Builds an RFC 9218 §7.1 HTTP/2 PRIORITY_UPDATE frame payload: the 4-octet
+    /// Prioritized Stream ID (high bit reserved) followed by the ASCII Priority
+    /// Field Value.
+    /// </summary>
+    private static byte[] PriorityUpdatePayload(int prioritizedStreamId, string priorityFieldValue)
+    {
+        byte[] ascii = Encoding.ASCII.GetBytes(priorityFieldValue);
+        byte[] payload = new byte[4 + ascii.Length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(payload, (uint)prioritizedStreamId);
+        ascii.CopyTo(payload, 4);
+        return payload;
+    }
+
     private static byte[] Combine(params byte[][] buffers)
     {
         using MemoryStream stream = new();

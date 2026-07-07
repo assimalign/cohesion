@@ -65,11 +65,6 @@ internal static class Http2FrameWriter
                 Bitshifter.WriteUInt31BigEndian(destination.Slice(0, 4), (uint)frame.GoAwayLastStreamId, preserveHighestBit: false);
                 BinaryPrimitives.WriteUInt32BigEndian(destination.Slice(4, 4), (uint)frame.GoAwayErrorCode);
                 break;
-            case Http2FrameType.Priority:
-                destination[0] = frame.PriorityIsExclusive ? (byte)0x80 : (byte)0x00;
-                Bitshifter.WriteUInt31BigEndian(destination.Slice(0, 4), (uint)frame.PriorityStreamDependency);
-                destination[4] = frame.PriorityWeight;
-                break;
             case Http2FrameType.RstStream:
                 BinaryPrimitives.WriteUInt32BigEndian(destination, (uint)frame.RstStreamErrorCode);
                 break;
