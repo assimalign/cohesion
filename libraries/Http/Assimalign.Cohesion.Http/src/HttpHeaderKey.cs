@@ -168,6 +168,9 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Expect</c> HTTP header name.</summary>
     public static HttpHeaderKey Expect {get;}= new( "Expect");
 
+    /// <summary>Gets the <c>Forwarded</c> HTTP header name (RFC 7239).</summary>
+    public static HttpHeaderKey Forwarded {get;}= new( "Forwarded");
+
     /// <summary>Gets the <c>From</c> HTTP header name.</summary>
     public static HttpHeaderKey From {get;}= new( "From");
 
@@ -371,6 +374,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>X-Content-Type-Options</c> HTTP header name.</summary>
     public static HttpHeaderKey XContentTypeOptions {get;}= new( "X-Content-Type-Options");
+
+    /// <summary>Gets the <c>X-Forwarded-For</c> HTTP header name (de-facto proxy client-chain header).</summary>
+    public static HttpHeaderKey XForwardedFor {get;}= new( "X-Forwarded-For");
+
+    /// <summary>Gets the <c>X-Forwarded-Host</c> HTTP header name (de-facto original-host header).</summary>
+    public static HttpHeaderKey XForwardedHost {get;}= new( "X-Forwarded-Host");
+
+    /// <summary>Gets the <c>X-Forwarded-Proto</c> HTTP header name (de-facto original-scheme header).</summary>
+    public static HttpHeaderKey XForwardedProto {get;}= new( "X-Forwarded-Proto");
 
     /// <summary>Gets the <c>X-Frame-Options</c> HTTP header name.</summary>
     public static HttpHeaderKey XFrameOptions {get;}= new( "X-Frame-Options");

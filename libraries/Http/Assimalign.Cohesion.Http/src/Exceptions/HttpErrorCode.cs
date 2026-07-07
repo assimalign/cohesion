@@ -88,4 +88,10 @@ public enum HttpErrorCode
     /// An <c>If-Range</c> conditional-request header (RFC 9110 &#167; 13.1.5) could not be parsed.
     /// </summary>
     InvalidConditional,
+
+    /// <summary>
+    /// An RFC 7239 <c>Forwarded</c> element (or one of its <c>for</c>/<c>by</c> nodes) or an
+    /// <c>X-Forwarded-*</c> list could not be parsed.
+    /// </summary>
+    InvalidForwarded,
 }

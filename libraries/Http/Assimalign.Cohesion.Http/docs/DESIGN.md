@@ -788,3 +788,128 @@ reflection, no runtime codegen, no dynamic dispatch. Trim-safe by construction
   primitives, reading the `Range` / `If-Range` / conditional fields off an
   `IHttpRequest` and populating `HttpConditionalRequestContext` is the consuming
   middleware's job.
+
+## Forwarding headers (RFC 7239 `Forwarded` + `X-Forwarded-*`)
+
+The core owns the value objects that parse and serialize the proxy-forwarding
+headers — the RFC 7239 `Forwarded` element list and the de-facto
+`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` list forms. Every
+Cohesion web service is deployed behind at least one proxy hop (the
+ApplicationModel K8s self-registry gateway, LoadBalancer/NatGateway resources),
+so without these primitives every downstream concern — CORS, cookie `Secure`
+decisions, session partitioning, rate-limit keys, access logging — sees the
+proxy's IP and `http://` scheme instead of the client's.
+
+### The protocol half vs. the trust half
+
+This library is deliberately the **protocol half only**: it turns raw header
+text into typed, validated value objects and back. It contains **no trust
+model**. Deciding *which* forwarded hops to believe — `KnownProxies`,
+`KnownNetworks`, `ForwardLimit`, and the actual overwrite of
+`connection.RemoteIp` / `request.Scheme` — lives in the forwarded-headers
+middleware (issue #778) in the Web runtime, because that is a policy decision
+that depends on the deployment topology, not on the wire grammar. Keeping the
+split here means the security-sensitive code has one job (apply policy to
+already-parsed, already-validated data) and the parser has one job (be a correct,
+total function over hostile input). This mirrors the established seam/feature
+taxonomy: protocol value objects in core, policy in the layer that composes them.
+
+### The surface
+
+Five readonly-struct value objects, in the span-based `TryParse`/`Parse`/
+`Serialize` style of the other core primitives (`HttpMediaType`,
+`HttpRequestTarget`, the `StructuredField*` family):
+
+- **`HttpForwardedNode`** — an RFC 7239 §6 `node` identifier (the `for`/`by`
+  value): `nodename [ ":" node-port ]`. It classifies the nodename as an IPv4
+  literal, a bracketed IPv6 literal, `unknown`, or an obfuscated identifier
+  (`_`-prefixed, §6.3), and the port as numeric or obfuscated (§6.4). `Address`
+  and `PortNumber` give the typed projections; `Name`/`Port` preserve the exact
+  spelling so `ToString` round-trips.
+- **`HttpForwardedParameter`** — one `forwarded-pair` (`token "=" value`),
+  carrying registered *and* extension parameters so an element round-trips
+  losslessly.
+- **`HttpForwardedElement`** — one `forwarded-element` (one proxy hop): typed
+  `For`/`By`/`Host`/`Proto` accessors over an ordered parameter list, plus
+  `TryGetParameter` for extensions and a typed `Create` factory for the
+  proxy-*writing* path.
+- **`HttpForwardedElementCollection`** — the whole `Forwarded` header
+  (`1#forwarded-element`).
+- **`HttpForwardedValues`** — the ordered entry list of any one `X-Forwarded-*`
+  header.
+
+`HttpHeaderKey` gained `Forwarded`, `XForwardedFor`, `XForwardedHost`, and
+`XForwardedProto` alongside the existing keys.
+
+### RFC 7239 strictness vs. `X-Forwarded-*` pragmatism
+
+`HttpForwardedNode` is reused across both header families, so it accepts a
+**bare** IPv6 literal (`2001:db8::1`) in addition to the RFC-mandated bracketed
+form (`[2001:db8::1]`) — bracket-less IPv6 is what real proxies write into
+`X-Forwarded-For`. Because a bare IPv6 literal's own colons cannot be
+distinguished from a trailing `:port`, a bare literal is always taken as the
+whole nodename with no port (which is exactly why RFC 7239 mandates brackets when
+a port is needed). IPv4/IPv6 recognition delegates to `System.Net.IPAddress`, so
+the accepted address forms are precisely the BCL's.
+
+`HttpForwardedValues` owns only the *list structure* — comma splitting
+(quote-aware) and multi-line combining — and keeps entries **verbatim**.
+Interpreting an `X-Forwarded-For` entry as an address is left to the consumer via
+`HttpForwardedNode.TryParse`, so the same list type serves all three
+`X-Forwarded-*` headers even though their entries mean different things (address
+vs. scheme vs. host).
+
+### Deterministic rejection is a security property
+
+Both the node and the element parser are **total**: any malformed input yields
+`TryParse == false` with no exception, no unbounded recursion, and no super-linear
+scanning (the quote-aware delimiter scan and the bracket/colon splits are all
+single passes). The `Forwarded` list parser is **strict and all-or-nothing** — an
+empty slot between commas is ignored per the RFC 7230 §7 list rule, but any
+element that is present and malformed fails the *entire* header. This is
+deliberate: a lenient parser that silently dropped one unparseable hop would let
+the #778 trust evaluator mis-count the chain and attribute the request to the
+wrong client. Strict parsing keeps the "how many hops, and which" question
+answerable only from well-formed input. `for`/`by` values that are present but
+are not valid nodes fail their element for the same reason. The fuzz suite
+(`HttpForwardedFuzzTests`) pins totality and determinism across truncated quotes,
+bracket/colon bombs, embedded NULs, high-plane characters, and multi-kilobyte
+inputs.
+
+### Rightmost-first traversal
+
+Both list types hold entries in **wire order** (left-most = closest to the
+client, right-most = closest to this server) and expose the same rightmost-first
+affordances the trust evaluator needs: index + `Count`, a `Nearest` accessor for
+the hop that handed *us* the request, and a `Reverse()` that returns a same-typed
+list in nearest-hop-first order. `AsSpan()` gives allocation-free traversal.
+
+### Why static-shaped value objects, not interfaces
+
+Like `HttpMediaType` and the `StructuredField*` types, these are immutable
+protocol primitives with exactly one correct parse — there is no injectable
+behavior to abstract, so an `IForwarded…` interface would add allocation and
+virtual dispatch (AOT-hostile) for no substitutability. The surface is kept
+conservative on purpose: as a Stage-1 fan-out primitive (#778 and every
+forwarding-aware concern imports it), it is costly to change once consumed.
+
+### AOT posture
+
+Span-based parsing over BCL `IPAddress`/char primitives — no reflection, no
+runtime codegen, no dynamic serialization. Parameter/entry storage is a plain
+array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **The trust model.** `KnownProxies`/`KnownNetworks`/`ForwardLimit` and the
+  mutation of connection/request state belong to the #778 middleware, not here.
+- **Interpreting `X-Forwarded-For` entries as addresses.** `HttpForwardedValues`
+  is a faithful ordered list; turning an entry into an `IPAddress` (and deciding
+  whether to trust it) is the consumer's call via `HttpForwardedNode`.
+- **De-obfuscating identifiers.** RFC 7239 §6.3 obfuscated nodes/ports are
+  recognized and preserved, never reversed — the mapping is private to the proxy
+  that issued them.
+- **`X-Forwarded-Port` and other vendor headers.** The scope is the three
+  ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
+  consumer overlay if ever needed.

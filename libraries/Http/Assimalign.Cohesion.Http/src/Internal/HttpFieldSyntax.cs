@@ -88,6 +88,45 @@ internal static class HttpFieldSyntax
     }
 
     /// <summary>
+    /// Determines whether <paramref name="value"/> is a well-formed RFC 9110 &#167; 5.6.4
+    /// <c>quoted-string</c> that spans the entire span: it opens and closes with <c>"</c>, every
+    /// backslash is followed by an escaped character, and the closing quote is the final character
+    /// (an unterminated or prematurely-closed quote fails).
+    /// </summary>
+    /// <param name="value">The candidate value.</param>
+    /// <returns><see langword="true"/> when the span is a complete quoted-string.</returns>
+    public static bool IsQuotedString(ReadOnlySpan<char> value)
+    {
+        if (value.Length < 2 || value[0] != '"')
+        {
+            return false;
+        }
+
+        int i = 1;
+        while (i < value.Length)
+        {
+            char c = value[i];
+            if (c == '\\')
+            {
+                // A quoted-pair must have a character to escape; a trailing backslash is malformed.
+                if (i + 1 >= value.Length)
+                {
+                    return false;
+                }
+                i += 2;
+                continue;
+            }
+            if (c == '"')
+            {
+                // The closing quote is only valid as the final character.
+                return i == value.Length - 1;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Unwraps an RFC 9110 &#167; 5.6.4 quoted-string, removing the surrounding quotes and
     /// resolving <c>\</c> escapes. When <paramref name="value"/> is not a quoted-string it is
     /// returned unchanged (already a bare token value).
