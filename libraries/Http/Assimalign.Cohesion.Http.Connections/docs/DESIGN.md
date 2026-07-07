@@ -214,15 +214,16 @@ implementation is wrapped as a read-through defaults source for safety.
 
 ### Protocol coverage
 
-The hooks are wired into the HTTP/1.1 parser. HTTP/2 and HTTP/3 currently
-buffer a stream's body before decoding its head (`Http2Stream.CreateContext`
-runs only once the stream is complete; the h3 request stream is drained before
-header decode), so the same two hook points exist conceptually but the
-"cap adjustable before enforcement" property is not implementable there until
-those paths enforce body caps at all — tracked as follow-up work alongside the
-h2/h3 abuse-limit items. Until then the seam is h1-only at runtime, which
-matches the pre-seam behavior (the transport-seeded body-size feature was also
-h1-only).
+The hooks are wired into the HTTP/1.1 parser. HTTP/2 now dispatches a request as
+soon as its header block completes and streams the body incrementally under
+flow-control backpressure (`Http2Stream.CreateContext` runs at header completion;
+see "HTTP/2 request-body flow control and backpressure"), while HTTP/3 still
+drains a request stream before header decode. The two hook points exist
+conceptually on both, but the parse-time interceptor seam is still h1-only at
+runtime — matching the pre-seam behavior (the transport-seeded body-size feature
+was also h1-only). Wiring the head/body hooks into the streaming h2 path (a body
+hook now has a real incremental stream to wrap) is tracked as follow-up work
+alongside the remaining h2/h3 abuse-limit items.
 
 ### AOT posture
 
@@ -350,23 +351,25 @@ when it finalizes the exchange, not by the feature.
   software, so send-side backpressure is enforced here. `WriteStreamingDataAsync`
   calls `AcquireSendWindowAsync`, which consumes credit from **both** the
   connection-level and stream-level send windows (RFC 9113 §5.2) and, when both are
-  exhausted, parks on a `TaskCompletionSource` signal until an inbound
-  `WINDOW_UPDATE` (or a `SETTINGS_INITIAL_WINDOW_SIZE` increase) replenishes credit.
-  Window reads/writes are serialized under a dedicated `_sendFlowLock`;
-  `ProcessWindowUpdateFrame` replenishes under the same lock and signals parked
-  writers. A writer never holds the flow lock across an `await`, and signal
-  completions run asynchronously so a parked writer never resumes inline under the
-  lock.
+  exhausted, parks on a `TaskCompletionSource` signal until credit is replenished by
+  an inbound `WINDOW_UPDATE` (or a `SETTINGS_INITIAL_WINDOW_SIZE` increase). Those
+  frames are processed by the **background frame pump** (see the HTTP/2 flow-control
+  section below), which runs concurrently with the application handler — so a parked
+  writer is always unblocked by the pump, regardless of how the host dispatches
+  requests. Send-window consume/replenish shares the connection's `_syncRoot` with
+  the stream table (never held across an `await`); signal completions run
+  asynchronously so a parked writer never resumes inline under the lock. If the pump
+  exits (wire failure, connection error, teardown) send credit is marked permanently
+  closed and a parked writer fails with a wire-level `IOException` instead of
+  hanging on a signal nothing will ever complete.
 - **HTTP/3** rides QUIC, whose per-stream flow control is applied by the transport on
   the underlying `Stream.WriteAsync`, so no software window accounting is needed here.
 
-Because a streaming response is written on the application thread while the receive
-loop keeps pumping frames (so window replenishment can arrive), the HTTP/2 path is
-careful about shared state: all outbound frame writes go through the existing
-`_writeLock`, all send-window access goes through `_sendFlowLock`, and the streaming
-completion does **not** remove the stream from `_streams` (a concurrent `Remove`
-would race the receive loop's reads). The fully-closed stream is reaped at
-connection teardown instead.
+A completed streamed response performs the same cleanup as the buffered path: the
+fully-closed stream is removed from the stream table (reclaiming any undrained
+receive-window debt via `RemoveStreamAsync`), and a stream whose peer half is still
+open is reset with `NO_ERROR` to stop the remaining request body and reclaim the
+concurrency slot.
 
 ### AOT posture
 
@@ -385,20 +388,21 @@ HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
 
 ## Receive-loop failure isolation
 
-Each protocol's receive loop (`Http1ConnectionContext.ReceiveAsync`,
-`Http2ConnectionContext.ReceiveAsync`, `Http3ConnectionContext.ReceiveAsync`)
-classifies failures into two scopes:
+Each protocol's inbound processor (`Http1ConnectionContext.ReceiveAsync`, the
+HTTP/2 background frame pump behind `Http2ConnectionContext.ReceiveAsync`, and
+`Http3ConnectionContext.ReceiveAsync`) classifies failures into two scopes:
 
 - **Per-connection wire-level failures** — truncated frames, malformed
-  request lines, peer reset, socket I/O errors. The receive enumerable
-  yields no more values and exits cleanly; the surrounding
+  request lines, peer reset, socket I/O errors. The processor stops
+  producing values and exits cleanly (the HTTP/2 pump completes the
+  ready-context channel so the enumerable ends); the surrounding
   `await using` disposes the connection; the listener keeps accepting.
   Protocol-required wire frames (`GOAWAY` on HTTP/2 connection errors,
   `RST_STREAM` on HTTP/2 stream errors) are emitted before exit.
 - **Per-stream failures** (HTTP/2, HTTP/3) — malformed headers on one
-  stream, QPACK errors on one HTTP/3 stream. The loop emits `RST_STREAM`
+  stream, QPACK errors on one HTTP/3 stream. The processor emits `RST_STREAM`
   (HTTP/2) or drops the offending stream (HTTP/3) and continues
-  accepting subsequent streams on the same connection.
+  processing subsequent streams on the same connection.
 
 The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
@@ -527,16 +531,154 @@ body byte and opens the window to middleware without changing this contract.
 ### Scope boundary
 
 These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
-(rapid-reset, CONTINUATION flood, header-list size) and HTTP/2 body-buffering
-backpressure are governed by the frame/flow-control machinery and tracked
-separately; `MaxConcurrentConnections` is an accept-loop concern owned by the
-Web-runtime rewrite, not this surface.
+(rapid-reset, CONTINUATION flood, header-list size) are governed by the
+frame machinery and tracked separately; HTTP/2 request-body buffering is
+bounded by flow-control backpressure, documented in "HTTP/2 request-body flow
+control and backpressure" below. `MaxConcurrentConnections` is an accept-loop
+concern owned by the Web-runtime rewrite, not this surface.
 
 ### AOT posture
 
 No reflection, no codegen. The limits are plain properties with guard-clause
 validation; enforcement is byte counting and `CancellationTokenSource.CancelAfter`
 timer arithmetic.
+
+## HTTP/2 request-body flow control and backpressure
+
+### The vulnerability this closes
+
+HTTP/2 (RFC 9113 §5.2) makes flow control **receiver-driven**: each receiver
+advertises a per-stream window (`SETTINGS_INITIAL_WINDOW_SIZE`, 65535 octets by
+default) and a fixed connection window (also 65535), and the sender may only
+transmit that many DATA octets before the receiver credits more capacity with a
+`WINDOW_UPDATE`. The receiver paces the sender by choosing *when* to credit.
+
+The previous implementation defeated that mechanism twice over. It credited the
+window **immediately on receipt** — the receive loop emitted `WINDOW_UPDATE` for
+every DATA frame as soon as it was parsed — and it **buffered the whole body**
+before the request was dispatched (`Http2Stream.CreateContext` ran only once the
+stream was complete, materializing a `MemoryStream` over the accumulated bytes).
+Together those meant a client could stream a body of any size as fast as it
+liked and the server would buffer all of it in memory before the application saw
+a single byte. HTTP/1.1 has a body cap (`Http1MessageBodyReader`); HTTP/2 had
+none. This is the memory-exhaustion DoS #750 closes.
+
+### The shape: a decoupled frame pump feeding per-stream body pipes
+
+Real end-to-end backpressure is impossible while frame reading is driven by the
+request-consumption loop: the server dispatches contexts sequentially (a handler
+runs to completion before the next context is pulled), so nothing would drain
+the wire while a slow handler read its body — the sender could not be paced and,
+worse, a body larger than the window could never complete, deadlocking the
+handler. So inbound processing is now owned by a **single background frame pump**
+(`Http2ConnectionContext.PumpAsync`), started once when `ReceiveAsync` is first
+enumerated and decoupled from how fast the consumer handles requests:
+
+- The pump reads and processes **every** inbound frame for the connection's
+  lifetime. It dispatches a request head to a ready-context channel as soon as
+  the header block is complete (RFC 9113 lets the server respond before the body
+  arrives), then keeps pumping that stream's DATA into a per-stream body pipe
+  (`Http2Stream`'s unbounded `Channel<Http2DataChunk>`) while the handler runs.
+- `ReceiveAsync` simply yields ready contexts off that channel. `SendAsync` and
+  the request-body reads run concurrently with the pump.
+- The application reads the body through `Http2RequestBodyStream`, which drains
+  the channel and — this is the whole point — credits each fully-consumed chunk's
+  flow-control cost back to the peer via `OnRequestBodyConsumedAsync`. **Credit is
+  driven by consumption, not receipt.**
+
+### Why this bounds buffering and preserves FLOW_CONTROL_ERROR enforcement
+
+Because the pump consumes the receive window as DATA arrives but only credits it
+back as the application reads, the unconsumed, buffered bytes for a stream can
+never exceed the advertised window: a conformant sender that fills the window
+stalls until the reader drains the pipe. A misbehaving sender that transmits more
+than the window without waiting is still caught — the pump consumes the receive
+window eagerly on receipt (`ProcessDataFrameAsync`), so an overshoot fails
+`TryConsume` and raises `FLOW_CONTROL_ERROR` exactly as before (connection-level
+on the shared window, stream-level on the per-stream window, RFC 9113 §6.9.1).
+Eager consumption is *load-bearing* for that check: a lazy, read-only-when-asked
+design would pace the window in lockstep with the reader and never detect the
+overshoot at all.
+
+Flow control accounts for the **entire DATA frame payload including padding and
+the pad-length octet** (RFC 9113 §6.9.1), while only the de-padded data reaches
+the application. The two lengths differ for padded frames, so each
+`Http2DataChunk` carries its `FlowControlLength` (the full payload length)
+independently of its data, and the credit emitted on consumption is the flow-
+control length, not the byte count the reader saw. A padded frame whose pad
+length meets or exceeds the payload is a `PROTOCOL_ERROR` (RFC 9113 §6.1),
+rejected before it is queued.
+
+Two window-conservation paths keep the shared connection receive window from
+leaking under consumption-driven credit — critical, because unlike the old
+credit-on-receipt model an un-drained body would otherwise never return its
+octets to the peer:
+
+- **Recently-closed discard.** DATA that arrives for a stream we have already
+  retired is discarded, but its connection-window cost is credited back
+  (RFC 9113 §6.9) before the stream error is raised, so a benign close race
+  does not shrink the window.
+- **Removal reclaim.** When a stream is removed while buffered body sits
+  unconsumed (an ignored body, a reset, an abandoned upload), its outstanding
+  receive debt — exactly `InitialReceiveWindow - ReceiveWindow.Available` — is
+  credited back to the connection window and a connection-level `WINDOW_UPDATE`
+  is emitted. Without this, every request whose handler skips the body (an
+  auth-rejected `POST`, an early 4xx) would permanently shrink the connection
+  window until inbound DATA stalled on every stream. A per-stream
+  `ReceiveReclaimed` flag makes reclaim and the reader's consumption-credit
+  mutually exclusive so an octet is never credited twice.
+
+### Concurrency model
+
+The pump is the single inbound processor, so pump-only state (remote settings,
+send windows, the continuation-tracking id) needs no synchronization. Two locks
+guard the state the pump and the application threads genuinely share, and neither
+is ever held across an await or a wire read:
+
+- A connection-level `_syncRoot` guards the stream table and the **receive**-
+  direction windows (the pump consumes them; the body reads credit them).
+- A per-`Http2Stream` `_stateLock` guards lifecycle transitions, because the pump
+  drives the remote half (`Receive*`) while the handler drives the local half
+  (`SendEndStream` / a local reset) concurrently. Modeling `State` as a single
+  enum keeps the two halves from racing to a lost update.
+
+All outbound frames — response HEADERS/DATA, SETTINGS/PING ACKs, GOAWAY, and both
+receipt-side and consumption-side `WINDOW_UPDATE`s — serialize through the
+existing `_writeLock`, so nothing tears a frame sequence (RFC 9113 §4.1).
+
+### Lifecycle: dispatch-at-headers, abandoned bodies, teardown
+
+The request head is dispatched once, when the header block completes; the body
+streams in afterward. A handler that responds **without draining the request
+body** would otherwise leave the stream in `HalfClosedLocal` forever, eventually
+exhausting `SETTINGS_MAX_CONCURRENT_STREAMS`, so after `SendAsync` writes the
+response the server emits `RST_STREAM(NO_ERROR)` to tell the peer to stop and to
+reclaim the stream slot (RFC 9113 §8.1). On connection teardown, wire failure, or
+a connection error, the pump's `finally` aborts every live stream and then
+completes the ready-context channel: a stream whose body was **still incoming**
+fires its `RequestAborted` so a handler parked reading it observes cancellation
+rather than a clean end-of-stream (which would let it treat a truncated upload as
+complete), while a **fully-received** body stays readable to completion. Aborting
+before completing the channel makes the abort observable to a consumer that is
+about to see the enumerable end. Graceful close cancels and awaits the pump
+before emitting the final GOAWAY, so the shutdown GOAWAY never races the pump's
+writes.
+
+### AOT posture
+
+No reflection, no runtime code generation. The pump is a plain async loop, the
+body pipe is a `System.Threading.Channels` channel, and the flow-control windows
+are value-type octet counters guarded by monitors.
+
+### Non-goals
+
+- **Outbound (response) flow control.** `SendAsync` does not yet consult the
+  per-stream send window; a streaming response write path (with send-side
+  backpressure and SSE) is tracked separately (#769). Response bodies are still
+  buffered before framing.
+- **A configurable initial window.** The advertised
+  `SETTINGS_INITIAL_WINDOW_SIZE` is the fixed RFC default (65535). Exposing a
+  tunable stream/connection window (Kestrel-style) is a later refinement.
 
 ## HTTP/3 stream model and SETTINGS engine
 

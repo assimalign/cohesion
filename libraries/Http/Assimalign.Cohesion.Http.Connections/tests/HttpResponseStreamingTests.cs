@@ -148,11 +148,15 @@ public class HttpResponseStreamingTests
         await context.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Streaming/Http2: Should honor the send window and resume after WINDOW_UPDATE")]
-    public async Task Http2_Streaming_ShouldRespectFlowControlBackpressure()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Streaming/Http2: A write past the send window resolves via the frame pump without the caller driving the receive loop (deadlock regression)")]
+    public async Task Http2_Streaming_ShouldResolveBackpressureViaFramePump()
     {
-        // Peer advertises a 4-octet initial stream window, so the first DATA frame can carry at most
-        // 4 octets; the writer then parks until a WINDOW_UPDATE grants more credit.
+        // Peer advertises a 4-octet initial stream window, so a 10-octet streamed write must park
+        // for flow-control credit partway through. The background frame pump processes the preloaded
+        // WINDOW_UPDATE frames concurrently, so the write completes on its own — the caller does NOT
+        // pump the receive loop. Without the pump this deadlocks: the single dispatcher would be
+        // suspended on the yielded context while the writer waits for a WINDOW_UPDATE it can never
+        // deliver.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(
             frameType: 0x4, flags: 0, streamId: 0,
@@ -174,36 +178,56 @@ public class HttpResponseStreamingTests
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
-
-        await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
-        (await enumerator.MoveNextAsync()).ShouldBeTrue();
-        IHttpContext context = enumerator.Current;
+        IHttpContext context = await ReadSingleContextAsync(connectionContext);
         IHttpResponseStreamingFeature streaming = context.Response.Streaming;
 
-        // Drive the write on a background task: it commits headers, emits the window-limited first
-        // DATA frame (4 octets), then parks awaiting credit.
-        Task writeTask = Task.Run(async () =>
+        // Write 10 octets over a 4-octet window, inline on this thread (no manual pumping). The frame
+        // pump delivers the WINDOW_UPDATE credit so this completes rather than deadlocking. A guard
+        // timeout turns a regression (deadlock) into a fast, clear failure instead of a hung test.
+        Task write = Task.Run(async () =>
         {
             await streaming.WriteAsync(Encoding.ASCII.GetBytes("0123456789"));
             await streaming.CompleteAsync();
         });
+        (await Task.WhenAny(write, Task.Delay(TimeSpan.FromSeconds(10)))).ShouldBe(write, "the streamed write deadlocked waiting for a WINDOW_UPDATE the frame pump should have delivered");
+        await write;
 
-        // Observe the pre-credit output: exactly the 4 octets the window allowed.
-        IReadOnlyList<(long FrameType, byte[] Payload)> preFrames = await ReadFramesUntilAsync(
-            connection, fs => fs.Any(f => f.FrameType == 0 /* DATA */));
-        byte[] preData = preFrames.Where(f => f.FrameType == 0).SelectMany(f => f.Payload).ToArray();
-        Encoding.ASCII.GetString(preData).ShouldBe("0123");
+        // All 10 octets are delivered across the DATA frames once credit is granted.
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = await ReadFramesUntilAsync(
+            connection, fs => fs.Where(f => f.FrameType == 0).SelectMany(f => f.Payload).Count() >= 10);
+        byte[] streamed = frames.Where(f => f.FrameType == 0).SelectMany(f => f.Payload).ToArray();
+        Encoding.ASCII.GetString(streamed).ShouldBe("0123456789");
 
-        // Pump the receive loop so the preloaded WINDOW_UPDATE frames are processed, which unblocks
-        // the parked writer; the loop then hits end-of-stream.
-        (await enumerator.MoveNextAsync()).ShouldBeFalse();
-        await writeTask;
+        await context.DisposeAsync();
+    }
 
-        // The remainder is delivered once credit is granted.
-        IReadOnlyList<(long FrameType, byte[] Payload)> postFrames =
-            HttpProtocolPayloadFactory.ParseHttp2Frames(await connection.ReadOutputAsync());
-        byte[] postData = postFrames.Where(f => f.FrameType == 0).SelectMany(f => f.Payload).ToArray();
-        Encoding.ASCII.GetString(postData).ShouldBe("456789");
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Streaming/Http2: A completed streamed response reaps its stream from the connection")]
+    public async Task Http2_Streaming_ShouldReapStreamAfterCompletion()
+    {
+        // Regression: a streamed response must remove its fully-closed stream from the connection's
+        // stream map (like the buffered path), so a long-lived connection serving many streamed
+        // responses does not accumulate stream state without bound.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/sse", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+        EnableStreaming(options);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext context = await ReadSingleContextAsync(connectionContext);
+
+        Http2ConnectionContext http2Connection = (Http2ConnectionContext)connectionContext;
+        http2Connection.StreamCount.ShouldBe(1);
+
+        IHttpResponseStreamingFeature streaming = context.Response.Streaming;
+        await streaming.WriteAsync(Encoding.UTF8.GetBytes("chunk-1"));
+        await streaming.FlushAsync();
+        await connectionContext.SendAsync(context); // finalizes the stream (END_STREAM) → reap
+
+        http2Connection.StreamCount.ShouldBe(0);
+
+        await context.DisposeAsync();
     }
 
     // -------------------------------------------------------------------- HTTP/3

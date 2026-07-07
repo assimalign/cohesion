@@ -104,6 +104,27 @@ internal sealed class TestConnection : Connection
         return output;
     }
 
+    /// <summary>
+    /// Sends additional bytes from the remote peer to the connection holder after
+    /// construction. Used by the flow-control tests to model a sender that resumes
+    /// once it has been credited more window via <c>WINDOW_UPDATE</c>. Only valid
+    /// when the connection was created with <c>completeInput: false</c>.
+    /// </summary>
+    public async Task WriteInputAsync(byte[] bytes)
+    {
+        await _peer.Output.WriteAsync(bytes);
+    }
+
+    /// <summary>
+    /// Signals that the remote peer has finished sending — the connection holder's
+    /// next read past the buffered bytes observes end-of-stream. Pairs with the
+    /// <c>completeInput: false</c> constructor option.
+    /// </summary>
+    public void CompleteInput()
+    {
+        _peer.Output.Complete();
+    }
+
     public override void Abort(Exception? reason = null)
     {
         _isAborted = true;
