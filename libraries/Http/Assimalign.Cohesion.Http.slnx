@@ -79,6 +79,18 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Cookies/tests/">
 		<Project Path="Assimalign.Cohesion.Http.Cookies/tests/Assimalign.Cohesion.Http.Cookies.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/">
+		<File Path="Assimalign.Cohesion.Http.DigestFields/README.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/docs/">
+		<File Path="Assimalign.Cohesion.Http.DigestFields/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/src/">
+		<Project Path="Assimalign.Cohesion.Http.DigestFields/src/Assimalign.Cohesion.Http.DigestFields.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.DigestFields/tests/">
+		<Project Path="Assimalign.Cohesion.Http.DigestFields/tests/Assimalign.Cohesion.Http.DigestFields.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/" />
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />

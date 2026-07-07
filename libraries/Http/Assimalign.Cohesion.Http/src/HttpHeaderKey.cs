@@ -108,6 +108,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Connection</c> HTTP header name.</summary>
     public static HttpHeaderKey Connection {get;}= new( "Connection");
 
+    /// <summary>Gets the <c>Content-Digest</c> HTTP header name (RFC 9530 &#167; 2).</summary>
+    /// <remarks>
+    /// Carries the integrity digest of the actual message content (the selected representation
+    /// after content codings) as an RFC 9651 Structured Field Dictionary of
+    /// <c>algorithm=:base64-digest:</c> entries. Modeled by <c>HttpDigestField</c> in
+    /// <c>Assimalign.Cohesion.Http.DigestFields</c>.
+    /// </remarks>
+    public static HttpHeaderKey ContentDigest {get;}= new( "Content-Digest");
+
     /// <summary>Gets the <c>Content-Disposition</c> HTTP header name.</summary>
     public static HttpHeaderKey ContentDisposition {get;}= new( "Content-Disposition");
 
@@ -252,6 +261,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Referer</c> HTTP header name.</summary>
     public static HttpHeaderKey Referer {get;}= new( "Referer");
 
+    /// <summary>Gets the <c>Repr-Digest</c> HTTP header name (RFC 9530 &#167; 3).</summary>
+    /// <remarks>
+    /// Carries the integrity digest of the representation data (independent of content codings and
+    /// range selection) as an RFC 9651 Structured Field Dictionary. Shares the value model with
+    /// <see cref="ContentDigest"/> (<c>HttpDigestField</c>); full representation-data verification
+    /// depends on content-coding layers not yet present, so this key is modeled but not enforced.
+    /// </remarks>
+    public static HttpHeaderKey ReprDigest {get;}= new( "Repr-Digest");
+
     /// <summary>Gets the <c>Retry-After</c> HTTP header name.</summary>
     public static HttpHeaderKey RetryAfter {get;}= new( "Retry-After");
 
@@ -327,6 +345,23 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>Via</c> HTTP header name.</summary>
     public static HttpHeaderKey Via {get;}= new( "Via");
+
+    /// <summary>Gets the <c>Want-Content-Digest</c> HTTP header name (RFC 9530 &#167; 4).</summary>
+    /// <remarks>
+    /// A request/response preference asking the peer to include <see cref="ContentDigest"/> using
+    /// the listed algorithms, expressed as an RFC 9651 Structured Field Dictionary of
+    /// <c>algorithm=preference</c> integer entries (0 = not acceptable, higher = more preferred).
+    /// Modeled by <c>HttpWantDigestField</c> in <c>Assimalign.Cohesion.Http.DigestFields</c>.
+    /// </remarks>
+    public static HttpHeaderKey WantContentDigest {get;}= new( "Want-Content-Digest");
+
+    /// <summary>Gets the <c>Want-Repr-Digest</c> HTTP header name (RFC 9530 &#167; 4).</summary>
+    /// <remarks>
+    /// A request/response preference asking the peer to include <see cref="ReprDigest"/> using the
+    /// listed algorithms, expressed as an RFC 9651 Structured Field Dictionary of integer
+    /// preferences. Shares the value model with <see cref="WantContentDigest"/>.
+    /// </remarks>
+    public static HttpHeaderKey WantReprDigest {get;}= new( "Want-Repr-Digest");
 
     /// <summary>Gets the <c>Warning</c> HTTP header name.</summary>
     public static HttpHeaderKey Warning {get;}= new( "Warning");
