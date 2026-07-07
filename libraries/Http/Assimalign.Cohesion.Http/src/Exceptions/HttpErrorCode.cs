@@ -72,4 +72,20 @@ public enum HttpErrorCode
     /// Application execution failed while processing the request.
     /// </summary>
     ExecutionError,
+
+    /// <summary>
+    /// A <c>Range</c> header value (RFC 9110 &#167; 14.1.1) could not be parsed — an
+    /// unrecognized range unit or a malformed range set.
+    /// </summary>
+    InvalidRange,
+
+    /// <summary>
+    /// A <c>Content-Range</c> header value (RFC 9110 &#167; 14.4) could not be parsed.
+    /// </summary>
+    InvalidContentRange,
+
+    /// <summary>
+    /// An <c>If-Range</c> conditional-request header (RFC 9110 &#167; 13.1.5) could not be parsed.
+    /// </summary>
+    InvalidConditional,
 }

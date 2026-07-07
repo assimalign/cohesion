@@ -672,3 +672,119 @@ on `HttpResponseInterceptorContext.Headers`.
 ### AOT posture
 
 Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.
+
+## Range requests and the `If-Range` precondition (RFC 9110 §14 / §13.1.5)
+
+Range requests are the layer the caching/validator section above explicitly
+deferred: it owns `ETag`, `HttpEntityTag`, `HttpEntityTagCondition`, `HttpDate`,
+and the four-step §13.2.2 precondition evaluator (`HttpConditionalRequest`); this
+section adds byte-range parsing, `Content-Range`, the `If-Range` value object,
+`206`/`416` selection, and the §13.2.2 **step-5** range-application decision that
+*reuses* those primitives rather than re-deriving them. `Web.StaticFiles` (#777)
+and output caching (#795) consume this layer.
+
+### The type map, and what is reused vs. new
+
+| Concern | Type(s) | Owner |
+|---|---|---|
+| Entity-tag, `If-Match`/`If-None-Match` value, HTTP-date, §13.2.2 steps 1–4 | `HttpEntityTag`, `HttpEntityTagCondition`, `HttpDate`, `HttpConditionalRequest`, `HttpPreconditionOutcome` | caching/validator section (#755) |
+| `Range` request header | `HttpRange` (one spec), `HttpRangeHeader` (the set) — RFC 9110 §14.1.1 | this section |
+| `Content-Range` response header | `HttpContentRange` — §14.4 | this section |
+| `If-Range` (entity-tag or date) + its step-5 decision | `HttpIfRange` (+ `Matches`) — §13.1.5 | this section |
+| `206`/`416` selection | `HttpRangeSelector` → `HttpRangeSelection` / `HttpRangeSlice` / `HttpRangeSelectionStatus` — §14.2 | this section |
+
+The range value objects are `readonly struct`s with span `TryParse`/`Parse`/
+`ToString`, and `HttpRangeSelector` is a `static` class — the same "value objects
++ static protocol transforms, not interfaces" rationale documented in the
+media-type and caching sections. No new ETag or condition type is introduced:
+`HttpIfRange`'s entity-tag form is an `HttpEntityTag`, and its `Matches` reuses
+`HttpEntityTag.StrongEquals`.
+
+### Parsing is strict, and "invalid" ≠ "unsatisfiable"
+
+A `Range` header yields one of three downstream outcomes, and separating them is
+deliberate:
+
+1. **Unparseable / unknown unit → ignore the range, serve `200`.**
+   `HttpRangeHeader.TryParse` returns `false` for a non-`bytes` unit or any
+   syntactically invalid range-set (one bad member fails the *whole* set) — the
+   RFC 9110 §14.2 "a server MAY ignore a Range it can't or won't honor." The
+   selector is never called.
+2. **Valid but wholly out of range → `416`.** A parsed `bytes` set where no spec
+   overlaps the representation is *unsatisfiable* — a different response (`416`
+   with `Content-Range: bytes */N`), not an ignore.
+3. **Valid, ≥1 overlapping → `206`.**
+
+Collapsing (1) and (2) — e.g. `416` for a malformed header — is a common and
+wrong implementation; keeping strict parse (`false`) separate from unsatisfiable
+selection (`Unsatisfiable`) is what makes the three-way outcome representable.
+
+### Range selection: 206 / 416 / Full, order preserved, DoS-guarded
+
+`HttpRangeSelector.Select(range, completeLength, maxRanges)` resolves each spec
+via `HttpRange.TryResolve` (§14.1.2: open-ended and suffix ranges clamp to the
+content; a `first-pos` at/after the end, an empty `-0` suffix, or a zero-length
+representation are unsatisfiable) and returns `HttpRangeSelection`:
+
+- **`Partial`** — one `HttpRangeSlice` per satisfiable spec, in client order, each
+  carrying the `Content-Range` a `206` (single or `multipart/byteranges`)
+  advertises. Ranges are **not coalesced or reordered** — the RFC permits
+  coalescing but does not require it; preserving client order keeps the primitive
+  predictable, and a consumer can coalesce the returned slices.
+- **`Unsatisfiable`** — carries `UnsatisfiedContentRange` = `bytes */N`.
+- **`Full`** — the escape hatch for a range set larger than `maxRanges`
+  (default 16). RFC 9110 §14.2 blesses ignoring "egregious" range requests; a huge
+  set of tiny overlapping ranges is the classic amplification vector, so the count
+  cap degrades to a plain `200`. It is a policy knob, surfaced as a parameter.
+
+### `If-Range` is step 5, and composes with the shared evaluator
+
+`HttpConditionalRequest.Evaluate` (the caching/validator section) resolves
+§13.2.2 steps 1–4 and returns `Proceed` / `NotModified` / `PreconditionFailed`.
+It deliberately stops there: `If-Range` is range-specific. `HttpIfRange.Matches`
+is step 5, and the two compose into the full "typed decision" the range feature
+needs:
+
+```
+outcome = HttpConditionalRequest.Evaluate(context)      // steps 1–4 → 304 / 412 / proceed
+if outcome != Proceed              → send 304 / 412
+else if a Range header is present:
+    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified)   // step 5
+    if applyRange   → HttpRangeSelector.Select(...)     → 206 / 416 / (Full → 200)
+    else            → 200 full          // validator stale: give the client the whole thing
+else                               → 200 full
+```
+
+Two correctness details:
+
+- **`If-Range` is always strong.** The entity-tag form uses
+  `HttpEntityTag.StrongEquals` (a weak or absent current tag never applies the
+  range); the date form applies the range only when the representation has not
+  been modified after the client's date (`Last-Modified ≤ If-Range date`, the
+  Kestrel rule). A mismatch *ignores* the range (full `200`) — `If-Range` is
+  "give me the whole thing if my copy is stale", never a `412`.
+- **One-second granularity.** `HttpIfRange.Matches` truncates the representation's
+  `Last-Modified` to whole seconds before the date comparison, because an
+  HTTP-date carries only whole seconds; a sub-second write therefore does not read
+  as "modified".
+
+### AOT posture (range/If-Range)
+
+Structs, spans, `long.TryParse`, and reuse of `HttpDate`/`HttpEntityTag` — no
+reflection, no runtime codegen, no dynamic dispatch. Trim-safe by construction
+(`IsAotCompatible=true`).
+
+### Non-goals (this layer)
+
+- **No `multipart/byteranges` rendering.** The selector returns slices and their
+  `Content-Range`s; composing the multipart body (boundaries, part headers) is a
+  response-writer concern (#769 streaming path / `Web.StaticFiles` #777).
+- **No range coalescing** and **no `Accept-Ranges` emission** — server response
+  concerns, not value-object ones.
+- **No re-derived validator types.** ETag, the condition list, HTTP-date, and the
+  step-1–4 evaluator belong to the caching/validator section; this layer reuses
+  them.
+- **No header-collection integration.** As with the media-type and caching
+  primitives, reading the `Range` / `If-Range` / conditional fields off an
+  `IHttpRequest` and populating `HttpConditionalRequestContext` is the consuming
+  middleware's job.
