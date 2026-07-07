@@ -14,7 +14,9 @@ public sealed partial class SqlQueryParser
 
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
+        {
             Advance(ref lexer);
+        }
 
         // IF NOT EXISTS
         bool ifNotExists = false;
@@ -22,7 +24,10 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NOT"))
+            {
                 Advance(ref lexer);
+            }
+
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
             {
                 ifNotExists = true;
@@ -70,7 +75,9 @@ public sealed partial class SqlQueryParser
             }
 
             if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+            {
                 Advance(ref lexer);
+            }
         }
 
         return new SqlCreateTableExpression(table, columns, ifNotExists, null,
@@ -166,7 +173,9 @@ public sealed partial class SqlQueryParser
 
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
+        {
             Advance(ref lexer);
+        }
 
         // Table reference (no alias)
         SqlTableReference? table = null;
@@ -196,7 +205,9 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             // Optional COLUMN keyword
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLUMN"))
+            {
                 Advance(ref lexer);
+            }
 
             var colDef = ParseColumnDefinition(ref lexer);
             action = new SqlAlterAddColumnAction(colDef);
@@ -206,7 +217,9 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             // Optional COLUMN keyword
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLUMN"))
+            {
                 Advance(ref lexer);
+            }
 
             string colName = string.Empty;
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
@@ -234,7 +247,9 @@ public sealed partial class SqlQueryParser
 
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
+        {
             Advance(ref lexer);
+        }
 
         // IF EXISTS
         bool ifExists = false;

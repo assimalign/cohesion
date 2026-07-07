@@ -81,7 +81,10 @@ public readonly struct Address : IEquatable<Address>
     /// <returns>The total absolute byte offset.</returns>
     public long ToAbsoluteOffset()
     {
-        if (_offsets is null) return 0;
+        if (_offsets is null)
+        {
+            return 0;
+        }
 
         long total = 0;
         for (int i = 0; i < _offsets.Length; i++)
@@ -94,10 +97,16 @@ public readonly struct Address : IEquatable<Address>
     /// <inheritdoc />
     public bool Equals(Address other)
     {
-        if (Depth != other.Depth) return false;
+        if (Depth != other.Depth)
+        {
+            return false;
+        }
         for (int i = 0; i < Depth; i++)
         {
-            if (_offsets![i] != other._offsets![i]) return false;
+            if (_offsets![i] != other._offsets![i])
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -108,7 +117,10 @@ public readonly struct Address : IEquatable<Address>
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        if (_offsets is null) return 0;
+        if (_offsets is null)
+        {
+            return 0;
+        }
 
         var hash = new HashCode();
         for (int i = 0; i < _offsets.Length; i++)
@@ -121,7 +133,10 @@ public readonly struct Address : IEquatable<Address>
     /// <inheritdoc />
     public override string ToString()
     {
-        if (_offsets is null || _offsets.Length == 0) return "<empty>";
+        if (_offsets is null || _offsets.Length == 0)
+        {
+            return "<empty>";
+        }
         return string.Join(" -> ", _offsets);
     }
 

@@ -42,6 +42,13 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.ApplicationModel/src/Assimalign.Cohesion.Database.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.ApplicationModel/tests/Assimalign.Cohesion.Database.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />
@@ -254,13 +261,20 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Hosting/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Hosting/src/Assimalign.Cohesion.Database.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Indexing/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Indexing/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Indexing/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Indexing/tests/Assimalign.Cohesion.Database.Indexing.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair/src/Assimalign.Cohesion.Database.KeyValuePair.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/">
-		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/Assimalign.Cohesion.Database.KeyValuePair.Cataalog.csproj" />
+		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/Assimalign.Cohesion.Database.KeyValuePair.Catalog.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/Assimalign.Cohesion.Database.KeyValuePair.Catalog.Tests.csproj" />
@@ -282,6 +296,9 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Security/src/Assimalign.Cohesion.Database.KeyValuePair.Security.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Security/tests/Assimalign.Cohesion.Database.KeyValuePair.Security.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/">
 		<File Path="Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/README.md" />
@@ -306,6 +323,13 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Memory/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Memory/tests/Assimalign.Cohesion.Database.Memory.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Protocol/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Protocol/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Protocol/src/Assimalign.Cohesion.Database.Protocol.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Protocol/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Protocol/tests/Assimalign.Cohesion.Database.Protocol.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Replication/">
 		<File Path="Database/Assimalign.Cohesion.Database.Replication/README.md" />
 	</Folder>
@@ -317,6 +341,13 @@
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Server/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Server/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Server/src/Assimalign.Cohesion.Database.Server.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Server/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Server/tests/Assimalign.Cohesion.Database.Server.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql/src/">
@@ -339,6 +370,13 @@
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Language/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Language/tests/Assimalign.Cohesion.Database.Sql.Language.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Replication/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Replication/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Replication/src/Assimalign.Cohesion.Database.Sql.Replication.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Replication/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Replication/tests/Assimalign.Cohesion.Database.Sql.Replication.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Security/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Security/src/">
@@ -364,6 +402,13 @@
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Storage/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Storage/tests/Assimalign.Cohesion.Database.Storage.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Transactions/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Transactions/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Transactions/src/Assimalign.Cohesion.Database.Transactions.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Transactions/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Transactions/tests/Assimalign.Cohesion.Database.Transactions.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Types/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Types/src/">

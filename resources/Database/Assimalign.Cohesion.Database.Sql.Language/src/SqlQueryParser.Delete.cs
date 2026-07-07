@@ -13,7 +13,9 @@ public sealed partial class SqlQueryParser
 
         // FROM (optional in some dialects, but standard)
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
+        {
             Advance(ref lexer);
+        }
 
         // Table reference
         SqlTableReference? table = null;
