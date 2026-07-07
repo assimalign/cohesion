@@ -731,9 +731,11 @@ same posture as the HTTP/2 transport's initial SETTINGS:
   matching the HTTP/2 transport's RFC 8441/9220 stance. This is what
   unblocks WebSocket-over-HTTP/3 clients, which will not send an extended
   CONNECT until the server advertises the capability.
-- **`QPACK_MAX_TABLE_CAPACITY` (0x01) = 0** (RFC 9204 §5) states explicitly
-  that the QPACK dynamic table is disabled (see the QPACK section), rather
-  than relying on the peer to assume the default.
+- **`QPACK_MAX_TABLE_CAPACITY` (0x01)** (RFC 9204 §5) is the server's decoder
+  capacity. It defaults to `0` — stating explicitly that the QPACK dynamic
+  table is disabled (see the QPACK section) — and is raised to the configured
+  `Http3QPackOptions.MaxTableCapacity` when the dynamic table is opted in, in
+  which case **`QPACK_BLOCKED_STREAMS` (0x07)** is advertised alongside it.
 
 Emission is best-effort: opening an outbound stream requires a live QUIC
 connection, so if the connection is already gone the setup failure is
@@ -781,9 +783,17 @@ failure and never throws into the receive loop.
 Each of the QPACK encoder (0x02) and decoder (0x03) streams may appear
 at most once (RFC 9204 §4.2); a duplicate is a connection error. With
 the QPACK dynamic table disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the
-posture #335 builds on) these streams carry no instructions the server
-must act on, so accepting the stream and recording that it was seen is
-sufficient. The streams are not drained frame-by-frame.
+default posture) these streams carry no instructions the server must act
+on, so accepting the stream and recording that it was seen is sufficient.
+
+When the dynamic table is **enabled** (opt-in, see "Dynamic table" below),
+the peer's encoder stream is drained on a background task
+(`DrainQPackEncoderStreamAsync`) that applies each Set Capacity / Insert /
+Duplicate instruction to the shared decoder table and emits an Insert Count
+Increment on the server's own decoder stream (which the server opens at
+receive start, symmetric to its control stream). Both server-opened streams
+are critical streams — left open for the connection lifetime and released by
+the connection-first teardown, never completed early.
 
 ### Push streams
 
@@ -884,9 +894,12 @@ the peer-settings store is a plain dictionary.
 - **Emitting server GOAWAY / MAX_PUSH_ID.** The server control stream
   carries only the opening SETTINGS frame today; sending `GOAWAY` (for
   graceful drain) rides on it as future work.
-- **QPACK dynamic table.** Encoder/decoder streams are accepted but not
-  processed; the static-table + Huffman + literal field-section support
-  (#335) runs with the dynamic table disabled.
+- **QPACK dynamic table (when disabled).** With the default
+  `QPACK_MAX_TABLE_CAPACITY = 0`, the encoder/decoder streams are accepted but
+  not processed and field sections resolve against the static table only. The
+  opt-in dynamic table (encoder-stream drain, decoder stream, blocked-stream
+  bookkeeping) is described under "QPACK field-section compression → Dynamic
+  table (opt-in)".
 - **Flow control / stream limits.** QUIC-level flow control and
   `MAX_STREAMS` accounting live in the QUIC transport, not here.
 
@@ -911,16 +924,15 @@ primitives live under `Internal/Http3/QPack`:
 - `QPackFieldSectionDecoder` / `QPackFieldSectionEncoder` — the field
   section prefix plus the per-line representations.
 
-### The dynamic table is disabled — and why that is RFC-compliant
+### The dynamic table is disabled by default — and why that is RFC-compliant
 
-The supported feature set runs with the **QPACK dynamic table disabled**:
+By default the transport runs with the **QPACK dynamic table disabled**:
 the server's `QPACK_MAX_TABLE_CAPACITY` is `0`. RFC 9204 §3.2.3 / §5
 explicitly permit this — a decoder that advertises capacity `0` simply
 forbids the encoder from ever inserting dynamic entries. It is the
 standards-blessed "static-only" QPACK profile, not a partial
-implementation.
-
-Disabling the dynamic table collapses several otherwise-hard problems:
+implementation, and it stays the default because it collapses several
+otherwise-hard problems:
 
 - **No blocked streams.** A stream blocks only when a field section
   references dynamic entries not yet received (RFC 9204 §2.1.2). With the
@@ -930,9 +942,64 @@ Disabling the dynamic table collapses several otherwise-hard problems:
   enforces this by **rejecting any field section whose Required Insert
   Count is non-zero** as a decompression failure (RFC 9204 §2.2).
 - **No encoder/decoder instruction processing.** The QPACK encoder and
-  decoder unidirectional streams (handled by the #334 stream engine)
-  carry only dynamic-table instructions, so with the table disabled they
-  carry nothing the server must act on.
+  decoder unidirectional streams carry only dynamic-table instructions, so
+  with the table disabled they carry nothing the server must act on.
+
+### Dynamic table (opt-in)
+
+Opting in is a per-listener, public configuration choice:
+`options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
+`Http3ListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
+capacity and blocked-stream limit; the HTTP/3 registration captures it in an
+`Http3ConnectionFactory` and threads it to the connection context. Setting
+`MaxTableCapacity` above 0 opts in to the full dynamic table on the **decoder**
+side (inbound request field sections). The switch is entirely gated on that
+option: when it is 0 (the default) none of the machinery below is constructed
+and the static-only path above is taken verbatim. When it is enabled:
+
+- **Dynamic table** (`QPackDynamicTable`). A capacity-bounded, absolutely
+  indexed entry store (RFC 9204 §3.2) fed by the peer's encoder-stream
+  instructions: Set Dynamic Table Capacity (§4.3.1), Insert with Name
+  Reference — static or dynamic (§4.3.2), Insert with Literal Name (§4.3.3),
+  and Duplicate (§4.3.4). Entry size is `name + value + 32` octets; inserts
+  evict from the draining end to fit, and an insert that cannot fit even an
+  empty table, or a capacity above the advertised maximum, is
+  `QPACK_ENCODER_STREAM_ERROR`.
+- **Instruction codecs.** `QPackEncoderInstructionParser` applies inbound
+  encoder instructions incrementally (partial instructions are left buffered
+  for the next read); `QPackDecoderInstructionEncoder` emits the decoder
+  instructions — Section Acknowledgment (§4.4.1), Stream Cancellation
+  (§4.4.2), and Insert Count Increment (§4.4.3).
+- **Field-section resolution.** `QPackFieldSectionPrefix` reconstructs the
+  Required Insert Count (§4.5.1.1) and Base (§4.5.1.2), and
+  `QPackFieldSectionDecoder` resolves dynamic indexed, dynamic name-reference,
+  and post-base references (§4.5.2–§4.5.5) against the table. The prefix is
+  parsed once (before any blocking) so the Base does not drift as more
+  insertions arrive during the wait.
+- **Blocked-stream bookkeeping** (`QPackDecoderState`). A field section whose
+  Required Insert Count exceeds the current insert count blocks until the
+  encoder stream delivers the referenced insertions. The number of
+  concurrently blocked streams is capped at the advertised
+  `QPACK_BLOCKED_STREAMS`; exceeding it, or an otherwise-unsatisfiable
+  Required Insert Count, is a `QPACK_DECOMPRESSION_FAILED` connection error
+  (§2.2). Because dynamic-table state is shared across streams, these failures
+  terminate the connection rather than dropping a single stream — unlike the
+  per-stream failures the static-only path isolates.
+
+The **response encoder stays static-only by design** (see "Encoder" below):
+an encoder is never required to use the dynamic table, so responses reference
+the static table or literals and never insert. This keeps response encoding
+stateless and sidesteps having to track the client decoder's acknowledgments.
+
+> **Known limitation — Section Acknowledgment / Stream Cancellation.** These
+> two decoder instructions are keyed on the QUIC **request stream ID**, which
+> the `Assimalign.Cohesion.Connections` `IConnection` abstraction does not yet
+> surface (the QUIC stream connection reports a synthetic `ConnectionId`, not
+> the wire stream ID). The instruction encoders are implemented and unit
+> tested, and Insert Count Increment — which needs no stream ID — is emitted
+> live, keeping the peer's Known Received Count advancing. Wiring Section
+> Acknowledgment / Stream Cancellation into the live path is deferred pending a
+> transport surface for the QUIC stream ID (filed as a follow-up).
 
 ### Decoder representations
 
@@ -976,10 +1043,17 @@ rules:
 per field: an Indexed Field Line for an exact static name+value match
 (e.g. `:status: 200`), then a Literal with static Name Reference for a
 known name, then a Literal with Literal Name. Field names are lowercased
-on the wire. Huffman coding is **not** applied on the encode path — it is
-optional for an encoder (RFC 9204 §4.1.2) and raw octets keep the output
-deterministic and allocation-light. (The decode path fully supports
-Huffman.)
+on the wire. The encoder is **static-only**: it never inserts into or
+references the dynamic table, so response encoding stays stateless and
+needs no acknowledgment tracking (RFC 9204 §2.1.1).
+
+Literal names and values are **Huffman-coded** (RFC 9204 §4.1.2, RFC 7541
+Appendix B) when the Huffman form is strictly shorter than the raw octets,
+via the shared `HPackHuffmanEncoder`. The encoder lives in the HPACK folder
+because HTTP/2 HPACK and HTTP/3 QPACK share the same Appendix B code, so the
+HTTP/2 response encoder (`HPackEncoder`) gets the same shorter-of-the-two
+literal encoding. `HPackHuffmanEncoder.GetEncodedLength` measures the Huffman
+size without allocating, so the choice costs a single pass over the octets.
 
 ### AOT posture
 
@@ -990,11 +1064,18 @@ and string primitives.
 
 ### Non-goals
 
-- **QPACK dynamic table** (insertions, duplication, eviction, blocked
-  streams). Disabled by design as above; re-enabling would add a dynamic
-  table, encoder/decoder-stream instruction processing, and blocked-stream
-  bookkeeping behind the same `Http3PeerSettings` seam.
-- **Encoder Huffman coding.** Decode supports it; encode emits raw octets.
+- **Response-side dynamic table.** The response encoder is static-only by
+  design (above): it never inserts into a dynamic table of its own, so the
+  server never opens a QPACK *encoder* stream and never has to track the
+  client decoder's Section Acknowledgments to encode safely. The dynamic
+  table implemented here is decoder-side only (inbound requests).
+- **Live Section Acknowledgment / Stream Cancellation.** Implemented and unit
+  tested as instruction encoders, but not emitted on the live path pending a
+  transport surface for the QUIC request stream ID (see the Known limitation
+  above). Insert Count Increment is emitted live.
+- **Acting on the peer's `QPACK_MAX_TABLE_CAPACITY`.** The server reads the
+  peer's SETTINGS but, being a static-only encoder, does not use the peer's
+  advertised decoder capacity to size a response-side table.
 
 ## Extended CONNECT (`:protocol`)
 

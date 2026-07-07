@@ -87,4 +87,39 @@ internal static class QPackStringCodec
         QPackPrefixedInteger.Encode(destination, octets.Length, prefixBits, prefixMask);
         destination.Write(octets, 0, octets.Length);
     }
+
+    /// <summary>
+    /// Encodes a string literal choosing the shorter of the raw and Huffman
+    /// forms. The Huffman form is emitted (with the Huffman flag — the bit at
+    /// <c>1 &lt;&lt; prefixBits</c> — set) only when it is strictly shorter
+    /// than the raw octets; otherwise the raw octets are emitted. Both forms
+    /// round-trip through <see cref="Decode"/> (RFC 9204 §4.1.2, RFC 7541
+    /// Appendix B).
+    /// </summary>
+    /// <param name="destination">The stream to write to.</param>
+    /// <param name="value">The string to encode (octets are Latin-1).</param>
+    /// <param name="prefixBits">The length prefix width.</param>
+    /// <param name="prefixMask">
+    /// The representation pattern OR-ed into the first byte; the Huffman flag
+    /// bit must be clear in this mask (it is set here when Huffman is chosen).
+    /// </param>
+    public static void EncodeShortest(Stream destination, string value, int prefixBits, byte prefixMask)
+    {
+        byte[] octets = Encoding.Latin1.GetBytes(value);
+        int huffmanLength = HPackHuffmanEncoder.GetEncodedLength(octets);
+
+        if (huffmanLength < octets.Length)
+        {
+            byte[] huffman = new byte[huffmanLength];
+            HPackHuffmanEncoder.Encode(octets, huffman);
+
+            byte huffmanFlag = (byte)(1 << prefixBits);
+            QPackPrefixedInteger.Encode(destination, huffman.Length, prefixBits, (byte)(prefixMask | huffmanFlag));
+            destination.Write(huffman, 0, huffman.Length);
+            return;
+        }
+
+        QPackPrefixedInteger.Encode(destination, octets.Length, prefixBits, prefixMask);
+        destination.Write(octets, 0, octets.Length);
+    }
 }

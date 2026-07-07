@@ -11,17 +11,19 @@ internal sealed class Http3Connection : HttpConnection
 {
     private readonly IMultiplexedConnection _connection;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors)
+    public Http3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors, Http3QPackOptions qpackOptions)
         : base(isSecure)
     {
         _connection = connection;
         _responseInterceptors = responseInterceptors;
+        _qpackOptions = qpackOptions;
     }
 
     public override ConnectionId Id => _connection.Id;
@@ -47,7 +49,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _responseInterceptors);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _responseInterceptors, _qpackOptions);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)
