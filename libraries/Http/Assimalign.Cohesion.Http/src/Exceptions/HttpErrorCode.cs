@@ -53,6 +53,17 @@ public enum HttpErrorCode
     InvalidStructuredField,
 
     /// <summary>
+    /// A <c>Cache-Control</c> field value (RFC 9111 &#167; 5.2) could not be parsed.
+    /// </summary>
+    InvalidCacheControl,
+
+    /// <summary>
+    /// An entity-tag or an <c>If-Match</c> / <c>If-None-Match</c> condition (RFC 9110 &#167; 8.8.3)
+    /// could not be parsed.
+    /// </summary>
+    InvalidEntityTag,
+
+    /// <summary>
     /// The HTTP protocol was violated.
     /// </summary>
     ProtocolViolation,

@@ -117,6 +117,9 @@ dictionaries. Fully AOT/trim safe.
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers
   build on for RFC 9651 syntax is the structured-fields surface documented below.
+  The typed consumers for the timestamp, caching, and validator fields
+  (`Date`/`Last-Modified`, `Cache-Control`, `ETag`, and the conditional-request
+  fields) are documented under **HTTP caching and validators** below.
   `HttpFieldRules` stays name-classification only.
 
 ## Cross-version normalization
@@ -490,6 +493,138 @@ the Items-key bridge.
 
 Interface dispatch plus the existing dictionary-backed feature lookup — no
 reflection, no codegen.
+
+## HTTP caching and validators (RFC 9111 / RFC 9110)
+
+The core owns the typed primitives for the caching and validator fields:
+`Cache-Control` directive parsing (RFC 9111 §5.2), the freshness arithmetic
+(§4.2), the `ETag` value type and its strong/weak comparison (RFC 9110 §8.8.3),
+HTTP-date parsing (§5.6.7), and conditional-request evaluation (§13). These are
+the typed *field-value consumers* the `HttpFieldRules` "per-field parsers"
+non-goal delegates to — the same relationship `HttpMediaType` and the
+structured-fields toolkit already have to the core. They are **not** a cache:
+there is no store, no revalidation transport, and no policy.
+
+### Why the core, not a layered `Http.Caching` package
+
+Two forces put these in the protocol core rather than in a sibling package
+beside `Http.Sessions`/`Http.Forms`:
+
+- **They parse their own values.** Like `HttpMethod`, `HttpStatusCode`, and
+  `HttpMediaType`, an entity-tag or a `Cache-Control` field is a self-contained
+  protocol value object. It does not extend `HttpFieldRules` (which stays
+  name-classification only) or touch the header collections, so it does not
+  cross the application-layer boundary the `HttpProtocolCoreBoundaryTests`
+  guard — a client, proxy, or edge cache wants exactly these types without
+  dragging in session/form semantics.
+- **The validator types are shared, not duplicated.** The range-request and
+  precondition primitives (RFC 9110 §13.2.2 / §14) land in this same core and
+  need the identical `ETag`, `If-Match`/`If-None-Match`, and conditional-request
+  machinery. A layered caching package would force a dependency inversion (core
+  range code depending on a caching package) or a second copy of the entity-tag
+  grammar. Keeping the shared validator surface in the core lets both consumers
+  reference one implementation. `HttpEntityTag`, `HttpEntityTagCondition`, and
+  the header preconditions live here; the range-specific `If-Range` (§13.2.2
+  step 5) and range selection are layered above, reusing these types.
+
+### The surface
+
+- **`HttpEntityTag`** — a `readonly struct` holding the opaque tag content
+  (without the surrounding quotes) and a weakness flag. It exposes the two
+  RFC 9110 §8.8.3.2 comparison functions as distinct methods —
+  `StrongEquals` (both tags strong and octet-equal) and `WeakEquals` (octet-equal
+  regardless of weakness) — because the two are not interchangeable: caching and
+  `If-None-Match` use weak comparison, while `If-Match`/`If-Range` use strong.
+  `Equals`/`==` are stricter still (structural: content *and* weakness), so the
+  type is a sound dictionary key; the comparison methods, not the operators,
+  carry the HTTP semantics.
+- **`HttpEntityTagCondition`** — the parsed `If-Match`/`If-None-Match` value:
+  either the `*` wildcard or a comma-separated tag list. `MatchesStrong` /
+  `MatchesWeak` fold the wildcard (matches when a representation exists) and the
+  list (any member matches under the chosen comparison) into one call the
+  evaluator and the range primitives share.
+- **`HttpCacheControl`** — one `readonly struct` for both request and response
+  directives (the field is bidirectional). Recognized directives are typed
+  (`bool` flags packed into an internal `[Flags]` enum, delta-seconds as
+  `TimeSpan`, the `no-cache`/`private` field-name arguments as string lists);
+  unrecognized directives are preserved as `Extensions` (§5.2.3) so a
+  parse→serialize round-trip is lossless. `max-stale` distinguishes
+  present-without-value (accept any staleness) via `HasMaxStale` from a bounded
+  value. Over-large delta-seconds clamp to ~68 years (2³¹−1 s) per §1.2.2.
+- **`HttpDate`** — parses all three §5.6.7 forms (IMF-fixdate, RFC 850, asctime)
+  via `DateTimeOffset.TryParseExact` with invariant culture, and formats the
+  preferred IMF-fixdate. There is deliberately no throwing `Parse`: a malformed
+  date is *ignored* by conditional-request rules (§13.1.3), so the `TryParse`
+  shape is the correct one and the consumer maps failure to "field absent".
+- **`HttpFreshness`** — pure §4.2 arithmetic: freshness-lifetime selection
+  (§4.2.1), the current-age algorithm (§4.2.3), and the `IsFresh` comparison.
+  Every timestamp is a parameter — no ambient clock is read — so the helpers are
+  deterministic and unit-testable, and the *policy* (heuristic freshness §4.2.2,
+  storage, revalidation) stays with the consuming cache.
+- **`HttpConditionalRequest`** + **`HttpConditionalRequestContext`** +
+  **`HttpPreconditionOutcome`** — the §13.2.2 evaluator over already-parsed
+  inputs. It implements the four header preconditions in order (`If-Match`,
+  then `If-Unmodified-Since` only when `If-Match` is absent; `If-None-Match`,
+  then `If-Modified-Since` only when `If-None-Match` is absent and the method is
+  a read). This encodes the two rules the feature calls out: `If-None-Match`
+  takes precedence over `If-Modified-Since`, and a failed read precondition is
+  `304` for GET/HEAD but `412` otherwise. Resource existence (for the `*`
+  wildcard) is inferred from a supplied validator, with an explicit
+  `HasCurrentRepresentation` escape hatch for the rare validator-less resource.
+
+### Why value objects and static helpers, not interfaces
+
+`HttpFreshness` and `HttpConditionalRequest` are `static` (like `HttpFieldRules`,
+`HttpFieldNormalization`, and `HttpContentNegotiation`), and the rest are value
+objects with `TryParse`/`Parse`/`ToString` (like `HttpMediaType` and the
+structured-field types). These are pure, stateless transforms over value types
+with exactly one correct implementation; an interface seam would add allocation
+and virtual dispatch with no substitutability payoff. The interface-first rule
+targets injectable behavior — these are protocol value transformations.
+
+### Parsing posture
+
+`TryParse` never throws on malformed wire input and returns `false`; the paired
+`Parse` throws a typed `HttpException` (`HttpErrorCode.InvalidCacheControl` /
+`InvalidEntityTag`). `Cache-Control` parsing is a single span-based pass that
+splits on unquoted commas, skips empty list elements (RFC 9110 §5.6.1.2), fails
+on a non-token directive name or a malformed delta-seconds argument, and
+tolerates a quoted delta-seconds some senders emit. The `no-cache`/`private`
+field-list argument (uncommon) is the one place a materialized string split is
+used rather than the span path; the entity-tag grammar validates `etagc`
+(§8.8.3) character-by-character.
+
+### Reading the fields is the consumer's job
+
+As with the media-type primitives, the core does **not** read `Cache-Control`,
+`ETag`, or the conditional fields off an `IHttpRequest`/`IHttpResponse`. A
+consumer looks the field up by `HttpHeaderKey`, hands the raw value to the
+relevant `TryParse`, and populates `HttpConditionalRequestContext`. Field wiring,
+the `304`-vs-`412` response shaping, and the caching decision belong to the
+response-caching middleware and the range/precondition layer that build on these
+primitives.
+
+### AOT posture
+
+Span-based parsing, no reflection, no runtime codegen. `HttpDate` uses
+`DateTimeOffset.TryParseExact` with `CultureInfo.InvariantCulture` (the invariant
+month/day names match HTTP's fixed English tokens) — a data-driven parse with no
+dynamic member access. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **A cache.** No response storage, cache-key derivation, revalidation transport,
+  or heuristic-freshness *decision*. `HttpFreshness` supplies the arithmetic; the
+  policy is the consumer's (a future server-side output cache, #795).
+- **Field wiring and response shaping.** Reading the request/response fields and
+  emitting `304`/`412`/`Vary` is the middleware's concern, not the core's.
+- **Range requests.** Byte-range parsing, `206`/`416` selection, and the
+  `If-Range` precondition are the range-request primitives' responsibility; they
+  reuse `HttpEntityTag`, `HttpEntityTagCondition`, and the comparison helpers here
+  rather than re-deriving them.
+- **Cookie `Max-Age`.** That is RFC 6265, a different grammar owned by the cookie
+  model; the delta-seconds handling here is `Cache-Control`-specific.
 
 ## The response interceptor seam
 
