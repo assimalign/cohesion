@@ -449,3 +449,50 @@ the Items-key bridge.
 
 Interface dispatch plus the existing dictionary-backed feature lookup — no
 reflection, no codegen.
+
+## The response interceptor seam
+
+`IHttpResponseInterceptor` (+ `HttpResponseInterceptorContext`) is the symmetric
+counterpart to `IHttpRequestInterceptor`: a generic hook the server transport
+invokes while an exchange's response pipeline is being set up, before the handler
+runs. It exists so **response-side capabilities stay out of both the protocol core
+and the transport**. Incremental response streaming — and Server-Sent Events on top
+of it — is the first consumer, and neither the core nor the transport carries any
+streaming/SSE type.
+
+### Why generic, and how a feature plugs in
+
+The request side already established the pattern: `Http.RequestLimits` participates
+in request parsing via an `IHttpRequestInterceptor` (registered on the listener
+options), and the transport enforces it without ever referencing that package. The
+response side mirrors it exactly:
+
+- The transport exposes its per-protocol **raw response body sink** as a plain
+  `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
+  frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
+  flow-control backpressure), commits the head on the first write/flush, and is
+  finalized by the transport when the exchange completes.
+- A feature package (`Assimalign.Cohesion.Http.Streaming`) ships an
+  `IHttpResponseInterceptor` that wraps that sink in a typed
+  `IHttpResponseStreamingFeature` and installs it on `context.Features`. A handler
+  resolves the feature (`context.Response.Streaming`) and writes.
+
+So the streaming write/flush API, its state machine, and the SSE wire format all
+live in feature packages; the core owns only the generic interceptor seam, and the
+transport owns only the framing. The one streaming-adjacent thing that stays in the
+core is the well-known **header-name constant** `HttpHeaderKey.LastEventId`,
+alongside the other feature-specific header names already centralized there
+(`Sec-WebSocket-*`, `Grpc-*`).
+
+### Header-commit timing
+
+Because the sink commits the head on the first write or flush, the status line and
+headers are committed exactly once and locked thereafter — a rule the streaming
+feature surfaces to callers and the SSE package relies on (set `Content-Type:
+text/event-stream` before the first write). The interceptor runs *before* any
+response byte is produced, so an interceptor may still set default response headers
+on `HttpResponseInterceptorContext.Headers`.
+
+### AOT posture
+
+Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.

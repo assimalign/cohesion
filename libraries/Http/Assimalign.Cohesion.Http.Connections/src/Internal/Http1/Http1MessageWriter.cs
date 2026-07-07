@@ -41,7 +41,32 @@ internal static class Http1MessageWriter
             headers[HttpHeaderKey.Connection] = "close";
         }
 
-        await WriteAsciiAsync(stream, $"HTTP/1.1 {context.Response.StatusCode}\r\n", cancellationToken).ConfigureAwait(false);
+        await WriteHeadAsync(stream, context.Response.StatusCode, headers, cancellationToken).ConfigureAwait(false);
+
+        if (context.Request.Method != HttpMethod.Head && bodyBytes.Length > 0)
+        {
+            await stream.WriteAsync(bodyBytes, 0, bodyBytes.Length, cancellationToken).ConfigureAwait(false);
+        }
+
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the response head — the status line, every header field line (with
+    /// RFC 6265 one-line-per-cookie handling for <c>Set-Cookie</c>), and the blank
+    /// line terminating the header section — without a trailing flush and without
+    /// writing any body. Shared by the buffered response path and the incremental
+    /// streaming sink (<see cref="Http1ResponseBodyStream"/>) so both commit
+    /// headers identically.
+    /// </summary>
+    /// <param name="stream">The connection stream to write to.</param>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task that completes when the head bytes have been written to the stream buffer.</returns>
+    public static async ValueTask WriteHeadAsync(Stream stream, HttpStatusCode statusCode, HttpHeaderCollection headers, CancellationToken cancellationToken)
+    {
+        await WriteAsciiAsync(stream, $"HTTP/1.1 {statusCode}\r\n", cancellationToken).ConfigureAwait(false);
 
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
@@ -65,13 +90,6 @@ internal static class Http1MessageWriter
         }
 
         await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);
-
-        if (context.Request.Method != HttpMethod.Head && bodyBytes.Length > 0)
-        {
-            await stream.WriteAsync(bodyBytes, 0, bodyBytes.Length, cancellationToken).ConfigureAwait(false);
-        }
-
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask<byte[]> ReadBodyAsync(Stream body, CancellationToken cancellationToken)

@@ -17,6 +17,21 @@ internal static partial class HPackEncoder
             headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
         }
 
+        return EncodeResponseHeaders(statusCode, headers);
+    }
+
+    /// <summary>
+    /// Encodes the response field section for an <em>incrementally streamed</em>
+    /// response: the <c>:status</c> pseudo-header followed by the supplied headers
+    /// verbatim, with <b>no</b> <c>Content-Length</c> synthesized. A streaming
+    /// response has no known body length up front — HTTP/2 delimits the body with
+    /// <c>END_STREAM</c> — so injecting a length here would be wrong.
+    /// </summary>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit as-is.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
+    {
         using MemoryStream buffer = new();
         WriteStatusHeader(buffer, (int)statusCode);
 

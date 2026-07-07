@@ -14,12 +14,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
     private readonly HttpServerLimits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
         _limits = limits;
         _interceptors = interceptors;
+        _responseInterceptors = responseInterceptors;
     }
 
     /// <summary>
@@ -50,6 +52,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 yield break;
             }
 
+            // Expose the raw chunked response body sink to registered response interceptors so a
+            // feature package (streaming / SSE) can wrap it and install a typed response feature —
+            // without this transport depending on that package. Zero interceptors → buffered fast path.
+            if (_responseInterceptors.Length > 0)
+            {
+                context.RunResponseInterceptors(_responseInterceptors, new Http1ResponseBodyStream(Stream, context));
+            }
+
             yield return context;
 
             if (!context.KeepAlive)
@@ -64,6 +74,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         if (context is not Http1Context http1Context)
         {
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
+        }
+
+        // If a response feature streamed to the raw sink, the head and body are already on the
+        // wire; finalize (emit the terminating zero-length chunk) rather than writing a second,
+        // buffered response.
+        if (http1Context.ResponseBodySink is { HasStarted: true } sink)
+        {
+            return new ValueTask(sink.CompleteAsync(cancellationToken));
         }
 
         // NOTE: the suppress-response-on-upgrade behaviour previously gated by

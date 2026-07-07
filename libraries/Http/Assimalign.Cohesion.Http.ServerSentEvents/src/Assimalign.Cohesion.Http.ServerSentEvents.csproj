@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- Deviates from AGENTS.md namespace-matches-assembly per design decision:
+		     HTTP feature packages surface their types in the Assimalign.Cohesion.Http
+		     namespace so IHttpResponseStreamingFeature extension members (WriteEventAsync)
+		     are discoverable without an extra using (matches Assimalign.Cohesion.Http.ExtendedConnect). -->
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+</Project>

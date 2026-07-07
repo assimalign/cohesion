@@ -60,6 +60,28 @@ public sealed class HttpConnectionListenerOptions
     public IList<IHttpRequestInterceptor> Interceptors { get; } = new List<IHttpRequestInterceptor>();
 
     /// <summary>
+    /// Gets the ordered list of response interceptors invoked while each exchange's response
+    /// pipeline is being set up, before the application handler runs. See
+    /// <see cref="IHttpResponseInterceptor"/> for the hook contract.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the symmetric counterpart to <see cref="Interceptors"/>: response-side feature
+    /// packages (incremental streaming, Server-Sent Events, later compression) plug in here so the
+    /// transport can expose its raw response body sink to them without depending on the feature
+    /// package. The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;
+    /// mutations after that point have no effect. A registered instance is shared across every
+    /// connection and request the listener serves, so implementations must be stateless and
+    /// thread-safe.
+    /// </para>
+    /// <para>
+    /// When the list is empty the transport takes the buffered fast path with no per-exchange
+    /// response-sink allocation at all.
+    /// </para>
+    /// </remarks>
+    public IList<IHttpResponseInterceptor> ResponseInterceptors { get; } = new List<IHttpResponseInterceptor>();
+
+    /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
     /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.

@@ -59,6 +59,43 @@ internal abstract class TransportHttpContext : HttpContext
     public override CancellationToken RequestCancelled => _abortedSource.Token;
 
     /// <summary>
+    /// The transport's raw response body sink for this exchange, or
+    /// <see langword="null"/> when no response interceptors are registered (the buffered
+    /// fast path). When a response feature has written to it
+    /// (<see cref="HttpResponseBodyStream.HasStarted"/> is <see langword="true"/>) the
+    /// transport's buffered <c>SendAsync</c> finalizes the already-started response
+    /// instead of writing the buffered body again.
+    /// </summary>
+    internal HttpResponseBodyStream? ResponseBodySink { get; private set; }
+
+    /// <summary>
+    /// Runs the registered response interceptors, exposing the transport's raw response body
+    /// <paramref name="sink"/> so a feature package can wrap it and install a typed response
+    /// feature on <see cref="Features"/> — without the transport depending on that package.
+    /// The sink is retained so the transport's send path can finalize it if the exchange streamed.
+    /// </summary>
+    /// <param name="interceptors">The snapshotted response interceptors, in registration order.</param>
+    /// <param name="sink">The protocol-specific raw response body sink.</param>
+    internal void RunResponseInterceptors(IHttpResponseInterceptor[] interceptors, HttpResponseBodyStream sink)
+    {
+        ResponseBodySink = sink;
+
+        HttpResponseInterceptorContext interceptorContext = new()
+        {
+            Version = Version,
+            Headers = Response.Headers,
+            Features = Features,
+            ConnectionInfo = ConnectionInfo,
+            ResponseBody = sink,
+        };
+
+        foreach (IHttpResponseInterceptor interceptor in interceptors)
+        {
+            interceptor.OnResponse(interceptorContext);
+        }
+    }
+
+    /// <summary>
     /// Whether the application requested cancellation of this exchange via
     /// <see cref="Cancel"/>. Each transport's response path observes this and
     /// resets the single exchange (HTTP/2 <c>RST_STREAM</c>, HTTP/3 stream

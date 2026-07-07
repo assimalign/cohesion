@@ -181,6 +181,22 @@ internal static class Http3HeaderCodec
             headers[HttpHeaderKey.ContentLength] = bodyBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        return EncodeResponseHeaders(context);
+    }
+
+    /// <summary>
+    /// Encodes the response field section for an <em>incrementally streamed</em>
+    /// response: the <c>:status</c> pseudo-header followed by the response headers
+    /// verbatim, with <b>no</b> synthesized <c>Content-Length</c>. HTTP/3 delimits
+    /// the body with the stream end, so a length is neither known up front nor
+    /// required.
+    /// </summary>
+    /// <param name="context">The exchange whose response head is encoded.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    public static byte[] EncodeResponseHeaders(Http3Context context)
+    {
+        HttpHeaderCollection headers = context.Response.Headers;
+
         List<(string Name, string Value)> fields =
         [
             (":status", ((int)context.Response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)),
