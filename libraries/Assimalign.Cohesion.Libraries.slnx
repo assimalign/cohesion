@@ -624,6 +624,13 @@
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
 		<Project Path="Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/" />
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/src/">
+		<Project Path="Http/Assimalign.Cohesion.Http.InterimResponses/src/Assimalign.Cohesion.Http.InterimResponses.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/tests/">
+		<Project Path="Http/Assimalign.Cohesion.Http.InterimResponses/tests/Assimalign.Cohesion.Http.InterimResponses.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Streaming/" />
 	<Folder Name="/libraries/Http/Assimalign.Cohesion.Http.Streaming/src/">
 		<Project Path="Http/Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />

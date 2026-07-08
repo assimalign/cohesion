@@ -82,10 +82,17 @@ internal abstract class TransportHttpContext : HttpContext
     /// HTTP/1.1 exchange owns its whole connection, whereas HTTP/2 / HTTP/3 exchanges are
     /// multiplexed streams over a shared connection.
     /// </param>
+    /// <param name="interimResponseWriter">
+    /// The protocol-specific interim-response capability (100 Continue / 103 Early Hints), or
+    /// <see langword="null"/> when the transport does not offer it. Unlike
+    /// <paramref name="connectionTakeover"/>, every version supplies one — an interim response is a
+    /// separate status line / HEADERS block / field section written before the final response.
+    /// </param>
     internal void RunResponseInterceptors(
         IHttpResponseInterceptor[] interceptors,
         HttpResponseBodyStream sink,
-        IHttpConnectionTakeover? connectionTakeover = null)
+        IHttpConnectionTakeover? connectionTakeover = null,
+        IHttpInterimResponseWriter? interimResponseWriter = null)
     {
         ResponseBodySink = sink;
 
@@ -97,6 +104,7 @@ internal abstract class TransportHttpContext : HttpContext
             ConnectionInfo = ConnectionInfo,
             ResponseBody = sink,
             ConnectionTakeover = connectionTakeover,
+            InterimResponseWriter = interimResponseWriter,
         };
 
         foreach (IHttpResponseInterceptor interceptor in interceptors)

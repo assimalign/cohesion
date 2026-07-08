@@ -10,20 +10,23 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transport installs an internal implementation on every exchange, so a handler resolves it with
-/// <c>context.Features.Get&lt;IHttpInterimResponseFeature&gt;()</c> (or the
-/// <see cref="HttpInterimResponseExtensions.InterimResponse"/> convenience). Modeling the capability
-/// as a typed feature — rather than a method on <see cref="IHttpResponse"/> — mirrors the extended
-/// CONNECT feature: baseline response handling is unchanged for the common case, and the wire
-/// emission stays a transport concern the feature package never has to re-implement.
+/// The feature is made available by registering
+/// <see cref="HttpInterimResponses.CreateInterceptor"/> on the transport's response-interceptor list
+/// (<c>HttpConnectionListenerOptions.ResponseInterceptors</c>), the same opt-in way response
+/// streaming and protocol upgrade plug in. Its interceptor wraps the transport's interim-response
+/// capability (<see cref="HttpResponseInterceptorContext.InterimResponseWriter"/>) in this typed
+/// feature and installs it on every exchange, so a handler resolves it with
+/// <c>context.Features.Get&lt;IHttpInterimResponseFeature&gt;()</c> or the
+/// <see cref="HttpInterimResponseExtensions.InterimResponse"/> convenience. The transport owns the
+/// per-version wire emission and never references this package.
 /// </para>
 /// <para>
-/// An interim response is a status line / field section with a <c>1xx</c> status and carries no body:
-/// a <c>100 Continue</c> carries no fields, a <c>103 Early Hints</c> typically carries only
-/// <see cref="HttpHeaderKey.Link"/> fields. HTTP/2 and HTTP/3 peers may receive several interim
-/// responses, all before the final one (RFC 9113 §8.1 / RFC 9114 §4.1). <c>101 Switching Protocols</c>
-/// is deliberately <b>not</b> an interim response here — it is a connection transition owned by
-/// <c>Assimalign.Cohesion.Http.ProtocolUpgrade</c> — so passing it is rejected.
+/// An interim response carries no body: a <c>100 Continue</c> carries no fields, a
+/// <c>103 Early Hints</c> typically carries only <see cref="HttpHeaderKey.Link"/> fields. HTTP/2 and
+/// HTTP/3 peers may receive several interim responses, all before the final one (RFC 9113 §8.1 /
+/// RFC 9114 §4.1). <c>101 Switching Protocols</c> is deliberately <b>not</b> an interim response here
+/// — it is a connection transition owned by <c>Assimalign.Cohesion.Http.ProtocolUpgrade</c> — so
+/// passing it is rejected.
 /// </para>
 /// <para>
 /// Emission is only possible while the final response has not started. Once the transport commits the
@@ -55,8 +58,7 @@ public interface IHttpInterimResponseFeature : IHttpFeature
     /// <param name="headers">
     /// The interim response fields, or <see langword="null"/> for none. A <c>100 Continue</c> carries
     /// no fields; a <c>103 Early Hints</c> typically carries only <see cref="HttpHeaderKey.Link"/>
-    /// fields. The fields carry no message body, so a <c>Content-Length</c> here is meaningless and is
-    /// not emitted onto the wire.
+    /// fields. The fields carry no message body, so no <c>Content-Length</c> is emitted onto the wire.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns>A task that completes when the interim response has been flushed to the transport.</returns>

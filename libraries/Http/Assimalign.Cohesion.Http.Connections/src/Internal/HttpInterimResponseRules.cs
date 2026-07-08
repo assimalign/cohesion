@@ -4,8 +4,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Status-code rules shared by all three protocol engines' response paths for interim (<c>1xx</c>)
-/// responses (RFC 9110 §15.2). Interim responses are emitted through
-/// <see cref="IHttpInterimResponseFeature"/>; the final response must never carry a <c>1xx</c> status.
+/// responses (RFC 9110 §15.2). Interim responses are emitted through the transport's
+/// <see cref="IHttpInterimResponseWriter"/> capability (wrapped by the <c>Http.InterimResponses</c>
+/// feature package); the final response must never carry a <c>1xx</c> status.
 /// </summary>
 internal static class HttpInterimResponseRules
 {
@@ -34,7 +35,7 @@ internal static class HttpInterimResponseRules
         => (int)statusCode is >= FirstInformationalStatus and <= LastInformationalStatus;
 
     /// <summary>
-    /// Validates a status code supplied to <see cref="IHttpInterimResponseFeature.SendInterimResponseAsync"/>:
+    /// Validates a status code supplied to <see cref="IHttpInterimResponseWriter.WriteInterimResponseAsync"/>:
     /// it MUST be <c>1xx</c> and MUST NOT be <c>101 Switching Protocols</c>.
     /// </summary>
     /// <param name="statusCode">The interim status code to validate.</param>
@@ -63,7 +64,7 @@ internal static class HttpInterimResponseRules
     /// <summary>
     /// Guards a transport's final-response write: a <c>1xx</c> status is never a valid <em>final</em>
     /// status (RFC 9110 §15.2 — an interim response is not the final response). Interim responses go
-    /// through <see cref="IHttpInterimResponseFeature"/>; the sole <c>1xx</c> that ends an exchange is
+    /// through <see cref="IHttpInterimResponseWriter"/>; the sole <c>1xx</c> that ends an exchange is
     /// <c>101 Switching Protocols</c>, which the HTTP/1.1 protocol-upgrade path finalizes out-of-band
     /// (its send is suppressed) and so never reaches this guard.
     /// </summary>

@@ -22,6 +22,14 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </summary>
 public class InterimResponseTests
 {
+    // The application-facing interim-response feature (103 Early Hints, manual 100 Continue) is an
+    // opt-in feature package that plugs in via the response-interceptor seam — registered here the
+    // same way the streaming tests register HttpResponseStreaming.CreateInterceptor(). The automatic
+    // Expect: 100-continue handshake and the 1xx-as-final-status guard are transport behavior and do
+    // NOT need this.
+    private static void EnableInterimResponses(HttpConnectionListenerOptions options)
+        => options.ResponseInterceptors.Add(HttpInterimResponses.CreateInterceptor());
+
     // ------------------------------------------------------------------ HTTP/1.1
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http1: Expect 100-continue solicits the body with 100 Continue before reading it, then completes normally")]
@@ -104,6 +112,7 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
+        EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -159,6 +168,7 @@ public class InterimResponseTests
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
         options.ResponseInterceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -188,6 +198,7 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
+        EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -248,6 +259,7 @@ public class InterimResponseTests
         TestMultiplexedConnection connection = new(stream);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+        EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -309,6 +321,7 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
+        EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

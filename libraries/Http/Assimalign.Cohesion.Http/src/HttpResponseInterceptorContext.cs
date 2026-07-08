@@ -76,4 +76,20 @@ public sealed class HttpResponseInterceptorContext
     /// existing construction sites (including test fakes) keep compiling.
     /// </remarks>
     public IHttpConnectionTakeover? ConnectionTakeover { get; init; }
+
+    /// <summary>
+    /// Gets the transport's interim-response capability — the seam by which a feature package emits
+    /// one or more interim (<c>1xx</c>) responses ahead of the final response (RFC 9110 §15.2), such
+    /// as <c>103 Early Hints</c> — or <see langword="null"/> when the transport does not offer it.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="ResponseBody"/> (the final body sink) and unlike
+    /// <see cref="ConnectionTakeover"/> (HTTP/1.1-only), this is offered on all three versions: an
+    /// interim response is a separate status line / HEADERS block / field section the transport
+    /// writes before the final response. A feature package (<c>Http.InterimResponses</c>) wraps this
+    /// capability in a typed feature; the transport owns the wire emission. Optional with a
+    /// <see langword="null"/> default so existing construction sites (including test fakes) keep
+    /// compiling.
+    /// </remarks>
+    public IHttpInterimResponseWriter? InterimResponseWriter { get; init; }
 }

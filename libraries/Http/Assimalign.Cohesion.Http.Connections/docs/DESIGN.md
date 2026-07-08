@@ -483,35 +483,43 @@ neither an application nor the transport itself could put a `1xx` on the wire.
 Two capabilities are added, and they are independent:
 
 1. **Automatic `Expect: 100-continue`** on HTTP/1.1 — a transport behavior, no
-   application involvement.
-2. **Application-emitted interim responses** through a typed feature, on all
-   three versions.
+   application involvement (below).
+2. **Application-emitted interim responses** through the response-interceptor seam,
+   on all three versions (below).
 
-### The feature: `IHttpInterimResponseFeature`
+### The seam capability: `IHttpInterimResponseWriter`
 
-The public typed surface is `IHttpInterimResponseFeature` in core
-`Assimalign.Cohesion.Http` (interface-first; the transport ships the internal
-implementation), mirroring the extended-CONNECT feature model — baseline response
-handling is unchanged and the wire emission stays a transport concern the feature
-never re-implements. Each transport installs a per-protocol internal
-implementation on `context.Features` **for every exchange**, before the handler
-runs, so a handler resolves it with
-`context.Features.Get<IHttpInterimResponseFeature>()` (or the
-`context.InterimResponse` / `context.SendEarlyHintsAsync(...)` /
-`context.SendContinueAsync()` ergonomics in
-`HttpInterimResponseExtensions`). Installation is a single feature-collection
-insert; `TransportHttpContext` already allocates the collection unconditionally,
-so this does not regress the interceptor fast paths.
+Application-emitted interim responses follow the repository's feature-package
+convention (the same as `Http.Streaming` and `Http.ProtocolUpgrade`): the transport
+exposes only a **generic capability**, and the typed feature lives in a separate
+package. The transport does **not** define or install an interim *feature* — that
+would couple the protocol core and the transport to the capability.
 
-The contract is deliberately small:
+- The **core** (`Assimalign.Cohesion.Http`) defines `IHttpInterimResponseWriter`, a
+  transport-capability contract that sits next to `IHttpConnectionTakeover` and is
+  surfaced on `HttpResponseInterceptorContext.InterimResponseWriter`. Unlike
+  `ConnectionTakeover` (HTTP/1.1-only), it is offered on **all three** versions.
+- The **transport** ships a per-protocol internal implementation
+  (`Http1InterimResponseWriter` / `Http2InterimResponseWriter` /
+  `Http3InterimResponseWriter`) and passes it into `RunResponseInterceptors`
+  alongside the response-body sink and the connection-takeover capability — created
+  only when at least one response interceptor is registered (the same gate as the
+  sink), so the zero-interceptor path allocates nothing extra and `context.Features`
+  stays empty on that path.
+- The **feature package** (`Assimalign.Cohesion.Http.InterimResponses`) owns the
+  application-facing `IHttpInterimResponseFeature`, the interceptor that wraps the
+  capability and installs the feature, and the `context.InterimResponse` /
+  `SendEarlyHintsAsync` / `SendContinueAsync` ergonomics. The transport never
+  references it.
 
-- `bool IsInterimResponseSupported` — `true` while an interim can still precede
-  the final response. It flips to `false` once the final response head is
-  committed (a streamed body started, or on HTTP/1.1 the connection was taken over
-  by a protocol upgrade). This is the **report-don't-throw** discoverability
-  path (acceptance criterion): a caller checks it and learns the exchange state
-  without provoking an exception.
-- `ValueTask SendInterimResponseAsync(HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, …)`
+The capability contract is deliberately small:
+
+- `bool CanWriteInterimResponse` — `true` while an interim can still precede the
+  final response. It flips to `false` once the final response head is committed (a
+  streamed body started, or on HTTP/1.1 the connection was taken over by a protocol
+  upgrade). The feature's `IsInterimResponseSupported` forwards to it — the
+  **report-don't-throw** discoverability path.
+- `ValueTask WriteInterimResponseAsync(HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, …)`
   — emits one interim response. The status MUST be `1xx` and MUST NOT be `101`
   (an `ArgumentOutOfRangeException` otherwise); `101 Switching Protocols` is a
   connection transition owned by `Assimalign.Cohesion.Http.ProtocolUpgrade`, not
@@ -520,12 +528,12 @@ The contract is deliberately small:
   bodyless `100`; a `103` typically carries only `Link`.
 
 The shared status-code rules live in `HttpInterimResponseRules`
-(`ValidateInterimStatusCode` for the feature, `EnsureFinalStatusCode` for the
+(`ValidateInterimStatusCode` for the writer impls, `EnsureFinalStatusCode` for the
 final-response guard below), so all three engines classify `1xx` identically.
 
 ### Per-transport wire emission
 
-- **HTTP/1.1** — `Http1InterimResponseFeature` writes the interim status line and
+- **HTTP/1.1** — `Http1InterimResponseWriter` writes the interim status line and
   fields straight onto the connection stream via
   `Http1MessageWriter.WriteInterimResponseAsync`
   (`HTTP/1.1 <code> <reason>` CRLF, one field line per value — so a multi-valued
@@ -534,7 +542,7 @@ final-response guard below), so all three engines classify `1xx` identically.
   owns its whole connection and the handler is the sole writer for its duration,
   so the interim bytes simply precede the final response bytes; no interleaving
   discipline is needed.
-- **HTTP/2** — `Http2InterimResponseFeature` delegates to
+- **HTTP/2** — `Http2InterimResponseWriter` delegates to
   `Http2ConnectionContext.WriteInterimResponseAsync`, which encodes the field
   section with `HPackEncoder.EncodeInterimResponseHeaders` (the `1xx` `:status`
   with **no** synthesized `Content-Length`) and writes it as an additional HEADERS
@@ -544,7 +552,7 @@ final-response guard below), so all three engines classify `1xx` identically.
   control frames or another stream's response (RFC 9113 §4.1). The stream's local
   half is left open — the final HEADERS(+DATA) with `END_STREAM` follows on the
   same stream.
-- **HTTP/3** — `Http3InterimResponseFeature` delegates to
+- **HTTP/3** — `Http3InterimResponseWriter` delegates to
   `Http3ConnectionContext.WriteInterimResponseAsync`, which encodes the field
   section with `Http3HeaderCodec.EncodeInterimResponseHeaders` (QPACK, `1xx`
   `:status`, no `Content-Length`) and writes an additional HEADERS frame on the
@@ -553,7 +561,7 @@ final-response guard below), so all three engines classify `1xx` identically.
   per-stream flow control, so the interim frame simply precedes the final frames.
 
 H2/H3 peers may receive several interim HEADERS, all before the final one — the
-feature can be called repeatedly.
+capability can be called repeatedly.
 
 ### The `1xx`-as-final-status guard
 
@@ -568,7 +576,7 @@ protocol-upgrade path (its `SendAsync` is suppressed via `ResponseFinalized`), s
 it never reaches the guard; HTTP/2 and HTTP/3 removed the `Upgrade` mechanism
 entirely, so their rejection is unconditional. Setting `1xx` as the final
 `Response.StatusCode` therefore fails fast, and an interim write after the final
-response has started is rejected by the feature — the two boundary criteria.
+response has started is rejected by the capability — the two boundary criteria.
 
 ### Automatic `Expect: 100-continue` on HTTP/1.1
 
@@ -582,9 +590,11 @@ body read, when the request declares `Expect: 100-continue` (via
 or a non-zero `Content-Length` — a `Content-Length: 0` or a CONNECT tunnel is not
 solicited). This runs *after* the request-head interceptor hooks (so a hook may
 reject the request before the body is solicited) and *before* the body read, and
-it reuses the same `Http1MessageWriter.WriteInterimResponseAsync` the feature uses.
-A request without the expectation observes no interim response, and the exchange
-then completes with a normal final response over a preserved keep-alive.
+it reuses the same `Http1MessageWriter.WriteInterimResponseAsync` the interim-writer
+capability uses. This automatic handshake needs no feature package registered — it
+is a wire-level interop concern the transport owns unconditionally. A request
+without the expectation observes no interim response, and the exchange then
+completes with a normal final response over a preserved keep-alive.
 
 ### De-scoped: lazy request-body solicitation
 
@@ -596,14 +606,15 @@ streaming-request-body rework the HTTP/1.1 data-rate limits wait on
 (`MinRequestBodyDataRate`), and is deliberately out of scope here — the automatic
 `100 Continue` is the minimal correct step that fixes the interop stall. When the
 read becomes incremental, the solicitation moves to the first body-byte read and
-the feature's `SendContinueAsync` becomes the application-driven path; neither
-changes the contract above.
+the feature package's `SendContinueAsync` becomes the application-driven path;
+neither changes the contract above.
 
 ### AOT posture
 
-No reflection or runtime codegen. The feature is a small per-exchange object; the
-interim encoders are the existing HPACK/QPACK field-section writers with a `1xx`
-`:status` and no `Content-Length`; the status guards are integer range checks.
+No reflection or runtime codegen. The interim-writer capabilities are small
+per-exchange objects; the interim encoders are the existing HPACK/QPACK
+field-section writers with a `1xx` `:status` and no `Content-Length`; the status
+guards are integer range checks.
 
 ## HTTP/1.1 connection takeover (protocol upgrade / CONNECT)
 

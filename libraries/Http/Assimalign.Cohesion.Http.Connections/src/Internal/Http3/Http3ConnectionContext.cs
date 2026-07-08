@@ -1132,17 +1132,19 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             context.EffectivePriority = headerPriority;
         }
 
-        // Install the interim-response capability (100 Continue on demand, 103 Early Hints) before the
-        // handler runs. Emission writes an additional HEADERS frame on this request stream ahead of
-        // the final one (RFC 9114 §4.1).
-        context.Features.Set(new Http3InterimResponseFeature(this, context));
-
         // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
         // provides backpressure) to registered response interceptors so a feature package
-        // (streaming / SSE) can wrap it — without this transport depending on that package.
+        // (streaming / SSE) can wrap it — without this transport depending on that package. The
+        // interim-response capability (100 Continue / 103 Early Hints) rides the same seam; its
+        // emission writes an additional HEADERS frame on this request stream ahead of the final one
+        // (RFC 9114 §4.1).
         if (_responseInterceptors.Length > 0)
         {
-            context.RunResponseInterceptors(_responseInterceptors, new Http3ResponseBodyStream(context));
+            context.RunResponseInterceptors(
+                _responseInterceptors,
+                new Http3ResponseBodyStream(context),
+                connectionTakeover: null,
+                new Http3InterimResponseWriter(this, context));
         }
 
         // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically

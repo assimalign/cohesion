@@ -246,20 +246,22 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
                 if (processed.Context is not null)
                 {
-                    // Install the interim-response capability (100 Continue on demand, 103 Early
-                    // Hints) before the handler runs. Emission rides the connection write gate so an
-                    // interim HEADERS block never interleaves with the pump's frames (RFC 9113 §4.1).
-                    processed.Context.Features.Set(new Http2InterimResponseFeature(this, processed.Context));
-
                     // Expose the raw DATA-frame response body sink to registered response
                     // interceptors so a feature package (streaming / SSE) can wrap it and
                     // install a typed response feature — without this transport depending
                     // on that package. The pump keeps processing frames while the handler
                     // streams, so a writer parked for send-window credit is always
-                    // unblocked by the next inbound WINDOW_UPDATE.
+                    // unblocked by the next inbound WINDOW_UPDATE. The interim-response
+                    // capability (100 Continue / 103 Early Hints) rides the same seam; its
+                    // emission goes through the connection write gate so an interim HEADERS
+                    // block never interleaves with the pump's frames (RFC 9113 §4.1).
                     if (_responseInterceptors.Length > 0)
                     {
-                        processed.Context.RunResponseInterceptors(_responseInterceptors, new Http2ResponseBodyStream(this, processed.Context));
+                        processed.Context.RunResponseInterceptors(
+                            _responseInterceptors,
+                            new Http2ResponseBodyStream(this, processed.Context),
+                            connectionTakeover: null,
+                            new Http2InterimResponseWriter(this, processed.Context));
                     }
 
                     // RFC 9113 §6.8 — the request is now an in-flight exchange the

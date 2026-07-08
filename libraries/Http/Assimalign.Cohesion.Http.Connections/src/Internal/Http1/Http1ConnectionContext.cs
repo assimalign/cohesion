@@ -52,24 +52,21 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 yield break;
             }
 
-            // Install the interim-response capability (100 Continue on demand, 103 Early Hints)
-            // before the handler runs. An HTTP/1.1 exchange owns its whole connection, so the feature
-            // writes the interim status line directly onto the connection stream ahead of the final
-            // response (RFC 9110 §15.2).
-            context.Features.Set(new Http1InterimResponseFeature(context, Stream));
-
             // Expose the raw chunked response body sink to registered response interceptors so a
             // feature package (streaming / SSE) can wrap it and install a typed response feature —
             // without this transport depending on that package. Zero interceptors → buffered fast path.
             // The connection-takeover capability rides the same seam: an HTTP/1.1 exchange owns its
             // whole connection, so a feature package (protocol upgrade / CONNECT tunnelling) may
-            // claim the raw stream and finalize the exchange out-of-band.
+            // claim the raw stream and finalize the exchange out-of-band. The interim-response
+            // capability (100 Continue on demand, 103 Early Hints) rides it too — a feature package
+            // (Http.InterimResponses) wraps it and emits interim responses ahead of the final one.
             if (_responseInterceptors.Length > 0)
             {
                 context.RunResponseInterceptors(
                     _responseInterceptors,
                     new Http1ResponseBodyStream(Stream, context),
-                    new Http1ConnectionTakeover(context, Stream));
+                    new Http1ConnectionTakeover(context, Stream),
+                    new Http1InterimResponseWriter(context, Stream));
             }
 
             yield return context;

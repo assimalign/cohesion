@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.Http;
 /// Ergonomic access to the per-exchange <see cref="IHttpInterimResponseFeature"/>: resolving it from
 /// the feature collection and emitting the two common interim responses (<c>100 Continue</c> and
 /// <c>103 Early Hints</c>) without the caller assembling status codes or header collections by hand.
+/// Available once <see cref="HttpInterimResponses.CreateInterceptor"/> is registered on the transport.
 /// </summary>
 public static class HttpInterimResponseExtensions
 {
@@ -16,7 +17,8 @@ public static class HttpInterimResponseExtensions
     {
         /// <summary>
         /// Gets the interim-response feature for this exchange, or <see langword="null"/> when the
-        /// transport did not install one.
+        /// interim-response interceptor is not registered (or the transport does not offer the
+        /// capability).
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         public IHttpInterimResponseFeature? InterimResponse
