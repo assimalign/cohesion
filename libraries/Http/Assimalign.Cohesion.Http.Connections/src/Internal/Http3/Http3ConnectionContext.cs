@@ -30,6 +30,20 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
+    // RFC 9114 §5.2 — the number of client-initiated bidirectional request
+    // streams this connection has accepted. At teardown the GOAWAY announces
+    // the lowest stream ID the server will NOT process; with QUIC's
+    // client-bidi numbering (0, 4, 8, …) that boundary is
+    // (accepted count) × 4, so every stream already accepted (IDs below the
+    // boundary) falls inside "may have been processed" while later streams
+    // are rejected. Counted at accept — not at dispatch — so a malformed
+    // stream the server touched and dropped is still inside the boundary and
+    // the client will not retry a request whose side effects may have run.
+    // Mutated with Interlocked from the receive loop; read by the dispose path.
+    private int _processedRequestStreamCount;
+    // Guards single GOAWAY emission across the receive-loop teardown and the
+    // connection dispose path (Interlocked one-shot latch).
+    private int _goAwaySent;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
     // RFC 9218 §7.2 — the effective priority of request streams the peer has
     // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
@@ -160,6 +174,12 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
                     continue;
                 }
+
+                // RFC 9114 §5.2 — this bidirectional stream is now an accepted
+                // request stream; advance the boundary the teardown GOAWAY
+                // announces so it falls inside "may have been processed" whether
+                // it yields a context or is dropped as malformed below.
+                Interlocked.Increment(ref _processedRequestStreamCount);
 
                 RequestReadOutcome outcome = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
 
@@ -311,6 +331,72 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         _teardownSource.Dispose();
+    }
+
+    /// <summary>
+    /// Emits the server's <c>GOAWAY</c> frame on the outbound control stream
+    /// (RFC 9114 §5.2 / §7.2.6) to announce graceful shutdown before the QUIC
+    /// connection is closed. The announced identifier is the lowest
+    /// client-initiated bidirectional stream ID the server will not process —
+    /// derived from the count of request streams already accepted using QUIC's
+    /// client-bidi numbering (ID = 4 × <c>n</c>) — so requests at or below the
+    /// highest accepted stream may finish while later streams are rejected.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the control-stream write.</param>
+    /// <returns>A task that completes once the GOAWAY has been written (or skipped).</returns>
+    /// <remarks>
+    /// <para>
+    /// One-shot: repeated calls after the first are no-ops. When the receive loop
+    /// never ran (no control stream was opened) there is nothing to announce and
+    /// the call returns without writing.
+    /// </para>
+    /// <para>
+    /// Best-effort, like the SETTINGS emission: writing GOAWAY requires a live
+    /// control stream, so a wire-level or QUIC failure here is swallowed — the
+    /// connection is tearing down regardless, and the QUIC <c>CONNECTION_CLOSE</c>
+    /// that follows conveys the shutdown even if the frame did not land.
+    /// </para>
+    /// </remarks>
+    internal async Task SendGoAwayAsync(CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
+        {
+            return;
+        }
+
+        IConnection? controlStream = _controlStream;
+        if (controlStream is null)
+        {
+            // The server never opened its control stream (the receive loop did
+            // not run), so it advertised no SETTINGS and has no critical stream
+            // to carry GOAWAY. The QUIC close alone tears the connection down.
+            return;
+        }
+
+        try
+        {
+            // RFC 9114 §5.2 — streams with an ID below the announced value may
+            // have been processed. The lowest unprocessed client-initiated
+            // bidirectional stream is (accepted count) × 4.
+            long goAwayStreamId = (long)Volatile.Read(ref _processedRequestStreamCount) * 4L;
+            byte[] frame = Http3GoAwayFrame.Encode(goAwayStreamId);
+            await controlStream.Output.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (QuicException)
+        {
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+        }
     }
 
     /// <summary>

@@ -76,7 +76,8 @@ The connection-is-the-pipe model shows up at three points:
 - Stream parsing (HTTP/1.1, HTTP/2) adapts the duplex pipe once via
   `connection.AsStream()`.
 - Graceful teardown completes `connection.Output` directly (HTTP/2
-  GOAWAY drain, HTTP/1.1 response drain) before disposal.
+  GOAWAY + bounded stream drain, HTTP/1.1 response drain) before disposal
+  (see "HTTP/2 graceful close").
 - HTTP/3 reads each accepted stream's `Input` (`PipeReader`) for
   unidirectional streams and `AsStream()` for request streams.
 
@@ -732,9 +733,10 @@ fires its `RequestAborted` so a handler parked reading it observes cancellation
 rather than a clean end-of-stream (which would let it treat a truncated upload as
 complete), while a **fully-received** body stays readable to completion. Aborting
 before completing the channel makes the abort observable to a consumer that is
-about to see the enumerable end. Graceful close cancels and awaits the pump
-before emitting the final GOAWAY, so the shutdown GOAWAY never races the pump's
-writes.
+about to see the enumerable end. Graceful close emits the shutdown GOAWAY while
+the pump is still running — the write scheduler serializes it against the pump's
+writes — then drains in-flight exchanges (bounded) and only then cancels and
+awaits the pump (see "HTTP/2 graceful close").
 
 ### AOT posture
 
@@ -751,6 +753,69 @@ are value-type octet counters guarded by monitors.
 - **A configurable initial window.** The advertised
   `SETTINGS_INITIAL_WINDOW_SIZE` is the fixed RFC default (65535). Exposing a
   tunable stream/connection window (Kestrel-style) is a later refinement.
+
+## HTTP/2 graceful close (GOAWAY + stream drain)
+
+RFC 9113 §6.8 makes an orderly HTTP/2 shutdown a two-part gesture: announce
+the close with `GOAWAY(NO_ERROR)`, then let the streams already accepted
+finish before the wire goes away. `Http2ConnectionContext.GracefulCloseAsync`
+performs both, in order:
+
+1. **Refuse new streams.** Setting `_gracefulCloseStarted` (an interlocked
+   one-shot) makes `OpenInboundStream` answer any HEADERS opening a *new*
+   stream with `RST_STREAM(REFUSED_STREAM)`. The connection stays alive and
+   keeps draining; the client may retry the refused request on a fresh
+   connection (RFC 9113 §8.1.4). Refused streams never bump the observed
+   last-stream-id, which is what makes the GOAWAY snapshot below exact.
+2. **Emit `GOAWAY(NO_ERROR)`** carrying the highest inbound stream ID
+   observed (snapshotted under the stream-table lock — the pump is still
+   processing frames concurrently), so the peer learns exactly which streams
+   will still be processed.
+3. **Drain, bounded.** `DrainActiveExchangesAsync` waits for every request
+   already dispatched to the application to finish — its response sent, its
+   stream reset, or its truncated request shutdown-aborted — before teardown
+   proceeds. Without this wait the previous behavior completed
+   `connection.Output` immediately, cutting off a response a handler was
+   still writing. The wait is capped by `GracefulDrainWindow` (a fixed
+   internal ceiling, not host-configurable): a stuck or slow response cannot
+   delay teardown indefinitely, and when the window elapses the remaining
+   exchanges are abandoned.
+4. **Stop the pump, then complete the output** so the transport's send loop
+   flushes its backlog and closes the socket (the #686 ordering).
+
+The pump deliberately keeps running through the drain window — this is what
+distinguishes the drain from a passive sleep. A live pump is what refuses
+newly opened streams *on the wire*, keeps feeding in-flight request bodies,
+replenishes send-window credit so a streaming response writer parked on flow
+control can finish, and observes peer `RST_STREAM`s that release the drain
+early. GOAWAY-vs-pump write interleaving is prevented by the connection
+write scheduler (control frames use `ControlUrgency`), not by stopping the
+reader. If the pump exits on its own during the drain (peer end-of-stream or
+wire failure), its shutdown abort releases the accounting of **truncated**
+requests only — a fully-received request stays counted because its handler
+can still respond through the pump-independent write path, and the drain
+exists precisely to give it that chance.
+
+The drain tracks an interlocked `_activeExchangeCount` rather than reading
+the `_streams` table from the close thread. A stream is counted by the pump
+(`MarkExchangeCounted`, immediately before its context is handed to the
+consumer) and released exactly once through the stream's tri-state
+accounting latch (`TryClaimExchangeAccounting`) — every exchange-terminating
+path funnels through `RemoveStreamAsync` (response sent on the buffered or
+streaming path, local reset, peer reset), with the pump's shutdown abort
+covering truncated requests. When the count reaches zero a draining close is
+woken through a published `TaskCompletionSource` (no polling); a re-check
+after publishing the signal closes the lost-wakeup window. When nothing is
+in flight the whole step is skipped.
+
+> The **host-facing** variant — a "drain now, close later" trigger the host
+> calls before dispose, rather than draining inside dispose — is a separate
+> public-surface decision (interface-first, implementation internal) and is
+> deliberately out of scope here. This section covers only the
+> drain-inside-`GracefulCloseAsync` behavior. The optional RFC 9113 §6.8
+> dual-`GOAWAY` pattern (a first `GOAWAY` at max stream ID, a second at the
+> true last-stream-ID after draining) is likewise not implemented; the
+> single `GOAWAY` carrying the real last-stream-ID is sufficient and simpler.
 
 ## HTTP/3 stream model and SETTINGS engine
 
@@ -843,12 +908,14 @@ a **background drain** (`DrainPeerControlStreamAsync`) that parses and
 discards subsequent control frames for the connection lifetime. Draining on
 a background task is load-bearing: the control stream is long-lived, so
 draining it inline would block the accept loop from ever serving another
-request. Post-SETTINGS frames are read but inert in this subset — `GOAWAY`
-(§7.2.6) is discarded (graceful-drain handling is deferred to the GOAWAY
-work item), and `MAX_PUSH_ID` (§7.2.7) is discarded because the server never
-pushes. The drain exists so those frames cannot accumulate unread in the
-pipe; it stops on end-of-stream, connection teardown, or a per-stream parse
-failure and never throws into the receive loop.
+request. Post-SETTINGS frames are read but inert in this subset — a peer
+`GOAWAY` (§7.2.6) is discarded rather than acted on (the server does not
+implement the *client* role of graceful shutdown — reacting to a peer's
+`GOAWAY` — only the server role of *emitting* one, see "Graceful GOAWAY on
+the control stream"), and `MAX_PUSH_ID` (§7.2.7) is discarded because the
+server never pushes. The drain exists so those frames cannot accumulate
+unread in the pipe; it stops on end-of-stream, connection teardown, or a
+per-stream parse failure and never throws into the receive loop.
 
 ### QPACK encoder/decoder streams
 
@@ -881,15 +948,20 @@ lifetime: the server's **own outbound control stream**, and the accepted
 them all *critical* streams — a peer that observes one of them terminate
 (FIN, RESET, or a STOP_SENDING request) before the connection close MUST
 fail the whole connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is
-therefore connection-first: `Http3Connection.DisposeAsync` delegates to the
-multiplexed connection, whose dispose completes bidirectional (request)
-streams — delivering any in-flight response data — then closes the QUIC
-connection (`CONNECTION_CLOSE` with the transport's configured close
-code, `H3_NO_ERROR` by default on the QUIC driver's options), and only
-then releases the unidirectional streams locally, after the close means no
-stream-level frames can reach the peer. The ordering lives in the QUIC
-driver (`QuicMultiplexedConnection`), not here: any multiplexed protocol
-with long-lived unidirectional control channels needs the same discipline.
+therefore connection-first: `Http3Connection.DisposeAsync` first emits the
+graceful-shutdown `GOAWAY` on the outbound control stream (see "Graceful
+GOAWAY on the control stream" below), then delegates to the multiplexed
+connection, whose dispose completes bidirectional (request) streams —
+delivering any in-flight response data — then closes the QUIC connection
+(`CONNECTION_CLOSE` with the transport's configured close code,
+`H3_NO_ERROR` by default on the QUIC driver's options), and only then
+releases the unidirectional streams locally, after the close means no
+stream-level frames can reach the peer. The `CONNECTION_CLOSE` ordering and
+critical-stream close discipline live in the QUIC driver
+(`QuicMultiplexedConnection`), not here: any multiplexed protocol with
+long-lived unidirectional control channels needs the same discipline. Only
+the `GOAWAY` emission — an HTTP/3 concern — is added ahead of it in this
+layer.
 
 The context's own teardown (`ShutdownAsync`, run from the receive loop's
 `finally`) is deliberately minimal: it cancels the inbound control-stream
@@ -897,9 +969,39 @@ drain and awaits it, but **never completes, aborts, or FINs the outbound
 control stream**. Completing it early — before the connection close — is
 exactly the `H3_CLOSED_CRITICAL_STREAM` violation the connection-first
 ordering exists to avoid, so the context leaves the outbound critical stream
-for the multiplexed connection's dispose to release alongside the close. A
-`GOAWAY`-announced graceful drain ahead of the close remains future work
-(see Non-goals).
+for the multiplexed connection's dispose to release alongside the close. The
+`GOAWAY` written during dispose rides on that still-open critical stream and
+does not complete it.
+
+### Graceful GOAWAY on the control stream
+
+RFC 9114 §5.2 shuts a connection down by sending `GOAWAY` on the control
+stream ahead of the `CONNECTION_CLOSE`. Its payload is a single QUIC
+variable-length integer (RFC 9114 §5.2 / §7.2.6) — for a server, the
+client-initiated bidirectional stream ID that marks the processing
+boundary: requests on streams **below** the announced value may have been
+processed and are allowed to finish; requests at or above it are not
+processed and the client may safely retry them elsewhere.
+
+`Http3GoAwayFrame.Encode` serializes that frame (type `0x07`, a length
+prefix, then the varint stream ID) as pure buffer arithmetic. The boundary
+value is derived from `_processedRequestStreamCount` — the number of
+bidirectional request streams the receive loop has accepted — using QUIC's
+client-bidi numbering (ID = `4 × n`), so after *k* accepted streams the
+announced ID is `4 × k`: the *k* accepted streams (IDs `0 … 4(k-1)`) fall
+below the boundary and may complete, while `4k` and above are rejected. The
+count advances at *accept*, not at dispatch, so a malformed stream the
+server touched and dropped still falls inside "may have been processed" and
+the client will not retry a request whose side effects may have run. The
+connection abstraction surfaces only an opaque `ConnectionId`, not the
+numeric QUIC stream ID, so this count-based derivation is how the HTTP/3
+layer reconstructs the boundary.
+
+`SendGoAwayAsync` writes the frame to the retained outbound control stream
+and is best-effort and one-shot: if the receive loop never ran (no control
+stream, no advertised SETTINGS) there is nothing to announce and it is a
+no-op; a wire/QUIC failure while writing is swallowed because the
+`CONNECTION_CLOSE` that follows conveys the shutdown regardless.
 
 ### Incremental reads off the PipeReader
 
@@ -958,14 +1060,17 @@ the peer-settings store is a plain dictionary.
 
 ### Non-goals
 
-- **Acting on post-SETTINGS control frames.** `GOAWAY`, `MAX_PUSH_ID`,
-  and friends are now *drained* (parsed and discarded by the background
-  control-stream drain, so they cannot accumulate unread) but are not
-  *acted on* in this subset: the server never pushes, so `MAX_PUSH_ID` is
-  inert, and graceful `GOAWAY`-driven drain is future work.
-- **Emitting server GOAWAY / MAX_PUSH_ID.** The server control stream
-  carries only the opening SETTINGS frame today; sending `GOAWAY` (for
-  graceful drain) rides on it as future work.
+- **Acting on a peer's post-SETTINGS control frames.** A peer `GOAWAY`
+  and `MAX_PUSH_ID` are *drained* (parsed and discarded by the background
+  control-stream drain, so they cannot accumulate unread) but not *acted
+  on*: the server never pushes, so `MAX_PUSH_ID` is inert, and reacting to
+  a peer's `GOAWAY` (the client role of graceful shutdown) is future work.
+  Note this is distinct from *emitting* the server's own `GOAWAY`, which
+  now ships — see "Graceful GOAWAY on the control stream".
+- **Emitting server `MAX_PUSH_ID`.** The server control stream carries its
+  opening SETTINGS frame and, at teardown, a graceful-shutdown `GOAWAY`
+  (RFC 9114 §5.2). `MAX_PUSH_ID` is never emitted because the server never
+  pushes.
 - **QPACK dynamic table (when disabled).** With the default
   `QPACK_MAX_TABLE_CAPACITY = 0`, the encoder/decoder streams are accepted but
   not processed and field sections resolve against the static table only. The
