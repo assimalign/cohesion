@@ -55,9 +55,15 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // Expose the raw chunked response body sink to registered response interceptors so a
             // feature package (streaming / SSE) can wrap it and install a typed response feature —
             // without this transport depending on that package. Zero interceptors → buffered fast path.
+            // The connection-takeover capability rides the same seam: an HTTP/1.1 exchange owns its
+            // whole connection, so a feature package (protocol upgrade / CONNECT tunnelling) may
+            // claim the raw stream and finalize the exchange out-of-band.
             if (_responseInterceptors.Length > 0)
             {
-                context.RunResponseInterceptors(_responseInterceptors, new Http1ResponseBodyStream(Stream, context));
+                context.RunResponseInterceptors(
+                    _responseInterceptors,
+                    new Http1ResponseBodyStream(Stream, context),
+                    new Http1ConnectionTakeover(context, Stream));
             }
 
             yield return context;
@@ -76,6 +82,15 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
         }
 
+        // The connection was taken over (accepted protocol upgrade / CONNECT tunnel): the
+        // transition response went straight to the surrendered raw stream and the connection no
+        // longer speaks HTTP. Checked before the sink branch so a misused streaming feature can
+        // never finalize chunked framing into the tunnel (RFC 9110 §7.8 / §9.3.6).
+        if (http1Context.ResponseFinalized)
+        {
+            return ValueTask.CompletedTask;
+        }
+
         // If a response feature streamed to the raw sink, the head and body are already on the
         // wire; finalize (emit the terminating zero-length chunk) rather than writing a second,
         // buffered response.
@@ -84,12 +99,6 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return new ValueTask(sink.CompleteAsync(cancellationToken));
         }
 
-        // NOTE: the suppress-response-on-upgrade behaviour previously gated by
-        // http1Context.ResponseFinalized is being moved to the
-        // Assimalign.Cohesion.Http.ProtocolUpgrade package and needs a transport
-        // <-> ProtocolUpgrade bridge to re-attach. Until that bridge lands, the
-        // transport always writes the response normally. CONNECT body framing is
-        // still honoured at request-parse time so request decoding stays correct.
         return Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken);
     }
 

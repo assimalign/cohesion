@@ -59,4 +59,21 @@ public sealed class HttpResponseInterceptorContext
     /// the transport falls back to the buffered response path.
     /// </remarks>
     public required Stream ResponseBody { get; init; }
+
+    /// <summary>
+    /// Gets the transport's connection-takeover capability for exchanges that can leave the HTTP
+    /// request/response loop entirely (HTTP/1.1 protocol upgrade / <c>CONNECT</c> tunnelling), or
+    /// <see langword="null"/> when the exchange cannot surrender its connection — HTTP/2 and
+    /// HTTP/3 exchanges are multiplexed streams over a shared connection, so the capability is
+    /// absent there.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="ResponseBody"/>, which frames writes for the negotiated protocol, a
+    /// takeover bypasses HTTP framing altogether: <see cref="IHttpConnectionTakeover.TakeOver"/>
+    /// yields the raw duplex stream and suppresses the transport's own response for the exchange.
+    /// A feature that captures this capability should defer exercising it until the application
+    /// explicitly accepts the transition. Optional with a <see langword="null"/> default so
+    /// existing construction sites (including test fakes) keep compiling.
+    /// </remarks>
+    public IHttpConnectionTakeover? ConnectionTakeover { get; init; }
 }

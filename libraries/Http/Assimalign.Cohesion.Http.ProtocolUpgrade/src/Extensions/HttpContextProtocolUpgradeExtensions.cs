@@ -4,52 +4,40 @@ namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Surfaces the protocol-upgrade capability for the current exchange on
-/// <see cref="IHttpRequest"/>, backed by an
-/// <see cref="IHttpProtocolUpgradeFeature"/> stored in the context's feature
-/// collection.
+/// <see cref="IHttpContext"/>, backed by the <see cref="IHttpProtocolUpgradeFeature"/> the
+/// package's interceptors install on the exchange's feature collection.
 /// </summary>
 public static class HttpContextProtocolUpgradeExtensions
 {
     extension(IHttpContext context)
     {
         /// <summary>
-        /// Gets the protocol-upgrade feature for this exchange, or
-        /// <see langword="null"/> when the exchange is not a candidate for a
-        /// connection transition.
+        /// Gets the protocol upgrade for this exchange, or <see langword="null"/> when the
+        /// exchange is not a candidate for a connection transition.
         /// </summary>
+        /// <value>
+        /// A non-null value indicates the request matched either the RFC 9110 §7.8 upgrade
+        /// signal (<c>Connection: upgrade</c> + <c>Upgrade</c>) or the RFC 9110 §9.3.6
+        /// <c>CONNECT</c> tunnel shape; inspect <see cref="IHttpProtocolUpgrade.Kind"/> to
+        /// disambiguate. Most exchanges are ordinary request/response and read
+        /// <see langword="null"/>.
+        /// </value>
+        /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <remarks>
-        /// <para>
-        /// A non-null value indicates that the request matches either the
-        /// RFC 9110 §7.8 upgrade signal (<c>Connection: upgrade</c> +
-        /// <c>Upgrade</c>) or the RFC 9110 §9.3.6 <c>CONNECT</c> tunnel shape.
-        /// Inspect <see cref="IHttpProtocolUpgrade.Kind"/> to disambiguate.
-        /// </para>
-        /// <para>
-        /// Most exchanges are normal request/response and this property
-        /// returns <see langword="null"/>. The feature is installed by a
-        /// transport bridge that detects the wire-level upgrade conditions
-        /// and exposes the surrender-stream hook; that bridge is in transit
-        /// while the transport drops its direct dependency on this package,
-        /// so the property currently returns <see langword="null"/> for all
-        /// transports until the bridge lands.
-        /// </para>
+        /// The feature is installed at parse time by the interceptor pair registered through
+        /// <see cref="HttpProtocolUpgrade.CreateRequestInterceptor"/> /
+        /// <see cref="HttpProtocolUpgrade.CreateResponseInterceptor"/>, so this accessor is a
+        /// plain feature read: without that registration — or on transports that cannot
+        /// surrender their connection (HTTP/2, HTTP/3) — it reads <see langword="null"/> rather
+        /// than throwing.
         /// </remarks>
-        public IHttpProtocolUpgrade Upgrade
+        public IHttpProtocolUpgrade? Upgrade
         {
             get
             {
                 ArgumentNullException.ThrowIfNull(context);
 
-                IHttpFeatureCollection features = context.Features;
-                IHttpProtocolUpgradeFeature? feature = context.Features.Get<IHttpProtocolUpgradeFeature>();
-
-                if (feature is null)
-                {
-                    feature = new HttpProtocolUpgradeFeature();
-                    features.Set<IHttpProtocolUpgradeFeature>(feature);
-                }
-
-                return feature.Upgrade;
+                return context.Features.Get<IHttpProtocolUpgradeFeature>()?.Upgrade;
             }
         }
     }

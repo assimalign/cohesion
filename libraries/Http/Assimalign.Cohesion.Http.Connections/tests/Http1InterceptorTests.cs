@@ -27,7 +27,7 @@ public class Http1InterceptorTests
             "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
         HttpConnectionListenerOptions options = new();
         FeatureAttachingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -44,7 +44,7 @@ public class Http1InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 64\r\n\r\n{new string('x', 64)}");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new CapSettingInterceptor(16));
+        options.RequestInterceptors.Add(new CapSettingInterceptor(16));
 
         (bool yielded, string response) = await DriveAsync(payload, options);
 
@@ -59,7 +59,7 @@ public class Http1InterceptorTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
         options.Limits.MaxRequestBodySize = 2; // would reject the 5-octet body
-        options.Interceptors.Add(new CapSettingInterceptor(1024));
+        options.RequestInterceptors.Add(new CapSettingInterceptor(1024));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -73,8 +73,8 @@ public class Http1InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new WrappingInterceptor("inner"));
-        options.Interceptors.Add(new WrappingInterceptor("outer"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("inner"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("outer"));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -93,7 +93,7 @@ public class Http1InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /forbidden HTTP/1.1\r\nHost: api.test\r\n\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new RejectingInterceptor(HttpStatusCode.Forbidden));
+        options.RequestInterceptors.Add(new RejectingInterceptor(HttpStatusCode.Forbidden));
 
         (bool yielded, string response) = await DriveAsync(payload, options);
 
@@ -109,7 +109,7 @@ public class Http1InterceptorTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -126,7 +126,7 @@ public class Http1InterceptorTests
             "GET / HTTP/1.1\r\nHost: api.test\r\nContent-Type: text/plain\r\n\r\n");
         HttpConnectionListenerOptions options = new();
         HeaderProbingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -142,7 +142,7 @@ public class Http1InterceptorTests
             "CONNECT origin.example.com:443 HTTP/1.1\r\nHost: origin.example.com:443\r\n\r\n");
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -158,7 +158,7 @@ public class Http1InterceptorTests
             "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -177,7 +177,7 @@ public class Http1InterceptorTests
         HttpConnectionListenerOptions options = new();
         options.Limits.MaxRequestBodySize = 16;
         DisposableFeatureAttachingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         (bool yielded, string response) = await DriveAsync(payload, options);
 
@@ -199,9 +199,9 @@ public class Http1InterceptorTests
         DisposableFeatureAttachingInterceptor first = new();
         WrappingInterceptor wrapper = new("inner");
         BodyRejectingInterceptor rejecting = new(HttpStatusCode.UnProcessableEntity);
-        options.Interceptors.Add(first);
-        options.Interceptors.Add(wrapper);
-        options.Interceptors.Add(rejecting);
+        options.RequestInterceptors.Add(first);
+        options.RequestInterceptors.Add(wrapper);
+        options.RequestInterceptors.Add(rejecting);
 
         (bool yielded, string response) = await DriveAsync(payload, options);
 
@@ -225,7 +225,7 @@ public class Http1InterceptorTests
 
         // The listener snapshotted the (empty) list at construction; this registration is inert.
         InvocationRecordingInterceptor late = new();
-        options.Interceptors.Add(late);
+        options.RequestInterceptors.Add(late);
 
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
         await ReadSingleContextAsync(context);

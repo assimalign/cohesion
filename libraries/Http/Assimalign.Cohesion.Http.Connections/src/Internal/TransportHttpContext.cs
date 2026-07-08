@@ -76,7 +76,16 @@ internal abstract class TransportHttpContext : HttpContext
     /// </summary>
     /// <param name="interceptors">The snapshotted response interceptors, in registration order.</param>
     /// <param name="sink">The protocol-specific raw response body sink.</param>
-    internal void RunResponseInterceptors(IHttpResponseInterceptor[] interceptors, HttpResponseBodyStream sink)
+    /// <param name="connectionTakeover">
+    /// The protocol-specific connection-takeover capability, or <see langword="null"/> when the
+    /// exchange cannot surrender its connection. Only the HTTP/1.1 transport supplies one — an
+    /// HTTP/1.1 exchange owns its whole connection, whereas HTTP/2 / HTTP/3 exchanges are
+    /// multiplexed streams over a shared connection.
+    /// </param>
+    internal void RunResponseInterceptors(
+        IHttpResponseInterceptor[] interceptors,
+        HttpResponseBodyStream sink,
+        IHttpConnectionTakeover? connectionTakeover = null)
     {
         ResponseBodySink = sink;
 
@@ -87,6 +96,7 @@ internal abstract class TransportHttpContext : HttpContext
             Features = Features,
             ConnectionInfo = ConnectionInfo,
             ResponseBody = sink,
+            ConnectionTakeover = connectionTakeover,
         };
 
         foreach (IHttpResponseInterceptor interceptor in interceptors)
@@ -146,7 +156,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// feature whose state needs deterministic cleanup at request end
     /// implements one of the disposal interfaces and is attached either at
     /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
-    /// (via <see cref="HttpConnectionListenerOptions.Interceptors"/>) or
+    /// (via <see cref="HttpConnectionListenerOptions.RequestInterceptors"/>) or
     /// later by middleware.
     /// </summary>
     public override async ValueTask DisposeAsync()

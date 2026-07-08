@@ -87,7 +87,7 @@ The migration from the original in-core placement is complete; the pieces sit as
    assemblies use the `Assimalign.Cohesion.Http` namespace (recorded csproj deviation), so the
    move was source-compatible for consumers; only project references changed.
 2. **Transport enforces, never seeds.** `Http.Connections` carries no body-size feature of its
-   own: `HttpConnectionListenerOptions.Interceptors` is snapshotted to an array when the
+   own: `HttpConnectionListenerOptions.RequestInterceptors` is snapshotted to an array when the
    listener is constructed (post-construction registrations are inert — no racing the accept
    loops); the h1 parser builds one `HttpRequestInterceptorContext` per request (read-only
    `Headers` view via `AsReadOnly()`), runs head hooks after the head parse, freezes the knob,

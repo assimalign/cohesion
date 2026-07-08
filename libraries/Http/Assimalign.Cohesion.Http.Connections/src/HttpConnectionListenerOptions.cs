@@ -60,7 +60,7 @@ public sealed class HttpConnectionListenerOptions
     /// state allocated at all.
     /// </para>
     /// </remarks>
-    public IList<IHttpRequestInterceptor> Interceptors { get; } = new List<IHttpRequestInterceptor>();
+    public IList<IHttpRequestInterceptor> RequestInterceptors { get; } = new List<IHttpRequestInterceptor>();
 
     /// <summary>
     /// Gets the ordered list of response interceptors invoked while each exchange's response
@@ -69,7 +69,7 @@ public sealed class HttpConnectionListenerOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This is the symmetric counterpart to <see cref="Interceptors"/>: response-side feature
+    /// This is the symmetric counterpart to <see cref="RequestInterceptors"/>: response-side feature
     /// packages (incremental streaming, Server-Sent Events, later compression) plug in here so the
     /// transport can expose its raw response body sink to them without depending on the feature
     /// package. The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;

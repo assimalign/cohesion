@@ -529,19 +529,234 @@ public class Http1TransportTests
     }
 
     // ------------------------------------------------------------------------
-    // The protocol-upgrade test suite that used to live here exercised
-    // httpContext.Upgrade — the Upgrade / CONNECT detection, the
-    // 101 Switching Protocols / 200 OK accept paths, the SendAsync suppression
-    // after upgrade, and the "do not consume tunnel octets" body framing.
-    //
-    // Those tests were removed when the transport package dropped its
-    // dependency on Assimalign.Cohesion.Http.ProtocolUpgrade. CONNECT body
-    // framing is still honoured at request-parse time (see Http1MessageReader)
-    // so request decoding stays correct; the wire-level acceptance path
-    // (writing 101 / 200, surrendering the transport stream, suppressing the
-    // duplicate response) needs a transport-to-ProtocolUpgrade bridge that
-    // will land in a follow-up. The tests should be restored at that point.
+    // Protocol-upgrade suite (#751). Exercises httpContext.Upgrade end-to-end
+    // over the interceptor seams: the ProtocolUpgrade package's interceptor
+    // pair is REGISTERED on the listener options (this test project references
+    // the package; the transport library does not), detection rides
+    // IHttpRequestInterceptor, and acceptance rides the response seam's
+    // generic IHttpConnectionTakeover capability — RFC 9110 §7.8 Upgrade /
+    // §9.3.6 CONNECT, the 101 / 200 accept paths, stream surrender, SendAsync
+    // suppression + keep-alive exit, the "do not consume tunnel octets"
+    // framing invariant, and the single-shot AcceptAsync guard.
     // ------------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface a non-null Upgrade for an RFC 9110 §7.8 upgrade request")]
+    public async Task Http1_OnUpgradeRequest_ShouldSurfaceUpgradeFeature()
+    {
+        // RFC 9110 §7.8 — "Connection: Upgrade" + an "Upgrade" header naming the protocol.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
+        upgrade.ShouldNotBeNull();
+        upgrade!.Kind.ShouldBe(HttpProtocolUpgradeKind.Upgrade);
+        upgrade.Protocol.ShouldBe("websocket");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface a null Upgrade for an ordinary request")]
+    public async Task Http1_OnOrdinaryRequest_ShouldSurfaceNullUpgrade()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Regression guard: this used to throw NotImplementedException on every access.
+        httpContext.Upgrade.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface a null Upgrade when the interceptors are not registered")]
+    public async Task Http1_OnUpgradeRequestWithoutInterceptors_ShouldSurfaceNullUpgrade()
+    {
+        // The capability is opt-in: without the ProtocolUpgrade interceptor pair on the listener
+        // options, an upgrade-shaped request is just an ordinary request to the transport.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Upgrade.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should ignore an Upgrade header without the Connection: upgrade token")]
+    public async Task Http1_OnUpgradeHeaderWithoutConnectionToken_ShouldSurfaceNullUpgrade()
+    {
+        // RFC 9110 §7.8 — an Upgrade header is only actionable when Connection lists the
+        // "upgrade" token; a bare Upgrade header must not trigger a transition.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nUpgrade: websocket\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Upgrade.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should write 101, surrender the stream, and pass octets through after an accepted upgrade")]
+    public async Task Http1_OnUpgradeAccept_ShouldWrite101AndSurrenderStream()
+    {
+        // The client pipelines protocol octets ("CLIENTDATA") immediately after the handshake
+        // request; those bytes belong to the negotiated protocol, not to the HTTP parser.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\nCLIENTDATA");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        // Act — accept the upgrade and take ownership of the raw duplex stream.
+        Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
+
+        // Exactly one 101 with the connection-specific headers and no body framing (RFC 9112 §9.9).
+        string handshake = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+        handshake.ShouldContain("HTTP/1.1 101 Switching Protocols");
+        handshake.ShouldContain("Connection: Upgrade");
+        handshake.ShouldContain("Upgrade: websocket");
+        handshake.ShouldNotContain("Content-Length");
+        handshake.ShouldNotContain("Transfer-Encoding");
+
+        // The octets the client sent after the handshake are readable from the surrendered
+        // stream — the transport's parser never consumed them.
+        byte[] clientOctets = new byte[10];
+        await tunnel.ReadExactlyAsync(clientOctets.AsMemory(0, 10));
+        Encoding.ASCII.GetString(clientOctets).ShouldBe("CLIENTDATA");
+
+        // Bytes the handler writes afterward appear verbatim on the wire.
+        await tunnel.WriteAsync(Encoding.ASCII.GetBytes("SERVERDATA"));
+        await tunnel.FlushAsync();
+        Encoding.ASCII.GetString(await connection.ReadOutputAsync()).ShouldBe("SERVERDATA");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should suppress SendAsync and exit keep-alive after an accepted upgrade")]
+    public async Task Http1_OnUpgradeAccept_ShouldSuppressSendAndExitKeepAlive()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext httpContext = enumerator.Current;
+
+        await httpContext.Upgrade!.AcceptAsync();
+
+        // A post-acceptance SendAsync must not write a second response onto the wire.
+        await httpConnectionContext.SendAsync(httpContext);
+
+        string wire = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+        wire.ShouldContain("101 Switching Protocols");
+        CountOccurrences(wire, "HTTP/1.1").ShouldBe(1);
+
+        // The connection leaves the keep-alive request loop — no further contexts are yielded.
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface Kind=Connect and write 200 for a CONNECT tunnel")]
+    public async Task Http1_OnConnect_ShouldSurfaceConnectAndWrite200()
+    {
+        // RFC 9112 §3.2.3 — CONNECT uses authority-form; the octets after the headers belong
+        // to the tunnel and must not be parsed as a body.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\nTUNNELBYTES");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        IHttpProtocolUpgrade? upgrade = httpContext.Upgrade;
+        upgrade.ShouldNotBeNull();
+        upgrade!.Kind.ShouldBe(HttpProtocolUpgradeKind.Connect);
+        upgrade.Protocol.ShouldBeNull();
+
+        Stream tunnel = await upgrade.AcceptAsync();
+
+        string response = Encoding.ASCII.GetString(await connection.ReadOutputAsync());
+        response.ShouldContain("HTTP/1.1 200 Ok");
+        response.ShouldNotContain("Content-Length");
+        response.ShouldNotContain("Transfer-Encoding");
+
+        // The tunnel octets that followed the CONNECT headers were never consumed as a body.
+        byte[] tunnelOctets = new byte[11];
+        await tunnel.ReadExactlyAsync(tunnelOctets.AsMemory(0, 11));
+        Encoding.ASCII.GetString(tunnelOctets).ShouldBe("TUNNELBYTES");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should throw on a second accept without writing a second response")]
+    public async Task Http1_OnSecondAccept_ShouldThrowWithoutWritingSecondResponse()
+    {
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "GET /chat HTTP/1.1\r\nHost: api.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = CreateUpgradeEnabledOptions(connection);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Stream tunnel = await httpContext.Upgrade!.AcceptAsync();
+
+        // Drain the single 101 the first acceptance wrote.
+        Encoding.ASCII.GetString(await connection.ReadOutputAsync()).ShouldContain("101 Switching Protocols");
+
+        // A second acceptance throws...
+        await Should.ThrowAsync<InvalidOperationException>(async () => await httpContext.Upgrade!.AcceptAsync());
+
+        // ...and wrote nothing: the next bytes on the wire are exactly what the handler sends.
+        await tunnel.WriteAsync(Encoding.ASCII.GetBytes("X"));
+        await tunnel.FlushAsync();
+        Encoding.ASCII.GetString(await connection.ReadOutputAsync()).ShouldBe("X");
+    }
+
+    /// <summary>
+    /// Listener options wired the way a host enables protocol upgrades: the HTTP/1.1 transport
+    /// plus the ProtocolUpgrade package's interceptor pair registered on both seams.
+    /// </summary>
+    private static HttpConnectionListenerOptions CreateUpgradeEnabledOptions(TestConnection connection)
+    {
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+        options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
+        options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
+        return options;
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+        return count;
+    }
 
     private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload)
     {

@@ -53,7 +53,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         HttpServerLimits limits = options.Limits;
         // Snapshot: registrations after this point must not race the accept loops or observe a
         // half-mutated list; the empty snapshots keep the parser's zero-interceptor fast paths.
-        IHttpRequestInterceptor[] interceptors = [.. options.Interceptors];
+        IHttpRequestInterceptor[] interceptors = [.. options.RequestInterceptors];
         IHttpResponseInterceptor[] responseInterceptors = [.. options.ResponseInterceptors];
 
         HttpProtocol protocols = HttpProtocol.None;
