@@ -90,6 +90,29 @@ internal sealed class QPackDecoderState
     }
 
     /// <summary>
+    /// Parses the field section prefix (RFC 9204 §4.5.1) against a snapshot of the
+    /// current insert count, without decoding the field lines. The caller inspects
+    /// <see cref="QPackFieldSectionPrefix.RequiredInsertCount"/> to learn whether the
+    /// section references the dynamic table — which it must know even if the
+    /// subsequent decode is abandoned, so a referencing stream reset before its
+    /// Section Acknowledgment can be answered with a Stream Cancellation
+    /// (RFC 9204 §2.2.2.2) — then passes the same prefix to
+    /// <see cref="DecodeRequestAsync(byte[], QPackFieldSectionPrefix, CancellationToken)"/>
+    /// so the Required Insert Count and Base are reconstructed once, from a single
+    /// insert-count snapshot.
+    /// </summary>
+    /// <param name="headerBlock">The encoded QPACK field section.</param>
+    /// <returns>The parsed prefix.</returns>
+    /// <exception cref="QPackException">Thrown when the encoded Required Insert Count cannot be reconstructed.</exception>
+    public QPackFieldSectionPrefix ReadPrefix(byte[] headerBlock)
+    {
+        lock (_gate)
+        {
+            return QPackFieldSectionPrefix.Parse(headerBlock, _table.MaxCapacity, _table.InsertCount);
+        }
+    }
+
+    /// <summary>
     /// Decodes a request field section, blocking (within the blocked-stream
     /// budget) until the dynamic table holds enough insertions to satisfy the
     /// section's Required Insert Count.
@@ -101,15 +124,25 @@ internal sealed class QPackDecoderState
     /// table (a Section Acknowledgment is owed for referencing sections).
     /// </returns>
     /// <exception cref="QPackException">Thrown on an unsatisfiable section or a blocked-stream overflow.</exception>
-    public async Task<QPackDecodeResult> DecodeRequestAsync(byte[] headerBlock, CancellationToken cancellationToken)
+    public Task<QPackDecodeResult> DecodeRequestAsync(byte[] headerBlock, CancellationToken cancellationToken)
+        => DecodeRequestAsync(headerBlock, ReadPrefix(headerBlock), cancellationToken);
+
+    /// <summary>
+    /// Decodes a request field section against a prefix already parsed by
+    /// <see cref="ReadPrefix"/>, blocking (within the blocked-stream budget) until the
+    /// dynamic table holds enough insertions to satisfy the section's Required Insert
+    /// Count.
+    /// </summary>
+    /// <param name="headerBlock">The encoded QPACK field section.</param>
+    /// <param name="prefix">The prefix returned by <see cref="ReadPrefix"/> for this same header block.</param>
+    /// <param name="cancellationToken">A token cancelled on connection teardown.</param>
+    /// <returns>
+    /// The decoded field lines and whether the section referenced the dynamic
+    /// table (a Section Acknowledgment is owed for referencing sections).
+    /// </returns>
+    /// <exception cref="QPackException">Thrown on an unsatisfiable section or a blocked-stream overflow.</exception>
+    public async Task<QPackDecodeResult> DecodeRequestAsync(byte[] headerBlock, QPackFieldSectionPrefix prefix, CancellationToken cancellationToken)
     {
-        QPackFieldSectionPrefix prefix;
-
-        lock (_gate)
-        {
-            prefix = QPackFieldSectionPrefix.Parse(headerBlock, _table.MaxCapacity, _table.InsertCount);
-        }
-
         if (prefix.RequiredInsertCount > 0)
         {
             await WaitForInsertCountAsync(prefix.RequiredInsertCount, cancellationToken).ConfigureAwait(false);

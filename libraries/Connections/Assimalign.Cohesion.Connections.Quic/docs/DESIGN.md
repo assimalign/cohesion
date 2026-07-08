@@ -52,6 +52,14 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   stream's `Output` is the graceful write-side close: the pipe flushes
   remaining bytes and disposes the `QuicStream`, which sends FIN and
   waits for the peer to acknowledge delivery.
+- `QuicStreamConnection` also implements the optional
+  `IStreamIdentifierFeature`, surfacing the QUIC wire stream ID
+  (`QuicStream.Id`, RFC 9000 §2.1) distinct from the synthetic
+  `ConnectionId`. This is the only path by which the wire stream number
+  leaves the driver: a consumer that needs it (the HTTP/3 QPACK decoder,
+  which keys Section Acknowledgment / Stream Cancellation on the request
+  stream ID — RFC 9204 §4.4) discovers it with a type test, so the general
+  `IConnection` surface stays free of QUIC specifics.
 
 ## Lifecycle and teardown
 
