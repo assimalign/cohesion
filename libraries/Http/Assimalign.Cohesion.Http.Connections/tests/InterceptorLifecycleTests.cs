@@ -25,7 +25,7 @@ public class InterceptorLifecycleTests
 {
     // ------------------------------------------------------------- request side
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http1: Request hooks fire in order (AfterRequestHead → BeforeRequestBody → AfterRequestBody) with the knob frozen before the body")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Lifecycle/Http1: Request hooks fire in order (AfterRequestHead → BeforeRequestBody → AfterRequestBody) with the knob freezing at the first body read")]
     public async Task Http1_RequestHooks_ShouldFireInLifecycleOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
@@ -41,8 +41,18 @@ public class InterceptorLifecycleTests
         IHttpContext context = await ReadSingleContextAsync(connectionContext);
 
         recorder.Invocations.ShouldBe(["after-head", "before-body", "after-body"]);
+        // #810: the h1 body is streamed and dispatched at head, so the knob stays writable through
+        // every parse-path hook (the pre-read override window) and freezes at the first body read.
         recorder.KnobFrozenAtHead.ShouldBe(false);
-        recorder.KnobFrozenAtBeforeBody.ShouldBe(true);
+        recorder.KnobFrozenAtBeforeBody.ShouldBe(false);
+        recorder.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
+
+        using (StreamReader reader = new(context.Request.Body, Encoding.ASCII))
+        {
+            (await reader.ReadToEndAsync()).ShouldBe("hello");
+        }
+
+        recorder.Captured.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
 
         await context.DisposeAsync();
     }
@@ -721,9 +731,12 @@ public class InterceptorLifecycleTests
 
         public bool? KnobFrozenAtBeforeBody { get; private set; }
 
+        public HttpExchangeInterceptorRequestContext? Captured { get; private set; }
+
         public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Invocations.Add("after-head");
+            Captured = context;
             KnobFrozenAtHead = context.IsMaxRequestBodySizeReadOnly;
         }
 

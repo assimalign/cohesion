@@ -20,6 +20,31 @@ public class HttpConnectionListenerLimitsTests
         limits.MaxRequestBodySize.ShouldBe(30_000_000);
         limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromSeconds(130));
         limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(30));
+
+        // Kestrel MinRequestBodyDataRate / MinResponseDataRate parity: 240 octets/s, 5-second grace.
+        limits.MinRequestBodyDataRate.ShouldNotBeNull();
+        limits.MinRequestBodyDataRate!.BytesPerSecond.ShouldBe(240);
+        limits.MinRequestBodyDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(5));
+        limits.MinResponseDataRate.ShouldNotBeNull();
+        limits.MinResponseDataRate!.BytesPerSecond.ShouldBe(240);
+        limits.MinResponseDataRate.GracePeriod.ShouldBe(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Limits: Data-rate limits should be nullable to disable the check")]
+    public void DataRateLimits_ShouldBeNullableToDisable()
+    {
+        Http1ConnectionListenerOptions.Http1Limits limits = new()
+        {
+            MinRequestBodyDataRate = null,
+            MinResponseDataRate = null,
+        };
+
+        limits.MinRequestBodyDataRate.ShouldBeNull();
+        limits.MinResponseDataRate.ShouldBeNull();
+
+        HttpMinDataRate rate = new(bytesPerSecond: 512, gracePeriod: TimeSpan.FromSeconds(2));
+        limits.MinRequestBodyDataRate = rate;
+        limits.MinRequestBodyDataRate.ShouldBeSameAs(rate);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Limits: Http2 limits should inherit the shared limits alongside the abuse caps")]

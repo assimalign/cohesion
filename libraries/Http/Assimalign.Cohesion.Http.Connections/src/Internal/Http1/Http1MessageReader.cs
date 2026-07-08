@@ -23,17 +23,19 @@ internal static class Http1MessageReader
     /// The listener's snapshotted request-parse interceptors. When empty the parser takes a fast
     /// path with no per-request interception state allocated.
     /// </param>
+    /// <param name="timeProvider">The monotonic clock threaded to the request body's data-rate enforcement.</param>
     /// <param name="readTimeout">
     /// The read-timeout controller. Signalled when the request line begins and once the header
-    /// section has been fully received; its token bounds every read.
+    /// section has been fully received; its token bounds every head read.
     /// </param>
     /// <param name="connectionToken">
-    /// The ambient connection token used as the request's abort token. Distinct from
-    /// <paramref name="readTimeout"/>'s token, which is disposed when the read completes.
+    /// The ambient connection token used as the request's abort token and to bound the body read.
+    /// Distinct from <paramref name="readTimeout"/>'s token, which is disposed once the head has been
+    /// read.
     /// </param>
-    /// <returns>The parsed request context, or <see langword="null"/> on a clean end-of-stream.</returns>
+    /// <returns>The parsed request context (dispatched at head; its body is read lazily), or <see langword="null"/> on a clean end-of-stream.</returns>
     /// <exception cref="Http1LimitExceededException">
-    /// Thrown when the request violates a configured limit (414 / 431 / 413).
+    /// Thrown when the request head violates a configured limit (414 / 431).
     /// </exception>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request (4xx / 5xx).
@@ -44,6 +46,7 @@ internal static class Http1MessageReader
         HttpScheme scheme,
         Http1ConnectionListenerOptions.Http1Limits limits,
         IHttpExchangeInterceptor[] interceptors,
+        TimeProvider timeProvider,
         Http1ReadTimeout readTimeout,
         CancellationToken connectionToken)
     {
@@ -94,8 +97,9 @@ internal static class Http1MessageReader
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, limits, readToken).ConfigureAwait(false);
 
         // The header section is fully received; disarm the request-headers deadline so the body
-        // read is not bounded by it (body-read data-rate limits are deferred behind the
-        // streaming-body rework).
+        // read is not bounded by it. The body is read lazily after dispatch, bounded instead by the
+        // connection token and (when configured) the minimum request-body data rate enforced by
+        // Http1RequestBodyStream.
         readTimeout.OnHeadReceived();
 
         // RFC 9110 §9.3.6 — CONNECT requests MUST NOT consume octets past the request
@@ -149,6 +153,7 @@ internal static class Http1MessageReader
             };
         }
 
+        Http1RequestBodyStream? requestBody = null;
         Stream? bodyStream = null;
 
         try
@@ -161,18 +166,23 @@ internal static class Http1MessageReader
                 }
             }
 
-            // The head hooks have run; the transport now starts consuming the body, so the
-            // effective cap is fixed for the exchange (write-through features observe the
-            // freeze immediately).
-            interception?.FreezeMaxRequestBodySize();
-            long? maxBodySize = interception is not null
-                ? interception.MaxRequestBodySize
-                : limits.MaxRequestBodySize;
+            // RFC 9112 §6 / §7 — decide the body framing from the headers, rejecting ambiguous
+            // combinations and malformed Content-Length / chunked encodings up front (before
+            // dispatch). CONNECT carries no framed body (RFC 9110 §9.3.6 — post-header octets are
+            // tunnel traffic). The body-size cap is NOT enforced here: an endpoint or middleware may
+            // still adjust it after dispatch, before the body is read, so Http1RequestBodyStream
+            // freezes and enforces it at the first read.
+            Http1RequestBodyFraming framing = isConnectTunnel
+                ? Http1RequestBodyFraming.None
+                : Http1MessageBodyReader.DetermineFraming(headers);
 
-            // The body is about to be read off the wire — knobs frozen, head hooks done. Runs
-            // before the automatic 100-continue solicitation below so a hook that rejects here
-            // does so before the body is solicited from the peer. CONNECT tunnels skip it (their
-            // post-head octets are tunnel traffic, not a message body).
+            // Hook: the request is about to be dispatched with its lazy body — head hooks done,
+            // framing decided, no body octet consumed. Runs before any Expect: 100-continue
+            // solicitation (itself lazy, at the first body read), so a hook that rejects here does
+            // so before the body is solicited from the peer. The body-size knob is deliberately not
+            // yet frozen: it freezes at the first body read, which is what opens the pre-read
+            // override window to middleware and endpoints. CONNECT tunnels skip it (their post-head
+            // octets are tunnel traffic, not a message body).
             if (interception is not null && !isConnectTunnel)
             {
                 foreach (IHttpExchangeInterceptor interceptor in interceptors)
@@ -181,54 +191,36 @@ internal static class Http1MessageReader
                 }
             }
 
-            // RFC 9110 §10.1.1 — a request that declares "Expect: 100-continue" with a framed body is
-            // waiting for the server to solicit the body before sending it. The reader fully buffers
-            // the body before dispatch, so a client that withholds it (curl, .NET HttpClient with
-            // ExpectContinue) would otherwise deadlock — the read below blocks for octets the client
-            // will not send until it sees 100 Continue. Emit 100 Continue now, after the head hooks
-            // ran (a hook may have rejected first) and before reading the body, to unblock the
-            // handshake. CONNECT tunnels carry no framed body and are skipped. Lazy, application-driven
-            // solicit-on-first-read (so a handler could answer 401/417 without reading the body) is
-            // de-scoped behind the streaming-body rework — see docs/DESIGN.md.
-            if (!isConnectTunnel && ShouldSolicitContinue(headers))
-            {
-                await Http1MessageWriter.WriteInterimResponseAsync(
-                    stream,
-                    HttpStatusCode.Continue,
-                    headers: null,
-                    readToken).ConfigureAwait(false);
-            }
+            // RFC 9112 §7.1.2 — only a chunked request can carry a trailer section. Surface a
+            // supported (initially empty) trailer collection the body stream fills once the body is
+            // fully read; non-chunked requests keep the shared unsupported collection.
+            HttpTrailerCollection trailers = framing.Mode == Http1RequestBodyMode.Chunked
+                ? new HttpTrailerCollection(isSupported: true)
+                : HttpTrailerCollection.Unsupported;
 
-            byte[] bodyBytes;
-            HttpTrailerCollection? requestTrailers = null;
-            if (isConnectTunnel)
-            {
-                // RFC 9110 §9.3.6 — a CONNECT request body is not framed by Content-Length
-                // or Transfer-Encoding. Anything after the headers is tunnel traffic.
-                bodyBytes = Array.Empty<byte>();
-            }
-            else
-            {
-                // RFC 9112 §6 / §7 — read the body using the framing rules signalled by the
-                // headers, rejecting ambiguous combinations and malformed Content-Length /
-                // chunked encodings, and enforcing the effective body-size cap (413).
-                Http1MessageBody messageBody = await Http1MessageBodyReader.ReadAsync(
-                    stream,
-                    headers,
-                    maxBodySize,
-                    readToken).ConfigureAwait(false);
-                bodyBytes = messageBody.Body;
-                // RFC 9112 §7.1.2 — only chunked transfer can carry a trailer
-                // section. Surface the parsed trailers (possibly empty) as a
-                // supported trailer collection on the request; non-chunked requests
-                // cannot carry trailers and keep the default unsupported collection.
-                if (HeaderContainsToken(headers, HttpHeaderKey.TransferEncoding, "chunked"))
-                {
-                    requestTrailers = new HttpTrailerCollection(messageBody.Trailers, isSupported: true);
-                }
-            }
+            // RFC 9110 §10.1.1 — a request that declares "Expect: 100-continue" with a framed body
+            // withholds the body until the server solicits it. The body streams after dispatch, so
+            // the solicitation is lazy and application-driven: Http1RequestBodyStream emits
+            // 100 Continue at the first body read (the shape the buffered reader explicitly
+            // de-scoped to this rework). A handler can thus answer 401/417 without soliciting the
+            // body at all; an exchange whose declared-and-never-solicited body is left unread closes
+            // the connection instead of reusing it (see Http1RequestBodyStream.DrainAsync).
+            bool solicitContinue = !isConnectTunnel && ShouldSolicitContinue(headers);
 
-            bodyStream = new MemoryStream(bodyBytes, writable: false);
+            // The lazy body stream: read incrementally after dispatch, enforcing the (frozen-at-
+            // first-read) body-size cap and the minimum request-body data rate. No body byte is read
+            // here — the request is dispatched at head.
+            requestBody = new Http1RequestBodyStream(
+                stream,
+                framing,
+                solicitContinue,
+                interception,
+                limits.MaxRequestBodySize,
+                limits.MinRequestBodyDataRate,
+                timeProvider,
+                connectionToken,
+                trailers);
+            bodyStream = requestBody;
 
             // Interceptor phase (body hooks): each hook receives the previous result, so the last
             // registered interceptor produces the outermost wrapper. CONNECT tunnels are skipped —
@@ -252,7 +244,7 @@ internal static class Http1MessageReader
                 queryCollection,
                 headers,
                 bodyStream,
-                requestTrailers);
+                trailers);
             Http1Response response = new();
 
             bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
@@ -263,17 +255,18 @@ internal static class Http1MessageReader
                 connectionInfo,
                 connectionToken,
                 keepAlive,
+                requestBody,
                 features);
         }
         catch when (features is not null)
         {
-            // The request failed after interceptors started participating (limit rejection,
-            // hook rejection, malformed body, wire failure, timeout) and no Http1Context — the
-            // owner of the feature-disposal walk — will ever exist for this exchange. Honor the
-            // seam's disposal contract here instead: tear down the partially-built wrapper chain
-            // (the outermost wrapper owns its inner stream) and dispose every hook-attached
-            // feature, then let the failure surface unchanged. The exception filter keeps the
-            // zero-interceptor fast path entirely outside this handler.
+            // The request failed after interceptors started participating (a head- or body-hook
+            // rejection, or malformed framing) and no Http1Context — the owner of the feature-
+            // disposal walk — will ever exist for this exchange. Honor the seam's disposal contract
+            // here instead: tear down the partially-built wrapper chain (the outermost wrapper owns
+            // its inner stream) and dispose every hook-attached feature, then let the failure surface
+            // unchanged. The exception filter keeps the zero-interceptor fast path entirely outside
+            // this handler.
             bodyStream?.Dispose();
             await DisposeFeaturesAsync(features).ConfigureAwait(false);
             throw;

@@ -36,13 +36,15 @@ The feature is a **write-through view over the parse context**, not a copy:
 - `MaxRequestBodySize` reads and writes `HttpExchangeInterceptorRequestContext.MaxRequestBodySize` —
   the very value the transport enforces. There is no second source of truth.
 - `IsReadOnly` delegates to the context's transport-owned freeze flag
-  (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob after the last
-  `AfterRequestHead` hook runs, as it starts consuming the body — `BeforeRequestBody` hooks
-  already observe the frozen value. Because the feature holds no frozen copy of its own, any
-  shift in when the transport begins that read (buffered today, first-byte once the
-  streaming-body rework lands) is invisible to this package and to feature consumers: the
-  contract ("adjust before the body is read; observe any time") is stable while the transport's
-  definition of "read" evolves.
+  (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob when it starts consuming the
+  body. On HTTP/1.1 that is now the **first read of the streamed body** (#810): the request is
+  dispatched at head and the body read lazily, so the writable window spans the head hooks, the
+  `BeforeRequestBody` hooks, *and* every middleware / endpoint that runs before the body is read —
+  which is what makes the middleware-visible pre-read override real. (On HTTP/2 / HTTP/3 the
+  pipeline still freezes before the body is exposed, so their `BeforeRequestBody` hooks observe
+  the frozen value.) Because the feature holds no frozen copy of its own, that per-version timing
+  is invisible to this package and to feature consumers: the contract ("adjust before the body is
+  read; observe any time") is stable while the transport's definition of "read" evolves.
 
 The transport keeps the context alive until the request body is consumed (documented on
 `HttpExchangeInterceptorRequestContext`), so the view never dangles.
@@ -134,8 +136,13 @@ The migration from the original in-core placement is complete; the pieces sit as
   work). A hook that lowers the cap on h2/h3 therefore changes the value the feature reports
   without rejecting the body. Nothing in this package should be read as implying h2/h3 body
   *protection* exists yet — only the typed feature and the hook plumbing do.
-- Data-rate limits and the middleware-visible pre-read override window depend on the
-  streaming-body rework (#810).
+- **The middleware-visible pre-read override window is live on HTTP/1.1 (#810).** The h1 transport
+  now streams the request body and freezes the cap at the first body read, so middleware and
+  endpoints — not just head-hook interceptors — can adjust `MaxRequestBodySize` through this
+  feature before the body is read, and the transport enforces whatever value remains (413). The
+  same window opens on h2/h3 once their body reads gain hard-cap enforcement. Minimum-data-rate
+  limits (`MinRequestBodyDataRate` / `MinResponseDataRate`) also landed with #810, but as
+  transport-owned limits (`HttpConnectionListenerLimits`), not features surfaced by this package.
 
 ## AOT posture
 

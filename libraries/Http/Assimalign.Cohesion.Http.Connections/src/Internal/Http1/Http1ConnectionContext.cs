@@ -12,6 +12,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
+    // The monotonic clock the request-body / response data-rate enforcement measures against.
+    // TimeProvider.System in production; a plain field so a future test/composition seam can inject.
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
@@ -62,13 +65,23 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             {
                 context.RunResponseInterceptors(
                     _responseInterceptors,
-                    new Http1ResponseBodyStream(Stream, context),
+                    new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider),
                     new Http1ExchangeControl(context, Stream));
             }
 
             yield return context;
 
             if (!context.KeepAlive)
+            {
+                yield break;
+            }
+
+            // The body is streamed lazily and dispatched at head, so the application may have left
+            // part (or all) of the request body unread. Consume it before reading the next request
+            // so the connection realigns on the next request's framing; a drain that cannot complete
+            // cleanly (slow trickle, over-cap, malformed body, wire failure) means the connection can
+            // no longer be safely reused for keep-alive.
+            if (!await context.DrainRequestBodyAsync(cancellationToken).ConfigureAwait(false))
             {
                 yield break;
             }
@@ -144,14 +157,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     }
 
     /// <summary>
-    /// Attempts to read the next request from the wire. Returns
-    /// <see langword="null"/> for a clean end-of-stream (the peer closed
-    /// gracefully between requests), a wire-level failure (truncated line,
-    /// malformed header, socket error), a configured-limit rejection
-    /// (414 / 431 / 413, after emitting the status response), and a
-    /// read-timeout (idle keep-alive or slow-header Slowloris, after
-    /// emitting a 408 when mid-headers). The receive enumerable treats
-    /// them all the same way: the connection is done.
+    /// Attempts to read the next request head from the wire and dispatch it (its body is read
+    /// lazily). Returns <see langword="null"/> for a clean end-of-stream (the peer closed gracefully
+    /// between requests), a wire-level failure (truncated line, malformed header, malformed body
+    /// framing, socket error), a head-limit rejection (414 / 431, after emitting the status
+    /// response), and a read-timeout (idle keep-alive or slow-header Slowloris, after emitting a 408
+    /// when mid-headers). The receive enumerable treats them all the same way: the connection is
+    /// done. Body-size (413) and data-rate (408) violations surface after dispatch, on the streamed
+    /// body read.
     /// </summary>
     private async Task<Http1Context?> TryReadRequestAsync(CancellationToken cancellationToken)
     {
@@ -165,6 +178,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 GetScheme(),
                 _limits,
                 _interceptors,
+                _timeProvider,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);
 
@@ -172,9 +186,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         }
         catch (Http1LimitExceededException rejection)
         {
-            // RFC 9110 §15.5 — a request that violates a configured limit gets the matching
-            // status response (414 / 431 / 413) before the connection is closed, rather than a
-            // silent drop, so a conformant client learns why.
+            // RFC 9110 §15.5 — a request whose head violates a configured limit gets the matching
+            // status response (414 / 431) before the connection is closed, rather than a silent
+            // drop, so a conformant client learns why. Body-size (413) and data-rate (408)
+            // violations surface after dispatch on the streamed body read, not here.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
             return null;
         }

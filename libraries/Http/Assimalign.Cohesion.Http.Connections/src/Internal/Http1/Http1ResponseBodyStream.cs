@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http.Connections.Internal;
+
 namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 /// <summary>
@@ -15,7 +17,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 /// <remarks>
 /// Chunked framing is self-delimiting, so the connection can stay keep-alive after a streamed
 /// response. The connection stream is owned by the connection, so this sink never disposes it — it
-/// only writes and flushes.
+/// only writes and flushes. When a minimum response data rate is configured, each body write and
+/// flush is bounded: a reader that fails to drain the response below that rate aborts the exchange
+/// (RFC 9110 §15.5.9 timeout semantics) instead of blocking the server indefinitely.
 /// </remarks>
 internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 {
@@ -25,14 +29,16 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 
     private readonly Stream _stream;
     private readonly Http1Context _context;
+    private readonly MinDataRateGate? _gate;
     private bool _chunked;
     private bool _suppressBody;
 
-    public Http1ResponseBodyStream(Stream stream, Http1Context context)
+    public Http1ResponseBodyStream(Stream stream, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider)
         : base(context)
     {
         _stream = stream;
         _context = context;
+        _gate = minResponseDataRate is not null ? new MinDataRateGate(minResponseDataRate, timeProvider) : null;
     }
 
     protected override async ValueTask CommitHeadersAsync(CancellationToken cancellationToken)
@@ -74,26 +80,90 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         {
             byte[] prefix = Encoding.ASCII.GetBytes(
                 data.Length.ToString("x", CultureInfo.InvariantCulture) + "\r\n");
-            await _stream.WriteAsync(prefix, cancellationToken).ConfigureAwait(false);
-            await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-            await _stream.WriteAsync(Crlf, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(prefix, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(data, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(Crlf, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(data, cancellationToken).ConfigureAwait(false);
         }
     }
 
     protected override ValueTask FlushFramedAsync(CancellationToken cancellationToken)
-        => new(_stream.FlushAsync(cancellationToken));
+        => FlushStreamAsync(cancellationToken);
 
     protected override async ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
     {
         if (_chunked && !_suppressBody)
         {
-            await _stream.WriteAsync(LastChunk, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(LastChunk, cancellationToken).ConfigureAwait(false);
         }
 
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await FlushStreamAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask WriteToStreamAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    {
+        if (_gate is null)
+        {
+            await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+        {
+            throw ResponseTooSlow();
+        }
+
+        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
+
+        long start = _gate.TimeProvider.GetTimestamp();
+        try
+        {
+            await _stream.WriteAsync(data, linked.Token).ConfigureAwait(false);
+            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, data.Length);
+        }
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw ResponseTooSlow();
+        }
+    }
+
+    private async ValueTask FlushStreamAsync(CancellationToken cancellationToken)
+    {
+        if (_gate is null)
+        {
+            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_gate.TryGetOperationTimeout(out TimeSpan timeout))
+        {
+            throw ResponseTooSlow();
+        }
+
+        using CancellationTokenSource timeoutSource = new(timeout, _gate.TimeProvider);
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
+
+        long start = _gate.TimeProvider.GetTimestamp();
+        try
+        {
+            await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
+            _gate.Record(_gate.TimeProvider.GetTimestamp() - start, 0);
+        }
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw ResponseTooSlow();
+        }
+    }
+
+    private static IOException ResponseTooSlow()
+    {
+        // RFC 9110 §15.5.9 — a reader draining the response below the configured minimum data rate
+        // is abandoned. The response has already started, so the status cannot change; the exchange
+        // is aborted as a wire-level failure.
+        return new IOException("The response was written below the configured minimum data rate.");
     }
 }

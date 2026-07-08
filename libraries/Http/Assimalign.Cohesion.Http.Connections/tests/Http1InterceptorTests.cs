@@ -36,20 +36,19 @@ public class Http1InterceptorTests
         feature!.ObservedHost.ShouldBe("api.test");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook lowering the cap should reject the body with 413")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook lowering the cap should reject the body with 413 on the body read")]
     public async Task AfterRequestHead_LoweringCap_ShouldRejectBodyWith413()
     {
         // The listener-wide default (~28.6 MB) would accept this 64-octet body; the hook lowers
-        // the per-request cap below it, so the transport must reject with 413.
+        // the per-request cap below it, so the streamed body read must reject with 413.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 64\r\n\r\n{new string('x', 64)}");
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new CapSettingInterceptor(16));
 
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook raising the cap should admit a body over the listener limit")]
@@ -104,21 +103,53 @@ public class Http1InterceptorTests
         response.ShouldContain("Connection: close", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: The body-size knob should freeze once the body is consumed")]
-    public async Task Knob_ShouldFreezeAfterHeadHooks()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: The body-size knob should stay writable until the body is read, then freeze")]
+    public async Task Knob_ShouldRemainWritableUntilBodyRead()
     {
+        // #810: the request is dispatched at head with a streamed body, so the per-request cap can be
+        // adjusted (by an endpoint / middleware) after dispatch — right up until the body is read,
+        // at which point it freezes.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
 
-        await ReceiveFirstContextAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
         interceptor.Captured.ShouldNotBeNull();
         interceptor.WasWritableDuringHeadHook.ShouldBeTrue();
-        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
+
+        // Dispatched at head, body not yet read: still writable, so a post-dispatch adjustment sticks.
+        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
+        interceptor.Captured.MaxRequestBodySize = 1024;
+
+        // Reading the body starts consuming it, freezing the knob.
+        await ReadBodyToEndAsync(httpContext.Request.Body);
+
+        interceptor.Captured.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
         Should.Throw<InvalidOperationException>(() => interceptor.Captured.MaxRequestBodySize = 1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: A post-dispatch cap lowered before the body is read should be enforced")]
+    public async Task PostDispatchCapLowering_ShouldBeEnforcedOnBodyRead()
+    {
+        // #810: an endpoint / middleware lowers the per-request cap after dispatch, before reading the
+        // body. The transport enforces whatever the cap is when the body read begins — here 4 octets,
+        // below the 5-octet body — so the read is rejected with 413.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
+
+        // Stand in for middleware running after dispatch and before the body is read.
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.MaxRequestBodySize = 4;
+
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hooks should observe read-only headers")]
@@ -168,22 +199,24 @@ public class Http1InterceptorTests
         interceptor.BodyInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Hook-attached disposable features should be disposed when the request is rejected pre-dispatch")]
-    public async Task LimitRejection_ShouldDisposeHookAttachedFeatures()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Hook-attached disposable features should be disposed with the exchange after a body-read rejection")]
+    public async Task HookAttachedFeature_ShouldBeDisposedOnExchangeDispose()
     {
-        // The head hook attaches a disposable feature, then the oversized Content-Length
-        // declaration is rejected (413) before any context exists. The parser must honor the
-        // disposal contract itself — the feature must not leak.
+        // The head hook attaches a disposable feature; the oversized Content-Length body is rejected
+        // (413) on the streamed read, after dispatch. The exchange now owns the disposal walk, so
+        // disposing it disposes the hook-attached feature — it must not leak.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4096\r\n\r\n");
         HttpConnectionListenerOptions options = new();
         DisposableFeatureAttachingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
 
-        (bool yielded, string response) = await DriveAsync(payload, options, http1 => http1.Limits.MaxRequestBodySize = 16);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options, http1 => http1.Limits.MaxRequestBodySize = 16);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
+
+        await httpContext.DisposeAsync();
+
         interceptor.Feature.ShouldNotBeNull();
         interceptor.Feature!.DisposeCount.ShouldBe(1);
     }
@@ -251,6 +284,14 @@ public class Http1InterceptorTests
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    private static async Task ReadBodyToEndAsync(Stream body)
+    {
+        byte[] buffer = new byte[8192];
+        while (await body.ReadAsync(buffer) > 0)
+        {
+        }
     }
 
     private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options, Action<Http1ConnectionListenerOptions>? configure = null)

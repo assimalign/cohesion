@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -52,30 +53,32 @@ public class Http1ServerLimitsTests
         response.ShouldContain("431", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should reject a Content-Length body over the cap with 413 and drop the connection")]
-    public async Task Http1_OnContentLengthBodyExceedingLimit_ShouldRespond413AndDrop()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should reject a Content-Length body over the cap (413) on the body read")]
+    public async Task Http1_OnContentLengthBodyExceedingLimit_ShouldThrowOnBodyRead()
     {
-        // RFC 9110 §15.5.14 — a declared Content-Length over the configured cap is 413.
+        // RFC 9110 §15.5.14 — a declared Content-Length over the configured cap is 413. The body is
+        // streamed and dispatched at head (so an endpoint may still adjust the cap), so the rejection
+        // surfaces when the application reads the body — the declared length is checked before a byte
+        // is read.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4096\r\n\r\n");
-        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 16);
+        IHttpContext context = await ReceiveContextAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 16);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(context.Request.Body));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should reject a chunked body over the cap with 413 and drop the connection")]
-    public async Task Http1_OnChunkedBodyExceedingLimit_ShouldRespond413AndDrop()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should reject a chunked body over the cap (413) on the body read")]
+    public async Task Http1_OnChunkedBodyExceedingLimit_ShouldThrowOnBodyRead()
     {
-        // RFC 9110 §15.5.14 — a chunked body that accumulates past the cap is 413.
+        // RFC 9110 §15.5.14 — a chunked body that would accumulate past the cap is 413, surfaced as
+        // the body streams (the offending chunk is rejected before it is delivered).
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "8\r\nabcdefgh\r\n"
             + "0\r\n\r\n");
-        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 4);
+        IHttpContext context = await ReceiveContextAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 4);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(context.Request.Body));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 Limits: Should accept a request within the configured limits")]
@@ -150,6 +153,25 @@ public class Http1ServerLimitsTests
         // Idle keep-alive: the next request never arrives, so the connection is reclaimed.
         bool secondYielded = await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         secondYielded.ShouldBeFalse();
+    }
+
+    private static async Task<IHttpContext> ReceiveContextAsync(byte[] payload, Action<Http1ConnectionListenerOptions> configure)
+    {
+        HttpConnectionListenerOptions options = new();
+        TestConnection connection = new(payload);
+        options.UseHttp1(new TestConnectionListener(connection), configure);
+
+        HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        return await ReadSingleContextAsync(context);
+    }
+
+    private static async Task ReadBodyToEndAsync(Stream body)
+    {
+        byte[] buffer = new byte[8192];
+        while (await body.ReadAsync(buffer) > 0)
+        {
+        }
     }
 
     private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, Action<Http1ConnectionListenerOptions> configure)
