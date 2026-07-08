@@ -9,11 +9,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 /// </summary>
 internal sealed class Http1ConnectionFactory : HttpConnectionFactory
 {
-    private readonly HttpServerLimits _limits;
+    private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
-    public Http1ConnectionFactory(HttpServerLimits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public Http1ConnectionFactory(Http1ConnectionListenerOptions.Http1Limits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
     {
         _limits = limits;
         _interceptors = interceptors;

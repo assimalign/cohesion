@@ -27,28 +27,28 @@ public class HttpServerConfigurationTests
             ["Http:Limits:KeepAliveTimeout"] = "00:01:00",
             ["Http:Limits:RequestHeadersTimeout"] = "00:00:15",
         });
-        HttpConnectionListenerOptions options = new();
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
 
-        HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options);
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
-        options.Limits.MaxRequestLineSize.ShouldBe(4096);
-        options.Limits.MaxRequestHeaderCount.ShouldBe(50);
-        options.Limits.MaxRequestHeadersTotalSize.ShouldBe(16384);
-        options.Limits.MaxRequestBodySize.ShouldBe(1048576);
-        options.Limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromMinutes(1));
-        options.Limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(15));
+        limits.MaxRequestLineSize.ShouldBe(4096);
+        limits.MaxRequestHeaderCount.ShouldBe(50);
+        limits.MaxRequestHeadersTotalSize.ShouldBe(16384);
+        limits.MaxRequestBodySize.ShouldBe(1048576);
+        limits.KeepAliveTimeout.ShouldBe(TimeSpan.FromMinutes(1));
+        limits.RequestHeadersTimeout.ShouldBe(TimeSpan.FromSeconds(15));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should leave defaults when a section is absent")]
     public void Bind_OnEmptyConfiguration_ShouldLeaveDefaults()
     {
         IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>());
-        HttpConnectionListenerOptions options = new();
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
 
-        HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options);
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
-        options.Limits.MaxRequestLineSize.ShouldBe(8 * 1024);
-        options.Limits.MaxRequestBodySize.ShouldBe(30_000_000);
+        limits.MaxRequestLineSize.ShouldBe(8 * 1024);
+        limits.MaxRequestBodySize.ShouldBe(30_000_000);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'unbounded' body size as null")]
@@ -58,11 +58,11 @@ public class HttpServerConfigurationTests
         {
             ["Http:Limits:MaxRequestBodySize"] = "unbounded",
         });
-        HttpConnectionListenerOptions options = new();
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
 
-        HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options);
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
-        options.Limits.MaxRequestBodySize.ShouldBeNull();
+        limits.MaxRequestBodySize.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should treat 'infinite' timeout as InfiniteTimeSpan")]
@@ -72,11 +72,11 @@ public class HttpServerConfigurationTests
         {
             ["Http:Limits:KeepAliveTimeout"] = "infinite",
         });
-        HttpConnectionListenerOptions options = new();
+        Http1ConnectionListenerOptions.Http1Limits limits = new();
 
-        HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options);
+        HttpServerConfiguration.BindLimits(configuration, HttpServerConfiguration.DefaultSectionKey, limits);
 
-        options.Limits.KeepAliveTimeout.ShouldBe(Timeout.InfiniteTimeSpan);
+        limits.KeepAliveTimeout.ShouldBe(Timeout.InfiniteTimeSpan);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register HTTP/1.1 and HTTP/2 endpoints from configuration")]

@@ -117,13 +117,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
     // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
-    // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2Limits. The
+    // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2ConnectionListenerOptions.Http2Limits. The
     // guard is driven solely from the frame pump — the connection's single inbound frame
     // processor — so it needs no synchronization of its own.
-    private readonly Http2Limits _http2Limits;
+    private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
     private readonly Http2FloodGuard _floodGuard;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
@@ -1970,9 +1970,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// initial values except for ENABLE_PUSH (0 — Cohesion does not
     /// implement server push), MAX_CONCURRENT_STREAMS, and
     /// MAX_HEADER_LIST_SIZE, which are operator-tunable via
-    /// <see cref="Http2Limits"/> (a bounded DoS guard instead of "unlimited").
+    /// <see cref="Http2ConnectionListenerOptions.Http2Limits"/> (a bounded DoS guard instead of "unlimited").
     /// </summary>
-    private static Http2ConnectionSettings BuildLocalSettings(Http2Limits limits)
+    private static Http2ConnectionSettings BuildLocalSettings(Http2ConnectionListenerOptions.Http2Limits limits)
     {
         return new Http2ConnectionSettings
         {

@@ -716,12 +716,11 @@ public class Http2TransportTests
     /// the wire then yields nothing — by contract a malformed peer must never
     /// crash the listener, so the enumerable completes without throwing.
     /// </summary>
-    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode, Action<Http2Limits>? configureLimits = null)
+    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode, Action<Http2ConnectionListenerOptions.Http2Limits>? configureLimits = null)
     {
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        configureLimits?.Invoke(options.Limits.Http2);
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(connection), http2 => configureLimits?.Invoke(http2.Limits));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -1539,8 +1538,7 @@ public class Http2TransportTests
 
         TestConnection connection = new(Combine(parts.ToArray()));
         HttpConnectionListenerOptions options = new();
-        options.Limits.Http2.MaxResetStreamsPerWindow = 5;
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxResetStreamsPerWindow = 5);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -1612,8 +1610,7 @@ public class Http2TransportTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.Limits.Http2.MaxRequestHeaderListSize = 200;
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxRequestHeaderListSize = 200);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -1708,8 +1705,7 @@ public class Http2TransportTests
 
         TestConnection connection = new(Combine(preface, settings, openStream, refusedStream));
         HttpConnectionListenerOptions options = new();
-        options.Limits.Http2.MaxStreamsPerConnection = 1;
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxStreamsPerConnection = 1);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();

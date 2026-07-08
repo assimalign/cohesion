@@ -39,8 +39,14 @@ with shape safety enforced at the seam:
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
     options.UseHttp1(tcpListener);                 // IConnectionListener
-    options.UseHttp2(tlsTcpListener);              // IConnectionListener (TLS pre-composed)
-    options.UseHttp3(quicListener);                // IMultiplexedConnectionListener
+    options.UseHttp2(tlsTcpListener, http2 =>      // IConnectionListener (TLS pre-composed)
+    {
+        http2.Limits.MaxStreamsPerConnection = 256;
+    });
+    options.UseHttp3(quicListener, http3 =>        // IMultiplexedConnectionListener
+    {
+        http3.QPack.MaxTableCapacity = 4096;
+    });
 });
 ```
 
@@ -54,6 +60,29 @@ HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 - `UseHttp3` accepts an `IMultiplexedConnectionListener` — the parameter
   type itself is the shape gate, so no runtime capability check is
   needed for stream multiplexing.
+
+### Per-version options, captured per registration
+
+Every `Use*` method has an overload taking a configure callback for that
+version's options type — `Http1ConnectionListenerOptions`,
+`Http2ConnectionListenerOptions`, `Http3ConnectionListenerOptions` (all under
+`Options/`) — so each protocol version owns its own configuration surface
+instead of sharing one listener-wide bag. The options are captured **per
+registration** at `Use*` time and closed over by that registration's
+connection-factory builder; two registrations of the same version can carry
+different limits. Cross-version concerns stay listener-wide on
+`HttpConnectionListenerOptions`: the request/response interceptors (snapshotted
+when the `HttpConnectionListener` is constructed) and `BacklogCapacity`.
+
+Limits follow the same split. `HttpConnectionListenerLimits` is the abstract
+base holding only the limits meaningful to all three versions
+(`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout` — each
+documents where it is enforced today); the version-specific types nest inside
+their options class (`Http1ConnectionListenerOptions.Http1Limits` adds the
+HTTP/1.1 wire-format bounds, `Http2ConnectionListenerOptions.Http2Limits` adds
+the HTTP/2 abuse caps). HTTP/3 deliberately exposes no limits surface — its
+stream/flow-control limits live in the QUIC transport (see the HTTP/3
+non-goals).
 
 `BacklogCapacity` retains its bounded-channel semantics: it caps how
 many accepted HTTP connections may buffer before the per-listener accept
@@ -129,8 +158,8 @@ Per HTTP/1.1 request the parser:
    derives host/scheme.
 2. Builds one `HttpRequestInterceptorContext` — head data, a **read-only**
    header view (`HttpHeaderCollection.AsReadOnly()`), a fresh feature
-   collection, and the body-size knob seeded from
-   `HttpServerLimits.MaxRequestBodySize` — and runs every head hook in
+   collection, and the body-size knob seeded from the registration's
+   `Http1Limits.MaxRequestBodySize` — and runs every head hook in
    registration order.
 3. Freezes the knob and reads the body under whatever cap the hooks left
    (413 on violation, as ever).
@@ -514,9 +543,12 @@ alongside the existing framing / smuggling defences.
 
 ### The limits surface
 
-`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`) is the tuning
-surface, with conservative Kestrel-`KestrelServerLimits`-parity defaults so a
-listener is protected out of the box:
+`Http1ConnectionListenerOptions.Limits` (`Http1Limits`, extending the shared
+`HttpConnectionListenerLimits` base with the HTTP/1.1 wire-format bounds) is
+the tuning surface, configured per registration through
+`UseHttp1(listener, http1 => http1.Limits...)`, with conservative
+Kestrel-`KestrelServerLimits`-parity defaults so a listener is protected out
+of the box:
 
 | Limit | Default | Enforced by | Rejection |
 |---|---|---|---|
@@ -527,10 +559,11 @@ listener is protected out of the box:
 | `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
 | `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
 
-The limits flow listener → `Http1Connection` → `Http1ConnectionContext` →
-reader as a plain object reference; there is no DI, config, or logging
-dependency in this package (Lane A guardrail — config binding of these limits is
-a Web.Hosting builder-time concern).
+The limits flow `UseHttp1` → `Http1ConnectionFactory` → `Http1Connection` →
+`Http1ConnectionContext` → reader as a plain object reference, captured per
+registration at `UseHttp1` time; there is no DI, config, or logging dependency
+in this package (Lane A guardrail — config binding of these limits is a
+Web.Hosting builder-time concern).
 
 ### 414 / 431 / 413 semantics, not a silent drop
 
@@ -603,11 +636,12 @@ body byte and opens the window to middleware without changing this contract.
 
 These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
 (rapid-reset, CONTINUATION flood, header-list size, SETTINGS/PING floods) are
-governed by the frame machinery and live under `HttpServerLimits.Http2`
-(`Http2Limits`) — see "HTTP/2 abuse limits" below. HTTP/2 request-body
-buffering is bounded by flow-control backpressure, documented in "HTTP/2
-request-body flow control and backpressure" below. `MaxConcurrentConnections`
-is an accept-loop concern owned by the Web-runtime rewrite, not this surface.
+governed by the frame machinery and live under
+`Http2ConnectionListenerOptions.Limits` (`Http2Limits`) — see "HTTP/2 abuse
+limits" below. HTTP/2 request-body buffering is bounded by flow-control
+backpressure, documented in "HTTP/2 request-body flow control and
+backpressure" below. `MaxConcurrentConnections` is an accept-loop concern
+owned by the Web-runtime rewrite, not this surface.
 
 ### AOT posture
 
@@ -645,9 +679,11 @@ message that forces the server into unbounded (or amplified) work:
 
 ### The limits surface
 
-`HttpServerLimits.Http2` (`Http2Limits`) is the operator-tunable surface, with
-conservative Kestrel-`Http2Limits`-parity defaults so a listener is protected
-out of the box:
+`Http2ConnectionListenerOptions.Limits` (`Http2Limits`, extending the shared
+`HttpConnectionListenerLimits` base) is the operator-tunable surface,
+configured per registration through `UseHttp2(listener, http2 =>
+http2.Limits...)`, with conservative Kestrel-`Http2Limits`-parity defaults so
+a listener is protected out of the box:
 
 | Limit | Default | Enforced by | Vector |
 |---|---|---|---|
@@ -659,10 +695,10 @@ out of the box:
 | `FloodDetectionWindow` | 5 s | the trailing window shared by the three flood counters | — |
 
 The limits flow `UseHttp2` → `Http2ConnectionFactory` → `Http2Connection` →
-`Http2ConnectionContext` as a plain object reference; there is no DI, config, or
-logging dependency in this package (Lane A guardrail — config binding is a
-Web.Hosting builder-time concern), exactly as with the HTTP/1.1
-`HttpServerLimits`.
+`Http2ConnectionContext` as a plain object reference, captured per
+registration at `UseHttp2` time; there is no DI, config, or logging dependency
+in this package (Lane A guardrail — config binding is a Web.Hosting
+builder-time concern), exactly as with the HTTP/1.1 `Http1Limits`.
 
 ### Escalation: GOAWAY(ENHANCE_YOUR_CALM), mirroring Kestrel
 
@@ -1262,7 +1298,7 @@ otherwise-hard problems:
 
 Opting in is a per-listener, public configuration choice:
 `options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
-`Http3ListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
+`Http3ConnectionListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
 capacity and blocked-stream limit; the HTTP/3 registration captures it in an
 `Http3ConnectionFactory` and threads it to the connection context. Setting
 `MaxTableCapacity` above 0 opts in to the full dynamic table on the **decoder**

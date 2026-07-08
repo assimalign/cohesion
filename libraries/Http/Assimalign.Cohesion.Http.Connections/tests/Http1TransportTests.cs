@@ -422,9 +422,9 @@ public class Http1TransportTests
     public async Task Http1_OnContentLengthExceedingCap_ShouldThrow()
     {
         // DoS guard — a peer that claims Content-Length: 10 GB would otherwise force a
-        // 10 GB allocation. Cohesion caps the body at the configured HttpServerLimits
-        // .MaxRequestBodySize (default ~28.6 MB) and rejects oversize declarations before
-        // reading a single byte from the stream. 200 MB is well over the default cap.
+        // 10 GB allocation. Cohesion caps the body at the registration's configured
+        // Http1Limits.MaxRequestBodySize (default ~28.6 MB) and rejects oversize declarations
+        // before reading a single byte from the stream. 200 MB is well over the default cap.
         const long oversize = 200L * 1024 * 1024;
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {oversize}\r\n\r\n");

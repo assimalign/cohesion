@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 /// Per-connection abuse detector for the frame-rate HTTP/2 attack classes: rapid stream reset
 /// (CVE-2023-44487), SETTINGS floods, and PING floods. Each detector is an independent
 /// <see cref="Http2SlidingWindowCounter"/> sharing the operator-configured
-/// <see cref="Http2Limits.FloodDetectionWindow"/>.
+/// <see cref="Http2ConnectionListenerOptions.Http2Limits.FloodDetectionWindow"/>.
 /// </summary>
 /// <remarks>
 /// Owned by a single <see cref="Http2ConnectionContext"/> and driven only from its sequential
@@ -25,7 +25,7 @@ internal sealed class Http2FloodGuard
     /// Creates a flood guard whose detectors are seeded from <paramref name="limits"/>.
     /// </summary>
     /// <param name="limits">The HTTP/2 abuse limits configured for the connection.</param>
-    public Http2FloodGuard(Http2Limits limits)
+    public Http2FloodGuard(Http2ConnectionListenerOptions.Http2Limits limits)
     {
         long windowMilliseconds = (long)limits.FloodDetectionWindow.TotalMilliseconds;
         _resetStreams = new Http2SlidingWindowCounter(limits.MaxResetStreamsPerWindow, windowMilliseconds);

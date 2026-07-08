@@ -9,11 +9,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 internal sealed class Http2Connection : HttpConnection
 {
     private readonly IConnection _connection;
-    private readonly Http2Limits _limits;
+    private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(IConnection connection, bool isSecure, Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
         : base(isSecure)
     {
         _connection = connection;

@@ -21,7 +21,7 @@ The repo already encodes this taxonomy: `IHttpExtendedConnectFeature` lives in
 `Assimalign.Cohesion.Http.ExtendedConnect`, not in core, and the transport stays decoupled from
 it. This package restores that discipline for the body-size feature. The enforcement itself —
 the wire-level cap with 413 semantics — is *not* a feature and stays transport-owned in
-`Http.Connections` (`HttpServerLimits.MaxRequestBodySize`): the security guarantee must hold
+`Http.Connections` (`HttpConnectionListenerLimits.MaxRequestBodySize`): the security guarantee must hold
 with zero optional packages installed.
 
 ## How it works
@@ -130,8 +130,8 @@ allocation per request, only when the interceptor is registered.
 ## Non-goals
 
 - **Enforcement.** The wire-level cap and its 413 semantics are transport-owned
-  (`HttpServerLimits`); this package only observes and adjusts the per-request value.
+  (the per-registration `Http1Limits`); this package only observes and adjusts the per-request value.
 - **Other limit knobs (request line, header count/size, timeouts).** Those are connection-wide
-  policy on `HttpServerLimits` with no per-request story; they gain typed features here only if
+  policy on the per-version listener limits with no per-request story; they gain typed features here only if
   a real per-request consumer appears.
 - **Client-side limits.** This is a server-side surface.

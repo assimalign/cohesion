@@ -15,14 +15,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class HttpListenerRegistration
 {
     private readonly Func<IConnectionListener>? _streamListenerFactory;
-    private readonly Func<HttpServerLimits, IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
+    private readonly Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
     private readonly Func<IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
-        Func<HttpServerLimits, IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
+        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
         Func<IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
@@ -46,7 +46,7 @@ internal sealed class HttpListenerRegistration
     public static HttpListenerRegistration ForStream(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<HttpServerLimits, IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
     }
@@ -73,16 +73,17 @@ internal sealed class HttpListenerRegistration
     }
 
     /// <summary>
-    /// Builds the stream connection factory, binding it to the listener-wide server limits and
-    /// request/response interceptors (which are only snapshotted once the listener is constructed).
+    /// Builds the stream connection factory, binding it to the listener-wide request/response
+    /// interceptors (which are only snapshotted once the listener is constructed); the
+    /// registration's captured per-version options (limits) are already closed over by the
+    /// builder.
     /// </summary>
-    /// <param name="limits">The shared server limits applied to every stream connection.</param>
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
     /// <returns>The stream connection factory.</returns>
-    public HttpConnectionFactory CreateStreamConnectionFactory(HttpServerLimits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
     {
-        return _streamConnectionFactoryBuilder!.Invoke(limits, interceptors, responseInterceptors);
+        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
     }
 
     /// <summary>

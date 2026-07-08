@@ -255,9 +255,18 @@ builder time, giving `appsettings`-style Kestrel-section parity:
 
 The actual binding lives in the internal `HttpServerConfiguration.Bind`, invoked
 from inside the `UseServer((serviceProvider, options) => …)` callback so it runs
-when the `HttpConnectionListener` is composed. Limits land on
-`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`); each endpoint maps
-to a TCP listener via the existing `UseHttp1` / `UseHttp2` convenience overloads.
+when the `HttpConnectionListener` is composed. Limits are per HTTP version on
+the transport, so the single `Limits` section is parsed eagerly (an unparseable
+value fails loudly even with no endpoints) into an
+`Http1ConnectionListenerOptions.Http1Limits` template, and each endpoint the
+section registers copies the bound values into its own per-registration limits
+through the transport's `UseHttp1` / `UseHttp2` configure overloads — HTTP/1.1
+endpoints receive every key; HTTP/2 endpoints receive the shared
+`HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`,
+`RequestHeadersTimeout`), because the HTTP/1.1 wire-format keys have no HTTP/2
+meaning. The HTTP/2 abuse caps (`Http2ConnectionListenerOptions.Http2Limits`)
+are not yet config-bindable — a `Limits:Http2` section is a natural follow-up
+when a deployment needs it.
 
 ### Why explicit, hand-rolled binding
 

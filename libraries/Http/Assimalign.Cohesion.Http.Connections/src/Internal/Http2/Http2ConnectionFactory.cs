@@ -9,10 +9,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 /// </summary>
 internal sealed class Http2ConnectionFactory : HttpConnectionFactory
 {
-    private readonly Http2Limits _limits;
+    private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
-    public Http2ConnectionFactory(Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2ConnectionFactory(Http2ConnectionListenerOptions.Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
     {
         _limits = limits;
         _responseInterceptors = responseInterceptors;
