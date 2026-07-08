@@ -44,6 +44,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     // Guards single GOAWAY emission across the receive-loop teardown and the
     // connection dispose path (Interlocked one-shot latch).
     private int _goAwaySent;
+    private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
     // RFC 9218 §7.2 — the effective priority of request streams the peer has
     // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
@@ -58,10 +60,18 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors, Http3QPackOptions qpackOptions)
+    public Http3ConnectionContext(
+        IMultiplexedConnection connection,
+        bool isSecure,
+        Http3ConnectionListenerOptions.Http3Limits limits,
+        IHttpRequestInterceptor[] requestInterceptors,
+        IHttpResponseInterceptor[] responseInterceptors,
+        Http3QPackOptions qpackOptions)
     {
         _connection = connection;
         _isSecure = isSecure;
+        _limits = limits;
+        _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _qpackOptions = qpackOptions;
 
@@ -1053,7 +1063,36 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         Http3Response response = new();
         HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
-        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection);
+        // Request-parse interceptor phase — the HTTP/3 analogue of the HTTP/1.1 invocation point,
+        // run as the request head is assembled. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
+        // tunnel traffic, so its body hooks are skipped (head hooks still run). The hook-populated
+        // feature collection flows into the exchange through the Http3Context features parameter;
+        // zero interceptors keeps the pre-seam fast path.
+        bool isConnect = request.Method == HttpMethod.Connect;
+        HttpFeatureCollection? features;
+        try
+        {
+            features = await HttpRequestInterceptorPipeline.InvokeAsync(
+                _requestInterceptors,
+                HttpVersion.Http30,
+                request,
+                connectionInfo,
+                _limits.MaxRequestBodySize,
+                isConnect).ConfigureAwait(false);
+        }
+        catch (HttpRequestRejectedException)
+        {
+            // A request-parse interceptor refused this request (the pipeline already disposed the
+            // partial body-wrapper chain and hook-attached features before surfacing). RFC 9114
+            // §4.1 — abort the request stream (the ideal wire code is H3_REQUEST_REJECTED; the
+            // IConnection abort contract resets with the transport's default stream error code)
+            // rather than writing the h1-style status response. The QUIC connection and its other
+            // streams are unaffected, so the caller drops just this stream and keeps serving.
+            streamConnection.Abort();
+            return null;
+        }
+
+        Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection, features);
 
         // RFC 9218 §4 — the request's Priority header sets the effective priority.
         // Parsing is tolerant: a malformed value leaves the default (urgency 3,

@@ -152,7 +152,9 @@ options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterc
 options.RequestInterceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
-Per HTTP/1.1 request the parser:
+Per request each transport (using the HTTP/1.1 parser as the reference; HTTP/2
+and HTTP/3 run the same steps 2–5 through the shared
+`HttpRequestInterceptorPipeline` — see "Protocol coverage" below):
 
 1. Parses the head (request line + headers) under the configured limits, then
    derives host/scheme.
@@ -198,11 +200,32 @@ thread-safe; all per-request state belongs in the context's feature collection.
 
 ### Exception classification on the parse path
 
-- **`HttpRequestRejectedException`** (4xx/5xx-constrained) is caught explicitly
-  in `Http1ConnectionContext.TryReadRequestAsync` — ahead of the wire-level
-  classifier — answered with a minimal bodyless status response, and the
-  connection is closed (never reused: remaining wire state is indeterminate).
-  This is the sanctioned way for a hook to refuse a request.
+- **`HttpRequestRejectedException`** (4xx/5xx-constrained) is the sanctioned way
+  for a hook to refuse a request; each transport answers it with the wire
+  behavior appropriate to its framing, ahead of the wire-level classifier:
+  - **HTTP/1.1** — caught in `Http1ConnectionContext.TryReadRequestAsync`,
+    answered with a minimal bodyless status response, and the connection is
+    closed (never reused: remaining wire state is indeterminate).
+  - **HTTP/2** — `Http2ConnectionContext.TryDispatchStreamAsync` translates it
+    into an `Http2StreamException` carrying `CANCEL`, so the frame pump emits
+    `RST_STREAM(CANCEL)` (RFC 9113 §5.4.2), removes the stream (reclaiming its
+    receive-window debt), and keeps serving the connection's other streams.
+    HTTP/2 has no `REQUEST_REJECTED` code; `CANCEL` is the neutral per-stream
+    termination already used by the transport's application-cancel path
+    (`IHttpContext.Cancel`), and deliberately avoids `REFUSED_STREAM`'s "safe to
+    retry" promise, which could amplify load against the very DoS-mitigation
+    interceptors this seam hosts.
+  - **HTTP/3** — `Http3ConnectionContext.ReadRequestAsync` aborts the request
+    stream and drops it (RFC 9114 §4.1), leaving the QUIC connection and its
+    other streams intact. The semantically exact code is `H3_REQUEST_REJECTED`,
+    but the `IConnection` abort contract resets with the transport's configured
+    default stream error code rather than a per-call one — a limitation of the
+    connection abstraction, not the seam.
+
+  In every case the request-parse interceptor pipeline has already torn down the
+  partially-built body-wrapper chain and every hook-attached feature before the
+  rejection surfaces, so the transport's rejection handler only performs the wire
+  action, never the cleanup.
 - **`IOException`-family exceptions** thrown by a hook are indistinguishable
   from wire failures and get silently classified as such (connection dropped,
   no response). This is a documented hazard, not a feature: hooks must use the
@@ -211,8 +234,9 @@ thread-safe; all per-request state belongs in the context's feature collection.
   receive-loop failure-isolation philosophy.
 
 Hooks run inline on the parse path at a point where the request-headers
-deadline has been disarmed, so they must be CPU-only; a blocking hook stalls
-the connection and pins a thread-pool thread.
+deadline has been disarmed (on HTTP/2 that path is the connection's single
+frame pump), so they must be CPU-only; a blocking hook stalls the whole
+connection — every multiplexed stream on it — and pins a thread-pool thread.
 
 ### Disposal contract
 
@@ -228,9 +252,12 @@ the outermost stream (which the exchange's disposal triggers via
 The contract also covers requests that never become an exchange. If the parse
 fails **after** head hooks ran — a limit rejection (413/431), a hook rejection,
 a malformed body, a wire failure, or a timeout — no `IHttpContext` exists to
-own the disposal walk, so the parser itself tears down the partially-built
-wrapper chain and disposes every hook-attached feature (same walk semantics)
-before the failure surfaces. Hook-attached disposables therefore never leak on
+own the disposal walk, so the invocation site itself tears down the
+partially-built wrapper chain and disposes every hook-attached feature (same
+walk semantics) before the failure surfaces. On HTTP/1.1 that is the parser; on
+HTTP/2 and HTTP/3 it is the shared `HttpRequestInterceptorPipeline`, which
+disposes the chain and features in its own `catch` before rethrowing to the
+transport's rejection handler. Hook-attached disposables therefore never leak on
 the rejection paths an attacker can drive for free (e.g. an oversized
 `Content-Length` declaration, rejected before any body byte is read).
 
@@ -244,16 +271,41 @@ implementation is wrapped as a read-through defaults source for safety.
 
 ### Protocol coverage
 
-The hooks are wired into the HTTP/1.1 parser. HTTP/2 now dispatches a request as
-soon as its header block completes and streams the body incrementally under
-flow-control backpressure (`Http2Stream.CreateContext` runs at header completion;
-see "HTTP/2 request-body flow control and backpressure"), while HTTP/3 still
-drains a request stream before header decode. The two hook points exist
-conceptually on both, but the parse-time interceptor seam is still h1-only at
-runtime — matching the pre-seam behavior (the transport-seeded body-size feature
-was also h1-only). Wiring the head/body hooks into the streaming h2 path (a body
-hook now has a real incremental stream to wrap) is tracked as follow-up work
-alongside the remaining h2/h3 abuse-limit items.
+The hooks are wired into **all three** request paths — HTTP/1.1, HTTP/2, and
+HTTP/3 — so a registered interceptor (the default `Http.RequestLimits` feature,
+a parse-time digest, request decompression, …) participates uniformly no matter
+which protocol served the request. A single shared helper,
+`HttpRequestInterceptorPipeline`, drives the h2/h3 invocation with the same
+ordering, CONNECT-skip, empty-body, freeze, rejection, and failure-path
+disposal semantics as the h1 parser; each transport calls it at the point its
+request head is assembled into a context (`Http2Stream.CreateContextAsync` from
+the frame pump's END_HEADERS dispatch, `Http3ConnectionContext.ReadRequestAsync`)
+and flows the hook-populated feature collection into the exchange through the
+(previously dormant) `features` parameter on `Http2Context` / `Http3Context`.
+The knob each context is seeded from is the registration's shared
+`HttpConnectionListenerLimits.MaxRequestBodySize` (`Http1Limits` / `Http2Limits`
+/ `Http3Limits`), so the same interceptor observes the same knob everywhere.
+
+The **per-protocol timing is documented on the seam contract**: h1 runs the head
+hook before any body octet is consumed from the wire, so a lowered cap precedes
+enforcement. HTTP/2 dispatches a request as soon as its header block completes
+and streams the body incrementally under flow-control backpressure (see "HTTP/2
+request-body flow control and backpressure"), so head hooks run before the
+application observes any body octet — DATA already in flight sits buffered in
+the stream's flow-control-bounded pipe — and a body hook wraps the live
+streaming body stream (forward-only, exactly what the hook contract requires
+wrappers to tolerate). HTTP/3 still drains a request stream before header
+decode, so its hooks run before the body is *exposed*, not before it was
+*received*.
+
+The **cap-enforcement posture is unchanged by the wiring**: no hard body-size
+cap is enforced on h2 or h3 yet (h2 bounds body buffering via flow-control
+backpressure, h3 via QUIC flow control — the hard cap and connection timeouts
+remain tracked follow-up work, per `HttpConnectionListenerLimits`). A hook that
+lowers the cap on those transports today adjusts only the value hook-attached
+features expose; the seam wires the hook *invocation*, and each request's parse
+context already carries the frozen post-hook value for those paths to consume
+when they gain enforcement.
 
 ### AOT posture
 

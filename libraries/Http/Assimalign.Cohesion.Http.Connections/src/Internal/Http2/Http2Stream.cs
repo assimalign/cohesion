@@ -557,12 +557,32 @@ internal sealed class Http2Stream
         _headerBlock.Write(payload);
     }
 
-    public Http2Context CreateContext(
+    /// <summary>
+    /// Materializes the completed request head as an <see cref="Http2Context"/>, running the
+    /// registered request-parse interceptors (head + body hooks) as the head is assembled — the
+    /// HTTP/2 analogue of the HTTP/1.1 <c>Http1MessageReader</c> invocation point. Head hooks run
+    /// before the application observes any body octet (the body streams in through the
+    /// flow-control-bounded pipe afterward); body hooks wrap the streaming body stream.
+    /// </summary>
+    /// <param name="decoder">The connection's HPACK decoder.</param>
+    /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
+    /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
+    /// <param name="connectionAborted">The connection-teardown token linked into the request's abort token.</param>
+    /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
+    /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
+    /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
+    /// <exception cref="HttpRequestRejectedException">
+    /// Thrown when a request-parse interceptor rejects the request.
+    /// </exception>
+    public async ValueTask<Http2Context> CreateContextAsync(
         HPackDecoder decoder,
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
         CancellationToken connectionAborted,
-        Func<int, int, CancellationToken, ValueTask> onBodyConsumed)
+        Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
+        IHttpRequestInterceptor[] interceptors,
+        long? maxRequestBodySize)
     {
         if (!HeadersCompleted)
         {
@@ -610,10 +630,11 @@ internal sealed class Http2Stream
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
+        HttpMethod method = HttpMethod.GetCanonicalizedValue(decodedHeaders.Method ?? HttpMethod.Get.Value);
         Http2Request request = new(
             host,
             path,
-            HttpMethod.GetCanonicalizedValue(decodedHeaders.Method ?? HttpMethod.Get.Value),
+            method,
             scheme,
             query,
             decodedHeaders.Headers,
@@ -629,7 +650,20 @@ internal sealed class Http2Stream
             SetPriorityFromHeader(headerPriority);
         }
 
-        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted);
+        // Request-parse interceptor phase. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
+        // tunnel traffic rather than a message body, so body hooks are skipped for it (head hooks
+        // still run). The hook-populated feature collection flows into the exchange through the
+        // Http2Context features parameter; zero interceptors keeps the pre-seam fast path.
+        bool isConnect = method == HttpMethod.Connect;
+        HttpFeatureCollection? features = await HttpRequestInterceptorPipeline.InvokeAsync(
+            interceptors,
+            HttpVersion.Http20,
+            request,
+            connectionInfo,
+            maxRequestBodySize,
+            isConnect).ConfigureAwait(false);
+
+        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, features);
 
         // Surface the :protocol pseudo-header (RFC 8441) generically so a
         // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)

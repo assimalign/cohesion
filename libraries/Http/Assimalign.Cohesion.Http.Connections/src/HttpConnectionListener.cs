@@ -66,7 +66,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         {
             if (registration.IsMultiplexed)
             {
-                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(responseInterceptors), registration.CreateMultiplexedListener()));
+                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors), registration.CreateMultiplexedListener()));
             }
             else
             {

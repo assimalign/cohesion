@@ -6,9 +6,9 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <summary>
 /// The request-shaping and timeout limits shared by every HTTP protocol version. Each
 /// version-specific options surface (<see cref="Http1ConnectionListenerOptions"/>,
-/// <see cref="Http2ConnectionListenerOptions"/>) exposes a derived limits type
-/// (<see cref="Http1Limits"/>, <see cref="Http2Limits"/>) that adds the bounds specific to that
-/// version's wire format.
+/// <see cref="Http2ConnectionListenerOptions"/>, <see cref="Http3ConnectionListenerOptions"/>)
+/// exposes a derived limits type (<see cref="Http1Limits"/>, <see cref="Http2Limits"/>,
+/// <see cref="Http3Limits"/>) that adds the bounds specific to that version's wire format.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,8 +23,10 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// Enforcement is per version: the HTTP/1.1 read path enforces all three limits today; HTTP/2
 /// bounds request-body buffering through flow-control backpressure (a hard body-size cap and the
 /// connection timeouts are tracked follow-up work); HTTP/3's equivalents are delegated to the
-/// QUIC transport. Each property documents where it is enforced so an operator never has to
-/// guess.
+/// QUIC transport. On every version <see cref="MaxRequestBodySize"/> additionally seeds each
+/// request's parse context, so request-parse interceptors observe and adjust the same knob no
+/// matter which protocol served the request. Each property documents where it is enforced so an
+/// operator never has to guess.
 /// </para>
 /// </remarks>
 public abstract class HttpConnectionListenerLimits

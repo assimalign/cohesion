@@ -211,7 +211,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listener, (_, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listener, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
     }
 
     /// <summary>
@@ -250,7 +250,7 @@ public sealed class HttpConnectionListenerOptions
         Http2ConnectionListenerOptions http2Options = new();
         configure(http2Options);
 
-        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (_, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, responseInterceptors));
+        return UseStreamListener(HttpProtocol.Http20, listenerFactory, (interceptors, responseInterceptors) => new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
     }
 
     /// <summary>
@@ -324,11 +324,11 @@ public sealed class HttpConnectionListenerOptions
         Http3ConnectionListenerOptions http3Options = new();
         configure(http3Options);
 
-        // The QPACK options are captured now (registration time); the listener-wide
-        // response interceptors are bound when the HttpConnectionListener snapshots them.
+        // The QPACK options and limits are captured now (registration time); the listener-wide
+        // request/response interceptors are bound when the HttpConnectionListener snapshots them.
         Registrations.Add(HttpListenerRegistration.ForMultiplexed(
             listenerFactory,
-            responseInterceptors => new Http3ConnectionFactory(responseInterceptors, http3Options.QPack)));
+            (interceptors, responseInterceptors) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, http3Options.QPack)));
 
         return this;
     }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 internal sealed class Http3Connection : HttpConnection
 {
     private readonly IMultiplexedConnection _connection;
+    private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
@@ -18,10 +20,18 @@ internal sealed class Http3Connection : HttpConnection
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3Connection(IMultiplexedConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors, Http3QPackOptions qpackOptions)
+    public Http3Connection(
+        IMultiplexedConnection connection,
+        bool isSecure,
+        Http3ConnectionListenerOptions.Http3Limits limits,
+        IHttpRequestInterceptor[] requestInterceptors,
+        IHttpResponseInterceptor[] responseInterceptors,
+        Http3QPackOptions qpackOptions)
         : base(isSecure)
     {
         _connection = connection;
+        _limits = limits;
+        _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _qpackOptions = qpackOptions;
     }
@@ -49,7 +59,7 @@ internal sealed class Http3Connection : HttpConnection
             throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
         }
 
-        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _responseInterceptors, _qpackOptions);
+        return _openContext = new Http3ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors, _qpackOptions);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

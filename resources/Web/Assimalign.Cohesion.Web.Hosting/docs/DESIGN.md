@@ -318,17 +318,20 @@ default request-parse interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
 Today that is one interceptor: `Http.RequestLimits`'
 max-request-body-size interceptor, which occupies slot 0 of the interceptor
-order so every HTTP/1.1 request carries the typed
-`IHttpMaxRequestBodySizeFeature` and user-registered interceptors' head hooks
-can observe it. HTTP/1.1 is currently the only protocol whose parse path
-invokes interceptors — HTTP/2 and HTTP/3 exchanges do not carry the feature
-yet (see the transport's protocol-coverage notes); wiring those paths is
-tracked follow-up work.
+order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
+user-registered interceptors' head hooks can observe it. As of #819 the seam is
+invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
+feature is attached uniformly regardless of protocol. Cap *enforcement* (the
+413) is still HTTP/1.1-only: h2 bounds body buffering via flow-control
+backpressure and h3 via QUIC flow control, so a lowered cap changes the
+reported feature value but does not reject the body there yet (the hard cap is
+tracked in the transport's protocol-coverage notes and on
+`HttpConnectionListenerLimits.MaxRequestBodySize`).
 
 ### Why default-on, and why here
 
 The transport itself stays lean — with zero interceptors it allocates no
-per-request interception state at all — so the "h1 requests always have the
+per-request interception state at all — so the "every request always has the
 typed feature" guarantee is a *hosting* policy, not a transport one. It lives
 here because this is the composition root: apps that want a leaner pipeline can
 inspect or clear `HttpConnectionListenerOptions.RequestInterceptors` in their own

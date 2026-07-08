@@ -17,14 +17,14 @@ internal sealed class HttpListenerRegistration
     private readonly Func<IConnectionListener>? _streamListenerFactory;
     private readonly Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
-    private readonly Func<IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
+    private readonly Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
         Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
-        Func<IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
+        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
         Protocol = protocol;
         _streamListenerFactory = streamListenerFactory;
@@ -53,7 +53,7 @@ internal sealed class HttpListenerRegistration
 
     public static HttpListenerRegistration ForMultiplexed(
         Func<IMultiplexedConnectionListener> listenerFactory,
-        Func<IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, streamConnectionFactoryBuilder: null, listenerFactory, connectionFactoryBuilder);
     }
@@ -97,14 +97,16 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Builds the multiplexed (HTTP/3) connection factory, binding it to the listener-wide
-    /// response interceptors (which are only snapshotted once the listener is constructed);
-    /// the registration's captured HTTP/3 options are already closed over by the builder.
+    /// request/response interceptors (which are only snapshotted once the listener is
+    /// constructed); the registration's captured HTTP/3 options are already closed over by the
+    /// builder.
     /// </summary>
+    /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
     /// <returns>The multiplexed connection factory.</returns>
-    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpResponseInterceptor[] responseInterceptors)
+    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
     {
-        return _multiplexedConnectionFactoryBuilder!.Invoke(responseInterceptors);
+        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
     }
 
     /// <summary>

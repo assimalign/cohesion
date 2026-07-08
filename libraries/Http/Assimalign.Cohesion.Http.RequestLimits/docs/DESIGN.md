@@ -67,11 +67,11 @@ bridge.
 
 Register this package's interceptor **first**. Its head hook attaches the feature; later
 interceptors' head hooks may then look it up (or simply write the context knob — same store).
-The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every HTTP/1.1
-request carries the typed feature — matching the protocol coverage of the transport-seeded
-predecessor, since h1 is the only parse path that invokes interceptors today (see "Protocol
-coverage" below); the raw transport remains lean (zero interceptors ⇒ no per-request context or
-feature allocation).
+The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every request carries
+the typed feature — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
+feature is attached uniformly regardless of protocol (enforcement of the cap remains h1-only —
+see "Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
+per-request context or feature allocation).
 
 ## Feature identity
 
@@ -89,35 +89,45 @@ The migration from the original in-core placement is complete; the pieces sit as
 2. **Transport enforces, never seeds.** `Http.Connections` carries no body-size feature of its
    own: `HttpConnectionListenerOptions.RequestInterceptors` is snapshotted to an array when the
    listener is constructed (post-construction registrations are inert — no racing the accept
-   loops); the h1 parser builds one `HttpRequestInterceptorContext` per request (read-only
-   `Headers` view via `AsReadOnly()`), runs head hooks after the head parse, freezes the knob,
-   enforces whatever cap remains (413), chains body hooks over the materialized stream, and
-   flows the hook-populated feature collection into the exchange through the context
-   constructors' `features` parameters. `HttpRequestRejectedException` is caught ahead of the
-   wire-failure classifier and answered via the minimal-status-response writer. Zero registered
-   interceptors keeps the exact pre-seam fast path (no context, no feature, no hook dispatch).
+   loops); each transport builds one `HttpRequestInterceptorContext` per request (read-only
+   `Headers` view via `AsReadOnly()`), runs head hooks after the head is assembled, freezes the
+   knob, chains body hooks over the materialized stream, and flows the hook-populated feature
+   collection into the exchange through the context constructors' `features` parameters. On h1 the
+   parser does this inline and enforces whatever cap remains (413); on h2/h3 the shared
+   `HttpRequestInterceptorPipeline` does it at the context-construction site (no cap enforcement
+   yet — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
+   wire-failure classifier and answered with the protocol-appropriate wire behavior (h1 minimal
+   status response + close; h2 `RST_STREAM(CANCEL)`; h3 stream abort). Zero registered interceptors
+   keeps the exact pre-seam fast path (no context, no feature, no hook dispatch).
 3. **Stale artifacts cleaned.** The never-shipped `CreateFeatures` factory references in
    `TransportHttpContext` and the Connections `DESIGN.md` were replaced by the interceptor
    documentation.
 4. **Web.Hosting installs by default.** `WebApplicationServerBuilder` registers
    `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` ahead of all user configuration,
    so it holds interceptor slot 0.
-5. **Tests.** The transport suite exercises the seam with local doubles (attach / cap-raise /
-   cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip / snapshot inertness);
-   this package's suite covers the feature contract; the h1 limit-rejection suite is unchanged
-   because enforcement never moved.
+5. **Tests.** The transport suite exercises the seam with local doubles on all three protocols
+   (h1: attach / cap-raise / cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip
+   / snapshot inertness; h2 + h3: attach / wrap / reject → RST_STREAM/stream-abort / freeze /
+   read-only headers / CONNECT skip / empty-body / lowered-cap no-reject / fast path); this
+   package's suite covers the feature contract; the h1 limit-rejection suite is unchanged because
+   enforcement never moved.
 
 ## Protocol coverage (honest gaps)
 
-- The interceptor seam and the cap enforcement are wired for **HTTP/1.1**. HTTP/2 and HTTP/3
-  currently buffer a stream's body **before** decoding its head (h2: `Http2Stream.CreateContext`
-  runs only when the stream is complete; h3: the request stream is drained before header
-  decode), so on those protocols a head hook runs before the body is *exposed*, not before it is
-  *received* — and no body-size cap is enforced there today at all. h2/h3 abuse limits are
-  tracked separately (#764, #750); wiring the hook invocation into their context-construction
-  sites is tracked follow-up work (the seam is h1-only at runtime, matching the pre-seam
-  behavior). Nothing in this package's docs should be read as implying h2/h3 body protection
-  exists yet.
+- The interceptor **seam** is now wired into **all three** request paths — HTTP/1.1, HTTP/2, and
+  HTTP/3 (#819) — so this package's head hook attaches the typed `IHttpMaxRequestBodySizeFeature`
+  on every request regardless of protocol, and the feature is visible from the first middleware
+  onward on h2/h3 exactly as on h1.
+- **Cap *enforcement* remains HTTP/1.1-only.** HTTP/2 dispatches a request at header completion
+  and streams the body under flow-control backpressure (h2: `Http2Stream.CreateContextAsync` runs
+  at the frame pump's END_HEADERS dispatch, so head hooks run before the application observes any
+  body octet); HTTP/3 drains the request stream before header decode, so its head hook runs
+  before the body is *exposed*, not before it is *received*. On both, no hard body-size cap is
+  enforced yet — h2 bounds buffering via flow-control backpressure and h3 via QUIC flow control
+  (see `HttpConnectionListenerLimits.MaxRequestBodySize`; the hard cap is tracked follow-up
+  work). A hook that lowers the cap on h2/h3 therefore changes the value the feature reports
+  without rejecting the body. Nothing in this package should be read as implying h2/h3 body
+  *protection* exists yet — only the typed feature and the hook plumbing do.
 - Data-rate limits and the middleware-visible pre-read override window depend on the
   streaming-body rework (#810).
 

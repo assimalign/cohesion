@@ -114,6 +114,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
     // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
@@ -123,7 +124,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
     private readonly Http2FloodGuard _floodGuard;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpRequestInterceptor[] requestInterceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
@@ -134,6 +135,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         _streams = new Dictionary<int, Http2Stream>();
         _localSettings = BuildLocalSettings(limits);
         _remoteSettings = new Http2ConnectionSettings();
+        _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
         _readyContexts = Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
         {
@@ -669,9 +671,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 await ProcessSettingsFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
             case Http2FrameType.Headers:
-                return ProcessHeadersFrame(receivedFrame);
+                return await ProcessHeadersFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Continuation:
-                return ProcessContinuationFrame(receivedFrame);
+                return await ProcessContinuationFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Data:
                 return await ProcessDataFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
             case Http2FrameType.Ping:
@@ -1162,7 +1164,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    private Http2Context? ProcessHeadersFrame(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessHeadersFrameAsync(ReceivedFrame receivedFrame)
     {
         if (!_receivedClientSettings)
         {
@@ -1186,7 +1188,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return null;
         }
 
-        return TryDispatchStream(stream);
+        return await TryDispatchStreamAsync(stream).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1235,7 +1237,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    private Http2Context? ProcessContinuationFrame(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessContinuationFrameAsync(ReceivedFrame receivedFrame)
     {
         if (_continuationStreamId is null || _continuationStreamId.Value != receivedFrame.Frame.StreamId)
         {
@@ -1264,7 +1266,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             _continuationStreamId = null;
         }
 
-        return TryDispatchStream(stream);
+        return await TryDispatchStreamAsync(stream).ConfigureAwait(false);
     }
 
     private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
@@ -1423,9 +1425,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// Dispatches a stream's request head as an <c>IHttpContext</c> once its header
     /// block is complete, exactly once. The body streams in afterward through the
     /// stream's body pipe (RFC 9113 lets the server respond before the request body
-    /// finishes arriving).
+    /// finishes arriving). The registered request-parse interceptors run here — as
+    /// the head is assembled into a context, before the consumer observes it.
     /// </summary>
-    private Http2Context? TryDispatchStream(Http2Stream stream)
+    private async Task<Http2Context?> TryDispatchStreamAsync(Http2Stream stream)
     {
         if (!stream.IsHeadReady)
         {
@@ -1440,7 +1443,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // fire RequestAborted on the application's IHttpContext.
         try
         {
-            return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None, OnRequestBodyConsumedAsync);
+            return await stream.CreateContextAsync(
+                _headerDecoder,
+                ConnectionInfo,
+                GetScheme(),
+                CancellationToken.None,
+                OnRequestBodyConsumedAsync,
+                _requestInterceptors,
+                _http2Limits.MaxRequestBodySize).ConfigureAwait(false);
         }
         catch (HPack.HPackHeaderListSizeExceededException error)
         {
@@ -1462,6 +1472,21 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
                 $"HTTP/2 HEADERS frame contained a malformed field section: {error.Message}");
+        }
+        catch (HttpRequestRejectedException rejection)
+        {
+            // A request-parse interceptor refused this request (the pipeline already disposed the
+            // partial body-wrapper chain and hook-attached features before surfacing). RFC 9113
+            // §5.4.2 — reset the single stream rather than writing the h1-style status response;
+            // the connection and its other streams are unaffected. HTTP/2 has no REQUEST_REJECTED
+            // code (unlike HTTP/3), so CANCEL carries the reset — a neutral per-stream termination
+            // consistent with the transport's application-cancel path, without REFUSED_STREAM's
+            // "safe to retry" promise (see docs/DESIGN.md). The pump's stream-error handler emits
+            // the RST_STREAM, which also removes the stream and reclaims its receive-window debt.
+            throw new Http2StreamException(
+                stream.StreamId,
+                Http2ErrorCode.Cancel,
+                $"HTTP/2 stream {stream.StreamId} was rejected by a request-parse interceptor with status '{rejection.StatusCode}'.");
         }
     }
 
