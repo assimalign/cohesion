@@ -468,6 +468,143 @@ HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
 - **A streaming/SSE dependency in this library.** By design — the feature packages
   own it; this transport only exposes the sink and the interceptor seam.
 
+## Interim (1xx) responses and `Expect: 100-continue`
+
+### What it is
+
+RFC 9110 §15.2 lets a server emit one or more **interim** (`1xx`) responses ahead
+of the single final response — most usefully `100 Continue` (RFC 9110 §10.1.1,
+the `Expect: 100-continue` handshake large-upload clients rely on) and
+`103 Early Hints` (RFC 8297, `Link` fields that let a client start fetching
+sub-resources before the final response is ready). Before this, the response
+write paths on all three versions assumed exactly one response per exchange, so
+neither an application nor the transport itself could put a `1xx` on the wire.
+
+Two capabilities are added, and they are independent:
+
+1. **Automatic `Expect: 100-continue`** on HTTP/1.1 — a transport behavior, no
+   application involvement.
+2. **Application-emitted interim responses** through a typed feature, on all
+   three versions.
+
+### The feature: `IHttpInterimResponseFeature`
+
+The public typed surface is `IHttpInterimResponseFeature` in core
+`Assimalign.Cohesion.Http` (interface-first; the transport ships the internal
+implementation), mirroring the extended-CONNECT feature model — baseline response
+handling is unchanged and the wire emission stays a transport concern the feature
+never re-implements. Each transport installs a per-protocol internal
+implementation on `context.Features` **for every exchange**, before the handler
+runs, so a handler resolves it with
+`context.Features.Get<IHttpInterimResponseFeature>()` (or the
+`context.InterimResponse` / `context.SendEarlyHintsAsync(...)` /
+`context.SendContinueAsync()` ergonomics in
+`HttpInterimResponseExtensions`). Installation is a single feature-collection
+insert; `TransportHttpContext` already allocates the collection unconditionally,
+so this does not regress the interceptor fast paths.
+
+The contract is deliberately small:
+
+- `bool IsInterimResponseSupported` — `true` while an interim can still precede
+  the final response. It flips to `false` once the final response head is
+  committed (a streamed body started, or on HTTP/1.1 the connection was taken over
+  by a protocol upgrade). This is the **report-don't-throw** discoverability
+  path (acceptance criterion): a caller checks it and learns the exchange state
+  without provoking an exception.
+- `ValueTask SendInterimResponseAsync(HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, …)`
+  — emits one interim response. The status MUST be `1xx` and MUST NOT be `101`
+  (an `ArgumentOutOfRangeException` otherwise); `101 Switching Protocols` is a
+  connection transition owned by `Assimalign.Cohesion.Http.ProtocolUpgrade`, not
+  an interim response. Emitting **after** the final response has started is an
+  ordering error and throws `InvalidOperationException`. `headers` is `null` for a
+  bodyless `100`; a `103` typically carries only `Link`.
+
+The shared status-code rules live in `HttpInterimResponseRules`
+(`ValidateInterimStatusCode` for the feature, `EnsureFinalStatusCode` for the
+final-response guard below), so all three engines classify `1xx` identically.
+
+### Per-transport wire emission
+
+- **HTTP/1.1** — `Http1InterimResponseFeature` writes the interim status line and
+  fields straight onto the connection stream via
+  `Http1MessageWriter.WriteInterimResponseAsync`
+  (`HTTP/1.1 <code> <reason>` CRLF, one field line per value — so a multi-valued
+  `Link` is expressed without comma-folding — then the blank line, then a flush).
+  No `Content-Length` is written (an interim carries no body). An HTTP/1.1 exchange
+  owns its whole connection and the handler is the sole writer for its duration,
+  so the interim bytes simply precede the final response bytes; no interleaving
+  discipline is needed.
+- **HTTP/2** — `Http2InterimResponseFeature` delegates to
+  `Http2ConnectionContext.WriteInterimResponseAsync`, which encodes the field
+  section with `HPackEncoder.EncodeInterimResponseHeaders` (the `1xx` `:status`
+  with **no** synthesized `Content-Length`) and writes it as an additional HEADERS
+  block **without** `END_STREAM` (RFC 9113 §8.1), holding the connection write gate
+  (`Http2WriteScheduler`) at the stream's effective priority for the whole
+  HEADERS [+ CONTINUATION…] sequence so it never interleaves with the pump's
+  control frames or another stream's response (RFC 9113 §4.1). The stream's local
+  half is left open — the final HEADERS(+DATA) with `END_STREAM` follows on the
+  same stream.
+- **HTTP/3** — `Http3InterimResponseFeature` delegates to
+  `Http3ConnectionContext.WriteInterimResponseAsync`, which encodes the field
+  section with `Http3HeaderCodec.EncodeInterimResponseHeaders` (QPACK, `1xx`
+  `:status`, no `Content-Length`) and writes an additional HEADERS frame on the
+  request stream ahead of the final HEADERS frame (RFC 9114 §4.1). The request
+  stream is single-writer for the response direction and QUIC applies its own
+  per-stream flow control, so the interim frame simply precedes the final frames.
+
+H2/H3 peers may receive several interim HEADERS, all before the final one — the
+feature can be called repeatedly.
+
+### The `1xx`-as-final-status guard
+
+A `1xx` is never a valid *final* response status. Every final-response write path
+funnels through `HttpInterimResponseRules.EnsureFinalStatusCode`, which throws a
+descriptive `InvalidOperationException`: HTTP/1.1 in the shared
+`Http1MessageWriter.WriteHeadAsync` (buffered + streaming), HTTP/2 in `SendAsync`
+and `WriteStreamingHeadersAsync`, HTTP/3 in `SendAsync` and the streaming sink's
+`CommitHeadersAsync`. The sole `1xx` that legitimately ends an exchange —
+`101 Switching Protocols` — is finalized out-of-band by the HTTP/1.1
+protocol-upgrade path (its `SendAsync` is suppressed via `ResponseFinalized`), so
+it never reaches the guard; HTTP/2 and HTTP/3 removed the `Upgrade` mechanism
+entirely, so their rejection is unconditional. Setting `1xx` as the final
+`Response.StatusCode` therefore fails fast, and an interim write after the final
+response has started is rejected by the feature — the two boundary criteria.
+
+### Automatic `Expect: 100-continue` on HTTP/1.1
+
+`Http1MessageReader` reads and fully buffers the request body **before** the
+context is dispatched. A client that sends `Expect: 100-continue` withholds the
+body until it sees `100 Continue`, so that buffered read would otherwise
+**deadlock** — the reader blocks for octets the client will not send. The reader
+therefore emits `100 Continue` automatically, on the wire, immediately before the
+body read, when the request declares `Expect: 100-continue` (via
+`ShouldSolicitContinue`) and its framing indicates a body (a `Transfer-Encoding`,
+or a non-zero `Content-Length` — a `Content-Length: 0` or a CONNECT tunnel is not
+solicited). This runs *after* the request-head interceptor hooks (so a hook may
+reject the request before the body is solicited) and *before* the body read, and
+it reuses the same `Http1MessageWriter.WriteInterimResponseAsync` the feature uses.
+A request without the expectation observes no interim response, and the exchange
+then completes with a normal final response over a preserved keep-alive.
+
+### De-scoped: lazy request-body solicitation
+
+The buffered-read model means the transport solicits the body *for* the handler,
+not *on behalf of* it: an application cannot inspect the head and decline
+(`401`/`417`) **before** the body is read, because the body is already buffered by
+dispatch time. True lazy solicit-on-first-body-read requires the same
+streaming-request-body rework the HTTP/1.1 data-rate limits wait on
+(`MinRequestBodyDataRate`), and is deliberately out of scope here — the automatic
+`100 Continue` is the minimal correct step that fixes the interop stall. When the
+read becomes incremental, the solicitation moves to the first body-byte read and
+the feature's `SendContinueAsync` becomes the application-driven path; neither
+changes the contract above.
+
+### AOT posture
+
+No reflection or runtime codegen. The feature is a small per-exchange object; the
+interim encoders are the existing HPACK/QPACK field-section writers with a `1xx`
+`:status` and no `Content-Length`; the status guards are integer range checks.
+
 ## HTTP/1.1 connection takeover (protocol upgrade / CONNECT)
 
 ### What it is
@@ -1664,7 +1801,10 @@ deliberate, recorded decision, not an implementation gap:
   real-world client support. The complexity (push streams, `PUSH_PROMISE`,
   `MAX_PUSH_ID` / `CANCEL_PUSH` bookkeeping, cache-state assumptions) buys
   almost nothing for interoperability today, and `103 Early Hints` covers
-  the practical "warm the client early" use case without it.
+  the practical "warm the client early" use case without it — and `103` now
+  ships as an interim response on all three versions (see "Interim (1xx)
+  responses and `Expect: 100-continue`" above), so the substitute is real,
+  not aspirational.
 - The mechanism is optional for a compliant server: RFC 9113 §8.4 and
   RFC 9114 §4.6 permit a server to simply never push.
 

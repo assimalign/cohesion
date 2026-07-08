@@ -24,18 +24,20 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// </remarks>
 public class HttpContextFeatureLifecycleTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose an empty per-request feature collection by default")]
-    public async Task Features_OnRequest_ShouldExposeEmptyCollection()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: Should expose only the baseline interim-response feature by default")]
+    public async Task Features_OnRequest_ShouldExposeOnlyBaselineInterimFeature()
     {
         // Arrange + Act — no request- or response-interceptors are registered, so the transport takes
-        // the zero-interceptor fast path and seeds nothing (features are attached by registered
-        // IHttpRequestInterceptor / IHttpResponseInterceptor implementations or by middleware).
+        // the zero-interceptor fast path and seeds no interceptor-driven features. The interim-response
+        // capability (100 Continue / 103 Early Hints) is installed on every exchange as a baseline, so
+        // the collection carries exactly it — nothing else.
         IHttpContext httpContext = await ReceiveSingleContextAsync();
 
-        // Assert — Features is non-null but empty.
+        // Assert — Features holds only the baseline IHttpInterimResponseFeature.
         httpContext.Features.ShouldNotBeNull();
-        using IEnumerator<IHttpFeature> enumerator = httpContext.Features.GetEnumerator();
-        enumerator.MoveNext().ShouldBeFalse();
+        List<IHttpFeature> features = [.. httpContext.Features];
+        features.Count.ShouldBe(1);
+        features[0].ShouldBeAssignableTo<IHttpInterimResponseFeature>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Features: IDisposable feature should be disposed when the request disposes")]

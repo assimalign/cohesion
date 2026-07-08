@@ -246,6 +246,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
                 if (processed.Context is not null)
                 {
+                    // Install the interim-response capability (100 Continue on demand, 103 Early
+                    // Hints) before the handler runs. Emission rides the connection write gate so an
+                    // interim HEADERS block never interleaves with the pump's frames (RFC 9113 §4.1).
+                    processed.Context.Features.Set(new Http2InterimResponseFeature(this, processed.Context));
+
                     // Expose the raw DATA-frame response body sink to registered response
                     // interceptors so a feature package (streaming / SSE) can wrap it and
                     // install a typed response feature — without this transport depending
@@ -497,6 +502,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
+
+        // RFC 9110 §15.2 — a 1xx status is never a valid final response status. Interim responses go
+        // through IHttpInterimResponseFeature; HTTP/2 has no 101 (the Upgrade mechanism was removed,
+        // RFC 9113 §8.6), so the rejection is unconditional.
+        HttpInterimResponseRules.EnsureFinalStatusCode(http2Context.Response.StatusCode);
 
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
@@ -1685,7 +1695,44 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// </summary>
     internal async Task WriteStreamingHeadersAsync(Http2Context context, CancellationToken cancellationToken)
     {
+        // RFC 9110 §15.2 — the final (streamed) response head must not carry a 1xx status.
+        HttpInterimResponseRules.EnsureFinalStatusCode(context.Response.StatusCode);
+
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
+
+        await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeScheduler.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes an interim (<c>1xx</c>) response as an additional HEADERS block on
+    /// <paramref name="context"/>'s stream, ahead of the final response (RFC 9113 §8.1). The field
+    /// section carries the <c>1xx</c> <c>:status</c> and the supplied fields with no
+    /// <c>Content-Length</c>, and the HEADERS frame is written <b>without</b> <c>END_STREAM</c> so the
+    /// stream stays open for the final response. Holds the connection write gate for the whole HEADERS
+    /// [+ CONTINUATION…] sequence (RFC 9113 §4.1), at the stream's effective priority, so the interim
+    /// frames never interleave with the pump's control frames or another stream's response. The
+    /// stream's local half is deliberately left open (no <c>SendEndStream</c>).
+    /// </summary>
+    /// <param name="context">The exchange whose interim response is emitted.</param>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    internal async Task WriteInterimResponseAsync(
+        Http2Context context,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
+    {
+        byte[] headerBlock = HPackEncoder.EncodeInterimResponseHeaders(statusCode, headers);
 
         await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
         try

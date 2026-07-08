@@ -980,6 +980,11 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
+        // RFC 9110 §15.2 — a 1xx status is never a valid final response status. Interim responses go
+        // through IHttpInterimResponseFeature; HTTP/3 has no 101 (RFC 9114 §4.2), so the rejection is
+        // unconditional.
+        HttpInterimResponseRules.EnsureFinalStatusCode(http3Context.Response.StatusCode);
+
         Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
@@ -991,6 +996,30 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             await WriteFrameAsync(stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }
 
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes an interim (<c>1xx</c>) response as an additional QPACK-encoded HEADERS frame on the
+    /// exchange's request stream, ahead of the final HEADERS frame (RFC 9114 §4.1). The field section
+    /// carries the <c>1xx</c> <c>:status</c> and the supplied fields with no <c>Content-Length</c>. The
+    /// request stream is single-writer for the response direction, so the interim frame simply
+    /// precedes the final frames on the same QUIC stream; QUIC flow control provides backpressure.
+    /// </summary>
+    /// <param name="http3Context">The exchange whose interim response is emitted.</param>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    internal async Task WriteInterimResponseAsync(
+        Http3Context http3Context,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
+    {
+        Stream stream = http3Context.StreamConnection.AsStream();
+        byte[] headerBlock = Http3HeaderCodec.EncodeInterimResponseHeaders(statusCode, headers);
+
+        await WriteFrameAsync(stream, Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1102,6 +1131,11 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         {
             context.EffectivePriority = headerPriority;
         }
+
+        // Install the interim-response capability (100 Continue on demand, 103 Early Hints) before the
+        // handler runs. Emission writes an additional HEADERS frame on this request stream ahead of
+        // the final one (RFC 9114 §4.1).
+        context.Features.Set(new Http3InterimResponseFeature(this, context));
 
         // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
         // provides backpressure) to registered response interceptors so a feature package
