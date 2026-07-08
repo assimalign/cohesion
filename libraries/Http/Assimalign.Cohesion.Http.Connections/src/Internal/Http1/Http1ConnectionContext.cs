@@ -18,13 +18,15 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpExchangeInterceptor[] _interceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly string? _altSvcHeaderValue;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _limits = limits;
         _interceptors = interceptors;
         _responseInterceptors = responseInterceptors;
+        _altSvcHeaderValue = altSvcHeaderValue;
     }
 
     /// <summary>
@@ -65,7 +67,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             {
                 context.RunResponseInterceptors(
                     _responseInterceptors,
-                    new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider),
+                    new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
                     new Http1ExchangeControl(context, Stream));
             }
 
@@ -115,8 +117,9 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         }
 
         // If a response feature streamed to the raw sink, the head and body are already on the
-        // wire (the BeforeResponseHead hooks fired at the sink's head commit); finalize (emit the
-        // terminating zero-length chunk) rather than writing a second, buffered response.
+        // wire (the BeforeResponseHead hooks fired at the sink's head commit, which also injected
+        // the Alt-Svc advertisement); finalize (emit the terminating zero-length chunk) rather
+        // than writing a second, buffered response.
         if (http1Context.ResponseBodySink is { HasStarted: true } sink)
         {
             await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
@@ -148,6 +151,11 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
+
+        // Advertise the HTTP/3 endpoint on this buffered response unless the application (or a
+        // lifecycle hook — they have all run by now) set its own Alt-Svc (RFC 7838 — the server
+        // never overwrites an application value).
+        HttpAltServiceInjector.Inject(http1Context.Response.Headers, _altSvcHeaderValue);
 
         // Commit point: from here the final response is on the wire, so the exchange control's
         // probes must report the response as started (no more interim writes or takeover).
