@@ -16,10 +16,11 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 /// <summary>
 /// Exercises the request-parse interceptor seam end to end over the HTTP/2 transport at its
-/// context-construction site (<c>Http2Stream.CreateContextAsync</c>): head hooks attaching features
-/// and observing read-only headers, body hooks wrapping the request stream, the freeze contract,
-/// CONNECT body-hook skipping, empty-body invocation, the buffered-body per-protocol timing
-/// difference, and typed rejection surfaced as an RST_STREAM.
+/// context-construction site (<c>Http2Stream.CreateContextAsync</c>, reached from the frame pump's
+/// END_HEADERS dispatch): head hooks attaching features and observing read-only headers, body
+/// hooks wrapping the streaming request-body stream, the freeze contract, CONNECT body-hook
+/// skipping, empty-body invocation, the unenforced-cap posture, and typed rejection surfaced as an
+/// RST_STREAM.
 /// </summary>
 public class Http2InterceptorTests
 {
@@ -28,7 +29,7 @@ public class Http2InterceptorTests
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new HostFeatureAttachingInterceptor());
+        options.RequestInterceptors.Add(new HostFeatureAttachingInterceptor());
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -43,8 +44,8 @@ public class Http2InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
             1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new WrappingInterceptor("inner"));
-        options.Interceptors.Add(new WrappingInterceptor("outer"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("inner"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("outer"));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -62,7 +63,7 @@ public class Http2InterceptorTests
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/forbidden", "https", "api.test");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new HeadRejectingInterceptor(HttpStatusCode.Forbidden));
+        options.RequestInterceptors.Add(new HeadRejectingInterceptor(HttpStatusCode.Forbidden));
 
         (bool yielded, IReadOnlyList<(long FrameType, byte[] Payload)> frames) = await DriveAsync(payload, options);
 
@@ -84,9 +85,9 @@ public class Http2InterceptorTests
         DisposableFeatureAttachingInterceptor first = new();
         WrappingInterceptor wrapper = new("inner");
         BodyRejectingInterceptor rejecting = new(HttpStatusCode.UnProcessableEntity);
-        options.Interceptors.Add(first);
-        options.Interceptors.Add(wrapper);
-        options.Interceptors.Add(rejecting);
+        options.RequestInterceptors.Add(first);
+        options.RequestInterceptors.Add(wrapper);
+        options.RequestInterceptors.Add(rejecting);
 
         (bool yielded, IReadOnlyList<(long FrameType, byte[] Payload)> frames) = await DriveAsync(payload, options);
 
@@ -104,7 +105,7 @@ public class Http2InterceptorTests
             1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -121,7 +122,7 @@ public class Http2InterceptorTests
             1, "GET", "/", "https", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
         HttpConnectionListenerOptions options = new();
         HeaderProbingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -147,7 +148,7 @@ public class Http2InterceptorTests
             (":authority", "api.test"));
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(Combine(preface, settings, headers), options);
 
@@ -162,7 +163,7 @@ public class Http2InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -170,17 +171,17 @@ public class Http2InterceptorTests
         interceptor.BodyInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A lowered cap should not reject the already-buffered body")]
-    public async Task OnRequestHead_LoweringCap_ShouldNotRejectBufferedBody()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A lowered cap should not reject the streamed body (h2 cap enforcement is follow-up)")]
+    public async Task OnRequestHead_LoweringCap_ShouldNotRejectBody()
     {
-        // Per-protocol timing difference (documented on IHttpRequestInterceptor): HTTP/2 buffers the
-        // body before the head is decoded, so lowering the cap at head-hook time cannot reject an
-        // already-received body — the request still dispatches. Body-cap enforcement on h2 is
-        // tracked separately (#750/#764); a lowered cap here only affects the exposed feature value.
+        // HTTP/2 bounds request-body buffering via flow-control backpressure; the hard wire-level
+        // cap is tracked follow-up work (see HttpConnectionListenerLimits.MaxRequestBodySize).
+        // Lowering the cap at head-hook time therefore adjusts only the value hook-attached
+        // features expose — the streamed body still dispatches and reads in full.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
             1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new CapSettingInterceptor(16));
+        options.RequestInterceptors.Add(new CapSettingInterceptor(16));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -241,23 +242,28 @@ public class Http2InterceptorTests
         return (yielded, frames);
     }
 
+    /// <summary>
+    /// Asserts the first <c>RST_STREAM</c> on the wire carries <paramref name="expectedErrorCode"/>.
+    /// Only the first is asserted because a rejection's reset removes the stream, so any DATA the
+    /// peer already sent afterward legitimately draws a follow-up <c>RST_STREAM(STREAM_CLOSED)</c>
+    /// (RFC 9113 §5.1).
+    /// </summary>
     private static void AssertResetStream(
         IReadOnlyList<(long FrameType, byte[] Payload)> frames,
         Http2ErrorCode expectedErrorCode)
     {
-        bool found = false;
         foreach ((long frameType, byte[] framePayload) in frames)
         {
             if (frameType == 3) // RST_STREAM
             {
-                found = true;
                 framePayload.Length.ShouldBe(4);
                 uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(framePayload);
                 code.ShouldBe((uint)expectedErrorCode);
+                return;
             }
         }
 
-        found.ShouldBeTrue();
+        throw new Shouldly.ShouldAssertException("Expected an RST_STREAM frame on the wire, but none was found.");
     }
 
     private static byte[] Combine(params byte[][] buffers)

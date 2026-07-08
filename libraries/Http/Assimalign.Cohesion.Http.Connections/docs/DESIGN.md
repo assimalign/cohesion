@@ -39,8 +39,14 @@ with shape safety enforced at the seam:
 HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 {
     options.UseHttp1(tcpListener);                 // IConnectionListener
-    options.UseHttp2(tlsTcpListener);              // IConnectionListener (TLS pre-composed)
-    options.UseHttp3(quicListener);                // IMultiplexedConnectionListener
+    options.UseHttp2(tlsTcpListener, http2 =>      // IConnectionListener (TLS pre-composed)
+    {
+        http2.Limits.MaxStreamsPerConnection = 256;
+    });
+    options.UseHttp3(quicListener, http3 =>        // IMultiplexedConnectionListener
+    {
+        http3.QPack.MaxTableCapacity = 4096;
+    });
 });
 ```
 
@@ -54,6 +60,29 @@ HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 - `UseHttp3` accepts an `IMultiplexedConnectionListener` — the parameter
   type itself is the shape gate, so no runtime capability check is
   needed for stream multiplexing.
+
+### Per-version options, captured per registration
+
+Every `Use*` method has an overload taking a configure callback for that
+version's options type — `Http1ConnectionListenerOptions`,
+`Http2ConnectionListenerOptions`, `Http3ConnectionListenerOptions` (all under
+`Options/`) — so each protocol version owns its own configuration surface
+instead of sharing one listener-wide bag. The options are captured **per
+registration** at `Use*` time and closed over by that registration's
+connection-factory builder; two registrations of the same version can carry
+different limits. Cross-version concerns stay listener-wide on
+`HttpConnectionListenerOptions`: the request/response interceptors (snapshotted
+when the `HttpConnectionListener` is constructed) and `BacklogCapacity`.
+
+Limits follow the same split. `HttpConnectionListenerLimits` is the abstract
+base holding only the limits meaningful to all three versions
+(`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout` — each
+documents where it is enforced today); the version-specific types nest inside
+their options class (`Http1ConnectionListenerOptions.Http1Limits` adds the
+HTTP/1.1 wire-format bounds, `Http2ConnectionListenerOptions.Http2Limits` adds
+the HTTP/2 abuse caps). HTTP/3 deliberately exposes no limits surface — its
+stream/flow-control limits live in the QUIC transport (see the HTTP/3
+non-goals).
 
 `BacklogCapacity` retains its bounded-channel semantics: it caps how
 many accepted HTTP connections may buffer before the per-listener accept
@@ -76,7 +105,8 @@ The connection-is-the-pipe model shows up at three points:
 - Stream parsing (HTTP/1.1, HTTP/2) adapts the duplex pipe once via
   `connection.AsStream()`.
 - Graceful teardown completes `connection.Output` directly (HTTP/2
-  GOAWAY drain, HTTP/1.1 response drain) before disposal.
+  GOAWAY + bounded stream drain, HTTP/1.1 response drain) before disposal
+  (see "HTTP/2 graceful close").
 - HTTP/3 reads each accepted stream's `Input` (`PipeReader`) for
   unidirectional streams and `AsStream()` for request streams.
 
@@ -108,7 +138,7 @@ capability is the single source of truth, and the scheme
 
 ### What it is
 
-`HttpConnectionListenerOptions.Interceptors` is the injection seam the transport
+`HttpConnectionListenerOptions.RequestInterceptors` is the injection seam the transport
 exposes for code outside this package to participate at request-parse time. The
 contract — `IHttpRequestInterceptor`, `HttpRequestInterceptorContext`, and the
 typed rejection `HttpRequestRejectedException` — lives in core
@@ -118,8 +148,8 @@ transport never references them:
 
 ```csharp
 HttpConnectionListenerOptions options = new();
-options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
-options.Interceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
+options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+options.RequestInterceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
 Per request each transport (using the HTTP/1.1 parser as the reference; HTTP/2
@@ -130,8 +160,8 @@ and HTTP/3 run the same steps 2–5 through the shared
    derives host/scheme.
 2. Builds one `HttpRequestInterceptorContext` — head data, a **read-only**
    header view (`HttpHeaderCollection.AsReadOnly()`), a fresh feature
-   collection, and the body-size knob seeded from
-   `HttpServerLimits.MaxRequestBodySize` — and runs every head hook in
+   collection, and the body-size knob seeded from the registration's
+   `Http1Limits.MaxRequestBodySize` — and runs every head hook in
    registration order.
 3. Freezes the knob and reads the body under whatever cap the hooks left
    (413 on violation, as ever).
@@ -176,14 +206,15 @@ thread-safe; all per-request state belongs in the context's feature collection.
   - **HTTP/1.1** — caught in `Http1ConnectionContext.TryReadRequestAsync`,
     answered with a minimal bodyless status response, and the connection is
     closed (never reused: remaining wire state is indeterminate).
-  - **HTTP/2** — `Http2ConnectionContext.TryCompleteStreamAsync` translates it
-    into an `Http2StreamException` carrying `CANCEL`, so the receive loop emits
-    `RST_STREAM(CANCEL)` (RFC 9113 §5.4.2) and keeps serving the connection's
-    other streams. HTTP/2 has no `REQUEST_REJECTED` code; `CANCEL` is the
-    neutral per-stream termination already used by the transport's
-    application-cancel path (`IHttpContext.Cancel`), and deliberately avoids
-    `REFUSED_STREAM`'s "safe to retry" promise, which could amplify load against
-    the very DoS-mitigation interceptors this seam hosts.
+  - **HTTP/2** — `Http2ConnectionContext.TryDispatchStreamAsync` translates it
+    into an `Http2StreamException` carrying `CANCEL`, so the frame pump emits
+    `RST_STREAM(CANCEL)` (RFC 9113 §5.4.2), removes the stream (reclaiming its
+    receive-window debt), and keeps serving the connection's other streams.
+    HTTP/2 has no `REQUEST_REJECTED` code; `CANCEL` is the neutral per-stream
+    termination already used by the transport's application-cancel path
+    (`IHttpContext.Cancel`), and deliberately avoids `REFUSED_STREAM`'s "safe to
+    retry" promise, which could amplify load against the very DoS-mitigation
+    interceptors this seam hosts.
   - **HTTP/3** — `Http3ConnectionContext.ReadRequestAsync` aborts the request
     stream and drops it (RFC 9114 §4.1), leaving the QUIC connection and its
     other streams intact. The semantically exact code is `H3_REQUEST_REJECTED`,
@@ -203,8 +234,9 @@ thread-safe; all per-request state belongs in the context's feature collection.
   receive-loop failure-isolation philosophy.
 
 Hooks run inline on the parse path at a point where the request-headers
-deadline has been disarmed, so they must be CPU-only; a blocking hook stalls
-the connection and pins a thread-pool thread.
+deadline has been disarmed (on HTTP/2 that path is the connection's single
+frame pump), so they must be CPU-only; a blocking hook stalls the whole
+connection — every multiplexed stream on it — and pins a thread-pool thread.
 
 ### Disposal contract
 
@@ -243,25 +275,37 @@ The hooks are wired into **all three** request paths — HTTP/1.1, HTTP/2, and
 HTTP/3 — so a registered interceptor (the default `Http.RequestLimits` feature,
 a parse-time digest, request decompression, …) participates uniformly no matter
 which protocol served the request. A single shared helper,
-`HttpRequestInterceptorPipeline`, drives the buffered (h2/h3) invocation with the
-same ordering, CONNECT-skip, empty-body, freeze, rejection, and failure-path
+`HttpRequestInterceptorPipeline`, drives the h2/h3 invocation with the same
+ordering, CONNECT-skip, empty-body, freeze, rejection, and failure-path
 disposal semantics as the h1 parser; each transport calls it at the point its
-request head is assembled into a context (`Http2Stream.CreateContextAsync`,
-`Http3ConnectionContext.ReadRequestAsync`) and flows the hook-populated feature
-collection into the exchange through the (previously dormant) `features`
-parameter on `Http2Context` / `Http3Context`.
+request head is assembled into a context (`Http2Stream.CreateContextAsync` from
+the frame pump's END_HEADERS dispatch, `Http3ConnectionContext.ReadRequestAsync`)
+and flows the hook-populated feature collection into the exchange through the
+(previously dormant) `features` parameter on `Http2Context` / `Http3Context`.
+The knob each context is seeded from is the registration's shared
+`HttpConnectionListenerLimits.MaxRequestBodySize` (`Http1Limits` / `Http2Limits`
+/ `Http3Limits`), so the same interceptor observes the same knob everywhere.
 
-One **timing difference is intrinsic and documented on the seam contract**: h1
-runs the head hook before any body octet is consumed from the wire, so a
-lowered cap precedes enforcement; h2 and h3 buffer a stream's body *before*
-decoding its head (`Http2Stream.CreateContextAsync` runs only once the stream is
-complete; the h3 request stream is drained before header decode), so the head
-hook there runs before the body is *exposed*, not before it was *received*.
-Consequently a hook that lowers the body-size cap cannot retroactively reject an
-already-buffered h2/h3 body — no body-size cap is enforced on those transports
-yet at all. That enforcement (and the abuse limits generally) is tracked
-separately (#750 body buffering, #764 h2 abuse limits); this change wires the
-hook *invocation*, not h2/h3 cap enforcement.
+The **per-protocol timing is documented on the seam contract**: h1 runs the head
+hook before any body octet is consumed from the wire, so a lowered cap precedes
+enforcement. HTTP/2 dispatches a request as soon as its header block completes
+and streams the body incrementally under flow-control backpressure (see "HTTP/2
+request-body flow control and backpressure"), so head hooks run before the
+application observes any body octet — DATA already in flight sits buffered in
+the stream's flow-control-bounded pipe — and a body hook wraps the live
+streaming body stream (forward-only, exactly what the hook contract requires
+wrappers to tolerate). HTTP/3 still drains a request stream before header
+decode, so its hooks run before the body is *exposed*, not before it was
+*received*.
+
+The **cap-enforcement posture is unchanged by the wiring**: no hard body-size
+cap is enforced on h2 or h3 yet (h2 bounds body buffering via flow-control
+backpressure, h3 via QUIC flow control — the hard cap and connection timeouts
+remain tracked follow-up work, per `HttpConnectionListenerLimits`). A hook that
+lowers the cap on those transports today adjusts only the value hook-attached
+features expose; the seam wires the hook *invocation*, and each request's parse
+context already carries the frozen post-hook value for those paths to consume
+when they gain enforcement.
 
 ### AOT posture
 
@@ -317,22 +361,200 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   handshake runs), surfaced through a typed seam rather than through
   HTTP-transport plumbing.
 
+## Response streaming: raw body sink behind the response-interceptor seam
+
+### What it is
+
+The baseline response path buffers a whole response and serializes it once
+(`SendAsync` reads `Response.Body` and writes it in a single HEADERS+DATA
+sequence). That cannot express Server-Sent Events, long-lived progress feeds, or
+memory-efficient large responses, because the peer sees nothing until the handler
+returns. The streaming write path adds the ability to start a response and write it
+incrementally — but **it is deliberately not wired into the transport as a
+streaming feature.** Instead the transport exposes a generic seam and a raw body
+sink; the streaming/SSE capability is a feature package that plugs in.
+
+This keeps the transport free of any streaming or SSE dependency: the streaming
+API, its state machine, and the SSE wire format all live in feature packages
+(`Assimalign.Cohesion.Http.Streaming`, `Assimalign.Cohesion.Http.ServerSentEvents`)
+that this library never references.
+
+### The two moving parts
+
+- **`HttpResponseBodyStream`** — the transport's raw response body sink, a write-only
+  `System.IO.Stream`. Its abstract base owns the response-lifecycle state machine
+  (commit-the-head-once on the first write/flush, idempotent completion) and forwards
+  the framing to per-protocol subclasses: `Http1ResponseBodyStream` (chunked transfer
+  coding), `Http2ResponseBodyStream` / `Http3ResponseBodyStream` (`DATA` frames). This
+  is where the header-commit timing and the wire framing live.
+- **`IHttpResponseInterceptor`** (core Http) + `HttpConnectionListenerOptions.ResponseInterceptors`
+  — the symmetric counterpart to the request-interceptor seam. At context setup, when
+  any response interceptor is registered, the transport creates the per-protocol sink,
+  builds a `HttpResponseInterceptorContext` exposing it as `ResponseBody`, and runs the
+  interceptors. A feature package's interceptor wraps the sink in a typed feature and
+  installs it on `context.Features`; the transport neither knows nor cares what feature.
+
+Response interceptors are snapshotted on the `HttpConnectionListener` (like request
+interceptors) and threaded to all three protocol connections. **Zero response
+interceptors is a true fast path**: no sink is created and the buffered response
+path runs exactly as before.
+
+### The `SendAsync` inversion
+
+The connection loop still calls `connectionContext.SendAsync(context)` after the
+handler returns. Each transport's `SendAsync` branches at the top: if a response
+feature wrote to the raw sink (`ResponseBodySink is { HasStarted: true }`),
+`SendAsync` **finalizes** the sink — emitting the terminating zero-length chunk
+(HTTP/1.1) or the empty `END_STREAM` DATA frame (HTTP/2) — instead of writing a
+second buffered response. If the sink was never written (or none exists), the
+buffered path runs unchanged. The wire terminator is thus emitted by the transport
+when it finalizes the exchange, not by the feature.
+
+### Per-protocol framing
+
+- **HTTP/1.1 — chunked transfer coding (RFC 9112 §7.1).** When the handler left
+  `Content-Length` unset (the streaming case), `Http1ResponseBodyStream` adds
+  `Transfer-Encoding: chunked` and wraps every write in a chunk; the finalize emits
+  the terminating zero-length chunk. Chunked framing is self-delimiting, so the
+  connection stays keep-alive. A HEAD response commits the head but writes no body.
+  `Http1MessageWriter.WriteHeadAsync` is shared by the buffered and streaming paths.
+- **HTTP/2 — incremental DATA frames (RFC 9113).** The HEADERS block is written
+  **without** a synthesized `Content-Length` (the body is delimited by
+  `END_STREAM`); each write emits one or more DATA frames split on the peer's
+  `MAX_FRAME_SIZE`, each flushed through the transport; finalize emits an empty DATA
+  frame carrying `END_STREAM`.
+- **HTTP/3 — incremental DATA frames (RFC 9114).** Same shape over the QUIC request
+  stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
+  delimited by the QUIC stream end, so finalize only flushes.
+
+### Backpressure (flow control)
+
+- **HTTP/2** multiplexes over one TCP stream and tracks flow-control windows in
+  software, so send-side backpressure is enforced here. `WriteStreamingDataAsync`
+  calls `AcquireSendWindowAsync`, which consumes credit from **both** the
+  connection-level and stream-level send windows (RFC 9113 §5.2) and, when both are
+  exhausted, parks on a `TaskCompletionSource` signal until credit is replenished by
+  an inbound `WINDOW_UPDATE` (or a `SETTINGS_INITIAL_WINDOW_SIZE` increase). Those
+  frames are processed by the **background frame pump** (see the HTTP/2 flow-control
+  section below), which runs concurrently with the application handler — so a parked
+  writer is always unblocked by the pump, regardless of how the host dispatches
+  requests. Send-window consume/replenish shares the connection's `_syncRoot` with
+  the stream table (never held across an `await`); signal completions run
+  asynchronously so a parked writer never resumes inline under the lock. If the pump
+  exits (wire failure, connection error, teardown) send credit is marked permanently
+  closed and a parked writer fails with a wire-level `IOException` instead of
+  hanging on a signal nothing will ever complete.
+- **HTTP/3** rides QUIC, whose per-stream flow control is applied by the transport on
+  the underlying `Stream.WriteAsync`, so no software window accounting is needed here.
+
+A completed streamed response performs the same cleanup as the buffered path: the
+fully-closed stream is removed from the stream table (reclaiming any undrained
+receive-window debt via `RemoveStreamAsync`), and a stream whose peer half is still
+open is reset with `NO_ERROR` to stop the remaining request body and reclaim the
+concurrency slot.
+
+### AOT posture
+
+No reflection, no runtime code generation. Chunk framing is byte arithmetic; the
+HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
+
+### Non-goals
+
+- **Data-rate (minimum-throughput) limits** on the streamed body — deferred with the
+  other data-rate limits.
+- **HEAD-body suppression on HTTP/2 / HTTP/3.** Only the HTTP/1.1 path suppresses the
+  body for HEAD; the h2/h3 buffered paths never did, and the sink matches their
+  existing behavior.
+- **A streaming/SSE dependency in this library.** By design — the feature packages
+  own it; this transport only exposes the sink and the interceptor seam.
+
+## HTTP/1.1 connection takeover (protocol upgrade / CONNECT)
+
+### What it is
+
+The second capability the HTTP/1.1 transport offers on the response-interceptor
+seam, next to the framed sink: `Http1ConnectionTakeover`, the internal
+implementation of the core `IHttpConnectionTakeover` contract, passed as
+`HttpResponseInterceptorContext.ConnectionTakeover`. Exercising it hands the
+caller the **raw duplex connection stream** with no HTTP framing — the escape
+hatch that RFC 9110 §7.8 protocol upgrades (`101 Switching Protocols`) and
+§9.3.6 `CONNECT` tunnels need, since both transitions take the connection out
+of the HTTP request/response loop entirely.
+
+### The layering (#751): all upgrade semantics live in `Http.ProtocolUpgrade`
+
+This transport deliberately dropped its dependency on
+`Assimalign.Cohesion.Http.ProtocolUpgrade` (commit `4c21d75`) and the bridge
+was restored **without upgrade knowledge re-entering the transport**. The
+transport does not detect upgrade signalling, does not know the
+`context.Upgrade` surface, and installs no upgrade feature. It contributes
+exactly three generic things:
+
+- **The takeover capability** on the response seam (`Http1ConnectionTakeover`,
+  offered per exchange alongside the framed sink whenever response interceptors
+  are registered). `TakeOver()` is one-shot: it flips the exchange's
+  `ResponseFinalized` flag, clears `KeepAlive`, and returns the connection
+  stream.
+- **Response suppression**: `Http1ConnectionContext.SendAsync` no-ops when
+  `ResponseFinalized` is set — checked *before* the streamed-sink branch so a
+  misused streaming feature can never finalize chunked framing into a tunnel.
+- **Keep-alive exit**: the receive loop already stops when `KeepAlive` is
+  false, so no post-transition octet is ever parsed as a next request.
+
+The `Http.ProtocolUpgrade` package owns everything else — detection over the
+parsed head (via `IHttpRequestInterceptor`), the `context.Upgrade` feature
+surface, the 101/200 accept path, and the RFC-mandated framing-header scrub —
+wired by registering its interceptor pair on the listener options
+(`HttpProtocolUpgrade.CreateRequestInterceptor()` /
+`CreateResponseInterceptor()`), exactly how `Http.RequestLimits` and
+`Http.Streaming` plug in. HTTP/2 / HTTP/3 never offer the capability: their
+exchanges are multiplexed streams over a shared connection, and those protocols
+removed the `Upgrade` mechanism (their bootstrap is extended CONNECT, below).
+
+### The no-over-read invariant
+
+Handing over the raw stream is only safe because the HTTP/1.1 parser never
+buffers past the request it parsed: the request line and headers are read
+byte-by-byte, a CONNECT skips body framing entirely (RFC 9110 §9.3.6 — the
+post-header octets belong to the tunnel), and a bodyless upgrade `GET` reads no
+body. Octets a client pipelines behind the handshake therefore stay in the
+connection stream and are readable from the surrendered stream. Preserving this
+byte-exact read boundary is a hard constraint on any future read-path
+optimization (read-ahead buffering would have to hand the remainder over with
+the takeover).
+
+### Unaccepted transitions
+
+If no handler accepts, the exchange follows the normal path: the transport
+writes the buffered response. For an unaccepted upgrade request that is exactly
+right (RFC 9110 §7.8 — a server that does not switch protocols just answers the
+request). For an unaccepted `CONNECT`, any pipelined tunnel octets will fail to
+parse as a next request and the wire-failure classifier drops the connection —
+unchanged from the pre-takeover behavior, and safe (the connection dies rather
+than desynchronizing).
+
+### AOT posture
+
+No reflection or runtime codegen: the takeover is a two-flag flip plus a field
+read, resolved through the existing interceptor seam.
+
 ## Receive-loop failure isolation
 
-Each protocol's receive loop (`Http1ConnectionContext.ReceiveAsync`,
-`Http2ConnectionContext.ReceiveAsync`, `Http3ConnectionContext.ReceiveAsync`)
-classifies failures into two scopes:
+Each protocol's inbound processor (`Http1ConnectionContext.ReceiveAsync`, the
+HTTP/2 background frame pump behind `Http2ConnectionContext.ReceiveAsync`, and
+`Http3ConnectionContext.ReceiveAsync`) classifies failures into two scopes:
 
 - **Per-connection wire-level failures** — truncated frames, malformed
-  request lines, peer reset, socket I/O errors. The receive enumerable
-  yields no more values and exits cleanly; the surrounding
+  request lines, peer reset, socket I/O errors. The processor stops
+  producing values and exits cleanly (the HTTP/2 pump completes the
+  ready-context channel so the enumerable ends); the surrounding
   `await using` disposes the connection; the listener keeps accepting.
   Protocol-required wire frames (`GOAWAY` on HTTP/2 connection errors,
   `RST_STREAM` on HTTP/2 stream errors) are emitted before exit.
 - **Per-stream failures** (HTTP/2, HTTP/3) — malformed headers on one
-  stream, QPACK errors on one HTTP/3 stream. The loop emits `RST_STREAM`
+  stream, QPACK errors on one HTTP/3 stream. The processor emits `RST_STREAM`
   (HTTP/2) or drops the offending stream (HTTP/3) and continues
-  accepting subsequent streams on the same connection.
+  processing subsequent streams on the same connection.
 
 The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
@@ -373,9 +595,12 @@ alongside the existing framing / smuggling defences.
 
 ### The limits surface
 
-`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`) is the tuning
-surface, with conservative Kestrel-`KestrelServerLimits`-parity defaults so a
-listener is protected out of the box:
+`Http1ConnectionListenerOptions.Limits` (`Http1Limits`, extending the shared
+`HttpConnectionListenerLimits` base with the HTTP/1.1 wire-format bounds) is
+the tuning surface, configured per registration through
+`UseHttp1(listener, http1 => http1.Limits...)`, with conservative
+Kestrel-`KestrelServerLimits`-parity defaults so a listener is protected out
+of the box:
 
 | Limit | Default | Enforced by | Rejection |
 |---|---|---|---|
@@ -386,10 +611,11 @@ listener is protected out of the box:
 | `KeepAliveTimeout` | 130 s | `Http1ConnectionContext` | connection reclaimed |
 | `RequestHeadersTimeout` | 30 s | `Http1ConnectionContext` | `408` Request Timeout (§15.5.9) |
 
-The limits flow listener → `Http1Connection` → `Http1ConnectionContext` →
-reader as a plain object reference; there is no DI, config, or logging
-dependency in this package (Lane A guardrail — config binding of these limits is
-a Web.Hosting builder-time concern).
+The limits flow `UseHttp1` → `Http1ConnectionFactory` → `Http1Connection` →
+`Http1ConnectionContext` → reader as a plain object reference, captured per
+registration at `UseHttp1` time; there is no DI, config, or logging dependency
+in this package (Lane A guardrail — config binding of these limits is a
+Web.Hosting builder-time concern).
 
 ### 414 / 431 / 413 semantics, not a silent drop
 
@@ -461,16 +687,359 @@ body byte and opens the window to middleware without changing this contract.
 ### Scope boundary
 
 These limits cover the HTTP/1.1 read path only. HTTP/2 abuse limits
-(rapid-reset, CONTINUATION flood, header-list size) and HTTP/2 body-buffering
-backpressure are governed by the frame/flow-control machinery and tracked
-separately; `MaxConcurrentConnections` is an accept-loop concern owned by the
-Web-runtime rewrite, not this surface.
+(rapid-reset, CONTINUATION flood, header-list size, SETTINGS/PING floods) are
+governed by the frame machinery and live under
+`Http2ConnectionListenerOptions.Limits` (`Http2Limits`) — see "HTTP/2 abuse
+limits" below. HTTP/2 request-body buffering is bounded by flow-control
+backpressure, documented in "HTTP/2 request-body flow control and
+backpressure" below. `MaxConcurrentConnections` is an accept-loop concern
+owned by the Web-runtime rewrite, not this surface.
 
 ### AOT posture
 
 No reflection, no codegen. The limits are plain properties with guard-clause
 validation; enforcement is byte counting and `CancellationTokenSource.CancelAfter`
 timer arithmetic.
+
+## HTTP/2 abuse limits
+
+### Why the frame machinery isn't enough
+
+The HTTP/2 transport already enforces the RFC 9113 structural caps —
+`SETTINGS_MAX_CONCURRENT_STREAMS`, `MAX_FRAME_SIZE`, the connection/stream
+flow-control windows, and the HPACK dynamic-table bound. None of those defend
+against the *known HTTP/2 abuse classes*, where a client sends a trivially cheap
+message that forces the server into unbounded (or amplified) work:
+
+- **Rapid reset (CVE-2023-44487).** A client opens a stream and immediately
+  `RST_STREAM`s it. Each cycle costs the client one HEADERS + one RST_STREAM but
+  makes the server allocate, dispatch, and tear down a stream — and because the
+  stream is closed, it never counts against `MAX_CONCURRENT_STREAMS`. Unbounded,
+  this is a CPU/allocation DoS.
+- **CONTINUATION flood.** A HEADERS frame without `END_HEADERS` followed by an
+  endless run of `CONTINUATION` frames grew an *unbounded* `MemoryStream` — the
+  header block was accumulated with no cap at all. (The request *body* is bounded
+  by flow control — see the flow-control section below — but header blocks sit
+  outside flow control per RFC 9113 §6.9, so they need their own bound.)
+- **Oversized decoded header list.** HPACK amplifies: a few indexed references
+  can expand into a huge decoded field list. The decode path had no
+  `MAX_HEADER_LIST_SIZE` enforcement (it was advertised but never checked on the
+  way in), so a small encoded block could materialise a large list.
+- **SETTINGS / PING floods.** Each inbound SETTINGS frame forces a re-parse and
+  an ACK; each inbound PING forces a PING ACK (an amplification vector). Neither
+  was rate-limited.
+
+### The limits surface
+
+`Http2ConnectionListenerOptions.Limits` (`Http2Limits`, extending the shared
+`HttpConnectionListenerLimits` base) is the operator-tunable surface,
+configured per registration through `UseHttp2(listener, http2 =>
+http2.Limits...)`, with conservative Kestrel-`Http2Limits`-parity defaults so
+a listener is protected out of the box:
+
+| Limit | Default | Enforced by | Vector |
+|---|---|---|---|
+| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)` | concurrency exhaustion |
+| `MaxRequestHeaderListSize` | 16 KB | advertised `SETTINGS_MAX_HEADER_LIST_SIZE`; raw-byte cap in `Http2Stream.AppendHeaderBytes`; decoded-size cap in `HPackDecoder` | CONTINUATION flood + header-list amplification |
+| `MaxResetStreamsPerWindow` | 200 | `ProcessRstStreamFrameAsync` via `Http2FloodGuard` | rapid reset (CVE-2023-44487) |
+| `MaxSettingsFramesPerWindow` | 100 | `ProcessSettingsFrameAsync` via `Http2FloodGuard` | SETTINGS flood |
+| `MaxPingFramesPerWindow` | 100 | `ProcessPingFrameAsync` via `Http2FloodGuard` | PING flood |
+| `FloodDetectionWindow` | 5 s | the trailing window shared by the three flood counters | — |
+
+The limits flow `UseHttp2` → `Http2ConnectionFactory` → `Http2Connection` →
+`Http2ConnectionContext` as a plain object reference, captured per
+registration at `UseHttp2` time; there is no DI, config, or logging dependency
+in this package (Lane A guardrail — config binding is a Web.Hosting
+builder-time concern), exactly as with the HTTP/1.1 `Http1Limits`.
+
+### Escalation: GOAWAY(ENHANCE_YOUR_CALM), mirroring Kestrel
+
+Every abuse trip escalates the same way Kestrel does: a connection-level
+`Http2ConnectionException(ENHANCE_YOUR_CALM)` (RFC 9113 §7, error code `0x0b`),
+which the frame pump's existing failure-isolation path turns into a `GOAWAY`
+carrying that code before the connection tears down. `ENHANCE_YOUR_CALM` is the
+RFC's "your peer is generating excessive load" signal, so a well-behaved client
+learns to back off and can retry its in-flight streams on a fresh connection.
+The **frame-size** violation (PING length ≠ 8) is the one exception — it is a
+structural fault, so it escalates as `FRAME_SIZE_ERROR` per RFC 9113 §6.7.
+
+### The two header-list caps are complementary, not redundant
+
+`MaxRequestHeaderListSize` bounds *two different things* because encoded and
+decoded sizes diverge:
+
+- **Raw accumulation** (`Http2Stream.AppendHeaderBytes`) bounds the on-the-wire
+  header-block bytes across a HEADERS frame and all its CONTINUATION frames. It
+  trips *before* HPACK decode, so a CONTINUATION flood can never pin memory in
+  the `MemoryStream` — the buffer is capped, replacing the previously-unbounded
+  growth. This is the CONTINUATION-flood defence.
+- **Decoded size** (`HPackDecoder.DecodeRequestHeaders`) bounds the RFC 9113
+  §10.5.1 header-list size — the running sum of `name-length + value-length + 32`
+  across the fields. This catches HPACK *amplification*: a small encoded block of
+  indexed references whose decoded list is large. The decode aborts the moment
+  the running total exceeds the cap, so the oversized list is never fully
+  materialised.
+
+Because the decode aborts early, the HPACK dynamic-table state is left
+indeterminate, so the overflow is a **connection** error (GOAWAY), not a
+recoverable stream reset — the decoder is connection-global and cannot be
+trusted for subsequent streams once a decode was abandoned mid-block. The
+distinct `HPackHeaderListSizeExceededException` (a subclass of
+`HPackDecodingException`) lets `TryDispatchStream` map the size overflow to
+`ENHANCE_YOUR_CALM` while genuinely malformed field sections keep mapping to
+`PROTOCOL_ERROR`.
+
+### The flood detectors are sliding windows
+
+`Http2FloodGuard` owns three `Http2SlidingWindowCounter`s (reset / SETTINGS /
+PING), one per rate-limited frame class, all sharing `FloodDetectionWindow`.
+Each counter records event timestamps (`Environment.TickCount64`, monotonic and
+allocation-free) and, on every event, evicts timestamps older than
+`now - window` before comparing the in-window count to the maximum. The window
+is a genuine *sliding* window rather than a tumbling one, so a burst straddling a
+fixed bucket boundary cannot slip past the limit; the backing `Queue<long>` only
+ever holds the events currently inside the window (at most `max + 1` before the
+trip), so memory tracks live traffic, not the configured maximum. The guard is
+driven solely from the frame pump — the connection's single inbound frame
+processor — so it needs no synchronization.
+
+The rapid-reset counter counts only inbound `RST_STREAM`s that target a stream
+the server has actually opened (or recently retired). Two deliberate
+exclusions keep the accounting honest:
+
+- A `RST_STREAM` on a never-opened (idle) stream is a *different* violation —
+  the RFC 9113 §6.4 `PROTOCOL_ERROR` handled just below — and is excluded so
+  the two failure modes stay distinct.
+- The server's **own** `RST_STREAM(NO_ERROR)` emissions (the routine
+  undrained-body reset on the response path) never pass through
+  `ProcessRstStreamFrameAsync`, so ordinary server operation cannot trip the
+  peer-abuse detector.
+
+### PING validation
+
+`ProcessPingFrameAsync` now also enforces the two RFC 9113 §6.7 structural rules
+that were previously unchecked: a PING payload length other than 8 octets is a
+`FRAME_SIZE_ERROR` (checked ahead of the ACK short-circuit so a malformed ACK is
+rejected too), and a PING on any stream other than 0 is a `PROTOCOL_ERROR`.
+
+### Scope boundary — HTTP/2 only, not HTTP/3
+
+These are HTTP/2 frame-machinery limits. HTTP/3's equivalent stream-churn and
+flow-control limits live in the QUIC transport (`MAX_STREAMS`, QUIC flow
+control), not here — deliberately, per the guardrail that h3 stream limits are a
+QUIC-transport concern. HTTP/2 request-body buffering is bounded by the
+flow-control backpressure documented in the next section; the two surfaces are
+complementary (frame-rate abuse here, byte-volume abuse there).
+
+### AOT posture
+
+No reflection, no runtime codegen. The limits are plain properties with
+guard-clause validation; the flood detectors are queue arithmetic over
+`Environment.TickCount64`; the header-list caps are byte counting and a running
+integer sum during decode.
+
+## HTTP/2 request-body flow control and backpressure
+
+### The vulnerability this closes
+
+HTTP/2 (RFC 9113 §5.2) makes flow control **receiver-driven**: each receiver
+advertises a per-stream window (`SETTINGS_INITIAL_WINDOW_SIZE`, 65535 octets by
+default) and a fixed connection window (also 65535), and the sender may only
+transmit that many DATA octets before the receiver credits more capacity with a
+`WINDOW_UPDATE`. The receiver paces the sender by choosing *when* to credit.
+
+The previous implementation defeated that mechanism twice over. It credited the
+window **immediately on receipt** — the receive loop emitted `WINDOW_UPDATE` for
+every DATA frame as soon as it was parsed — and it **buffered the whole body**
+before the request was dispatched (`Http2Stream.CreateContext` ran only once the
+stream was complete, materializing a `MemoryStream` over the accumulated bytes).
+Together those meant a client could stream a body of any size as fast as it
+liked and the server would buffer all of it in memory before the application saw
+a single byte. HTTP/1.1 has a body cap (`Http1MessageBodyReader`); HTTP/2 had
+none. This is the memory-exhaustion DoS #750 closes.
+
+### The shape: a decoupled frame pump feeding per-stream body pipes
+
+Real end-to-end backpressure is impossible while frame reading is driven by the
+request-consumption loop: the server dispatches contexts sequentially (a handler
+runs to completion before the next context is pulled), so nothing would drain
+the wire while a slow handler read its body — the sender could not be paced and,
+worse, a body larger than the window could never complete, deadlocking the
+handler. So inbound processing is now owned by a **single background frame pump**
+(`Http2ConnectionContext.PumpAsync`), started once when `ReceiveAsync` is first
+enumerated and decoupled from how fast the consumer handles requests:
+
+- The pump reads and processes **every** inbound frame for the connection's
+  lifetime. It dispatches a request head to a ready-context channel as soon as
+  the header block is complete (RFC 9113 lets the server respond before the body
+  arrives), then keeps pumping that stream's DATA into a per-stream body pipe
+  (`Http2Stream`'s unbounded `Channel<Http2DataChunk>`) while the handler runs.
+- `ReceiveAsync` simply yields ready contexts off that channel. `SendAsync` and
+  the request-body reads run concurrently with the pump.
+- The application reads the body through `Http2RequestBodyStream`, which drains
+  the channel and — this is the whole point — credits each fully-consumed chunk's
+  flow-control cost back to the peer via `OnRequestBodyConsumedAsync`. **Credit is
+  driven by consumption, not receipt.**
+
+### Why this bounds buffering and preserves FLOW_CONTROL_ERROR enforcement
+
+Because the pump consumes the receive window as DATA arrives but only credits it
+back as the application reads, the unconsumed, buffered bytes for a stream can
+never exceed the advertised window: a conformant sender that fills the window
+stalls until the reader drains the pipe. A misbehaving sender that transmits more
+than the window without waiting is still caught — the pump consumes the receive
+window eagerly on receipt (`ProcessDataFrameAsync`), so an overshoot fails
+`TryConsume` and raises `FLOW_CONTROL_ERROR` exactly as before (connection-level
+on the shared window, stream-level on the per-stream window, RFC 9113 §6.9.1).
+Eager consumption is *load-bearing* for that check: a lazy, read-only-when-asked
+design would pace the window in lockstep with the reader and never detect the
+overshoot at all.
+
+Flow control accounts for the **entire DATA frame payload including padding and
+the pad-length octet** (RFC 9113 §6.9.1), while only the de-padded data reaches
+the application. The two lengths differ for padded frames, so each
+`Http2DataChunk` carries its `FlowControlLength` (the full payload length)
+independently of its data, and the credit emitted on consumption is the flow-
+control length, not the byte count the reader saw. A padded frame whose pad
+length meets or exceeds the payload is a `PROTOCOL_ERROR` (RFC 9113 §6.1),
+rejected before it is queued.
+
+Two window-conservation paths keep the shared connection receive window from
+leaking under consumption-driven credit — critical, because unlike the old
+credit-on-receipt model an un-drained body would otherwise never return its
+octets to the peer:
+
+- **Recently-closed discard.** DATA that arrives for a stream we have already
+  retired is discarded, but its connection-window cost is credited back
+  (RFC 9113 §6.9) before the stream error is raised, so a benign close race
+  does not shrink the window.
+- **Removal reclaim.** When a stream is removed while buffered body sits
+  unconsumed (an ignored body, a reset, an abandoned upload), its outstanding
+  receive debt — exactly `InitialReceiveWindow - ReceiveWindow.Available` — is
+  credited back to the connection window and a connection-level `WINDOW_UPDATE`
+  is emitted. Without this, every request whose handler skips the body (an
+  auth-rejected `POST`, an early 4xx) would permanently shrink the connection
+  window until inbound DATA stalled on every stream. A per-stream
+  `ReceiveReclaimed` flag makes reclaim and the reader's consumption-credit
+  mutually exclusive so an octet is never credited twice.
+
+### Concurrency model
+
+The pump is the single inbound processor, so pump-only state (remote settings,
+send windows, the continuation-tracking id) needs no synchronization. Two locks
+guard the state the pump and the application threads genuinely share, and neither
+is ever held across an await or a wire read:
+
+- A connection-level `_syncRoot` guards the stream table and the **receive**-
+  direction windows (the pump consumes them; the body reads credit them).
+- A per-`Http2Stream` `_stateLock` guards lifecycle transitions, because the pump
+  drives the remote half (`Receive*`) while the handler drives the local half
+  (`SendEndStream` / a local reset) concurrently. Modeling `State` as a single
+  enum keeps the two halves from racing to a lost update.
+
+All outbound frames — response HEADERS/DATA, SETTINGS/PING ACKs, GOAWAY, and both
+receipt-side and consumption-side `WINDOW_UPDATE`s — serialize through the
+connection write gate (`Http2WriteScheduler`), so nothing tears a frame sequence
+(RFC 9113 §4.1). The gate additionally grants contending writers in RFC 9218 §10
+priority order — see the extensible-priorities section below.
+
+### Lifecycle: dispatch-at-headers, abandoned bodies, teardown
+
+The request head is dispatched once, when the header block completes; the body
+streams in afterward. A handler that responds **without draining the request
+body** would otherwise leave the stream in `HalfClosedLocal` forever, eventually
+exhausting `SETTINGS_MAX_CONCURRENT_STREAMS`, so after `SendAsync` writes the
+response the server emits `RST_STREAM(NO_ERROR)` to tell the peer to stop and to
+reclaim the stream slot (RFC 9113 §8.1). On connection teardown, wire failure, or
+a connection error, the pump's `finally` aborts every live stream and then
+completes the ready-context channel: a stream whose body was **still incoming**
+fires its `RequestAborted` so a handler parked reading it observes cancellation
+rather than a clean end-of-stream (which would let it treat a truncated upload as
+complete), while a **fully-received** body stays readable to completion. Aborting
+before completing the channel makes the abort observable to a consumer that is
+about to see the enumerable end. Graceful close emits the shutdown GOAWAY while
+the pump is still running — the write scheduler serializes it against the pump's
+writes — then drains in-flight exchanges (bounded) and only then cancels and
+awaits the pump (see "HTTP/2 graceful close").
+
+### AOT posture
+
+No reflection, no runtime code generation. The pump is a plain async loop, the
+body pipe is a `System.Threading.Channels` channel, and the flow-control windows
+are value-type octet counters guarded by monitors.
+
+### Non-goals
+
+- **Outbound (response) flow control.** `SendAsync` does not yet consult the
+  per-stream send window; a streaming response write path (with send-side
+  backpressure and SSE) is tracked separately (#769). Response bodies are still
+  buffered before framing.
+- **A configurable initial window.** The advertised
+  `SETTINGS_INITIAL_WINDOW_SIZE` is the fixed RFC default (65535). Exposing a
+  tunable stream/connection window (Kestrel-style) is a later refinement.
+
+## HTTP/2 graceful close (GOAWAY + stream drain)
+
+RFC 9113 §6.8 makes an orderly HTTP/2 shutdown a two-part gesture: announce
+the close with `GOAWAY(NO_ERROR)`, then let the streams already accepted
+finish before the wire goes away. `Http2ConnectionContext.GracefulCloseAsync`
+performs both, in order:
+
+1. **Refuse new streams.** Setting `_gracefulCloseStarted` (an interlocked
+   one-shot) makes `OpenInboundStream` answer any HEADERS opening a *new*
+   stream with `RST_STREAM(REFUSED_STREAM)`. The connection stays alive and
+   keeps draining; the client may retry the refused request on a fresh
+   connection (RFC 9113 §8.1.4). Refused streams never bump the observed
+   last-stream-id, which is what makes the GOAWAY snapshot below exact.
+2. **Emit `GOAWAY(NO_ERROR)`** carrying the highest inbound stream ID
+   observed (snapshotted under the stream-table lock — the pump is still
+   processing frames concurrently), so the peer learns exactly which streams
+   will still be processed.
+3. **Drain, bounded.** `DrainActiveExchangesAsync` waits for every request
+   already dispatched to the application to finish — its response sent, its
+   stream reset, or its truncated request shutdown-aborted — before teardown
+   proceeds. Without this wait the previous behavior completed
+   `connection.Output` immediately, cutting off a response a handler was
+   still writing. The wait is capped by `GracefulDrainWindow` (a fixed
+   internal ceiling, not host-configurable): a stuck or slow response cannot
+   delay teardown indefinitely, and when the window elapses the remaining
+   exchanges are abandoned.
+4. **Stop the pump, then complete the output** so the transport's send loop
+   flushes its backlog and closes the socket (the #686 ordering).
+
+The pump deliberately keeps running through the drain window — this is what
+distinguishes the drain from a passive sleep. A live pump is what refuses
+newly opened streams *on the wire*, keeps feeding in-flight request bodies,
+replenishes send-window credit so a streaming response writer parked on flow
+control can finish, and observes peer `RST_STREAM`s that release the drain
+early. GOAWAY-vs-pump write interleaving is prevented by the connection
+write scheduler (control frames use `ControlUrgency`), not by stopping the
+reader. If the pump exits on its own during the drain (peer end-of-stream or
+wire failure), its shutdown abort releases the accounting of **truncated**
+requests only — a fully-received request stays counted because its handler
+can still respond through the pump-independent write path, and the drain
+exists precisely to give it that chance.
+
+The drain tracks an interlocked `_activeExchangeCount` rather than reading
+the `_streams` table from the close thread. A stream is counted by the pump
+(`MarkExchangeCounted`, immediately before its context is handed to the
+consumer) and released exactly once through the stream's tri-state
+accounting latch (`TryClaimExchangeAccounting`) — every exchange-terminating
+path funnels through `RemoveStreamAsync` (response sent on the buffered or
+streaming path, local reset, peer reset), with the pump's shutdown abort
+covering truncated requests. When the count reaches zero a draining close is
+woken through a published `TaskCompletionSource` (no polling); a re-check
+after publishing the signal closes the lost-wakeup window. When nothing is
+in flight the whole step is skipped.
+
+> The **host-facing** variant — a "drain now, close later" trigger the host
+> calls before dispose, rather than draining inside dispose — is a separate
+> public-surface decision (interface-first, implementation internal) and is
+> deliberately out of scope here. This section covers only the
+> drain-inside-`GracefulCloseAsync` behavior. The optional RFC 9113 §6.8
+> dual-`GOAWAY` pattern (a first `GOAWAY` at max stream ID, a second at the
+> true last-stream-ID after draining) is likewise not implemented; the
+> single `GOAWAY` carrying the real last-stream-ID is sufficient and simpler.
 
 ## HTTP/3 stream model and SETTINGS engine
 
@@ -523,9 +1092,11 @@ same posture as the HTTP/2 transport's initial SETTINGS:
   matching the HTTP/2 transport's RFC 8441/9220 stance. This is what
   unblocks WebSocket-over-HTTP/3 clients, which will not send an extended
   CONNECT until the server advertises the capability.
-- **`QPACK_MAX_TABLE_CAPACITY` (0x01) = 0** (RFC 9204 §5) states explicitly
-  that the QPACK dynamic table is disabled (see the QPACK section), rather
-  than relying on the peer to assume the default.
+- **`QPACK_MAX_TABLE_CAPACITY` (0x01)** (RFC 9204 §5) is the server's decoder
+  capacity. It defaults to `0` — stating explicitly that the QPACK dynamic
+  table is disabled (see the QPACK section) — and is raised to the configured
+  `Http3QPackOptions.MaxTableCapacity` when the dynamic table is opted in, in
+  which case **`QPACK_BLOCKED_STREAMS` (0x07)** is advertised alongside it.
 
 Emission is best-effort: opening an outbound stream requires a live QUIC
 connection, so if the connection is already gone the setup failure is
@@ -561,21 +1132,31 @@ a **background drain** (`DrainPeerControlStreamAsync`) that parses and
 discards subsequent control frames for the connection lifetime. Draining on
 a background task is load-bearing: the control stream is long-lived, so
 draining it inline would block the accept loop from ever serving another
-request. Post-SETTINGS frames are read but inert in this subset — `GOAWAY`
-(§7.2.6) is discarded (graceful-drain handling is deferred to the GOAWAY
-work item), and `MAX_PUSH_ID` (§7.2.7) is discarded because the server never
-pushes. The drain exists so those frames cannot accumulate unread in the
-pipe; it stops on end-of-stream, connection teardown, or a per-stream parse
-failure and never throws into the receive loop.
+request. Post-SETTINGS frames are read but inert in this subset — a peer
+`GOAWAY` (§7.2.6) is discarded rather than acted on (the server does not
+implement the *client* role of graceful shutdown — reacting to a peer's
+`GOAWAY` — only the server role of *emitting* one, see "Graceful GOAWAY on
+the control stream"), and `MAX_PUSH_ID` (§7.2.7) is discarded because the
+server never pushes. The drain exists so those frames cannot accumulate
+unread in the pipe; it stops on end-of-stream, connection teardown, or a
+per-stream parse failure and never throws into the receive loop.
 
 ### QPACK encoder/decoder streams
 
 Each of the QPACK encoder (0x02) and decoder (0x03) streams may appear
 at most once (RFC 9204 §4.2); a duplicate is a connection error. With
 the QPACK dynamic table disabled (`QPACK_MAX_TABLE_CAPACITY = 0`, the
-posture #335 builds on) these streams carry no instructions the server
-must act on, so accepting the stream and recording that it was seen is
-sufficient. The streams are not drained frame-by-frame.
+default posture) these streams carry no instructions the server must act
+on, so accepting the stream and recording that it was seen is sufficient.
+
+When the dynamic table is **enabled** (opt-in, see "Dynamic table" below),
+the peer's encoder stream is drained on a background task
+(`DrainQPackEncoderStreamAsync`) that applies each Set Capacity / Insert /
+Duplicate instruction to the shared decoder table and emits an Insert Count
+Increment on the server's own decoder stream (which the server opens at
+receive start, symmetric to its control stream). Both server-opened streams
+are critical streams — left open for the connection lifetime and released by
+the connection-first teardown, never completed early.
 
 ### Push streams
 
@@ -591,15 +1172,20 @@ lifetime: the server's **own outbound control stream**, and the accepted
 them all *critical* streams — a peer that observes one of them terminate
 (FIN, RESET, or a STOP_SENDING request) before the connection close MUST
 fail the whole connection with `H3_CLOSED_CRITICAL_STREAM`. Teardown is
-therefore connection-first: `Http3Connection.DisposeAsync` delegates to the
-multiplexed connection, whose dispose completes bidirectional (request)
-streams — delivering any in-flight response data — then closes the QUIC
-connection (`CONNECTION_CLOSE` with the transport's configured close
-code, `H3_NO_ERROR` by default on the QUIC driver's options), and only
-then releases the unidirectional streams locally, after the close means no
-stream-level frames can reach the peer. The ordering lives in the QUIC
-driver (`QuicMultiplexedConnection`), not here: any multiplexed protocol
-with long-lived unidirectional control channels needs the same discipline.
+therefore connection-first: `Http3Connection.DisposeAsync` first emits the
+graceful-shutdown `GOAWAY` on the outbound control stream (see "Graceful
+GOAWAY on the control stream" below), then delegates to the multiplexed
+connection, whose dispose completes bidirectional (request) streams —
+delivering any in-flight response data — then closes the QUIC connection
+(`CONNECTION_CLOSE` with the transport's configured close code,
+`H3_NO_ERROR` by default on the QUIC driver's options), and only then
+releases the unidirectional streams locally, after the close means no
+stream-level frames can reach the peer. The `CONNECTION_CLOSE` ordering and
+critical-stream close discipline live in the QUIC driver
+(`QuicMultiplexedConnection`), not here: any multiplexed protocol with
+long-lived unidirectional control channels needs the same discipline. Only
+the `GOAWAY` emission — an HTTP/3 concern — is added ahead of it in this
+layer.
 
 The context's own teardown (`ShutdownAsync`, run from the receive loop's
 `finally`) is deliberately minimal: it cancels the inbound control-stream
@@ -607,9 +1193,39 @@ drain and awaits it, but **never completes, aborts, or FINs the outbound
 control stream**. Completing it early — before the connection close — is
 exactly the `H3_CLOSED_CRITICAL_STREAM` violation the connection-first
 ordering exists to avoid, so the context leaves the outbound critical stream
-for the multiplexed connection's dispose to release alongside the close. A
-`GOAWAY`-announced graceful drain ahead of the close remains future work
-(see Non-goals).
+for the multiplexed connection's dispose to release alongside the close. The
+`GOAWAY` written during dispose rides on that still-open critical stream and
+does not complete it.
+
+### Graceful GOAWAY on the control stream
+
+RFC 9114 §5.2 shuts a connection down by sending `GOAWAY` on the control
+stream ahead of the `CONNECTION_CLOSE`. Its payload is a single QUIC
+variable-length integer (RFC 9114 §5.2 / §7.2.6) — for a server, the
+client-initiated bidirectional stream ID that marks the processing
+boundary: requests on streams **below** the announced value may have been
+processed and are allowed to finish; requests at or above it are not
+processed and the client may safely retry them elsewhere.
+
+`Http3GoAwayFrame.Encode` serializes that frame (type `0x07`, a length
+prefix, then the varint stream ID) as pure buffer arithmetic. The boundary
+value is derived from `_processedRequestStreamCount` — the number of
+bidirectional request streams the receive loop has accepted — using QUIC's
+client-bidi numbering (ID = `4 × n`), so after *k* accepted streams the
+announced ID is `4 × k`: the *k* accepted streams (IDs `0 … 4(k-1)`) fall
+below the boundary and may complete, while `4k` and above are rejected. The
+count advances at *accept*, not at dispatch, so a malformed stream the
+server touched and dropped still falls inside "may have been processed" and
+the client will not retry a request whose side effects may have run. The
+connection abstraction surfaces only an opaque `ConnectionId`, not the
+numeric QUIC stream ID, so this count-based derivation is how the HTTP/3
+layer reconstructs the boundary.
+
+`SendGoAwayAsync` writes the frame to the retained outbound control stream
+and is best-effort and one-shot: if the receive loop never ran (no control
+stream, no advertised SETTINGS) there is nothing to announce and it is a
+no-op; a wire/QUIC failure while writing is swallowed because the
+`CONNECTION_CLOSE` that follows conveys the shutdown regardless.
 
 ### Incremental reads off the PipeReader
 
@@ -668,17 +1284,23 @@ the peer-settings store is a plain dictionary.
 
 ### Non-goals
 
-- **Acting on post-SETTINGS control frames.** `GOAWAY`, `MAX_PUSH_ID`,
-  and friends are now *drained* (parsed and discarded by the background
-  control-stream drain, so they cannot accumulate unread) but are not
-  *acted on* in this subset: the server never pushes, so `MAX_PUSH_ID` is
-  inert, and graceful `GOAWAY`-driven drain is future work.
-- **Emitting server GOAWAY / MAX_PUSH_ID.** The server control stream
-  carries only the opening SETTINGS frame today; sending `GOAWAY` (for
-  graceful drain) rides on it as future work.
-- **QPACK dynamic table.** Encoder/decoder streams are accepted but not
-  processed; the static-table + Huffman + literal field-section support
-  (#335) runs with the dynamic table disabled.
+- **Acting on a peer's post-SETTINGS control frames.** A peer `GOAWAY`
+  and `MAX_PUSH_ID` are *drained* (parsed and discarded by the background
+  control-stream drain, so they cannot accumulate unread) but not *acted
+  on*: the server never pushes, so `MAX_PUSH_ID` is inert, and reacting to
+  a peer's `GOAWAY` (the client role of graceful shutdown) is future work.
+  Note this is distinct from *emitting* the server's own `GOAWAY`, which
+  now ships — see "Graceful GOAWAY on the control stream".
+- **Emitting server `MAX_PUSH_ID`.** The server control stream carries its
+  opening SETTINGS frame and, at teardown, a graceful-shutdown `GOAWAY`
+  (RFC 9114 §5.2). `MAX_PUSH_ID` is never emitted because the server never
+  pushes.
+- **QPACK dynamic table (when disabled).** With the default
+  `QPACK_MAX_TABLE_CAPACITY = 0`, the encoder/decoder streams are accepted but
+  not processed and field sections resolve against the static table only. The
+  opt-in dynamic table (encoder-stream drain, decoder stream, blocked-stream
+  bookkeeping) is described under "QPACK field-section compression → Dynamic
+  table (opt-in)".
 - **Flow control / stream limits.** QUIC-level flow control and
   `MAX_STREAMS` accounting live in the QUIC transport, not here.
 
@@ -703,16 +1325,15 @@ primitives live under `Internal/Http3/QPack`:
 - `QPackFieldSectionDecoder` / `QPackFieldSectionEncoder` — the field
   section prefix plus the per-line representations.
 
-### The dynamic table is disabled — and why that is RFC-compliant
+### The dynamic table is disabled by default — and why that is RFC-compliant
 
-The supported feature set runs with the **QPACK dynamic table disabled**:
+By default the transport runs with the **QPACK dynamic table disabled**:
 the server's `QPACK_MAX_TABLE_CAPACITY` is `0`. RFC 9204 §3.2.3 / §5
 explicitly permit this — a decoder that advertises capacity `0` simply
 forbids the encoder from ever inserting dynamic entries. It is the
 standards-blessed "static-only" QPACK profile, not a partial
-implementation.
-
-Disabling the dynamic table collapses several otherwise-hard problems:
+implementation, and it stays the default because it collapses several
+otherwise-hard problems:
 
 - **No blocked streams.** A stream blocks only when a field section
   references dynamic entries not yet received (RFC 9204 §2.1.2). With the
@@ -722,9 +1343,64 @@ Disabling the dynamic table collapses several otherwise-hard problems:
   enforces this by **rejecting any field section whose Required Insert
   Count is non-zero** as a decompression failure (RFC 9204 §2.2).
 - **No encoder/decoder instruction processing.** The QPACK encoder and
-  decoder unidirectional streams (handled by the #334 stream engine)
-  carry only dynamic-table instructions, so with the table disabled they
-  carry nothing the server must act on.
+  decoder unidirectional streams carry only dynamic-table instructions, so
+  with the table disabled they carry nothing the server must act on.
+
+### Dynamic table (opt-in)
+
+Opting in is a per-listener, public configuration choice:
+`options.UseHttp3(listener, o => o.QPack.MaxTableCapacity = 4096)`. The public
+`Http3ConnectionListenerOptions.QPack` (an `Http3QPackOptions`) carries the advertised
+capacity and blocked-stream limit; the HTTP/3 registration captures it in an
+`Http3ConnectionFactory` and threads it to the connection context. Setting
+`MaxTableCapacity` above 0 opts in to the full dynamic table on the **decoder**
+side (inbound request field sections). The switch is entirely gated on that
+option: when it is 0 (the default) none of the machinery below is constructed
+and the static-only path above is taken verbatim. When it is enabled:
+
+- **Dynamic table** (`QPackDynamicTable`). A capacity-bounded, absolutely
+  indexed entry store (RFC 9204 §3.2) fed by the peer's encoder-stream
+  instructions: Set Dynamic Table Capacity (§4.3.1), Insert with Name
+  Reference — static or dynamic (§4.3.2), Insert with Literal Name (§4.3.3),
+  and Duplicate (§4.3.4). Entry size is `name + value + 32` octets; inserts
+  evict from the draining end to fit, and an insert that cannot fit even an
+  empty table, or a capacity above the advertised maximum, is
+  `QPACK_ENCODER_STREAM_ERROR`.
+- **Instruction codecs.** `QPackEncoderInstructionParser` applies inbound
+  encoder instructions incrementally (partial instructions are left buffered
+  for the next read); `QPackDecoderInstructionEncoder` emits the decoder
+  instructions — Section Acknowledgment (§4.4.1), Stream Cancellation
+  (§4.4.2), and Insert Count Increment (§4.4.3).
+- **Field-section resolution.** `QPackFieldSectionPrefix` reconstructs the
+  Required Insert Count (§4.5.1.1) and Base (§4.5.1.2), and
+  `QPackFieldSectionDecoder` resolves dynamic indexed, dynamic name-reference,
+  and post-base references (§4.5.2–§4.5.5) against the table. The prefix is
+  parsed once (before any blocking) so the Base does not drift as more
+  insertions arrive during the wait.
+- **Blocked-stream bookkeeping** (`QPackDecoderState`). A field section whose
+  Required Insert Count exceeds the current insert count blocks until the
+  encoder stream delivers the referenced insertions. The number of
+  concurrently blocked streams is capped at the advertised
+  `QPACK_BLOCKED_STREAMS`; exceeding it, or an otherwise-unsatisfiable
+  Required Insert Count, is a `QPACK_DECOMPRESSION_FAILED` connection error
+  (§2.2). Because dynamic-table state is shared across streams, these failures
+  terminate the connection rather than dropping a single stream — unlike the
+  per-stream failures the static-only path isolates.
+
+The **response encoder stays static-only by design** (see "Encoder" below):
+an encoder is never required to use the dynamic table, so responses reference
+the static table or literals and never insert. This keeps response encoding
+stateless and sidesteps having to track the client decoder's acknowledgments.
+
+> **Known limitation — Section Acknowledgment / Stream Cancellation.** These
+> two decoder instructions are keyed on the QUIC **request stream ID**, which
+> the `Assimalign.Cohesion.Connections` `IConnection` abstraction does not yet
+> surface (the QUIC stream connection reports a synthetic `ConnectionId`, not
+> the wire stream ID). The instruction encoders are implemented and unit
+> tested, and Insert Count Increment — which needs no stream ID — is emitted
+> live, keeping the peer's Known Received Count advancing. Wiring Section
+> Acknowledgment / Stream Cancellation into the live path is deferred pending a
+> transport surface for the QUIC stream ID (filed as a follow-up).
 
 ### Decoder representations
 
@@ -768,10 +1444,17 @@ rules:
 per field: an Indexed Field Line for an exact static name+value match
 (e.g. `:status: 200`), then a Literal with static Name Reference for a
 known name, then a Literal with Literal Name. Field names are lowercased
-on the wire. Huffman coding is **not** applied on the encode path — it is
-optional for an encoder (RFC 9204 §4.1.2) and raw octets keep the output
-deterministic and allocation-light. (The decode path fully supports
-Huffman.)
+on the wire. The encoder is **static-only**: it never inserts into or
+references the dynamic table, so response encoding stays stateless and
+needs no acknowledgment tracking (RFC 9204 §2.1.1).
+
+Literal names and values are **Huffman-coded** (RFC 9204 §4.1.2, RFC 7541
+Appendix B) when the Huffman form is strictly shorter than the raw octets,
+via the shared `HPackHuffmanEncoder`. The encoder lives in the HPACK folder
+because HTTP/2 HPACK and HTTP/3 QPACK share the same Appendix B code, so the
+HTTP/2 response encoder (`HPackEncoder`) gets the same shorter-of-the-two
+literal encoding. `HPackHuffmanEncoder.GetEncodedLength` measures the Huffman
+size without allocating, so the choice costs a single pass over the octets.
 
 ### AOT posture
 
@@ -782,11 +1465,18 @@ and string primitives.
 
 ### Non-goals
 
-- **QPACK dynamic table** (insertions, duplication, eviction, blocked
-  streams). Disabled by design as above; re-enabling would add a dynamic
-  table, encoder/decoder-stream instruction processing, and blocked-stream
-  bookkeeping behind the same `Http3PeerSettings` seam.
-- **Encoder Huffman coding.** Decode supports it; encode emits raw octets.
+- **Response-side dynamic table.** The response encoder is static-only by
+  design (above): it never inserts into a dynamic table of its own, so the
+  server never opens a QPACK *encoder* stream and never has to track the
+  client decoder's Section Acknowledgments to encode safely. The dynamic
+  table implemented here is decoder-side only (inbound requests).
+- **Live Section Acknowledgment / Stream Cancellation.** Implemented and unit
+  tested as instruction encoders, but not emitted on the live path pending a
+  transport surface for the QUIC request stream ID (see the Known limitation
+  above). Insert Count Increment is emitted live.
+- **Acting on the peer's `QPACK_MAX_TABLE_CAPACITY`.** The server reads the
+  peer's SETTINGS but, being a static-only encoder, does not use the peer's
+  advertised decoder capacity to size a response-side table.
 
 ## Extended CONNECT (`:protocol`)
 
@@ -866,6 +1556,103 @@ class resolved through the existing feature collection.
 - **WebSocket framing / the data tunnel.** See above.
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
   as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
+
+## RFC 9218 extensible priorities
+
+### What it is
+
+The server implements the RFC 9218 Extensible Prioritization Scheme and
+**replaces** — does not extend — the deprecated RFC 7540 tree-priority handling
+(RFC 9113 §5.3.2 permits ignoring it). Three moving parts:
+
+- **Signals in, priority out.** The `Priority` request header and the
+  `PRIORITY_UPDATE` frame both carry the same `u`/`i` Priority Field Value. Both
+  are parsed through the core-Http structured-field toolkit into an
+  `HttpPriority` (urgency 0–7, incremental flag) — no field-value parsing is
+  reimplemented in the transport (Lane B owns parsing, Lane A owns scheduling).
+  The shared `HttpPriorityFieldValue` helper bridges the ASCII frame octets to
+  the `char` span the toolkit consumes.
+- **Per-stream effective priority.** Each stream carries an effective priority:
+  the `Priority` header initialises it, and a `PRIORITY_UPDATE` overrides it and
+  pins it so a later header parse cannot clobber it (RFC 9218 §8), regardless of
+  arrival order.
+- **Urgency-ordered write scheduling** on the contended HTTP/2 write path.
+
+### Replacing the legacy PRIORITY frame
+
+The RFC 7540 `PRIORITY` frame (type `0x2`) and its stream-dependency/weight/
+exclusive model are gone from the engine: the frame model, its reader fields, and
+its writer case were deleted, and `0x2` is now simply ignored (RFC 9113 §5.3.2).
+The HEADERS frame's optional priority fields are still *skipped* during parsing —
+they must be, to locate the header block — but they are no longer read as a
+scheduling signal. HTTP/2 advertises `SETTINGS_NO_RFC7540_PRIORITIES = 1`
+(RFC 9218 §2.1) in its initial SETTINGS so peers know to use the header +
+`PRIORITY_UPDATE` scheme; an inbound value other than 0/1 is a `PROTOCOL_ERROR`.
+
+### HTTP/2 PRIORITY_UPDATE (frame type 0x10)
+
+Dispatched like any other connection-control frame. A `PRIORITY_UPDATE` on a
+non-zero stream is a connection error (`PROTOCOL_ERROR`, RFC 9218 §7.1), as is a
+Prioritized Stream ID that is zero or even (a client cannot open those). The
+4-octet Prioritized Stream ID is parsed as a fixed frame-prefix field (the same
+mechanism GOAWAY uses), leaving the ASCII Priority Field Value as the frame
+payload. A field value that cannot be parsed leaves the frame **without effect**
+(not an error). A frame referencing a stream that has not opened yet is retained
+in a small bounded buffer and applied when the stream is created; a frame
+referencing an already-closed stream is dropped.
+
+### The write scheduler
+
+`Http2WriteScheduler` replaces the plain FIFO write semaphore. It preserves the
+non-interleaving invariant (RFC 9113 §4.1 — exactly one writer holds the gate at a
+time) and, when writers contend, grants the gate in RFC 9218 §10 order instead of
+first-come-first-served:
+
+1. connection-control frames first (a sentinel urgency below 0, so ACKs / window
+   updates / GOAWAY are never starved behind response data);
+2. then response writes by ascending urgency;
+3. non-incremental before incremental at the same urgency;
+4. round-robin by stream id among same-urgency incremental streams.
+
+The ordering policy is a pure, synchronous function (`SelectNextWaiterIndex`) so
+it is unit-tested in isolation, separate from the async gate. Both response write
+paths go through it:
+
+- The **buffered** path (`SendAsync`) holds the gate for the whole contiguous
+  HEADERS [+ CONTINUATION…] [+ DATA…] sequence, so the scheduler orders **which
+  stream's queued response proceeds next** under contention.
+- The **streaming** path acquires the gate **per DATA frame** — and only after
+  the send-window credit for that frame has been granted, so a writer parked on
+  flow control never holds the gate. This is what delivers real frame-level
+  interleaving: same-urgency incremental streams round-robin DATA frame by DATA
+  frame, and a newly-arrived lower-urgency (more urgent) response preempts
+  between frames of a less urgent one.
+
+### HTTP/3 posture
+
+HTTP/3 multiplexes streams at the QUIC layer, so there is no shared connection
+write gate to schedule — response ordering across streams is delegated to the QUIC
+transport. What the HTTP/3 engine owns is the **priority signal as observable
+state**:
+
+- The peer's control-stream drain now parses post-SETTINGS `PRIORITY_UPDATE`
+  frames instead of discarding them: a request-stream update (`0xF0700`) records
+  the referenced stream's effective priority in the connection's priority map;
+  the request `Priority` header sets the per-request effective priority on the
+  context. Both are observable to the engine.
+- A push `PRIORITY_UPDATE` (`0xF0701`) references a push id that cannot exist (the
+  server issues no pushes — see the server-push scope decision below). It is
+  rejected and draining stops. Consistent with this drain's existing
+  parse-and-discard posture, the rejection is recorded and connection teardown
+  closes the QUIC connection; strict HTTP/3 would signal `H3_ID_ERROR`.
+
+### AOT posture
+
+No reflection or dynamic dispatch. Frame parsing is span-based; the priority
+field-value bridge stack-allocates for the small values that occur in practice and
+falls back to a pooled buffer otherwise. The scheduler is a plain lock + list with
+a pure selection function. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
 
 ## Scope decision: server push (de-scoped)
 

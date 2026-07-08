@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+		<ImplicitUsings>disable</ImplicitUsings>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ServerSentEvents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+</Project>

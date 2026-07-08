@@ -28,7 +28,7 @@ public class Http3InterceptorTests
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new HostFeatureAttachingInterceptor());
+        options.RequestInterceptors.Add(new HostFeatureAttachingInterceptor());
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -43,8 +43,8 @@ public class Http3InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new WrappingInterceptor("inner"));
-        options.Interceptors.Add(new WrappingInterceptor("outer"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("inner"));
+        options.RequestInterceptors.Add(new WrappingInterceptor("outer"));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -62,7 +62,7 @@ public class Http3InterceptorTests
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/forbidden", "https", "api.test");
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new HeadRejectingInterceptor(HttpStatusCode.Forbidden));
+        options.RequestInterceptors.Add(new HeadRejectingInterceptor(HttpStatusCode.Forbidden));
 
         (bool yielded, TestConnection requestStream) = await DriveAsync(payload, options);
 
@@ -84,9 +84,9 @@ public class Http3InterceptorTests
         DisposableFeatureAttachingInterceptor first = new();
         WrappingInterceptor wrapper = new("inner");
         BodyRejectingInterceptor rejecting = new(HttpStatusCode.UnProcessableEntity);
-        options.Interceptors.Add(first);
-        options.Interceptors.Add(wrapper);
-        options.Interceptors.Add(rejecting);
+        options.RequestInterceptors.Add(first);
+        options.RequestInterceptors.Add(wrapper);
+        options.RequestInterceptors.Add(rejecting);
 
         (bool yielded, TestConnection requestStream) = await DriveAsync(payload, options);
 
@@ -104,7 +104,7 @@ public class Http3InterceptorTests
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes("hello"));
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -121,7 +121,7 @@ public class Http3InterceptorTests
             "GET", "/", "https", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
         HttpConnectionListenerOptions options = new();
         HeaderProbingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -143,7 +143,7 @@ public class Http3InterceptorTests
             (":authority", "api.test"));
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
@@ -158,7 +158,7 @@ public class Http3InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
         InvocationRecordingInterceptor interceptor = new();
-        options.Interceptors.Add(interceptor);
+        options.RequestInterceptors.Add(interceptor);
 
         await ReceiveFirstContextAsync(payload, options);
 
@@ -176,7 +176,7 @@ public class Http3InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes(new string('x', 64)));
         HttpConnectionListenerOptions options = new();
-        options.Interceptors.Add(new CapSettingInterceptor(16));
+        options.RequestInterceptors.Add(new CapSettingInterceptor(16));
 
         IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 

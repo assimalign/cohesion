@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 using Shouldly;
@@ -71,5 +73,95 @@ public class RouteTests
 
         // Assert
         matched.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - TryMatchPath: Should match the path while ignoring the method")]
+    public void TryMatchPath_OnMethodMismatch_ShouldStillMatchPath()
+    {
+        // Arrange
+        Route route = new(HttpMethod.Get, "/users/{id:int}");
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.Post, "/users/42");
+
+        // Act
+        bool pathMatched = route.TryMatchPath(context, out RouteValueDictionary values);
+        bool fullMatch = route.TryMatch(context, out _);
+
+        // Assert
+        pathMatched.ShouldBeTrue();
+        values["id"].ShouldBe("42");
+        fullMatch.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - TryMatch: Should accept any of the mapped methods")]
+    public void TryMatch_OnMultiMethodRoute_ShouldAcceptEachMappedMethod()
+    {
+        // Arrange
+        Route route = new(new[] { HttpMethod.Get, HttpMethod.Post }, "/items/{id}");
+
+        // Act
+        bool getMatched = route.TryMatch(TestHttpContext.Create(HttpMethod.Get, "/items/1"), out _);
+        bool postMatched = route.TryMatch(TestHttpContext.Create(HttpMethod.Post, "/items/1"), out _);
+        bool deleteMatched = route.TryMatch(TestHttpContext.Create(HttpMethod.Delete, "/items/1"), out _);
+
+        // Assert
+        getMatched.ShouldBeTrue();
+        postMatched.ShouldBeTrue();
+        deleteMatched.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Methods: Should de-duplicate repeated methods")]
+    public void Methods_WithDuplicateMethods_ShouldDeduplicate()
+    {
+        // Arrange
+        Route route = new(new[] { HttpMethod.Get, HttpMethod.Get, HttpMethod.Post }, "/items");
+
+        // Act
+        int methodCount = route.Methods.Count;
+
+        // Assert
+        methodCount.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - AcceptsMethod: Empty method set should accept any method")]
+    public void AcceptsMethod_OnEmptyMethodSet_ShouldAcceptAnyMethod()
+    {
+        // Arrange
+        Route route = new(Array.Empty<HttpMethod>(), "/any/{id}");
+
+        // Act
+        bool acceptsGet = route.AcceptsMethod(HttpMethod.Get);
+        bool acceptsDelete = route.AcceptsMethod(HttpMethod.Delete);
+        bool fullMatch = route.TryMatch(TestHttpContext.Create(HttpMethod.Patch, "/any/9"), out _);
+
+        // Assert
+        acceptsGet.ShouldBeTrue();
+        acceptsDelete.ShouldBeTrue();
+        fullMatch.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - TryMatch: Should capture a catch-all remainder")]
+    public void TryMatch_OnCatchAllRoute_ShouldCaptureRemainder()
+    {
+        // Arrange
+        Route route = new(HttpMethod.Get, "/files/{**path}");
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.Get, "/files/images/logo.png");
+
+        // Act
+        bool matched = route.TryMatch(context, out RouteValueDictionary values);
+
+        // Assert
+        matched.ShouldBeTrue();
+        values["path"].ShouldBe("images/logo.png");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - InboundPrecedence: Literal route outranks parameter route")]
+    public void InboundPrecedence_LiteralRoute_ShouldOutrankParameterRoute()
+    {
+        // Arrange
+        Route literalRoute = new(HttpMethod.Get, "/api/status");
+        Route parameterRoute = new(HttpMethod.Get, "/api/{id}");
+
+        // Act & Assert — lower inbound precedence is more specific and evaluated first.
+        literalRoute.InboundPrecedence.ShouldBeLessThan(parameterRoute.InboundPrecedence);
     }
 }

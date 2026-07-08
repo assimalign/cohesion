@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Http.Connections;
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>
-/// Binds HTTP server listener endpoints and <see cref="HttpServerLimits"/> from a Cohesion
+/// Binds HTTP server listener endpoints and per-endpoint limits from a Cohesion
 /// <see cref="IConfiguration"/> section onto an <see cref="HttpConnectionListenerOptions"/> at
 /// builder time.
 /// </summary>
@@ -41,6 +41,17 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 ///   }
 /// }
 /// </code>
+/// <para>
+/// Limits are per HTTP version on the transport
+/// (<see cref="Http1ConnectionListenerOptions.Http1Limits"/> /
+/// <see cref="Http2ConnectionListenerOptions.Http2Limits"/> deriving from the shared
+/// <see cref="HttpConnectionListenerLimits"/>), so the single <c>Limits</c> section is applied to
+/// every endpoint this binder registers: HTTP/1.1 endpoints receive all six keys; HTTP/2
+/// endpoints receive the shared keys (<c>MaxRequestBodySize</c>, <c>KeepAliveTimeout</c>,
+/// <c>RequestHeadersTimeout</c>), because the HTTP/1.1 wire-format keys have no HTTP/2 meaning.
+/// The section is parsed eagerly — before any endpoint is registered — so an unparseable value
+/// fails loudly even when no endpoint consumes it.
+/// </para>
 /// </remarks>
 internal static class HttpServerConfiguration
 {
@@ -65,11 +76,24 @@ internal static class HttpServerConfiguration
         ArgumentException.ThrowIfNullOrEmpty(sectionKey);
         ArgumentNullException.ThrowIfNull(options);
 
-        BindLimits(configuration, sectionKey, options.Limits);
-        BindEndpoints(configuration, sectionKey, options);
+        // Parse the Limits section eagerly into a template so an unparseable value fails loudly
+        // even when no endpoint is declared; each registered endpoint then copies the bound
+        // values into its own per-registration limits.
+        Http1ConnectionListenerOptions.Http1Limits boundLimits = new();
+        BindLimits(configuration, sectionKey, boundLimits);
+        BindEndpoints(configuration, sectionKey, options, boundLimits);
     }
 
-    private static void BindLimits(IConfiguration configuration, string sectionKey, HttpServerLimits limits)
+    /// <summary>
+    /// Binds the <c>Limits</c> object under <paramref name="sectionKey"/> onto
+    /// <paramref name="limits"/>. Absent values leave the built-in defaults in place; present but
+    /// unparseable values throw.
+    /// </summary>
+    /// <param name="configuration">The configuration to read from.</param>
+    /// <param name="sectionKey">The root section key (for example <c>"Http"</c>).</param>
+    /// <param name="limits">The HTTP/1.1 limits to populate (the superset the section models).</param>
+    /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed.</exception>
+    internal static void BindLimits(IConfiguration configuration, string sectionKey, Http1ConnectionListenerOptions.Http1Limits limits)
     {
         if (TryGetInt(configuration, $"{sectionKey}:Limits:MaxRequestLineSize", out int maxRequestLineSize))
         {
@@ -103,7 +127,7 @@ internal static class HttpServerConfiguration
         }
     }
 
-    private static void BindEndpoints(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options)
+    private static void BindEndpoints(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits)
     {
         IConfigurationSection? endpoints = configuration.GetSection($"{sectionKey}:Endpoints");
         if (endpoints is null)
@@ -115,12 +139,12 @@ internal static class HttpServerConfiguration
         {
             if (child is IConfigurationSection endpoint)
             {
-                BindEndpoint(endpoint, options);
+                BindEndpoint(endpoint, options, boundLimits);
             }
         }
     }
 
-    private static void BindEndpoint(IConfigurationSection endpoint, HttpConnectionListenerOptions options)
+    private static void BindEndpoint(IConfigurationSection endpoint, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits)
     {
         string endpointName = endpoint.Key.ToString();
         string? protocol = GetString(endpoint, "Protocol");
@@ -137,17 +161,36 @@ internal static class HttpServerConfiguration
 
         if (IsHttp2(protocol))
         {
-            options.UseHttp2(tcp => tcp.EndPoint = bindEndPoint);
+            options.UseHttp2(
+                () => TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint),
+                http2 => CopySharedLimits(boundLimits, http2.Limits));
         }
         else if (IsHttp1(protocol))
         {
-            options.UseHttp1(tcp => tcp.EndPoint = bindEndPoint);
+            options.UseHttp1(
+                () => TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint),
+                http1 => CopyHttp1Limits(boundLimits, http1.Limits));
         }
         else
         {
             throw new InvalidOperationException(
                 $"The HTTP endpoint '{endpointName}' declares an unsupported 'Protocol' ('{protocol}'). Supported values: Http1, Http2.");
         }
+    }
+
+    private static void CopyHttp1Limits(Http1ConnectionListenerOptions.Http1Limits source, Http1ConnectionListenerOptions.Http1Limits target)
+    {
+        target.MaxRequestLineSize = source.MaxRequestLineSize;
+        target.MaxRequestHeaderCount = source.MaxRequestHeaderCount;
+        target.MaxRequestHeadersTotalSize = source.MaxRequestHeadersTotalSize;
+        CopySharedLimits(source, target);
+    }
+
+    private static void CopySharedLimits(HttpConnectionListenerLimits source, HttpConnectionListenerLimits target)
+    {
+        target.MaxRequestBodySize = source.MaxRequestBodySize;
+        target.KeepAliveTimeout = source.KeepAliveTimeout;
+        target.RequestHeadersTimeout = source.RequestHeadersTimeout;
     }
 
     private static bool IsHttp1(string? protocol)

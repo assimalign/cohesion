@@ -23,7 +23,7 @@ public static class RoutingExtensions
             builder.Use(async (context, next) =>
             {
                 using CancellationTokenSource cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
-                
+
                 CancellationToken cancellationToken = cancellationTokenSource.Token;
 
                 IHttpFeatureCollection? features = context.Features;
@@ -36,11 +36,25 @@ public static class RoutingExtensions
                 IRouterFeature feature = features.Get<IRouterFeature>() ?? throw new InvalidOperationException("No router feature was registered.");
                 IRouter router = feature.Router;
 
-                await router.RouteAsync(context, cancellationToken).ConfigureAwait(false);
+                RouteMatch match = router.Match(context);
 
-                if (!context.TryGetRoute(out _))
+                switch (match.Status)
                 {
-                    await next.Invoke(context).ConfigureAwait(false);
+                    case RouteMatchStatus.Matched:
+                        context.SetRouteMatch(match.Route!, match.Values);
+                        await match.Route!.Handler.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+                        break;
+
+                    case RouteMatchStatus.MethodNotAllowed:
+                        // A route matched the path but not the method: emit 405 with an Allow header and
+                        // short-circuit rather than falling through to the terminal 404 pipeline.
+                        context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
+                        context.Response.Headers[HttpHeaderKey.Allow] = match.ToAllowHeaderValue();
+                        break;
+
+                    default:
+                        await next.Invoke(context).ConfigureAwait(false);
+                        break;
                 }
             });
 

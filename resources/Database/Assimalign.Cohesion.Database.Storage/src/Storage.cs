@@ -54,6 +54,9 @@ public abstract class Storage : IStorage
     public Name Name => _name;
 
     /// <inheritdoc />
+    public abstract StorageModel Model { get; }
+
+    /// <inheritdoc />
     public StorageStream Data { get; }
 
     /// <inheritdoc />

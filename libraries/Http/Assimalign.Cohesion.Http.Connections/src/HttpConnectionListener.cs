@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.Versioning;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Channels;
@@ -8,9 +7,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
-using Assimalign.Cohesion.Http.Connections.Internal.Http1;
-using Assimalign.Cohesion.Http.Connections.Internal.Http2;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
 namespace Assimalign.Cohesion.Http.Connections;
 
@@ -27,10 +23,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// </remarks>
 public sealed class HttpConnectionListener : IHttpConnectionListener
 {
-    private readonly List<(HttpProtocol Protocol, IConnectionListener Listener)> _streamListeners;
-    private readonly List<IMultiplexedConnectionListener> _multiplexedListeners;
-    private readonly HttpServerLimits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly List<(HttpConnectionFactory Factory, IConnectionListener Listener)> _streamListeners;
+    private readonly List<(HttpMultiplexedConnectionFactory Factory, IMultiplexedConnectionListener Listener)> _multiplexedListeners;
     private readonly List<Task> _acceptLoops;
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
@@ -53,24 +47,30 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _streamListeners = new List<(HttpProtocol, IConnectionListener)>();
-        _multiplexedListeners = new List<IMultiplexedConnectionListener>();
-        _limits = options.Limits;
+        _streamListeners = new List<(HttpConnectionFactory, IConnectionListener)>();
+        _multiplexedListeners = new List<(HttpMultiplexedConnectionFactory, IMultiplexedConnectionListener)>();
+
         // Snapshot: registrations after this point must not race the accept loops or observe a
-        // half-mutated list; the empty snapshot keeps the parser's zero-interceptor fast path.
-        _interceptors = [.. options.Interceptors];
+        // half-mutated list; the empty snapshots keep the parser's zero-interceptor fast paths.
+        IHttpRequestInterceptor[] interceptors = [.. options.RequestInterceptors];
+        IHttpResponseInterceptor[] responseInterceptors = [.. options.ResponseInterceptors];
 
         HttpProtocol protocols = HttpProtocol.None;
 
+        // Each registration carries the factory that turns an accepted transport connection into
+        // its protocol-specific HttpConnection; the accept loops dispatch to that factory rather
+        // than switching on the protocol. Factories bind to the listener-wide interceptors here
+        // (once they are snapshotted); each registration's version-specific options (limits,
+        // QPACK) were already captured at Use* time and are closed over by its factory builder.
         foreach (HttpListenerRegistration registration in options.Registrations)
         {
             if (registration.IsMultiplexed)
             {
-                _multiplexedListeners.Add(registration.CreateMultiplexedListener());
+                _multiplexedListeners.Add((registration.CreateMultiplexedConnectionFactory(interceptors, responseInterceptors), registration.CreateMultiplexedListener()));
             }
             else
             {
-                _streamListeners.Add((registration.Protocol, registration.CreateStreamListener()));
+                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors), registration.CreateStreamListener()));
             }
 
             protocols |= registration.Protocol;
@@ -157,12 +157,12 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         _isDisposed = true;
         _disposeCancellationTokenSource.Cancel();
 
-        foreach ((HttpProtocol _, IConnectionListener listener) in _streamListeners)
+        foreach ((HttpConnectionFactory _, IConnectionListener listener) in _streamListeners)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
         }
 
-        foreach (IMultiplexedConnectionListener listener in _multiplexedListeners)
+        foreach ((HttpMultiplexedConnectionFactory _, IMultiplexedConnectionListener listener) in _multiplexedListeners)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
         }
@@ -214,21 +214,21 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 return;
             }
 
-            foreach ((HttpProtocol protocol, IConnectionListener listener) in _streamListeners)
+            foreach ((HttpConnectionFactory factory, IConnectionListener listener) in _streamListeners)
             {
-                _acceptLoops.Add(RunStreamAcceptLoopAsync(protocol, listener));
+                _acceptLoops.Add(RunStreamAcceptLoopAsync(factory, listener));
             }
 
-            foreach (IMultiplexedConnectionListener listener in _multiplexedListeners)
+            foreach ((HttpMultiplexedConnectionFactory factory, IMultiplexedConnectionListener listener) in _multiplexedListeners)
             {
-                _acceptLoops.Add(RunMultiplexedAcceptLoopAsync(listener));
+                _acceptLoops.Add(RunMultiplexedAcceptLoopAsync(factory, listener));
             }
 
             _acceptLoopsStarted = true;
         }
     }
 
-    private async Task RunStreamAcceptLoopAsync(HttpProtocol protocol, IConnectionListener listener)
+    private async Task RunStreamAcceptLoopAsync(HttpConnectionFactory connectionFactory, IConnectionListener listener)
     {
         // TLS is composed onto the listener before registration; the capability
         // reports the effective security of every connection it accepts.
@@ -242,12 +242,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = protocol switch
-                {
-                    HttpProtocol.Http11 => new Http1Connection(connection, isSecure, _limits, _interceptors),
-                    HttpProtocol.Http20 => new Http2Connection(connection, isSecure, _limits, _interceptors),
-                    _ => throw new InvalidOperationException($"The configured HTTP protocol '{protocol}' does not map to a stream connection listener.")
-                };
+                HttpConnection httpConnection = connectionFactory.Create(connection, isSecure);
 
                 await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -275,7 +270,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
     }
 
-    private async Task RunMultiplexedAcceptLoopAsync(IMultiplexedConnectionListener listener)
+    private async Task RunMultiplexedAcceptLoopAsync(HttpMultiplexedConnectionFactory connectionFactory, IMultiplexedConnectionListener listener)
     {
         bool isSecure = listener.Capabilities.Security == ConnectionSecurity.Tls;
 
@@ -287,7 +282,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = CreateHttp3Connection(multiplexedConnection, isSecure, _limits, _interceptors);
+                HttpConnection httpConnection = connectionFactory.Create(multiplexedConnection, isSecure);
 
                 await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
             }
@@ -313,29 +308,5 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
             _disposeCancellationTokenSource.Cancel();
         }
-    }
-
-    private static Http3Connection CreateHttp3Connection(
-        IMultiplexedConnection connection,
-        bool isSecure,
-        HttpServerLimits limits,
-        IHttpRequestInterceptor[] interceptors)
-    {
-        if (!IsHttp3SupportedPlatform())
-        {
-            throw new PlatformNotSupportedException("HTTP/3 transports require a QUIC-capable platform.");
-        }
-
-        return new Http3Connection(connection, isSecure, limits, interceptors);
-    }
-
-    [SupportedOSPlatformGuard("windows")]
-    [SupportedOSPlatformGuard("linux")]
-    [SupportedOSPlatformGuard("macos")]
-    private static bool IsHttp3SupportedPlatform()
-    {
-        return OperatingSystem.IsWindows() ||
-            OperatingSystem.IsLinux() ||
-            OperatingSystem.IsMacOS();
     }
 }

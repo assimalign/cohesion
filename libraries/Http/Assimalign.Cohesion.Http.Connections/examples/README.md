@@ -26,3 +26,4 @@ dotnet run --project .\examples\Assimalign.Cohesion.Http.Connections.Examples.Ht
 - The HTTP/3 example uses QUIC and requires a QUIC-capable platform and runtime.
 - If the HTTP/3 sample fails during the QUIC/TLS handshake, verify local QUIC support and certificate handling on the host machine before debugging the HTTP/3 frame layer.
 - All examples are single-request samples intended to demonstrate real end-to-end protocol flow on localhost.
+- The incremental **response-streaming** write path these transports expose (chunked / DATA-frame streaming) is demonstrated end-to-end by the Server-Sent Events sample under `libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples`, which composes this transport with the SSE feature package.

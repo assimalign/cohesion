@@ -59,6 +59,53 @@ internal abstract class TransportHttpContext : HttpContext
     public override CancellationToken RequestCancelled => _abortedSource.Token;
 
     /// <summary>
+    /// The transport's raw response body sink for this exchange, or
+    /// <see langword="null"/> when no response interceptors are registered (the buffered
+    /// fast path). When a response feature has written to it
+    /// (<see cref="HttpResponseBodyStream.HasStarted"/> is <see langword="true"/>) the
+    /// transport's buffered <c>SendAsync</c> finalizes the already-started response
+    /// instead of writing the buffered body again.
+    /// </summary>
+    internal HttpResponseBodyStream? ResponseBodySink { get; private set; }
+
+    /// <summary>
+    /// Runs the registered response interceptors, exposing the transport's raw response body
+    /// <paramref name="sink"/> so a feature package can wrap it and install a typed response
+    /// feature on <see cref="Features"/> — without the transport depending on that package.
+    /// The sink is retained so the transport's send path can finalize it if the exchange streamed.
+    /// </summary>
+    /// <param name="interceptors">The snapshotted response interceptors, in registration order.</param>
+    /// <param name="sink">The protocol-specific raw response body sink.</param>
+    /// <param name="connectionTakeover">
+    /// The protocol-specific connection-takeover capability, or <see langword="null"/> when the
+    /// exchange cannot surrender its connection. Only the HTTP/1.1 transport supplies one — an
+    /// HTTP/1.1 exchange owns its whole connection, whereas HTTP/2 / HTTP/3 exchanges are
+    /// multiplexed streams over a shared connection.
+    /// </param>
+    internal void RunResponseInterceptors(
+        IHttpResponseInterceptor[] interceptors,
+        HttpResponseBodyStream sink,
+        IHttpConnectionTakeover? connectionTakeover = null)
+    {
+        ResponseBodySink = sink;
+
+        HttpResponseInterceptorContext interceptorContext = new()
+        {
+            Version = Version,
+            Headers = Response.Headers,
+            Features = Features,
+            ConnectionInfo = ConnectionInfo,
+            ResponseBody = sink,
+            ConnectionTakeover = connectionTakeover,
+        };
+
+        foreach (IHttpResponseInterceptor interceptor in interceptors)
+        {
+            interceptor.OnResponse(interceptorContext);
+        }
+    }
+
+    /// <summary>
     /// Whether the application requested cancellation of this exchange via
     /// <see cref="Cancel"/>. Each transport's response path observes this and
     /// resets the single exchange (HTTP/2 <c>RST_STREAM</c>, HTTP/3 stream
@@ -109,7 +156,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// feature whose state needs deterministic cleanup at request end
     /// implements one of the disposal interfaces and is attached either at
     /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
-    /// (via <see cref="HttpConnectionListenerOptions.Interceptors"/>) or
+    /// (via <see cref="HttpConnectionListenerOptions.RequestInterceptors"/>) or
     /// later by middleware.
     /// </summary>
     public override async ValueTask DisposeAsync()

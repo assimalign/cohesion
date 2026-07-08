@@ -117,6 +117,9 @@ dictionaries. Fully AOT/trim safe.
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers
   build on for RFC 9651 syntax is the structured-fields surface documented below.
+  The typed consumers for the timestamp, caching, and validator fields
+  (`Date`/`Last-Modified`, `Cache-Control`, `ETag`, and the conditional-request
+  fields) are documented under **HTTP caching and validators** below.
   `HttpFieldRules` stays name-classification only.
 
 ## Cross-version normalization
@@ -377,6 +380,47 @@ escape-free strings directly. Builds clean under the trim/AOT analyzers
   bytes; `Serialize()` always emits the §4.1 canonical form. A parse→serialize round-trip
   therefore normalizes (e.g. `1.50` → `1.5`, `-0` → `0`) rather than preserving the wire
   spelling.
+
+## Priority (RFC 9218 extensible priorities)
+
+### The value object
+
+`HttpPriority` is the field-specific consumer the Structured Field Values non-goals point at:
+it projects the RFC 9218 *Priority Field Value* — the `u`/`i` structured-field dictionary
+carried by the `Priority` request header **and** by HTTP/2 / HTTP/3 `PRIORITY_UPDATE` frames —
+onto the two things a scheduler consumes: an **urgency** 0–7 (`u`, default 3) and an
+**incremental** flag (`i`, default false). It is a `readonly struct` with `TryParse`, `Serialize`,
+and value equality, matching the shape of the other core value objects (`HttpMediaType`,
+`HttpQuality`).
+
+Parsing goes **through** `StructuredFieldDictionary` rather than around it — there is one
+structured-field parser in the stack, and `HttpPriority` only adds the field's semantics on top
+of it. The header name is exposed as the typed `HttpHeaderKey.Priority`.
+
+### Tolerant field semantics, strict syntax
+
+The structured-field *syntax* is strict (a malformed dictionary fails `TryParse`, which returns
+the default and `false`), but the *field members* are tolerant exactly as RFC 9218 §4 requires: an
+absent, out-of-range (not 0–7), or wrong-typed `u` falls back to urgency 3; an absent or
+non-boolean `i` falls back to non-incremental; and unrecognized members are ignored. This split
+lets a transport treat a well-formed-but-nonsensical `Priority` value as "no signal" (the default)
+without raising a protocol error, while still rejecting genuinely malformed structured fields.
+
+### Why a value object here and the scheduler elsewhere
+
+`HttpPriority` is pure parsing/representation and therefore lives in the protocol core (Lane B).
+*Acting* on the priority — urgency-ordered, non-incremental-first response scheduling, the
+`PRIORITY_UPDATE` frame engine, per-stream priority state — is wire behavior and lives in
+`Assimalign.Cohesion.Http.Connections` (Lane A). The value object is the seam between the two: the
+transport parses header and frame field values into `HttpPriority` and schedules on its
+`Urgency`/`Incremental`.
+
+### AOT posture
+
+No reflection or dynamic serialization; parsing is span-based via the structured-field toolkit and
+the ASCII→`char` bridge on the transport side is stack-allocated for the small field values that
+occur in practice. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
+
 ## Request-parse interception seam
 
 ### What it is
@@ -407,7 +451,7 @@ infrastructure every parse-time feature shares (`Http.RequestLimits` today;
 digest fields and request decompression are the designed next consumers), so it
 sits here; the concrete `IHttpMaxRequestBodySizeFeature` was deliberately moved
 *out* of this core into `Assimalign.Cohesion.Http.RequestLimits`. Registration
-is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
+is transport-owned (`HttpConnectionListenerOptions.RequestInterceptors` in
 `Http.Connections`) because *when* hooks run is a transport decision; *what*
 they can do is defined here.
 
@@ -449,3 +493,450 @@ the Items-key bridge.
 
 Interface dispatch plus the existing dictionary-backed feature lookup — no
 reflection, no codegen.
+
+## HTTP caching and validators (RFC 9111 / RFC 9110)
+
+The core owns the typed primitives for the caching and validator fields:
+`Cache-Control` directive parsing (RFC 9111 §5.2), the freshness arithmetic
+(§4.2), the `ETag` value type and its strong/weak comparison (RFC 9110 §8.8.3),
+HTTP-date parsing (§5.6.7), and conditional-request evaluation (§13). These are
+the typed *field-value consumers* the `HttpFieldRules` "per-field parsers"
+non-goal delegates to — the same relationship `HttpMediaType` and the
+structured-fields toolkit already have to the core. They are **not** a cache:
+there is no store, no revalidation transport, and no policy.
+
+### Why the core, not a layered `Http.Caching` package
+
+Two forces put these in the protocol core rather than in a sibling package
+beside `Http.Sessions`/`Http.Forms`:
+
+- **They parse their own values.** Like `HttpMethod`, `HttpStatusCode`, and
+  `HttpMediaType`, an entity-tag or a `Cache-Control` field is a self-contained
+  protocol value object. It does not extend `HttpFieldRules` (which stays
+  name-classification only) or touch the header collections, so it does not
+  cross the application-layer boundary the `HttpProtocolCoreBoundaryTests`
+  guard — a client, proxy, or edge cache wants exactly these types without
+  dragging in session/form semantics.
+- **The validator types are shared, not duplicated.** The range-request and
+  precondition primitives (RFC 9110 §13.2.2 / §14) land in this same core and
+  need the identical `ETag`, `If-Match`/`If-None-Match`, and conditional-request
+  machinery. A layered caching package would force a dependency inversion (core
+  range code depending on a caching package) or a second copy of the entity-tag
+  grammar. Keeping the shared validator surface in the core lets both consumers
+  reference one implementation. `HttpEntityTag`, `HttpEntityTagCondition`, and
+  the header preconditions live here; the range-specific `If-Range` (§13.2.2
+  step 5) and range selection are layered above, reusing these types.
+
+### The surface
+
+- **`HttpEntityTag`** — a `readonly struct` holding the opaque tag content
+  (without the surrounding quotes) and a weakness flag. It exposes the two
+  RFC 9110 §8.8.3.2 comparison functions as distinct methods —
+  `StrongEquals` (both tags strong and octet-equal) and `WeakEquals` (octet-equal
+  regardless of weakness) — because the two are not interchangeable: caching and
+  `If-None-Match` use weak comparison, while `If-Match`/`If-Range` use strong.
+  `Equals`/`==` are stricter still (structural: content *and* weakness), so the
+  type is a sound dictionary key; the comparison methods, not the operators,
+  carry the HTTP semantics.
+- **`HttpEntityTagCondition`** — the parsed `If-Match`/`If-None-Match` value:
+  either the `*` wildcard or a comma-separated tag list. `MatchesStrong` /
+  `MatchesWeak` fold the wildcard (matches when a representation exists) and the
+  list (any member matches under the chosen comparison) into one call the
+  evaluator and the range primitives share.
+- **`HttpCacheControl`** — one `readonly struct` for both request and response
+  directives (the field is bidirectional). Recognized directives are typed
+  (`bool` flags packed into an internal `[Flags]` enum, delta-seconds as
+  `TimeSpan`, the `no-cache`/`private` field-name arguments as string lists);
+  unrecognized directives are preserved as `Extensions` (§5.2.3) so a
+  parse→serialize round-trip is lossless. `max-stale` distinguishes
+  present-without-value (accept any staleness) via `HasMaxStale` from a bounded
+  value. Over-large delta-seconds clamp to ~68 years (2³¹−1 s) per §1.2.2.
+- **`HttpDate`** — parses all three §5.6.7 forms (IMF-fixdate, RFC 850, asctime)
+  via `DateTimeOffset.TryParseExact` with invariant culture, and formats the
+  preferred IMF-fixdate. There is deliberately no throwing `Parse`: a malformed
+  date is *ignored* by conditional-request rules (§13.1.3), so the `TryParse`
+  shape is the correct one and the consumer maps failure to "field absent".
+- **`HttpFreshness`** — pure §4.2 arithmetic: freshness-lifetime selection
+  (§4.2.1), the current-age algorithm (§4.2.3), and the `IsFresh` comparison.
+  Every timestamp is a parameter — no ambient clock is read — so the helpers are
+  deterministic and unit-testable, and the *policy* (heuristic freshness §4.2.2,
+  storage, revalidation) stays with the consuming cache.
+- **`HttpConditionalRequest`** + **`HttpConditionalRequestContext`** +
+  **`HttpPreconditionOutcome`** — the §13.2.2 evaluator over already-parsed
+  inputs. It implements the four header preconditions in order (`If-Match`,
+  then `If-Unmodified-Since` only when `If-Match` is absent; `If-None-Match`,
+  then `If-Modified-Since` only when `If-None-Match` is absent and the method is
+  a read). This encodes the two rules the feature calls out: `If-None-Match`
+  takes precedence over `If-Modified-Since`, and a failed read precondition is
+  `304` for GET/HEAD but `412` otherwise. Resource existence (for the `*`
+  wildcard) is inferred from a supplied validator, with an explicit
+  `HasCurrentRepresentation` escape hatch for the rare validator-less resource.
+
+### Why value objects and static helpers, not interfaces
+
+`HttpFreshness` and `HttpConditionalRequest` are `static` (like `HttpFieldRules`,
+`HttpFieldNormalization`, and `HttpContentNegotiation`), and the rest are value
+objects with `TryParse`/`Parse`/`ToString` (like `HttpMediaType` and the
+structured-field types). These are pure, stateless transforms over value types
+with exactly one correct implementation; an interface seam would add allocation
+and virtual dispatch with no substitutability payoff. The interface-first rule
+targets injectable behavior — these are protocol value transformations.
+
+### Parsing posture
+
+`TryParse` never throws on malformed wire input and returns `false`; the paired
+`Parse` throws a typed `HttpException` (`HttpErrorCode.InvalidCacheControl` /
+`InvalidEntityTag`). `Cache-Control` parsing is a single span-based pass that
+splits on unquoted commas, skips empty list elements (RFC 9110 §5.6.1.2), fails
+on a non-token directive name or a malformed delta-seconds argument, and
+tolerates a quoted delta-seconds some senders emit. The `no-cache`/`private`
+field-list argument (uncommon) is the one place a materialized string split is
+used rather than the span path; the entity-tag grammar validates `etagc`
+(§8.8.3) character-by-character.
+
+### Reading the fields is the consumer's job
+
+As with the media-type primitives, the core does **not** read `Cache-Control`,
+`ETag`, or the conditional fields off an `IHttpRequest`/`IHttpResponse`. A
+consumer looks the field up by `HttpHeaderKey`, hands the raw value to the
+relevant `TryParse`, and populates `HttpConditionalRequestContext`. Field wiring,
+the `304`-vs-`412` response shaping, and the caching decision belong to the
+response-caching middleware and the range/precondition layer that build on these
+primitives.
+
+### AOT posture
+
+Span-based parsing, no reflection, no runtime codegen. `HttpDate` uses
+`DateTimeOffset.TryParseExact` with `CultureInfo.InvariantCulture` (the invariant
+month/day names match HTTP's fixed English tokens) — a data-driven parse with no
+dynamic member access. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **A cache.** No response storage, cache-key derivation, revalidation transport,
+  or heuristic-freshness *decision*. `HttpFreshness` supplies the arithmetic; the
+  policy is the consumer's (a future server-side output cache, #795).
+- **Field wiring and response shaping.** Reading the request/response fields and
+  emitting `304`/`412`/`Vary` is the middleware's concern, not the core's.
+- **Range requests.** Byte-range parsing, `206`/`416` selection, and the
+  `If-Range` precondition are the range-request primitives' responsibility; they
+  reuse `HttpEntityTag`, `HttpEntityTagCondition`, and the comparison helpers here
+  rather than re-deriving them.
+- **Cookie `Max-Age`.** That is RFC 6265, a different grammar owned by the cookie
+  model; the delta-seconds handling here is `Cache-Control`-specific.
+
+## The response interceptor seam
+
+`IHttpResponseInterceptor` (+ `HttpResponseInterceptorContext`) is the symmetric
+counterpart to `IHttpRequestInterceptor`: a generic hook the server transport
+invokes while an exchange's response pipeline is being set up, before the handler
+runs. It exists so **response-side capabilities stay out of both the protocol core
+and the transport**. Incremental response streaming — and Server-Sent Events on top
+of it — is the first consumer, and neither the core nor the transport carries any
+streaming/SSE type.
+
+### Why generic, and how a feature plugs in
+
+The request side already established the pattern: `Http.RequestLimits` participates
+in request parsing via an `IHttpRequestInterceptor` (registered on the listener
+options), and the transport enforces it without ever referencing that package. The
+response side mirrors it exactly:
+
+- The transport exposes its per-protocol **raw response body sink** as a plain
+  `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
+  frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
+  flow-control backpressure), commits the head on the first write/flush, and is
+  finalized by the transport when the exchange completes.
+- A feature package (`Assimalign.Cohesion.Http.Streaming`) ships an
+  `IHttpResponseInterceptor` that wraps that sink in a typed
+  `IHttpResponseStreamingFeature` and installs it on `context.Features`. A handler
+  resolves the feature (`context.Response.Streaming`) and writes.
+
+So the streaming write/flush API, its state machine, and the SSE wire format all
+live in feature packages; the core owns only the generic interceptor seam, and the
+transport owns only the framing. The one streaming-adjacent thing that stays in the
+core is the well-known **header-name constant** `HttpHeaderKey.LastEventId`,
+alongside the other feature-specific header names already centralized there
+(`Sec-WebSocket-*`, `Grpc-*`).
+
+### Header-commit timing
+
+Because the sink commits the head on the first write or flush, the status line and
+headers are committed exactly once and locked thereafter — a rule the streaming
+feature surfaces to callers and the SSE package relies on (set `Content-Type:
+text/event-stream` before the first write). The interceptor runs *before* any
+response byte is produced, so an interceptor may still set default response headers
+on `HttpResponseInterceptorContext.Headers`.
+
+### Connection takeover — the second capability on the same seam
+
+`HttpResponseInterceptorContext.ConnectionTakeover` (an optional
+`IHttpConnectionTakeover`) is the seam's escape hatch from HTTP framing
+altogether: where `ResponseBody` frames writes for the negotiated protocol, a
+takeover surrenders the **raw duplex connection stream** and tells the transport
+to suppress its own response for the exchange and stop reusing the connection.
+It exists for HTTP/1.1 connection transitions — the RFC 9110 §7.8 protocol
+upgrade (`101 Switching Protocols`) and the §9.3.6 `CONNECT` tunnel — which by
+definition leave the request/response loop.
+
+The same layering discipline applies: the core defines only the generic
+capability (one one-shot `TakeOver()` method), the HTTP/1.1 transport ships the
+internal implementation and offers it on the context, and the
+`Assimalign.Cohesion.Http.ProtocolUpgrade` package owns *all* upgrade semantics
+— detection (via `IHttpRequestInterceptor` over the parsed head), the
+`context.Upgrade` surface, the 101/200 accept path, and the framing-header
+scrub. Neither the core nor the transport carries an upgrade-specific type; a
+transport that cannot surrender a connection (HTTP/2 / HTTP/3, whose exchanges
+are multiplexed streams and whose protocols removed `Upgrade`) simply leaves
+the member `null`, and the feature package degrades to `context.Upgrade == null`.
+
+The capability is one-shot and claims the connection *before* any transition
+byte is written, so two features can never fight over the same connection and a
+failed accept can never be followed by a second HTTP response on a
+desynchronized stream.
+
+### AOT posture
+
+Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.
+
+## Range requests and the `If-Range` precondition (RFC 9110 §14 / §13.1.5)
+
+Range requests are the layer the caching/validator section above explicitly
+deferred: it owns `ETag`, `HttpEntityTag`, `HttpEntityTagCondition`, `HttpDate`,
+and the four-step §13.2.2 precondition evaluator (`HttpConditionalRequest`); this
+section adds byte-range parsing, `Content-Range`, the `If-Range` value object,
+`206`/`416` selection, and the §13.2.2 **step-5** range-application decision that
+*reuses* those primitives rather than re-deriving them. `Web.StaticFiles` (#777)
+and output caching (#795) consume this layer.
+
+### The type map, and what is reused vs. new
+
+| Concern | Type(s) | Owner |
+|---|---|---|
+| Entity-tag, `If-Match`/`If-None-Match` value, HTTP-date, §13.2.2 steps 1–4 | `HttpEntityTag`, `HttpEntityTagCondition`, `HttpDate`, `HttpConditionalRequest`, `HttpPreconditionOutcome` | caching/validator section (#755) |
+| `Range` request header | `HttpRange` (one spec), `HttpRangeHeader` (the set) — RFC 9110 §14.1.1 | this section |
+| `Content-Range` response header | `HttpContentRange` — §14.4 | this section |
+| `If-Range` (entity-tag or date) + its step-5 decision | `HttpIfRange` (+ `Matches`) — §13.1.5 | this section |
+| `206`/`416` selection | `HttpRangeSelector` → `HttpRangeSelection` / `HttpRangeSlice` / `HttpRangeSelectionStatus` — §14.2 | this section |
+
+The range value objects are `readonly struct`s with span `TryParse`/`Parse`/
+`ToString`, and `HttpRangeSelector` is a `static` class — the same "value objects
++ static protocol transforms, not interfaces" rationale documented in the
+media-type and caching sections. No new ETag or condition type is introduced:
+`HttpIfRange`'s entity-tag form is an `HttpEntityTag`, and its `Matches` reuses
+`HttpEntityTag.StrongEquals`.
+
+### Parsing is strict, and "invalid" ≠ "unsatisfiable"
+
+A `Range` header yields one of three downstream outcomes, and separating them is
+deliberate:
+
+1. **Unparseable / unknown unit → ignore the range, serve `200`.**
+   `HttpRangeHeader.TryParse` returns `false` for a non-`bytes` unit or any
+   syntactically invalid range-set (one bad member fails the *whole* set) — the
+   RFC 9110 §14.2 "a server MAY ignore a Range it can't or won't honor." The
+   selector is never called.
+2. **Valid but wholly out of range → `416`.** A parsed `bytes` set where no spec
+   overlaps the representation is *unsatisfiable* — a different response (`416`
+   with `Content-Range: bytes */N`), not an ignore.
+3. **Valid, ≥1 overlapping → `206`.**
+
+Collapsing (1) and (2) — e.g. `416` for a malformed header — is a common and
+wrong implementation; keeping strict parse (`false`) separate from unsatisfiable
+selection (`Unsatisfiable`) is what makes the three-way outcome representable.
+
+### Range selection: 206 / 416 / Full, order preserved, DoS-guarded
+
+`HttpRangeSelector.Select(range, completeLength, maxRanges)` resolves each spec
+via `HttpRange.TryResolve` (§14.1.2: open-ended and suffix ranges clamp to the
+content; a `first-pos` at/after the end, an empty `-0` suffix, or a zero-length
+representation are unsatisfiable) and returns `HttpRangeSelection`:
+
+- **`Partial`** — one `HttpRangeSlice` per satisfiable spec, in client order, each
+  carrying the `Content-Range` a `206` (single or `multipart/byteranges`)
+  advertises. Ranges are **not coalesced or reordered** — the RFC permits
+  coalescing but does not require it; preserving client order keeps the primitive
+  predictable, and a consumer can coalesce the returned slices.
+- **`Unsatisfiable`** — carries `UnsatisfiedContentRange` = `bytes */N`.
+- **`Full`** — the escape hatch for a range set larger than `maxRanges`
+  (default 16). RFC 9110 §14.2 blesses ignoring "egregious" range requests; a huge
+  set of tiny overlapping ranges is the classic amplification vector, so the count
+  cap degrades to a plain `200`. It is a policy knob, surfaced as a parameter.
+
+### `If-Range` is step 5, and composes with the shared evaluator
+
+`HttpConditionalRequest.Evaluate` (the caching/validator section) resolves
+§13.2.2 steps 1–4 and returns `Proceed` / `NotModified` / `PreconditionFailed`.
+It deliberately stops there: `If-Range` is range-specific. `HttpIfRange.Matches`
+is step 5, and the two compose into the full "typed decision" the range feature
+needs:
+
+```
+outcome = HttpConditionalRequest.Evaluate(context)      // steps 1–4 → 304 / 412 / proceed
+if outcome != Proceed              → send 304 / 412
+else if a Range header is present:
+    applyRange = ifRange is null  ||  ifRange.Matches(currentETag, currentLastModified)   // step 5
+    if applyRange   → HttpRangeSelector.Select(...)     → 206 / 416 / (Full → 200)
+    else            → 200 full          // validator stale: give the client the whole thing
+else                               → 200 full
+```
+
+Two correctness details:
+
+- **`If-Range` is always strong.** The entity-tag form uses
+  `HttpEntityTag.StrongEquals` (a weak or absent current tag never applies the
+  range); the date form applies the range only when the representation has not
+  been modified after the client's date (`Last-Modified ≤ If-Range date`, the
+  Kestrel rule). A mismatch *ignores* the range (full `200`) — `If-Range` is
+  "give me the whole thing if my copy is stale", never a `412`.
+- **One-second granularity.** `HttpIfRange.Matches` truncates the representation's
+  `Last-Modified` to whole seconds before the date comparison, because an
+  HTTP-date carries only whole seconds; a sub-second write therefore does not read
+  as "modified".
+
+### AOT posture (range/If-Range)
+
+Structs, spans, `long.TryParse`, and reuse of `HttpDate`/`HttpEntityTag` — no
+reflection, no runtime codegen, no dynamic dispatch. Trim-safe by construction
+(`IsAotCompatible=true`).
+
+### Non-goals (this layer)
+
+- **No `multipart/byteranges` rendering.** The selector returns slices and their
+  `Content-Range`s; composing the multipart body (boundaries, part headers) is a
+  response-writer concern (#769 streaming path / `Web.StaticFiles` #777).
+- **No range coalescing** and **no `Accept-Ranges` emission** — server response
+  concerns, not value-object ones.
+- **No re-derived validator types.** ETag, the condition list, HTTP-date, and the
+  step-1–4 evaluator belong to the caching/validator section; this layer reuses
+  them.
+- **No header-collection integration.** As with the media-type and caching
+  primitives, reading the `Range` / `If-Range` / conditional fields off an
+  `IHttpRequest` and populating `HttpConditionalRequestContext` is the consuming
+  middleware's job.
+
+## Forwarding headers (RFC 7239 `Forwarded` + `X-Forwarded-*`)
+
+The core owns the value objects that parse and serialize the proxy-forwarding
+headers — the RFC 7239 `Forwarded` element list and the de-facto
+`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` list forms. Every
+Cohesion web service is deployed behind at least one proxy hop (the
+ApplicationModel K8s self-registry gateway, LoadBalancer/NatGateway resources),
+so without these primitives every downstream concern — CORS, cookie `Secure`
+decisions, session partitioning, rate-limit keys, access logging — sees the
+proxy's IP and `http://` scheme instead of the client's.
+
+### The protocol half vs. the trust half
+
+This library is deliberately the **protocol half only**: it turns raw header
+text into typed, validated value objects and back. It contains **no trust
+model**. Deciding *which* forwarded hops to believe — `KnownProxies`,
+`KnownNetworks`, `ForwardLimit`, and the actual overwrite of
+`connection.RemoteIp` / `request.Scheme` — lives in the forwarded-headers
+middleware (issue #778) in the Web runtime, because that is a policy decision
+that depends on the deployment topology, not on the wire grammar. Keeping the
+split here means the security-sensitive code has one job (apply policy to
+already-parsed, already-validated data) and the parser has one job (be a correct,
+total function over hostile input). This mirrors the established seam/feature
+taxonomy: protocol value objects in core, policy in the layer that composes them.
+
+### The surface
+
+Five readonly-struct value objects, in the span-based `TryParse`/`Parse`/
+`Serialize` style of the other core primitives (`HttpMediaType`,
+`HttpRequestTarget`, the `StructuredField*` family):
+
+- **`HttpForwardedNode`** — an RFC 7239 §6 `node` identifier (the `for`/`by`
+  value): `nodename [ ":" node-port ]`. It classifies the nodename as an IPv4
+  literal, a bracketed IPv6 literal, `unknown`, or an obfuscated identifier
+  (`_`-prefixed, §6.3), and the port as numeric or obfuscated (§6.4). `Address`
+  and `PortNumber` give the typed projections; `Name`/`Port` preserve the exact
+  spelling so `ToString` round-trips.
+- **`HttpForwardedParameter`** — one `forwarded-pair` (`token "=" value`),
+  carrying registered *and* extension parameters so an element round-trips
+  losslessly.
+- **`HttpForwardedElement`** — one `forwarded-element` (one proxy hop): typed
+  `For`/`By`/`Host`/`Proto` accessors over an ordered parameter list, plus
+  `TryGetParameter` for extensions and a typed `Create` factory for the
+  proxy-*writing* path.
+- **`HttpForwardedElementCollection`** — the whole `Forwarded` header
+  (`1#forwarded-element`).
+- **`HttpForwardedValues`** — the ordered entry list of any one `X-Forwarded-*`
+  header.
+
+`HttpHeaderKey` gained `Forwarded`, `XForwardedFor`, `XForwardedHost`, and
+`XForwardedProto` alongside the existing keys.
+
+### RFC 7239 strictness vs. `X-Forwarded-*` pragmatism
+
+`HttpForwardedNode` is reused across both header families, so it accepts a
+**bare** IPv6 literal (`2001:db8::1`) in addition to the RFC-mandated bracketed
+form (`[2001:db8::1]`) — bracket-less IPv6 is what real proxies write into
+`X-Forwarded-For`. Because a bare IPv6 literal's own colons cannot be
+distinguished from a trailing `:port`, a bare literal is always taken as the
+whole nodename with no port (which is exactly why RFC 7239 mandates brackets when
+a port is needed). IPv4/IPv6 recognition delegates to `System.Net.IPAddress`, so
+the accepted address forms are precisely the BCL's.
+
+`HttpForwardedValues` owns only the *list structure* — comma splitting
+(quote-aware) and multi-line combining — and keeps entries **verbatim**.
+Interpreting an `X-Forwarded-For` entry as an address is left to the consumer via
+`HttpForwardedNode.TryParse`, so the same list type serves all three
+`X-Forwarded-*` headers even though their entries mean different things (address
+vs. scheme vs. host).
+
+### Deterministic rejection is a security property
+
+Both the node and the element parser are **total**: any malformed input yields
+`TryParse == false` with no exception, no unbounded recursion, and no super-linear
+scanning (the quote-aware delimiter scan and the bracket/colon splits are all
+single passes). The `Forwarded` list parser is **strict and all-or-nothing** — an
+empty slot between commas is ignored per the RFC 7230 §7 list rule, but any
+element that is present and malformed fails the *entire* header. This is
+deliberate: a lenient parser that silently dropped one unparseable hop would let
+the #778 trust evaluator mis-count the chain and attribute the request to the
+wrong client. Strict parsing keeps the "how many hops, and which" question
+answerable only from well-formed input. `for`/`by` values that are present but
+are not valid nodes fail their element for the same reason. The fuzz suite
+(`HttpForwardedFuzzTests`) pins totality and determinism across truncated quotes,
+bracket/colon bombs, embedded NULs, high-plane characters, and multi-kilobyte
+inputs.
+
+### Rightmost-first traversal
+
+Both list types hold entries in **wire order** (left-most = closest to the
+client, right-most = closest to this server) and expose the same rightmost-first
+affordances the trust evaluator needs: index + `Count`, a `Nearest` accessor for
+the hop that handed *us* the request, and a `Reverse()` that returns a same-typed
+list in nearest-hop-first order. `AsSpan()` gives allocation-free traversal.
+
+### Why static-shaped value objects, not interfaces
+
+Like `HttpMediaType` and the `StructuredField*` types, these are immutable
+protocol primitives with exactly one correct parse — there is no injectable
+behavior to abstract, so an `IForwarded…` interface would add allocation and
+virtual dispatch (AOT-hostile) for no substitutability. The surface is kept
+conservative on purpose: as a Stage-1 fan-out primitive (#778 and every
+forwarding-aware concern imports it), it is costly to change once consumed.
+
+### AOT posture
+
+Span-based parsing over BCL `IPAddress`/char primitives — no reflection, no
+runtime codegen, no dynamic serialization. Parameter/entry storage is a plain
+array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **The trust model.** `KnownProxies`/`KnownNetworks`/`ForwardLimit` and the
+  mutation of connection/request state belong to the #778 middleware, not here.
+- **Interpreting `X-Forwarded-For` entries as addresses.** `HttpForwardedValues`
+  is a faithful ordered list; turning an entry into an `IPAddress` (and deciding
+  whether to trust it) is the consumer's call via `HttpForwardedNode`.
+- **De-obfuscating identifiers.** RFC 7239 §6.3 obfuscated nodes/ports are
+  recognized and preserved, never reversed — the mapping is private to the proxy
+  that issued them.
+- **`X-Forwarded-Port` and other vendor headers.** The scope is the three
+  ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
+  consumer overlay if ever needed.

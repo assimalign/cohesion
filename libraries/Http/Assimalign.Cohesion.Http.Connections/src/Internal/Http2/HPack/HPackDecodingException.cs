@@ -2,7 +2,7 @@ using System;
 namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
 [Serializable]
-internal sealed class HPackDecodingException : Exception
+internal class HPackDecodingException : Exception
 {
     public HPackDecodingException()
     {

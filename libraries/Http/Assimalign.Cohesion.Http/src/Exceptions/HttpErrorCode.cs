@@ -53,6 +53,17 @@ public enum HttpErrorCode
     InvalidStructuredField,
 
     /// <summary>
+    /// A <c>Cache-Control</c> field value (RFC 9111 &#167; 5.2) could not be parsed.
+    /// </summary>
+    InvalidCacheControl,
+
+    /// <summary>
+    /// An entity-tag or an <c>If-Match</c> / <c>If-None-Match</c> condition (RFC 9110 &#167; 8.8.3)
+    /// could not be parsed.
+    /// </summary>
+    InvalidEntityTag,
+
+    /// <summary>
     /// The HTTP protocol was violated.
     /// </summary>
     ProtocolViolation,
@@ -61,4 +72,26 @@ public enum HttpErrorCode
     /// Application execution failed while processing the request.
     /// </summary>
     ExecutionError,
+
+    /// <summary>
+    /// A <c>Range</c> header value (RFC 9110 &#167; 14.1.1) could not be parsed — an
+    /// unrecognized range unit or a malformed range set.
+    /// </summary>
+    InvalidRange,
+
+    /// <summary>
+    /// A <c>Content-Range</c> header value (RFC 9110 &#167; 14.4) could not be parsed.
+    /// </summary>
+    InvalidContentRange,
+
+    /// <summary>
+    /// An <c>If-Range</c> conditional-request header (RFC 9110 &#167; 13.1.5) could not be parsed.
+    /// </summary>
+    InvalidConditional,
+
+    /// <summary>
+    /// An RFC 7239 <c>Forwarded</c> element (or one of its <c>for</c>/<c>by</c> nodes) or an
+    /// <c>X-Forwarded-*</c> list could not be parsed.
+    /// </summary>
+    InvalidForwarded,
 }

@@ -63,9 +63,13 @@ internal static class Http2FrameReader
             Http2FrameType.Data => frame.DataHasPadding ? 1 : 0,
             Http2FrameType.Headers => (frame.HeadersHasPadding ? 1 : 0) + (frame.HeadersHasPriority ? 5 : 0),
             Http2FrameType.GoAway => 8,
-            Http2FrameType.Priority => 5,
+            // RFC 9218 §7.1 — a 4-octet Prioritized Stream ID prefix; the rest
+            // of the payload is the ASCII Priority Field Value.
+            Http2FrameType.PriorityUpdate => 4,
             Http2FrameType.RstStream => 4,
             Http2FrameType.WindowUpdate => 4,
+            // RFC 9113 §5.3.2 — the deprecated PRIORITY frame (0x2) is ignored;
+            // no fixed fields are parsed so its whole payload is discarded.
             _ => 0,
         };
     }
@@ -129,10 +133,11 @@ internal static class Http2FrameReader
                 frame.GoAwayLastStreamId = (int)Bitshifter.ReadUInt31BigEndian(extendedHeaders);
                 frame.GoAwayErrorCode = (Http2ErrorCode)BinaryPrimitives.ReadUInt32BigEndian(extendedHeaders.Slice(4));
                 break;
-            case Http2FrameType.Priority:
-                frame.PriorityIsExclusive = (extendedHeaders[0] & 0x80) != 0;
-                frame.PriorityStreamDependency = (int)Bitshifter.ReadUInt31BigEndian(extendedHeaders);
-                frame.PriorityWeight = extendedHeaders[4];
+            case Http2FrameType.PriorityUpdate:
+                // RFC 9218 §7.1 — the fixed prefix is the 31-bit Prioritized
+                // Stream ID (high bit reserved). The Priority Field Value that
+                // follows is returned to the caller as the frame payload.
+                frame.PriorityUpdatePrioritizedStreamId = (int)Bitshifter.ReadUInt31BigEndian(extendedHeaders);
                 break;
             case Http2FrameType.RstStream:
                 frame.RstStreamErrorCode = (Http2ErrorCode)BinaryPrimitives.ReadUInt32BigEndian(extendedHeaders);

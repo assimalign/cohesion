@@ -31,11 +31,22 @@ namespace Assimalign.Cohesion.Http;
 /// not reflected back into this object &#8211; callers should mutate
 /// through the collection rather than the header.
 /// </para>
+/// <para>
+/// Parsing is hardened per RFC 6265bis: cookies whose name plus value or
+/// whose individual attributes exceed the configured
+/// <see cref="HttpCookieLimits"/> are ignored (not truncated, not thrown),
+/// the retained attribute count per cookie is bounded, and cookies whose
+/// name or value falls outside the RFC 6265 &#167; 4.1.1 grammar are dropped
+/// rather than surfaced. This is wire-safety hardening, not cookie policy;
+/// prefix/pairing enforcement lives in
+/// <c>Assimalign.Cohesion.Web.CookiePolicy</c>.
+/// </para>
 /// </remarks>
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
     private readonly IHttpHeaderCollection _headers;
     private readonly HttpHeaderKey _headerKey;
+    private readonly HttpCookieLimits _limits;
     private readonly List<HttpCookie> _cookies = new();
 
     /// <summary>
@@ -53,10 +64,8 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
     /// <summary>
     /// Initializes a cookie collection synchronized with
     /// <paramref name="headers"/> through the supplied
-    /// <paramref name="headerKey"/>. Existing cookies on the header are
-    /// parsed into the collection during construction; subsequent
-    /// <see cref="Add"/>, <see cref="Remove"/>, and <see cref="Clear"/>
-    /// calls write back to the same header.
+    /// <paramref name="headerKey"/>, using the RFC 6265bis default parsing
+    /// limits (<see cref="HttpCookieLimits.Default"/>).
     /// </summary>
     /// <param name="headers">The header collection that owns the wire
     /// representation.</param>
@@ -67,10 +76,39 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
     /// <paramref name="headers"/> is <see langword="null"/>.
     /// </exception>
     public HttpCookieCollection(IHttpHeaderCollection headers, HttpHeaderKey headerKey)
+        : this(headers, headerKey, HttpCookieLimits.Default)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a cookie collection synchronized with
+    /// <paramref name="headers"/> through the supplied
+    /// <paramref name="headerKey"/> and bounded by
+    /// <paramref name="limits"/>. Existing cookies on the header are parsed
+    /// into the collection during construction &#8212; with oversized cookies
+    /// and attributes ignored per <paramref name="limits"/> and malformed
+    /// cookies dropped per the RFC 6265 &#167; 4.1.1 grammar &#8212; and
+    /// subsequent <see cref="Add"/>, <see cref="Remove"/>, and
+    /// <see cref="Clear"/> calls write back to the same header.
+    /// </summary>
+    /// <param name="headers">The header collection that owns the wire
+    /// representation.</param>
+    /// <param name="headerKey">Either <see cref="HttpHeaderKey.Cookie"/>
+    /// (request side) or <see cref="HttpHeaderKey.SetCookie"/> (response
+    /// side). The cookie format follows the header semantics.</param>
+    /// <param name="limits">The RFC 6265bis size limits applied while parsing
+    /// the header.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="headers"/> or <paramref name="limits"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    public HttpCookieCollection(IHttpHeaderCollection headers, HttpHeaderKey headerKey, HttpCookieLimits limits)
     {
         ArgumentNullException.ThrowIfNull(headers);
+        ArgumentNullException.ThrowIfNull(limits);
         _headers = headers;
         _headerKey = headerKey;
+        _limits = limits;
 
         ReadFromHeaders();
     }
@@ -189,23 +227,39 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
                 }
 
                 int eq = trimmed.IndexOf('=');
-                string name;
-                string val;
+                ReadOnlySpan<char> name;
+                ReadOnlySpan<char> val;
                 if (eq < 0)
                 {
-                    name = trimmed.ToString();
-                    val = string.Empty;
+                    name = trimmed;
+                    val = default;
                 }
                 else
                 {
-                    name = trimmed[..eq].Trim().ToString();
-                    val = trimmed[(eq + 1)..].Trim().ToString();
+                    name = trimmed[..eq].Trim();
+                    val = trimmed[(eq + 1)..].Trim();
                 }
 
-                if (name.Length > 0)
+                if (name.Length == 0)
                 {
-                    _cookies.Add(new HttpCookie(name, val));
+                    continue;
                 }
+
+                // RFC 6265bis per-cookie size guard — an oversized name=value
+                // pair is ignored rather than truncated or rejected with an error.
+                if (name.Length + val.Length > _limits.MaxNameValueLength)
+                {
+                    continue;
+                }
+
+                // RFC 6265 §4.1.1 grammar guard — drop a malformed inbound pair
+                // (it could not be constructed as an HttpCookie anyway).
+                if (!HttpCookieGrammar.IsValidName(name) || !HttpCookieGrammar.IsValidValue(val))
+                {
+                    continue;
+                }
+
+                _cookies.Add(new HttpCookie(name.ToString(), val.ToString()));
             }
         }
     }
@@ -231,7 +285,7 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         }
     }
 
-    private static HttpCookie? ParseSetCookieValue(string raw)
+    private HttpCookie? ParseSetCookieValue(string raw)
     {
         string[] segments = raw.Split(';');
         if (segments.Length == 0)
@@ -264,12 +318,27 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             return null;
         }
 
+        // RFC 6265bis per-cookie size guard — a cookie whose name+value exceeds
+        // the limit is ignored wholesale rather than truncated or rejected.
+        if (name.Length + value.Length > _limits.MaxNameValueLength)
+        {
+            return null;
+        }
+
+        // RFC 6265 §4.1.1 grammar guard — drop a malformed cookie (an
+        // out-of-grammar name/value could not be constructed anyway).
+        if (!HttpCookieGrammar.IsValidName(name) || !HttpCookieGrammar.IsValidValue(value))
+        {
+            return null;
+        }
+
         // Build options with the wire-empty defaults: HttpCookieOptions's
         // own ctor sets Path = "/" as a convenience for senders, but for
         // a faithful round-trip we only set Path when the wire actually
         // carried it. Override here before walking the attributes.
         HttpCookieOptions options = new() { Path = null };
 
+        int attributes = 0;
         for (int i = 1; i < segments.Length; i++)
         {
             string segment = segments[i].Trim();
@@ -277,6 +346,14 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             {
                 continue;
             }
+
+            // Bound the number of attributes retained so a hostile Set-Cookie
+            // with many ';'-separated segments cannot grow options unbounded.
+            if (attributes >= _limits.MaxAttributeCount)
+            {
+                break;
+            }
+            attributes++;
 
             int attrEq = segment.IndexOf('=');
             if (attrEq < 0)
@@ -287,6 +364,15 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
             {
                 string attrName = segment[..attrEq].Trim();
                 string attrValue = segment[(attrEq + 1)..].Trim();
+
+                // RFC 6265bis attribute-value size guard — an oversized
+                // attribute value is dropped while the rest of the cookie
+                // (including already-parsed attributes) is retained.
+                if (attrValue.Length > _limits.MaxAttributeValueLength)
+                {
+                    continue;
+                }
+
                 ApplyValueAttribute(attrName, attrValue, options);
             }
         }

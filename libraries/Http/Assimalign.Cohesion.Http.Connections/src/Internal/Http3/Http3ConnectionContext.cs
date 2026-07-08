@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
@@ -18,30 +19,101 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 {
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
-    private readonly HttpServerLimits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly Http3QPackOptions _qpackOptions;
     private readonly Http3PeerSettings _peerSettings = new();
     private readonly CancellationTokenSource _teardownSource = new();
+    private readonly QPackDecoderState? _decoderState;
     private IConnection? _controlStream;
+    private IConnection? _decoderStream;
     private Task? _peerControlDrainTask;
+    private Task? _qpackEncoderDrainTask;
     private bool _controlStreamReceived;
     private bool _qpackEncoderStreamReceived;
     private bool _qpackDecoderStreamReceived;
+    // RFC 9114 §5.2 — the number of client-initiated bidirectional request
+    // streams this connection has accepted. At teardown the GOAWAY announces
+    // the lowest stream ID the server will NOT process; with QUIC's
+    // client-bidi numbering (0, 4, 8, …) that boundary is
+    // (accepted count) × 4, so every stream already accepted (IDs below the
+    // boundary) falls inside "may have been processed" while later streams
+    // are rejected. Counted at accept — not at dispatch — so a malformed
+    // stream the server touched and dropped is still inside the boundary and
+    // the client will not retry a request whose side effects may have run.
+    // Mutated with Interlocked from the receive loop; read by the dispose path.
+    private int _processedRequestStreamCount;
+    // Guards single GOAWAY emission across the receive-loop teardown and the
+    // connection dispose path (Interlocked one-shot latch).
+    private int _goAwaySent;
+    private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    // RFC 9218 §7.2 — the effective priority of request streams the peer has
+    // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
+    // engine's observable priority state; response ordering across streams is
+    // otherwise delegated to the QUIC transport (see docs/DESIGN.md). Guarded
+    // because the control-stream drain runs on a background task.
+    private readonly Dictionary<long, HttpPriority> _requestStreamPriorities = new();
+    private readonly object _priorityLock = new();
+    private volatile bool _pushPriorityUpdateRejected;
 
     [SupportedOSPlatform("windows")]
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
     [SupportedOSPlatform("osx")]
-    public Http3ConnectionContext(IMultiplexedConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    public Http3ConnectionContext(
+        IMultiplexedConnection connection,
+        bool isSecure,
+        Http3ConnectionListenerOptions.Http3Limits limits,
+        IHttpRequestInterceptor[] requestInterceptors,
+        IHttpResponseInterceptor[] responseInterceptors,
+        Http3QPackOptions qpackOptions)
     {
         _connection = connection;
         _isSecure = isSecure;
         _limits = limits;
-        _interceptors = interceptors;
+        _requestInterceptors = requestInterceptors;
+        _responseInterceptors = responseInterceptors;
+        _qpackOptions = qpackOptions;
+
+        // The dynamic table (and its encoder/decoder instruction streams) is
+        // opt-in: with QPACK_MAX_TABLE_CAPACITY = 0 the decoder state is never
+        // created and the transport stays on the static-only path.
+        _decoderState = qpackOptions.DynamicTableEnabled ? new QPackDecoderState(qpackOptions) : null;
     }
 
     public override EndPoint? LocalEndPoint => _connection.LocalEndPoint;
     public override EndPoint? RemoteEndPoint => _connection.RemoteEndPoint;
+
+    /// <summary>
+    /// Attempts to read the effective priority recorded for a request stream by a
+    /// control-stream PRIORITY_UPDATE frame (RFC 9218 §7.2). Exposes the HTTP/3
+    /// engine's observable priority state.
+    /// </summary>
+    /// <param name="streamId">The prioritized request-stream identifier.</param>
+    /// <param name="priority">The recorded priority when present.</param>
+    /// <returns><see langword="true"/> if a priority was recorded for the stream; otherwise <see langword="false"/>.</returns>
+    internal bool TryGetRequestStreamPriority(long streamId, out HttpPriority priority)
+    {
+        lock (_priorityLock)
+        {
+            return _requestStreamPriorities.TryGetValue(streamId, out priority);
+        }
+    }
+
+    /// <summary>
+    /// Whether a push PRIORITY_UPDATE (frame type 0xF0701) has been received and
+    /// rejected. The server issues no pushes, so such a frame references a push id
+    /// that cannot exist (RFC 9218 §7.2 / H3_ID_ERROR).
+    /// </summary>
+    internal bool PushPriorityUpdateRejected => _pushPriorityUpdateRejected;
+
+    private void RecordRequestStreamPriority(long streamId, HttpPriority priority)
+    {
+        lock (_priorityLock)
+        {
+            _requestStreamPriorities[streamId] = priority;
+        }
+    }
 
     /// <summary>
     /// Yields HTTP/3 request contexts for the lifetime of this connection.
@@ -113,11 +185,24 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                     continue;
                 }
 
-                Http3Context? context = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+                // RFC 9114 §5.2 — this bidirectional stream is now an accepted
+                // request stream; advance the boundary the teardown GOAWAY
+                // announces so it falls inside "may have been processed" whether
+                // it yields a context or is dropped as malformed below.
+                Interlocked.Increment(ref _processedRequestStreamCount);
 
-                if (context is not null)
+                RequestReadOutcome outcome = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+
+                if (outcome.TerminateConnection)
                 {
-                    yield return context;
+                    // A QPACK connection error (RFC 9204 §2.2) corrupts shared
+                    // dynamic-table state and cannot be isolated to one stream.
+                    yield break;
+                }
+
+                if (outcome.Context is not null)
+                {
+                    yield return outcome.Context;
                 }
             }
         }
@@ -159,8 +244,24 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             // PipeWriter.WriteAsync flushes, so the SETTINGS frame reaches the
             // transport as the stream's first bytes. The output is not completed
             // — the critical stream stays open for the connection lifetime.
-            byte[] preamble = BuildControlStreamPreamble();
+            byte[] preamble = BuildControlStreamPreamble(_qpackOptions);
             await controlStream.Output.WriteAsync(preamble, cancellationToken).ConfigureAwait(false);
+
+            // When the dynamic table is enabled the server also opens its own
+            // QPACK decoder stream (RFC 9204 §4.2) so it can send decoder
+            // instructions (Insert Count Increment, and — with a stream ID —
+            // Section Acknowledgment). Like the control stream it is a critical
+            // stream: its type prefix is written and it is left open.
+            if (_decoderState is not null)
+            {
+                IConnection decoderStream = await _connection
+                    .OpenStreamAsync(ConnectionDirection.WriteOnly, cancellationToken)
+                    .ConfigureAwait(false);
+                _decoderStream = decoderStream;
+
+                byte[] decoderPrefix = BuildStreamTypePrefix(Http3StreamType.QPackDecoder);
+                await decoderStream.Output.WriteAsync(decoderPrefix, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -179,12 +280,19 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
     }
 
+    private static byte[] BuildStreamTypePrefix(long streamType)
+    {
+        using MemoryStream buffer = new();
+        QuicVariableLengthInteger.Write(buffer, streamType);
+        return buffer.ToArray();
+    }
+
     /// <summary>
     /// Builds the bytes for the server control stream's opening: the RFC 9114
     /// §6.2 unidirectional stream-type prefix (0x00 = control) followed by a
     /// SETTINGS frame (type 0x04) carrying the server's advertised settings.
     /// </summary>
-    private static byte[] BuildControlStreamPreamble()
+    private static byte[] BuildControlStreamPreamble(Http3QPackOptions qpackOptions)
     {
         using MemoryStream buffer = new();
 
@@ -193,7 +301,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         QuicVariableLengthInteger.Write(buffer, Http3StreamType.Control);
 
         // RFC 9114 §6.2.1 / §7.2.4 — the first frame MUST be SETTINGS.
-        byte[] settings = Http3LocalSettings.EncodePayload();
+        byte[] settings = Http3LocalSettings.EncodePayload(qpackOptions);
         QuicVariableLengthInteger.Write(buffer, (long)Http3FrameType.Settings);
         QuicVariableLengthInteger.Write(buffer, settings.Length);
         buffer.Write(settings, 0, settings.Length);
@@ -225,7 +333,80 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             await _peerControlDrainTask.ConfigureAwait(false);
         }
 
+        if (_qpackEncoderDrainTask is not null)
+        {
+            // Same contract as the control-stream drain: it absorbs its own
+            // failures, so awaiting it just lets the background loop unwind.
+            await _qpackEncoderDrainTask.ConfigureAwait(false);
+        }
+
         _teardownSource.Dispose();
+    }
+
+    /// <summary>
+    /// Emits the server's <c>GOAWAY</c> frame on the outbound control stream
+    /// (RFC 9114 §5.2 / §7.2.6) to announce graceful shutdown before the QUIC
+    /// connection is closed. The announced identifier is the lowest
+    /// client-initiated bidirectional stream ID the server will not process —
+    /// derived from the count of request streams already accepted using QUIC's
+    /// client-bidi numbering (ID = 4 × <c>n</c>) — so requests at or below the
+    /// highest accepted stream may finish while later streams are rejected.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the control-stream write.</param>
+    /// <returns>A task that completes once the GOAWAY has been written (or skipped).</returns>
+    /// <remarks>
+    /// <para>
+    /// One-shot: repeated calls after the first are no-ops. When the receive loop
+    /// never ran (no control stream was opened) there is nothing to announce and
+    /// the call returns without writing.
+    /// </para>
+    /// <para>
+    /// Best-effort, like the SETTINGS emission: writing GOAWAY requires a live
+    /// control stream, so a wire-level or QUIC failure here is swallowed — the
+    /// connection is tearing down regardless, and the QUIC <c>CONNECTION_CLOSE</c>
+    /// that follows conveys the shutdown even if the frame did not land.
+    /// </para>
+    /// </remarks>
+    internal async Task SendGoAwayAsync(CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
+        {
+            return;
+        }
+
+        IConnection? controlStream = _controlStream;
+        if (controlStream is null)
+        {
+            // The server never opened its control stream (the receive loop did
+            // not run), so it advertised no SETTINGS and has no critical stream
+            // to carry GOAWAY. The QUIC close alone tears the connection down.
+            return;
+        }
+
+        try
+        {
+            // RFC 9114 §5.2 — streams with an ID below the announced value may
+            // have been processed. The lowest unprocessed client-initiated
+            // bidirectional stream is (accepted count) × 4.
+            long goAwayStreamId = (long)Volatile.Read(ref _processedRequestStreamCount) * 4L;
+            byte[] frame = Http3GoAwayFrame.Encode(goAwayStreamId);
+            await controlStream.Output.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (QuicException)
+        {
+        }
+        catch (ConnectionException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+        }
     }
 
     /// <summary>
@@ -271,13 +452,22 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             case Http3StreamType.QPackEncoder:
                 // RFC 9204 §4.2 — at most one encoder stream. With the dynamic
                 // table disabled (QPACK_MAX_TABLE_CAPACITY = 0) it carries no
-                // instructions to process, so accepting it is sufficient.
+                // instructions to process, so accepting it is sufficient. With the
+                // table enabled, drain it in the background so its Set Capacity /
+                // Insert / Duplicate instructions populate the dynamic table while
+                // the accept loop keeps serving requests.
                 if (_qpackEncoderStreamReceived)
                 {
                     return true;
                 }
 
                 _qpackEncoderStreamReceived = true;
+
+                if (_decoderState is not null)
+                {
+                    _qpackEncoderDrainTask = DrainQPackEncoderStreamAsync(reader, cancellationToken);
+                }
+
                 return false;
 
             case Http3StreamType.QPackDecoder:
@@ -353,14 +543,16 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     }
 
     /// <summary>
-    /// Drains post-SETTINGS frames from the peer's control stream for the
-    /// connection lifetime, parsing and discarding each frame (RFC 9114 §7.2).
-    /// GOAWAY (§7.2.6) and MAX_PUSH_ID (§7.2.7) are read but inert in this
-    /// subset: GOAWAY-driven graceful drain is deferred, and the server never
-    /// pushes, so MAX_PUSH_ID has no effect. Draining prevents unread control
-    /// frames from accumulating in the pipe. The loop stops on end-of-stream,
-    /// connection teardown, or a per-stream parse failure, and never throws
-    /// into the receive loop.
+    /// Processes post-SETTINGS frames from the peer's control stream for the
+    /// connection lifetime (RFC 9114 §7.2). RFC 9218 §7.2 PRIORITY_UPDATE frames
+    /// are parsed and applied: a request-stream update (0xF0700) records the
+    /// referenced stream's effective priority; a push update (0xF0701) is rejected
+    /// (the server issues no pushes) and stops the drain. GOAWAY (§7.2.6) and
+    /// MAX_PUSH_ID (§7.2.7) are read but inert in this subset, and every other
+    /// frame is discarded. Processing prevents unread control frames from
+    /// accumulating in the pipe. The loop stops on end-of-stream, connection
+    /// teardown, or a per-stream parse failure, and never throws into the receive
+    /// loop.
     /// </summary>
     private async Task DrainPeerControlStreamAsync(PipeReader reader, CancellationToken receiveToken)
     {
@@ -385,7 +577,35 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                     break;
                 }
 
-                await SkipAsync(reader, checked((int)frameLength.Value), cancellationToken).ConfigureAwait(false);
+                int length = checked((int)frameLength.Value);
+
+                if (frameType.Value == (long)Http3FrameType.PriorityUpdateRequest)
+                {
+                    // RFC 9218 §7.2 — read the payload (Prioritized Element ID +
+                    // Priority Field Value) and apply it to the referenced stream.
+                    byte[] priorityPayload = await ReadExactAsync(reader, length, cancellationToken).ConfigureAwait(false);
+                    if (Http3PriorityUpdate.TryParse(priorityPayload, out long prioritizedStreamId, out HttpPriority priority))
+                    {
+                        RecordRequestStreamPriority(prioritizedStreamId, priority);
+                    }
+
+                    continue;
+                }
+
+                if (frameType.Value == (long)Http3FrameType.PriorityUpdatePush)
+                {
+                    // RFC 9218 §7.2 — the server advertises no push capacity, so a
+                    // push PRIORITY_UPDATE references a push id that cannot exist.
+                    // Reject it consistently with the server-push de-scope: record
+                    // the rejection and stop draining so connection teardown closes
+                    // the QUIC connection. (Strict HTTP/3 would signal H3_ID_ERROR;
+                    // this drain keeps its parse-and-discard posture — see docs/DESIGN.md.)
+                    await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
+                    _pushPriorityUpdateRejected = true;
+                    break;
+                }
+
+                await SkipAsync(reader, length, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -398,6 +618,103 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             // this as a connection error; in this parse-and-discard subset the
             // drain stops and connection teardown closes the QUIC connection.
         }
+    }
+
+    /// <summary>
+    /// Drains the peer's QPACK encoder stream for the connection lifetime,
+    /// applying its Set Dynamic Table Capacity / Insert / Duplicate instructions
+    /// (RFC 9204 §4.3) to the shared decoder dynamic table and emitting an Insert
+    /// Count Increment (§4.4.3) on the server's decoder stream for each batch of
+    /// applied insertions. A malformed instruction or table violation is a
+    /// connection error (§2.2): it aborts the connection so the accept loop
+    /// observes the failure and terminates. Runs only when the dynamic table is
+    /// enabled.
+    /// </summary>
+    private async Task DrainQPackEncoderStreamAsync(PipeReader reader, CancellationToken receiveToken)
+    {
+        using CancellationTokenSource linked =
+            CancellationTokenSource.CreateLinkedTokenSource(receiveToken, _teardownSource.Token);
+        CancellationToken cancellationToken = linked.Token;
+
+        try
+        {
+            while (true)
+            {
+                ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                ReadOnlySequence<byte> buffer = result.Buffer;
+
+                int consumed = 0;
+                int insertions = 0;
+
+                if (!buffer.IsEmpty)
+                {
+                    // Copy the unconsumed span so the parser can work over a
+                    // contiguous buffer; instruction volumes are small.
+                    byte[] bytes = buffer.ToArray();
+                    consumed = _decoderState!.ApplyEncoderInstructions(bytes, out insertions);
+                }
+
+                if (insertions > 0)
+                {
+                    await SendDecoderInstructionAsync(
+                        QPackDecoderInstructionEncoder.InsertCountIncrement(insertions),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                // Consume the complete instructions; keep the trailing partial
+                // (examined = end) so the next read waits for more bytes.
+                reader.AdvanceTo(buffer.GetPosition(consumed), buffer.End);
+
+                if (result.IsCompleted)
+                {
+                    if (consumed < buffer.Length)
+                    {
+                        throw new QPackException(
+                            Http3ErrorCode.QPackEncoderStreamError,
+                            "The QPACK encoder stream ended in the middle of an instruction.");
+                    }
+
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Connection teardown or the receive token firing — stop draining.
+        }
+        catch (QPackException ex)
+        {
+            // A connection-level QPACK error: signal teardown so any request
+            // stream currently blocked on pending insertions unblocks, then abort
+            // so the accept loop's next AcceptStreamAsync observes the failure and
+            // terminates the connection.
+            if (!_teardownSource.IsCancellationRequested)
+            {
+                _teardownSource.Cancel();
+            }
+
+            _connection.Abort(ex);
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+            // A wire failure on the encoder stream; teardown closes the connection.
+        }
+    }
+
+    /// <summary>
+    /// Writes a QPACK decoder-stream instruction (Insert Count Increment, or —
+    /// with a stream ID — Section Acknowledgment / Stream Cancellation) to the
+    /// server's outbound decoder stream. Called only from the single encoder-drain
+    /// task, so the writer is never contended.
+    /// </summary>
+    private async Task SendDecoderInstructionAsync(byte[] instruction, CancellationToken cancellationToken)
+    {
+        if (_decoderStream is null)
+        {
+            return;
+        }
+
+        await _decoderStream.Output.WriteAsync(instruction, cancellationToken).ConfigureAwait(false);
     }
 
     private void ApplySettings(byte[] payload)
@@ -566,11 +883,18 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// returns <see langword="null"/>, signalling the caller to drop this
     /// stream and keep accepting more on the same QUIC connection.
     /// </summary>
-    private async Task<Http3Context?> TryReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    private async Task<RequestReadOutcome> TryReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
     {
         try
         {
-            return await ReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+            return new RequestReadOutcome(await ReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false), terminate: false);
+        }
+        catch (QPackException)
+        {
+            // A QPACK decompression / instruction failure is a connection error
+            // (RFC 9204 §2.2): the shared dynamic table cannot be trusted, so the
+            // connection terminates rather than dropping just this stream.
+            return new RequestReadOutcome(context: null, terminate: true);
         }
         catch (OperationCanceledException)
         {
@@ -578,12 +902,24 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             // per-stream — the outer loop check on cancellationToken will
             // break out at the top of the next iteration if the cancel
             // applies to the whole connection.
-            return null;
+            return new RequestReadOutcome(context: null, terminate: false);
         }
         catch (Exception ex) when (IsPerStreamFailure(ex))
         {
-            return null;
+            return new RequestReadOutcome(context: null, terminate: false);
         }
+    }
+
+    private readonly struct RequestReadOutcome
+    {
+        public RequestReadOutcome(Http3Context? context, bool terminate)
+        {
+            Context = context;
+            TerminateConnection = terminate;
+        }
+
+        public Http3Context? Context { get; }
+        public bool TerminateConnection { get; }
     }
 
     /// <summary>
@@ -636,6 +972,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
+        // If a response feature streamed to the raw sink, the HEADERS and DATA frames are already on
+        // the wire; finalize instead of writing a buffered response.
+        if (http3Context.ResponseBodySink is { HasStarted: true } sink)
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(http3Context, bodyBytes);
@@ -685,7 +1029,37 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         byte[] bodyBytes = body.ToArray();
-        Http3Request request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, _isSecure ? HttpScheme.Https : HttpScheme.Http, bodyBytes, out string? extendedConnectProtocol);
+        HttpScheme fallbackScheme = _isSecure ? HttpScheme.Https : HttpScheme.Http;
+        string? extendedConnectProtocol;
+        Http3Request request;
+
+        if (_decoderState is not null)
+        {
+            // Dynamic QPACK path: resolve against the connection dynamic table,
+            // blocking (within the blocked-stream budget) until the referenced
+            // insertions arrive (RFC 9204 §2.1.2), then apply the shared HTTP/3
+            // field-section validation. The wait is linked to connection teardown
+            // so an encoder-stream abort or graceful stop releases a blocked
+            // stream instead of hanging it.
+            using CancellationTokenSource decodeCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _teardownSource.Token);
+            QPackDecodeResult decode = await _decoderState.DecodeRequestAsync(headerBlock, decodeCancellation.Token).ConfigureAwait(false);
+            request = Http3HeaderCodec.BuildRequest(decode.Fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
+
+            // A field section that referenced the dynamic table owes a Section
+            // Acknowledgment on the decoder stream (RFC 9204 §4.4.1). The
+            // instruction is keyed on the QUIC request stream ID, which the
+            // connection abstraction does not yet surface, so live emission is
+            // deferred (see docs/DESIGN.md and the filed follow-up). Insert Count
+            // Increment — which needs no stream ID — is emitted by the encoder
+            // drain and keeps the peer's Known Received Count advancing.
+            _ = decode.ReferencedDynamicTable;
+        }
+        else
+        {
+            request = Http3HeaderCodec.DecodeRequestHeaders(headerBlock, fallbackScheme, bodyBytes, out extendedConnectProtocol);
+        }
+
         Http3Response response = new();
         HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
@@ -699,7 +1073,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         try
         {
             features = await HttpRequestInterceptorPipeline.InvokeAsync(
-                _interceptors,
+                _requestInterceptors,
                 HttpVersion.Http30,
                 request,
                 connectionInfo,
@@ -719,6 +1093,23 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         Http3Context context = new(request, response, connectionInfo, cancellationToken, streamConnection, features);
+
+        // RFC 9218 §4 — the request's Priority header sets the effective priority.
+        // Parsing is tolerant: a malformed value leaves the default (urgency 3,
+        // non-incremental) in place.
+        if (request.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
+        {
+            context.EffectivePriority = headerPriority;
+        }
+
+        // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
+        // provides backpressure) to registered response interceptors so a feature package
+        // (streaming / SSE) can wrap it — without this transport depending on that package.
+        if (_responseInterceptors.Length > 0)
+        {
+            context.RunResponseInterceptors(_responseInterceptors, new Http3ResponseBodyStream(context));
+        }
 
         // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
         // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model

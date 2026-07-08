@@ -1,6 +1,6 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 
 internal sealed class TestHttpRequest : HttpRequest
 {
+    private HttpContext? _httpContext;
+
     public override HttpHost Host { get; set; } = HttpHost.Empty;
 
     public override HttpPath Path { get; set; } = HttpPath.Root;
@@ -18,62 +20,104 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override HttpScheme Scheme { get; set; } = HttpScheme.Http;
 
-    public override IHttpQueryCollection Query { get; } = new HttpQueryCollection();
+    public override HttpQueryCollection Query { get; } = new HttpQueryCollection();
 
-    public override IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+    public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
-
-    public override IHttpFormCollection Form { get; } = new HttpFormCollection();
+    public override HttpContext HttpContext => _httpContext
+        ?? throw new InvalidOperationException(
+            "The HttpContext back-reference has not been attached. Construct the TestHttpRequest through a TestHttpContext.");
 
     public override Stream Body { get; set; } = Stream.Null;
 
-    public override ClaimsPrincipal ClaimsPrincipal { get; set; } = new(new ClaimsIdentity());
+    internal void AttachContext(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _httpContext ??= context;
+    }
 }
 
 internal sealed class TestHttpResponse : HttpResponse
 {
+    private HttpContext? _httpContext;
+
     public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
 
-    public override IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+    public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override IHttpCookieCollection Cookies { get; } = new HttpCookieCollection();
+    public override HttpContext HttpContext => _httpContext
+        ?? throw new InvalidOperationException(
+            "The HttpContext back-reference has not been attached. Construct the TestHttpResponse through a TestHttpContext.");
 
     public override Stream Body { get; set; } = new MemoryStream();
+
+    internal void AttachContext(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _httpContext ??= context;
+    }
+}
+
+internal sealed class RecordingRouterRouteHandler : IRouterRouteHandler
+{
+    public bool WasInvoked { get; private set; }
+
+    public int InvocationCount { get; private set; }
+
+    public IHttpContext? Context { get; private set; }
+
+    public Task InvokeAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    {
+        WasInvoked = true;
+        InvocationCount++;
+        Context = context;
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class TestHttpContext : HttpContext
 {
     private TestHttpContext(
         HttpVersion version,
-        HttpSession session,
         TestHttpRequest request,
         TestHttpResponse response,
-        IHttpConnectionInfo? connectionInfo = null,
-        CancellationToken requestAborted = default)
+        HttpConnectionInfo? connectionInfo = null,
+        CancellationToken requestCancelled = default)
     {
         Version = version;
-        Session = session;
         Request = request;
         Response = response;
         ConnectionInfo = connectionInfo ?? HttpConnectionInfo.Empty;
-        RequestAborted = requestAborted;
-        Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
+        Features = new HttpFeatureCollection();
+        Items = new Dictionary<string, object?>(StringComparer.Ordinal);
+        RequestCancelled = requestCancelled;
+
+        request.AttachContext(this);
+        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }
-
-    public override HttpSession Session { get; }
 
     public override TestHttpRequest Request { get; }
 
     public override TestHttpResponse Response { get; }
 
-    public override IHttpConnectionInfo ConnectionInfo { get; }
+    public override HttpConnectionInfo ConnectionInfo { get; }
+
+    public override HttpFeatureCollection Features { get; }
 
     public override IDictionary<string, object?> Items { get; }
 
-    public override CancellationToken RequestAborted { get; }
+    public override CancellationToken RequestCancelled { get; }
+
+    public override void Cancel()
+    {
+    }
+
+    public override Task CancelAsync()
+    {
+        return Task.CompletedTask;
+    }
 
     public override ValueTask DisposeAsync()
     {
@@ -84,7 +128,6 @@ internal sealed class TestHttpContext : HttpContext
     {
         return new TestHttpContext(
             HttpVersion.Http11,
-            new HttpSession("routing-test-session"),
             new TestHttpRequest
             {
                 Method = method,

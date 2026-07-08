@@ -8,10 +8,18 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 /// (RFC 9204 §4.5) for the supported feature set. The encoder never uses
 /// the dynamic table: it emits a zero Field Section Prefix and references
 /// only the static table, falling back to literal representations. Field
-/// names are emitted lowercase (RFC 9114 §4.2). Huffman coding is not
-/// applied — it is optional for an encoder and raw octets keep the output
-/// deterministic.
+/// names are emitted lowercase (RFC 9114 §4.2). Literal names and values are
+/// Huffman-coded (RFC 9204 §4.1.2, RFC 7541 Appendix B) when the Huffman form
+/// is strictly shorter than the raw octets; otherwise raw octets are emitted.
 /// </summary>
+/// <remarks>
+/// The encoder stays static-only by design: an encoder is never required to
+/// use the dynamic table, so responses reference the static table or literals
+/// and never insert. This keeps response encoding stateless and means the
+/// server never needs to track a decoder's acknowledgments to encode safely
+/// (RFC 9204 §2.1.1). The <em>decoder</em> is what maintains the dynamic table
+/// for inbound request field sections.
+/// </remarks>
 internal static class QPackFieldSectionEncoder
 {
     // Representation pattern bits (RFC 9204 §4.5).
@@ -55,12 +63,12 @@ internal static class QPackFieldSectionEncoder
         {
             // §4.5.4 Literal Field Line with (static) Name Reference.
             QPackPrefixedInteger.Encode(destination, nameIndex, 4, LiteralNameRefStatic);
-            QPackStringCodec.Encode(destination, value, 7, 0x00);
+            QPackStringCodec.EncodeShortest(destination, value, 7, 0x00);
             return;
         }
 
         // §4.5.6 Literal Field Line with Literal Name.
-        QPackStringCodec.Encode(destination, name, 3, LiteralLiteralName);
-        QPackStringCodec.Encode(destination, value, 7, 0x00);
+        QPackStringCodec.EncodeShortest(destination, name, 3, LiteralLiteralName);
+        QPackStringCodec.EncodeShortest(destination, value, 7, 0x00);
     }
 }

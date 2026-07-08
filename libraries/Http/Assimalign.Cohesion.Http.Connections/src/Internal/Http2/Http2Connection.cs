@@ -9,16 +9,18 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 internal sealed class Http2Connection : HttpConnection
 {
     private readonly IConnection _connection;
-    private readonly HttpServerLimits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
+    private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpRequestInterceptor[] requestInterceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(isSecure)
     {
         _connection = connection;
         _limits = limits;
-        _interceptors = interceptors;
+        _requestInterceptors = requestInterceptors;
+        _responseInterceptors = responseInterceptors;
     }
 
     public override ConnectionId Id => _connection.Id;
@@ -36,7 +38,7 @@ internal sealed class Http2Connection : HttpConnection
     {
         // The wrapped connection is already live (connections are produced live by the
         // listener), so opening the HTTP context is a synchronous projection.
-        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _interceptors);
+        return _context ??= new Http2ConnectionContext(_connection, IsSecure, _limits, _requestInterceptors, _responseInterceptors);
     }
 
     public override ValueTask<HttpConnectionContext> OpenAsync(CancellationToken cancellationToken = default)

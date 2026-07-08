@@ -42,7 +42,7 @@ internal static class Http1MessageReader
         Stream stream,
         HttpConnectionInfo connectionInfo,
         HttpScheme scheme,
-        HttpServerLimits limits,
+        Http1ConnectionListenerOptions.Http1Limits limits,
         IHttpRequestInterceptor[] interceptors,
         Http1ReadTimeout readTimeout,
         CancellationToken connectionToken)
@@ -283,7 +283,7 @@ internal static class Http1MessageReader
 
     private static async ValueTask<HttpHeaderCollection> ReadHeadersAsync(
         Stream stream,
-        HttpServerLimits limits,
+        Http1ConnectionListenerOptions.Http1Limits limits,
         CancellationToken cancellationToken)
     {
         HttpHeaderCollection headers = new();

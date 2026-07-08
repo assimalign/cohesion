@@ -87,7 +87,9 @@ public sealed partial class SqlQueryParser
         var left = ParseAddition(ref lexer);
 
         if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon)
+        {
             return left;
+        }
 
         // IS [NOT] NULL
         if (IsKeyword(ref lexer, "IS"))
@@ -120,7 +122,9 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
 
             if (IsAtEnd(ref lexer))
+            {
                 return left;
+            }
 
             if (!IsKeyword(ref lexer, "BETWEEN") && !IsKeyword(ref lexer, "IN") && !IsKeyword(ref lexer, "LIKE"))
             {
@@ -140,7 +144,10 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             var low = ParseAddition(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND"))
+            {
                 Advance(ref lexer);
+            }
+
             var high = ParseAddition(ref lexer);
             return new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos));
         }
@@ -159,7 +166,10 @@ public sealed partial class SqlQueryParser
                 {
                     var subquery = ParseSelect(ref lexer);
                     if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+                    {
                         Advance(ref lexer);
+                    }
+
                     return new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos));
                 }
 
@@ -175,7 +185,10 @@ public sealed partial class SqlQueryParser
                     }
                 }
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+                {
                     Advance(ref lexer);
+                }
+
                 return new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos));
             }
             return new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos));
@@ -225,13 +238,21 @@ public sealed partial class SqlQueryParser
         {
             SqlBinaryOperator op;
             if (lexer.Current.Type == TokenType.Plus)
+            {
                 op = SqlBinaryOperator.Add;
+            }
             else if (lexer.Current.Type == TokenType.Minus)
+            {
                 op = SqlBinaryOperator.Subtract;
+            }
             else if (lexer.Current.Type == TokenType.Concat)
+            {
                 op = SqlBinaryOperator.Concat;
+            }
             else
+            {
                 break;
+            }
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
@@ -250,13 +271,21 @@ public sealed partial class SqlQueryParser
         {
             SqlBinaryOperator op;
             if (lexer.Current.Type == TokenType.Asterisk)
+            {
                 op = SqlBinaryOperator.Multiply;
+            }
             else if (lexer.Current.Type == TokenType.Slash)
+            {
                 op = SqlBinaryOperator.Divide;
+            }
             else if (lexer.Current.Type == TokenType.Percent)
+            {
                 op = SqlBinaryOperator.Modulo;
+            }
             else
+            {
                 break;
+            }
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
@@ -393,14 +422,20 @@ public sealed partial class SqlQueryParser
             {
                 var subSelect = ParseSelect(ref lexer);
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+                {
                     Advance(ref lexer);
+                }
+
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
 
             // Parenthesized expression
             var inner = ParseExpression(ref lexer);
             if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+            {
                 Advance(ref lexer);
+            }
+
             return inner;
         }
 
@@ -511,7 +546,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+        {
             Advance(ref lexer);
+        }
 
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
     }
@@ -534,7 +571,10 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer); // consume WHEN
             var condition = ParseExpression(ref lexer);
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "THEN"))
+            {
                 Advance(ref lexer);
+            }
+
             var result = ParseExpression(ref lexer);
             whenClauses.Add(new SqlWhenClause(condition, result));
         }
@@ -547,7 +587,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "END"))
+        {
             Advance(ref lexer);
+        }
 
         return new SqlCaseExpression(input, whenClauses, elseResult,
             Location.Create(1, 1, pos, pos));
@@ -559,12 +601,16 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume CAST
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        {
             Advance(ref lexer);
+        }
 
         var operand = ParseExpression(ref lexer);
 
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AS"))
+        {
             Advance(ref lexer);
+        }
 
         // Parse type name (could be multi-word like VARCHAR(100))
         string targetType = string.Empty;
@@ -592,7 +638,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+        {
             Advance(ref lexer);
+        }
 
         return new SqlCastExpression(operand, targetType, Location.Create(1, 1, pos, pos));
     }
@@ -602,7 +650,9 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume EXISTS
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        {
             Advance(ref lexer);
+        }
 
         SqlSelectExpression? subquery = null;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
@@ -611,7 +661,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+        {
             Advance(ref lexer);
+        }
 
         subquery ??= new SqlSelectExpression(
             Array.Empty<SqlSelectColumn>(), null, Array.Empty<SqlJoinClause>(),

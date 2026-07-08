@@ -1,3 +1,40 @@
 <Project>
-    
+    <!--
+        Build tasks for database projects. The Tasks DLL sits next to the SDK's
+        Sdk/ and Targets/ folders in the packaged layout (same shape as the base
+        SDK's StronglyTypedSettings tasks).
+    -->
+    <UsingTask
+        TaskName="Assimalign.Cohesion.Sdk.Database.Tasks.CompileDatabaseSchemaTask"
+        AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.dll"
+        Runtime="NET" />
+    <UsingTask
+        TaskName="Assimalign.Cohesion.Sdk.Database.Tasks.CreateDatabaseMigrationTask"
+        AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.dll"
+        Runtime="NET" />
+
+    <PropertyGroup>
+        <!--
+            A *database project* holds declarative schema sources that the build
+            validates and compiles into a schema model artifact. Consumer apps
+            that merely use database client libraries leave this unset.
+        -->
+        <CohesionDatabaseProject Condition="'$(CohesionDatabaseProject)' == ''">false</CohesionDatabaseProject>
+
+        <!--
+            The database model the project targets. Selects which model-specific
+            build tooling is imported (Sdk.Database.<Model>.targets). Static
+            imports - never runtime plugin loading - keep the toolchain AOT-clean.
+        -->
+        <CohesionDatabaseModel Condition="'$(CohesionDatabaseModel)' == ''">Sql</CohesionDatabaseModel>
+
+        <!-- Where declarative schema sources live, relative to the project. -->
+        <CohesionDatabaseSchemaRoot Condition="'$(CohesionDatabaseSchemaRoot)' == ''">Schema\</CohesionDatabaseSchemaRoot>
+
+        <!-- Where generated migration scripts live, relative to the project. -->
+        <CohesionDatabaseMigrationsRoot Condition="'$(CohesionDatabaseMigrationsRoot)' == ''">Migrations\</CohesionDatabaseMigrationsRoot>
+
+        <!-- The compiled schema model artifact produced by the schema compile. -->
+        <CohesionDatabaseSchemaOutputPath Condition="'$(CohesionDatabaseSchemaOutputPath)' == ''">$(IntermediateOutputPath)$(MSBuildProjectName).schema.json</CohesionDatabaseSchemaOutputPath>
+    </PropertyGroup>
 </Project>

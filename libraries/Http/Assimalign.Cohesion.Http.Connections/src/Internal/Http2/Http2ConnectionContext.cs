@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -16,10 +17,35 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 {
     private static readonly byte[] ClientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
+    // RFC 9113 §6.8 — the graceful close waits for streams already accepted
+    // to finish, but that wait is bounded: a slow or stuck in-flight
+    // response must not delay connection teardown indefinitely. When the
+    // window elapses the remaining exchanges are cut off and the output is
+    // completed regardless. Not host-configurable in this package (a
+    // host-facing drain trigger is a separate public-surface decision); a
+    // conservative fixed ceiling keeps shutdown latency bounded.
+    private static readonly TimeSpan GracefulDrainWindow = TimeSpan.FromSeconds(5);
+
     private readonly HPackDecoder _headerDecoder;
-    private readonly HttpServerLimits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly Dictionary<int, Http2Stream> _streams;
+    // Guards the shared mutable state the frame pump and the application threads
+    // both touch: the stream table and the flow-control windows in BOTH directions.
+    // Receive side — the pump consumes them as DATA arrives; the request body
+    // streams credit them back as the application consumes. Send side — a
+    // streaming response writer consumes them before emitting DATA while the pump
+    // replenishes them from inbound WINDOW_UPDATE / SETTINGS frames. Held only for
+    // short, synchronous critical sections — never across an await or a wire read.
+    private readonly object _syncRoot = new();
+    // Wakes a streaming-response writer parked on an exhausted send window as soon
+    // as the pump grants credit (WINDOW_UPDATE or a SETTINGS initial-window
+    // increase). Swapped-and-completed under _syncRoot; continuations run
+    // asynchronously so a parked writer never resumes inline under the lock.
+    private TaskCompletionSource _sendWindowSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Set (under _syncRoot) when the frame pump exits: no further WINDOW_UPDATE can
+    // ever arrive, so send credit is permanently unobtainable. A parked streaming
+    // writer is woken and fails with a wire-level IOException instead of hanging
+    // forever on a signal nothing will complete.
+    private bool _sendCreditClosed;
     // RFC 9113 §6.5 — local settings are what we (the server) advertised
     // to the peer; remote settings are what the peer advertised to us.
     // Inbound frame parsing is bounded by the local cap; outbound frame
@@ -29,23 +55,58 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // RFC 9113 §4.1 + §6.8 — a single TCP connection multiplexes many
     // logical streams. Frames from concurrent senders MUST NOT interleave
     // on the wire, or the peer's parser will see a corrupted frame
-    // sequence. This semaphore serializes every outbound frame write on
-    // the connection, regardless of whether it originated from a
-    // SendAsync, a SETTINGS/PING ACK, a GOAWAY, or graceful shutdown.
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    // sequence. This scheduler serializes every outbound frame write on
+    // the connection (exactly one holder at a time), regardless of whether
+    // it originated from a SendAsync, a streaming body writer, a
+    // SETTINGS/PING ACK, a WINDOW_UPDATE, a GOAWAY, or graceful shutdown.
+    // It additionally grants the gate to contending writers in RFC 9218 §10
+    // priority order rather than FIFO: control frames first, then response
+    // writes by ascending urgency, non-incremental before incremental,
+    // round-robin among same-urgency incremental streams.
+    private readonly Http2WriteScheduler _writeScheduler = new();
+    // RFC 9218 §7.1 — a PRIORITY_UPDATE may reference a request stream in
+    // the idle state (the client sends it before HEADERS). The signal is
+    // retained here and applied when the stream is opened. Bounded to avoid
+    // an unbounded-buffer DoS from a peer that never opens the streams.
+    // Guarded by _syncRoot alongside the stream table.
+    private readonly Dictionary<int, HttpPriority> _bufferedPriorities = new();
+    private const int MaxBufferedPriorities = 128;
+    // Ready request heads produced by the frame pump and consumed by ReceiveAsync.
+    // The pump dispatches a context as soon as a stream's header block is complete
+    // (RFC 9113 lets the server respond before the body arrives), then keeps
+    // pumping DATA into that stream's body pipe while the application handles it.
+    private readonly Channel<Http2Context> _readyContexts;
     // RFC 9113 §5.2 — every HTTP/2 endpoint maintains two connection-level
     // flow-control windows (independent of the per-stream windows). The
     // send window caps outbound DATA across all streams combined; the
     // receive window caps inbound DATA likewise. Both default to 65535
     // octets per RFC 9113 §6.5.2 and are NOT affected by
-    // SETTINGS_INITIAL_WINDOW_SIZE.
+    // SETTINGS_INITIAL_WINDOW_SIZE. The receive window is only replenished
+    // as the application consumes buffered request bodies (see
+    // OnRequestBodyConsumedAsync), which is what applies real backpressure.
     private Http2FlowControlWindow _connectionSendWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
     private Http2FlowControlWindow _connectionReceiveWindow = new(Http2ConnectionSettings.InitialInitialWindowSize);
+    private CancellationTokenSource? _pumpCts;
+    private Task? _pumpTask;
+    private int _pumpStarted;
     private int? _continuationStreamId;
     private bool _initialized;
     private bool _receivedClientSettings;
     private int _lastInboundStreamId;
     private int _gracefulCloseStarted;
+    // RFC 9113 §6.8 — the number of dispatched request exchanges whose
+    // response has not yet been sent (nor whose stream has been reset or
+    // shutdown-aborted). GracefulCloseAsync waits for this to reach zero —
+    // within the bounded GracefulDrainWindow — before stopping the pump and
+    // completing the connection output, so an in-flight response is not cut
+    // off by the graceful close. Mutated with Interlocked from the pump and
+    // application threads.
+    private int _activeExchangeCount;
+    // A one-shot signal completed when _activeExchangeCount reaches zero
+    // while a graceful close is draining. Null until the drain begins;
+    // published (volatile) by DrainActiveExchangesAsync so a decrementing
+    // thread can wake the waiter without polling.
+    private volatile TaskCompletionSource? _drainSignal;
     // RFC 9113 §6.8 — after the peer sends GOAWAY, the server MUST NOT
     // process new streams with id higher than the GOAWAY's last-stream-id.
     // -1 means no GOAWAY received yet; int.MaxValue would mean "accept
@@ -53,15 +114,51 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    private readonly IHttpRequestInterceptor[] _requestInterceptors;
+    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+
+    // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
+    // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2ConnectionListenerOptions.Http2Limits. The
+    // guard is driven solely from the frame pump — the connection's single inbound frame
+    // processor — so it needs no synchronization of its own.
+    private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
+    private readonly Http2FloodGuard _floodGuard;
+
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpRequestInterceptor[] requestInterceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
-        _headerDecoder = new HPackDecoder();
-        _limits = limits;
-        _interceptors = interceptors;
+        _http2Limits = limits;
+        _floodGuard = new Http2FloodGuard(limits);
+        // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
+        // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
+        _headerDecoder = new HPackDecoder(maxHeaderListSize: limits.MaxRequestHeaderListSize);
         _streams = new Dictionary<int, Http2Stream>();
-        _localSettings = BuildLocalSettings();
+        _localSettings = BuildLocalSettings(limits);
         _remoteSettings = new Http2ConnectionSettings();
+        _requestInterceptors = requestInterceptors;
+        _responseInterceptors = responseInterceptors;
+        _readyContexts = Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            AllowSynchronousContinuations = false,
+        });
+    }
+
+    /// <summary>
+    /// The number of streams currently tracked on this connection. Internal so tests can
+    /// assert that completed streams are reaped and the per-connection footprint stays
+    /// bounded.
+    /// </summary>
+    internal int StreamCount
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _streams.Count;
+            }
+        }
     }
 
     /// <summary>
@@ -69,78 +166,176 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Wire-level failures and HTTP/2 connection-level protocol errors
-    /// scope to this connection only. <see cref="Http2ConnectionException"/>
-    /// emits the required <c>GOAWAY</c> (RFC 9113 §6.8) and then exits the
-    /// enumerable cleanly; the listener stays alive for subsequent
-    /// peers. <see cref="Http2StreamException"/> stays recoverable per
-    /// RFC 9113 §5.4.2 &#8211; a <c>RST_STREAM</c> is emitted and the
-    /// loop continues processing other streams on the same connection.
+    /// A dedicated background frame pump reads and processes every inbound frame,
+    /// decoupled from the pace at which the consumer handles requests. This is what
+    /// makes request-body flow control work end-to-end: the pump keeps draining the
+    /// wire (feeding per-stream body pipes and enforcing the receive window) while a
+    /// request handler runs, so a slow reader applies backpressure to the sender
+    /// instead of blocking the whole connection.
+    /// </para>
+    /// <para>
+    /// Wire-level failures and HTTP/2 connection-level protocol errors scope to this
+    /// connection only. <see cref="Http2ConnectionException"/> emits the required
+    /// <c>GOAWAY</c> (RFC 9113 §6.8) and then completes the enumerable cleanly; the
+    /// listener stays alive for subsequent peers. <see cref="Http2StreamException"/>
+    /// stays recoverable per RFC 9113 §5.4.2 &#8211; a <c>RST_STREAM</c> is emitted
+    /// and the pump continues processing other streams on the same connection.
     /// Cancellation propagates so cooperative shutdown is unaffected.
     /// </para>
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!await TryInitializeAsync(cancellationToken).ConfigureAwait(false))
+        StartPump(cancellationToken);
+
+        ChannelReader<Http2Context> reader = _readyContexts.Reader;
+        while (await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            yield break;
+            while (reader.TryRead(out Http2Context? context))
+            {
+                yield return context;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts the background frame pump exactly once. The pump owns all inbound
+    /// frame processing for the connection's lifetime; its cancellation is linked
+    /// to the enumeration token (cooperative shutdown) and to
+    /// <see cref="GracefulCloseAsync"/> / disposal.
+    /// </summary>
+    private void StartPump(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _pumpStarted, 1) == 1)
+        {
+            return;
         }
 
-        while (!cancellationToken.IsCancellationRequested)
+        _pumpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _pumpTask = Task.Run(() => PumpAsync(_pumpCts.Token));
+    }
+
+    /// <summary>
+    /// The connection's single inbound frame processor. Reads frames, applies
+    /// protocol rules, dispatches ready request heads to <see cref="_readyContexts"/>,
+    /// and feeds DATA into per-stream body pipes — all decoupled from how fast the
+    /// consumer handles requests, which is what lets request-body flow control apply
+    /// real backpressure.
+    /// </summary>
+    private async Task PumpAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            FrameReadOutcome read = await TryReadFrameAsync(cancellationToken).ConfigureAwait(false);
-            if (read.TerminateConnection)
+            if (!await TryInitializeAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield break;
-            }
-            if (read.Frame is null)
-            {
-                // Clean end-of-stream — peer closed gracefully.
-                yield break;
+                return;
             }
 
-            ReceivedFrame received = read.Frame.Value;
-
-            FrameProcessOutcome processed = await TryProcessFrameAsync(received, cancellationToken).ConfigureAwait(false);
-            
-            if (processed.TerminateConnection)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                yield break;
-            }
-
-            // RFC 9113 §6.9 — DATA frames consume credit from both the
-            // connection-level and stream-level receive windows. Emit a
-            // pair of WINDOW_UPDATE frames here to credit the bytes back
-            // to the peer as soon as we have consumed them, keeping the
-            // pipeline flowing for long-running request bodies.
-            if (received.Frame.Type == Http2FrameType.Data
-                && received.Frame.PayloadLength > 0)
-            {
-                int dataLength = received.Frame.PayloadLength;
-                _connectionReceiveWindow.TryReplenish(dataLength);
-                await EmitWindowUpdateAsync(0, dataLength, cancellationToken).ConfigureAwait(false);
-
-                int streamId = received.Frame.StreamId;
-                if (_streams.TryGetValue(streamId, out Http2Stream? stream))
+                FrameReadOutcome read = await TryReadFrameAsync(cancellationToken).ConfigureAwait(false);
+                if (read.TerminateConnection || read.Frame is null)
                 {
-                    stream.ReceiveWindow.TryReplenish(dataLength);
-                    await EmitWindowUpdateAsync(streamId, dataLength, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                FrameProcessOutcome processed = await TryProcessFrameAsync(read.Frame.Value, cancellationToken).ConfigureAwait(false);
+                if (processed.TerminateConnection)
+                {
+                    return;
+                }
+
+                if (processed.Context is not null)
+                {
+                    // Expose the raw DATA-frame response body sink to registered response
+                    // interceptors so a feature package (streaming / SSE) can wrap it and
+                    // install a typed response feature — without this transport depending
+                    // on that package. The pump keeps processing frames while the handler
+                    // streams, so a writer parked for send-window credit is always
+                    // unblocked by the next inbound WINDOW_UPDATE.
+                    if (_responseInterceptors.Length > 0)
+                    {
+                        processed.Context.RunResponseInterceptors(_responseInterceptors, new Http2ResponseBodyStream(this, processed.Context));
+                    }
+
+                    // RFC 9113 §6.8 — the request is now an in-flight exchange the
+                    // graceful-close drain must wait on. Count it before handing it
+                    // to the consumer; the accounting is released exactly once when
+                    // the response completes, the stream is reset, or a shutdown
+                    // abort truncates the request.
+                    processed.Context.Stream.MarkExchangeCounted();
+                    Interlocked.Increment(ref _activeExchangeCount);
+
+                    _readyContexts.Writer.TryWrite(processed.Context);
                 }
             }
-
-            if (processed.Context is not null)
+        }
+        catch (OperationCanceledException)
+        {
+            // Cooperative shutdown — the enumeration token or graceful close fired.
+        }
+        catch (Exception)
+        {
+            // Last-resort isolation: an unexpected fault in the pump tears down only
+            // this connection, never the listener. The finally still unblocks the
+            // consumer and any in-flight body readers.
+        }
+        finally
+        {
+            // No further WINDOW_UPDATE can arrive once the pump stops, so send credit
+            // is permanently unobtainable: mark it closed and wake any streaming
+            // writer parked in AcquireSendWindowAsync so it fails fast instead of
+            // hanging forever on a signal nothing will complete.
+            lock (_syncRoot)
             {
-                yield return processed.Context;
+                _sendCreditClosed = true;
+                SignalSendWindowReplenished();
+            }
+
+            // Abort in-flight body readers BEFORE signalling the consumer that no
+            // more requests are coming, so a handler observes the abort rather than
+            // racing a clean end-of-enumerable.
+            AbortPendingRequests();
+            _readyContexts.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Aborts every live stream when the pump stops (teardown, wire failure, or
+    /// connection error): fires each stream's <c>RequestAborted</c> and completes
+    /// its body pipe, so a request handler parked reading a still-incoming body
+    /// observes cancellation rather than a clean end-of-stream (which would let it
+    /// treat a truncated body as complete) — and never hangs.
+    /// </summary>
+    private void AbortPendingRequests()
+    {
+        Http2Stream[] streams;
+        lock (_syncRoot)
+        {
+            streams = new Http2Stream[_streams.Count];
+            _streams.Values.CopyTo(streams, 0);
+        }
+
+        foreach (Http2Stream stream in streams)
+        {
+            // A truncated request (input still incoming when the pump stopped)
+            // can never complete normally — release its graceful-close drain
+            // accounting so the drain does not wait the full window for it. A
+            // fully-received request stays counted: the handler can still send
+            // its response after the pump exits (the write path does not need
+            // the pump), and the drain exists precisely to give it that chance.
+            if (stream.AbortOnShutdown())
+            {
+                AccountExchangeComplete(stream);
             }
         }
     }
 
     /// <summary>
     /// Drives <see cref="EnsureInitializedAsync"/> with the same per-connection
-    /// failure-isolation contract as the main loop: any preface mismatch (which
+    /// failure-isolation contract as the pump loop: any preface mismatch (which
     /// already emits GOAWAY before throwing), wire-level read failure during the
     /// preface, or write failure while emitting the server SETTINGS terminates
-    /// the receive enumerable cleanly rather than crashing the listener.
+    /// the pump cleanly rather than crashing the listener.
     /// </summary>
     private async Task<bool> TryInitializeAsync(CancellationToken cancellationToken)
     {
@@ -162,8 +357,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     }
 
     /// <summary>
-    /// Reads the next HTTP/2 frame, classifying failures so the receive
-    /// loop can route them: connection-level protocol errors emit
+    /// Reads the next HTTP/2 frame, classifying failures so the pump loop
+    /// can route them: connection-level protocol errors emit
     /// <c>GOAWAY</c> and terminate; wire-level transport failures
     /// terminate silently (no GOAWAY is possible after the peer is
     /// already gone); cancellation propagates.
@@ -278,8 +473,6 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
     public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
-        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
         if (context is not Http2Context http2Context)
         {
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/2 connection.");
@@ -296,15 +489,28 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return;
         }
 
+        // If a response feature streamed to the raw sink, the head and DATA frames are already on
+        // the wire; finalize the stream (empty DATA + END_STREAM and the same cleanup as the
+        // buffered path) rather than re-sending a buffered response.
+        if (http2Context.ResponseBodySink is { HasStarted: true } sink)
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
 
         // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave.
         // The whole HEADERS [+ CONTINUATION...] [+ DATA...] sequence MUST be
-        // emitted contiguously on the wire. Hold the connection write lock
-        // for the duration so concurrent SendAsync calls and receive-loop
-        // ACK frames cannot tear the frame sequence.
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // emitted contiguously on the wire. Hold the connection write gate
+        // for the duration so concurrent SendAsync calls, pump ACK/WINDOW_UPDATE
+        // frames, and body-consumption WINDOW_UPDATEs cannot tear the sequence.
+        // RFC 9218 §10 — when multiple responses contend for the gate, the
+        // scheduler grants it in urgency order (non-incremental first) using
+        // this stream's effective priority.
+        HttpPriority priority = http2Context.Stream.EffectivePriority;
+        await _writeScheduler.AcquireAsync(http2Context.StreamId, priority.Urgency, priority.Incremental, cancellationToken).ConfigureAwait(false);
         try
         {
             await WriteHeaderBlockAsync(http2Context.StreamId, headerBlock, endStream: bodyBytes.Length == 0, cancellationToken).ConfigureAwait(false);
@@ -313,12 +519,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // the response bytes have been handed off to the transport pipe
             // before SendAsync returns. Flush the pipe writer here so the
             // bytes are durably committed to the send-side of the underlying
-            // transport before the lock is released.
+            // transport before the gate is released.
             await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
 
         // RFC 9113 §5.1 — every server response ends with END_STREAM (either
@@ -328,16 +534,76 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // stream transitions to Closed.
         http2Context.Stream.SendEndStream();
 
-        // Cleanup: once the stream is fully Closed (both halves done), drop
-        // it from the active map so the per-connection memory footprint
-        // stays bounded over many requests. Streams that ended up in
-        // HalfClosedLocal (server done, peer still sending) stay until the
-        // peer sends END_STREAM or RST_STREAM.
-        if (http2Context.Stream.State == Http2StreamState.Closed)
+        if (http2Context.Stream.IsClosed)
         {
-            _streams.Remove(http2Context.StreamId);
+            // Cleanup: once the stream is fully Closed (both halves done), drop
+            // it from the active map so the per-connection memory footprint
+            // stays bounded over many requests. Reclaims the connection-window
+            // debt of a body the handler never drained.
+            await RemoveStreamAsync(http2Context.StreamId, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            // The server responded before the peer finished sending the request
+            // body (the handler did not drain it). RFC 9113 §8.1 — reset the
+            // stream with NO_ERROR to tell the peer to stop sending and to
+            // reclaim the stream slot against SETTINGS_MAX_CONCURRENT_STREAMS,
+            // rather than leaving a HalfClosedLocal stream lingering forever.
+            await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Credits back the flow-control cost of a request-body chunk the application
+    /// has finished consuming. Wired into each stream's <see cref="Http2RequestBodyStream"/>
+    /// as its consume callback.
+    /// </summary>
+    /// <remarks>
+    /// RFC 9113 §5.2 / §6.9 — request-body flow control is receiver-driven and
+    /// consumption-paced. As the application drains a buffered <see cref="Http2DataChunk"/>,
+    /// its full flow-control cost is credited back to both the stream and the
+    /// connection receive windows and the paired <c>WINDOW_UPDATE</c> frames are
+    /// emitted, which is what resumes a sender that stalled because the reader was
+    /// slow.
+    /// </remarks>
+    private async ValueTask OnRequestBodyConsumedAsync(int streamId, int flowControlLength, CancellationToken cancellationToken)
+    {
+        if (flowControlLength <= 0)
+        {
+            return;
+        }
+
+        lock (_syncRoot)
+        {
+            // If the stream is gone or its receive debt was already reclaimed to
+            // the connection window on removal, this credit would double-count —
+            // skip it. Otherwise credit both windows atomically.
+            if (!_streams.TryGetValue(streamId, out Http2Stream? stream) || stream.ReceiveReclaimed)
+            {
+                return;
+            }
+
+            stream.ReceiveWindow.TryReplenish(flowControlLength);
+            _connectionReceiveWindow.TryReplenish(flowControlLength);
+        }
+
+        // Connection-level credit first, then the stream-level credit.
+        await EmitWindowUpdateAsync(0, flowControlLength, cancellationToken).ConfigureAwait(false);
+        await EmitWindowUpdateAsync(streamId, flowControlLength, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Acquires the connection write gate for a connection-control frame
+    /// (SETTINGS/PING ACK, WINDOW_UPDATE, RST_STREAM, GOAWAY). Control frames use
+    /// <see cref="Http2WriteScheduler.ControlUrgency"/> so they are never starved
+    /// behind response DATA writes (RFC 9218 §10).
+    /// </summary>
+    private Task AcquireControlWriteAsync(CancellationToken cancellationToken)
+        => _writeScheduler.AcquireAsync(
+            streamId: 0,
+            urgency: Http2WriteScheduler.ControlUrgency,
+            incremental: false,
+            cancellationToken);
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
@@ -367,7 +633,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         byte[] settingsPayload = EncodeLocalSettings();
         Http2Frame settingsFrame = new();
         settingsFrame.PrepareSettings(Http2SettingsFrameFlags.None);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, settingsFrame, settingsPayload, cancellationToken).ConfigureAwait(false);
@@ -375,7 +641,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
 
         _initialized = true;
@@ -409,18 +675,21 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             case Http2FrameType.Continuation:
                 return await ProcessContinuationFrameAsync(receivedFrame).ConfigureAwait(false);
             case Http2FrameType.Data:
-                return await ProcessDataFrameAsync(receivedFrame).ConfigureAwait(false);
+                return await ProcessDataFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
             case Http2FrameType.Ping:
                 await ProcessPingFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
             case Http2FrameType.RstStream:
-                ProcessRstStreamFrame(receivedFrame);
+                await ProcessRstStreamFrameAsync(receivedFrame, cancellationToken).ConfigureAwait(false);
                 return null;
             case Http2FrameType.WindowUpdate:
                 ProcessWindowUpdateFrame(receivedFrame);
                 return null;
             case Http2FrameType.GoAway:
                 ProcessGoAwayFrame(receivedFrame);
+                return null;
+            case Http2FrameType.PriorityUpdate:
+                ProcessPriorityUpdateFrame(receivedFrame);
                 return null;
             case Http2FrameType.PushPromise:
                 // RFC 9113 §8.4 / §6.6 — only servers send PUSH_PROMISE, and a
@@ -464,6 +733,80 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         _peerLastStreamId = receivedFrame.Frame.GoAwayLastStreamId;
     }
 
+    /// <summary>
+    /// Applies an inbound RFC 9218 §7.1 PRIORITY_UPDATE frame. The frame MUST be
+    /// on stream 0 and reference a client-initiated (odd, non-zero) request
+    /// stream; both are connection errors of type PROTOCOL_ERROR otherwise. The
+    /// Priority Field Value is parsed tolerantly (a value that cannot be parsed
+    /// leaves the frame with no effect), and the resulting priority overrides the
+    /// referenced stream's Priority-header value. A frame that references a stream
+    /// not yet opened is retained until the stream is created.
+    /// </summary>
+    private void ProcessPriorityUpdateFrame(ReceivedFrame receivedFrame)
+    {
+        // RFC 9218 §7.1 — PRIORITY_UPDATE MUST be sent on stream 0.
+        if (receivedFrame.Frame.StreamId != 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PRIORITY_UPDATE received on stream {receivedFrame.Frame.StreamId}; PRIORITY_UPDATE MUST use stream 0.");
+        }
+
+        int prioritizedStreamId = receivedFrame.Frame.PriorityUpdatePrioritizedStreamId;
+
+        // RFC 9218 §7.1 — the Prioritized Stream ID must identify a request
+        // stream the client is allowed to open: non-zero and odd. Stream 0 or an
+        // even (server-initiated) id is a connection error.
+        if (prioritizedStreamId == 0 || (prioritizedStreamId & 1) == 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PRIORITY_UPDATE referenced invalid prioritized stream {prioritizedStreamId}.");
+        }
+
+        // RFC 9218 §7.1 — a Priority Field Value that cannot be parsed leaves the
+        // frame without effect (it is not a stream or connection error).
+        if (!HttpPriorityFieldValue.TryParse(receivedFrame.Payload, out HttpPriority priority))
+        {
+            return;
+        }
+
+        // The stream table and the buffered-priority map are shared with the
+        // application threads (SendAsync / streaming completions remove streams),
+        // so both are read and written under _syncRoot.
+        lock (_syncRoot)
+        {
+            if (_streams.TryGetValue(prioritizedStreamId, out Http2Stream? stream))
+            {
+                stream.ApplyPriorityUpdate(priority);
+                return;
+            }
+
+            // An idle stream (id above every id we have observed) has not opened
+            // yet; retain the signal to apply when it does. A lower id we no
+            // longer track is closed — applying a priority to it has no effect,
+            // so drop it.
+            if (prioritizedStreamId > _lastInboundStreamId)
+            {
+                BufferPriorityUpdateLocked(prioritizedStreamId, priority);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retains a PRIORITY_UPDATE for a not-yet-opened stream, bounded by
+    /// <see cref="MaxBufferedPriorities"/> so a peer that announces priorities for
+    /// streams it never opens cannot grow the buffer without limit. Must be
+    /// called while holding <see cref="_syncRoot"/>.
+    /// </summary>
+    private void BufferPriorityUpdateLocked(int streamId, HttpPriority priority)
+    {
+        if (_bufferedPriorities.ContainsKey(streamId) || _bufferedPriorities.Count < MaxBufferedPriorities)
+        {
+            _bufferedPriorities[streamId] = priority;
+        }
+    }
+
     private void ProcessWindowUpdateFrame(ReceivedFrame receivedFrame)
     {
         // RFC 9113 §6.9 — WINDOW_UPDATE has a fixed 4-octet payload (the
@@ -502,12 +845,18 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         if (receivedFrame.Frame.StreamId == 0)
         {
             // Connection-level credit. Overflow → FLOW_CONTROL_ERROR
-            // connection-level (RFC 9113 §6.9.1).
-            if (!_connectionSendWindow.TryReplenish(increment))
+            // connection-level (RFC 9113 §6.9.1). Replenish under the lock and
+            // wake any streaming-response writer parked on the exhausted window.
+            lock (_syncRoot)
             {
-                throw new Http2ConnectionException(
-                    Http2ErrorCode.FlowControlError,
-                    $"HTTP/2 connection-level send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
+                if (!_connectionSendWindow.TryReplenish(increment))
+                {
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.FlowControlError,
+                        $"HTTP/2 connection-level send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
+                }
+
+                SignalSendWindowReplenished();
             }
 
             return;
@@ -519,28 +868,92 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // observed is "idle" (connection error); id ≤ highest is
         // "recently closed" (silently ignore — the peer is racing our
         // RST_STREAM or our END_STREAM acknowledgement, RFC 9113 §5.1).
-        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        lock (_syncRoot)
         {
-            if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+            if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
             {
-                throw new Http2ConnectionException(
-                    Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 WINDOW_UPDATE on idle stream {receivedFrame.Frame.StreamId}.");
+                if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+                {
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.ProtocolError,
+                        $"HTTP/2 WINDOW_UPDATE on idle stream {receivedFrame.Frame.StreamId}.");
+                }
+
+                return;
             }
 
-            return;
-        }
+            if (!stream.SendWindow.TryReplenish(increment))
+            {
+                throw new Http2StreamException(
+                    receivedFrame.Frame.StreamId,
+                    Http2ErrorCode.FlowControlError,
+                    $"HTTP/2 stream {receivedFrame.Frame.StreamId} send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
+            }
 
-        if (!stream.SendWindow.TryReplenish(increment))
-        {
-            throw new Http2StreamException(
-                receivedFrame.Frame.StreamId,
-                Http2ErrorCode.FlowControlError,
-                $"HTTP/2 stream {receivedFrame.Frame.StreamId} send window would exceed {Http2FlowControlWindow.MaxValue} after WINDOW_UPDATE.");
+            SignalSendWindowReplenished();
         }
     }
 
-    private void ProcessRstStreamFrame(ReceivedFrame receivedFrame)
+    /// <summary>
+    /// Wakes every streaming-response writer parked on an exhausted send window by
+    /// completing the current signal and swapping in a fresh one. Must be called while
+    /// holding <see cref="_syncRoot"/>. Completion runs continuations asynchronously so a
+    /// parked writer never resumes inline under the lock.
+    /// </summary>
+    private void SignalSendWindowReplenished()
+    {
+        TaskCompletionSource prior = _sendWindowSignal;
+        _sendWindowSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        prior.TrySetResult();
+    }
+
+    /// <summary>
+    /// Reserves up to <paramref name="desired"/> octets of outbound DATA credit, consuming
+    /// from both the connection-level and stream-level send windows (RFC 9113 §5.2). When
+    /// both windows are exhausted the call parks until the pump replenishes credit from an
+    /// inbound <c>WINDOW_UPDATE</c> (or a <c>SETTINGS_INITIAL_WINDOW_SIZE</c> increase) —
+    /// this is the send-side backpressure that keeps a streaming response from buffering
+    /// unbounded ahead of a slow reader. The pump runs concurrently with the writer, so
+    /// parking here can never starve the frame that would grant the credit.
+    /// </summary>
+    /// <param name="stream">The stream whose send window is charged.</param>
+    /// <param name="desired">The maximum number of octets the caller wants to send.</param>
+    /// <param name="cancellationToken">A token that abandons the wait (exchange abort / shutdown).</param>
+    /// <returns>The number of octets granted; always at least one.</returns>
+    private async ValueTask<int> AcquireSendWindowAsync(Http2Stream stream, int desired, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task signal;
+
+            lock (_syncRoot)
+            {
+                long available = Math.Min(_connectionSendWindow.Available, stream.SendWindow.Available);
+                if (available > 0)
+                {
+                    int grant = (int)Math.Min(desired, available);
+                    _connectionSendWindow.TryConsume(grant);
+                    stream.SendWindow.TryConsume(grant);
+                    return grant;
+                }
+
+                // The pump has exited (wire failure, connection error, or teardown):
+                // no WINDOW_UPDATE will ever arrive, so fail the write as a wire-level
+                // I/O failure instead of parking forever.
+                if (_sendCreditClosed)
+                {
+                    throw new IOException(
+                        "The HTTP/2 connection terminated while a streamed response was awaiting send-window credit.");
+                }
+
+                signal = _sendWindowSignal.Task;
+            }
+
+            await signal.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ProcessRstStreamFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
         // RFC 9113 §6.4 — RST_STREAM frames MUST be associated with a
         // specific stream (stream 0 is illegal) and MUST carry a 4-octet
@@ -552,10 +965,27 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "HTTP/2 RST_STREAM frame received on stream 0.");
         }
 
-        if (_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        // CVE-2023-44487 (HTTP/2 Rapid Reset) — a client opening a stream and immediately
+        // resetting it lets it churn work off the server for near-zero cost. Count each RST_STREAM
+        // that targets a stream we have actually opened (or recently retired); a RST on a
+        // never-opened stream is handled as the idle-stream PROTOCOL_ERROR below and is a distinct
+        // violation, so it is deliberately excluded from the rapid-reset accounting. Over the
+        // per-window budget → GOAWAY(ENHANCE_YOUR_CALM), matching Kestrel's escalation.
+        if (receivedFrame.Frame.StreamId <= _lastInboundStreamId && _floodGuard.TrackStreamReset())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 stream resets exceeded the connection flood limit of {_http2Limits.MaxResetStreamsPerWindow} per window (rapid reset).");
+        }
+
+        // Remove-and-reclaim: the peer is abandoning the stream, so its buffered
+        // but unconsumed body is discarded and its connection-window debt is
+        // credited back (RFC 9113 §6.9).
+        Http2Stream? stream = await RemoveStreamAsync(receivedFrame.Frame.StreamId, cancellationToken).ConfigureAwait(false);
+
+        if (stream is not null)
         {
             stream.ReceiveReset();
-            _streams.Remove(receivedFrame.Frame.StreamId);
         }
         else if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
         {
@@ -577,7 +1007,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// Validates a client-initiated stream identifier per RFC 9113 §5.1.1:
     /// MUST be odd, MUST be non-zero, MUST be greater than every previously
     /// observed client-initiated stream identifier. Violations are
-    /// connection-level PROTOCOL_ERROR.
+    /// connection-level PROTOCOL_ERROR. Must be called while holding
+    /// <see cref="_syncRoot"/> because it inspects the stream table.
     /// </summary>
     private void ValidateInboundStreamId(int streamId)
     {
@@ -615,6 +1046,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
                 $"SETTINGS frame received on stream {receivedFrame.Frame.StreamId}; SETTINGS frames MUST use stream 0.");
+        }
+
+        // CVE-class defence — a peer that streams SETTINGS frames forces repeated re-parsing and
+        // ACK emission. Count every inbound SETTINGS frame (ACK or not); over the per-window budget
+        // → ENHANCE_YOUR_CALM (RFC 9113 §7).
+        if (_floodGuard.TrackSettingsFrame())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 SETTINGS frames exceeded the connection flood limit of {_http2Limits.MaxSettingsFramesPerWindow} per window.");
         }
 
         if (receivedFrame.Frame.SettingsAck)
@@ -684,13 +1125,25 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
 
             int signedDelta = (int)delta;
-            foreach (Http2Stream existingStream in _streams.Values)
+            // Adjust under the lock: a streaming-response writer consumes from these
+            // same send windows under _syncRoot, so adjusting outside it would race the
+            // consume. The loop is pure window arithmetic (no awaits), and a positive
+            // delta grants credit — wake any parked streaming writer.
+            lock (_syncRoot)
             {
-                if (!existingStream.SendWindow.TryAdjustInitialWindow(signedDelta))
+                foreach (Http2Stream existingStream in _streams.Values)
                 {
-                    throw new Http2ConnectionException(
-                        Http2ErrorCode.FlowControlError,
-                        $"SETTINGS_INITIAL_WINDOW_SIZE change pushed stream {existingStream.StreamId} send window above {Http2FlowControlWindow.MaxValue}.");
+                    if (!existingStream.SendWindow.TryAdjustInitialWindow(signedDelta))
+                    {
+                        throw new Http2ConnectionException(
+                            Http2ErrorCode.FlowControlError,
+                            $"SETTINGS_INITIAL_WINDOW_SIZE change pushed stream {existingStream.StreamId} send window above {Http2FlowControlWindow.MaxValue}.");
+                    }
+                }
+
+                if (signedDelta > 0)
+                {
+                    SignalSendWindowReplenished();
                 }
             }
         }
@@ -699,7 +1152,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame acknowledgement = new();
         acknowledgement.PrepareSettings(Http2SettingsFrameFlags.Acknowledge);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, acknowledgement, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -707,7 +1160,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
     }
 
@@ -722,41 +1175,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame frame = receivedFrame.Frame;
 
-        // RFC 9113 §5.1.1 — client-initiated streams MUST use odd-numbered
-        // identifiers, and stream IDs MUST increase monotonically. The server
-        // never initiates a stream (PUSH_PROMISE is disabled), so we treat any
-        // even ID as a connection-level PROTOCOL_ERROR.
-        ValidateInboundStreamId(frame.StreamId);
-
-        bool openingNewStream = !_streams.ContainsKey(frame.StreamId);
-        if (openingNewStream)
-        {
-            // RFC 9113 §6.8 — after we've initiated a graceful close, refuse
-            // new streams with RST_STREAM(REFUSED_STREAM). The peer can
-            // safely retry these on a fresh connection (RFC §8.1.4).
-            if (_gracefulCloseStarted == 1)
-            {
-                throw new Http2StreamException(
-                    frame.StreamId,
-                    Http2ErrorCode.RefusedStream,
-                    $"HTTP/2 stream {frame.StreamId} refused: server is closing the connection.");
-            }
-
-            // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
-            // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
-            // local settings; new streams beyond the cap are refused so
-            // the client can back off.
-            if (_streams.Count >= _localSettings.MaxConcurrentStreams)
-            {
-                throw new Http2StreamException(
-                    frame.StreamId,
-                    Http2ErrorCode.RefusedStream,
-                    $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached.");
-            }
-        }
-
-        _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
-        Http2Stream stream = GetOrCreateStream(frame.StreamId);
+        Http2Stream stream = OpenInboundStream(frame);
 
         // Hand the HEADERS frame to the state machine — it folds the payload
         // into the accumulating header block AND updates the stream's
@@ -769,7 +1188,53 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return null;
         }
 
-        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
+        return await TryDispatchStreamAsync(stream).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Validates, admission-controls, and materializes the inbound stream a HEADERS
+    /// frame targets, under the stream-table lock.
+    /// </summary>
+    private Http2Stream OpenInboundStream(Http2Frame frame)
+    {
+        lock (_syncRoot)
+        {
+            // RFC 9113 §5.1.1 — client-initiated streams MUST use odd-numbered
+            // identifiers, and stream IDs MUST increase monotonically. The server
+            // never initiates a stream (PUSH_PROMISE is disabled), so we treat any
+            // even ID as a connection-level PROTOCOL_ERROR.
+            ValidateInboundStreamId(frame.StreamId);
+
+            bool openingNewStream = !_streams.ContainsKey(frame.StreamId);
+            if (openingNewStream)
+            {
+                // RFC 9113 §6.8 — after we've initiated a graceful close, refuse
+                // new streams with RST_STREAM(REFUSED_STREAM). The peer can
+                // safely retry these on a fresh connection (RFC §8.1.4).
+                if (Volatile.Read(ref _gracefulCloseStarted) == 1)
+                {
+                    throw new Http2StreamException(
+                        frame.StreamId,
+                        Http2ErrorCode.RefusedStream,
+                        $"HTTP/2 stream {frame.StreamId} refused: server is closing the connection.");
+                }
+
+                // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
+                // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
+                // local settings; new streams beyond the cap are refused so
+                // the client can back off.
+                if (_streams.Count >= _localSettings.MaxConcurrentStreams)
+                {
+                    throw new Http2StreamException(
+                        frame.StreamId,
+                        Http2ErrorCode.RefusedStream,
+                        $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached.");
+                }
+            }
+
+            _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
+            return GetOrCreateStreamLocked(frame.StreamId);
+        }
     }
 
     private async Task<Http2Context?> ProcessContinuationFrameAsync(ReceivedFrame receivedFrame)
@@ -781,13 +1246,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "The HTTP/2 CONTINUATION frame did not match the active header block stream.");
         }
 
-        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        Http2Stream? stream;
+        lock (_syncRoot)
         {
-            // The leading HEADERS frame must have created the stream entry;
-            // an orphan CONTINUATION is a protocol error.
-            throw new Http2ConnectionException(
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 CONTINUATION frame received on unknown stream {receivedFrame.Frame.StreamId}.");
+            if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out stream))
+            {
+                // The leading HEADERS frame must have created the stream entry;
+                // an orphan CONTINUATION is a protocol error.
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 CONTINUATION frame received on unknown stream {receivedFrame.Frame.StreamId}.");
+            }
         }
 
         stream.ReceiveContinuation(receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
@@ -797,10 +1266,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             _continuationStreamId = null;
         }
 
-        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
+        return await TryDispatchStreamAsync(stream).ConfigureAwait(false);
     }
 
-    private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame)
+    private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
         // RFC 9113 §6.1 — DATA frames MUST be associated with a stream;
         // stream 0 is reserved for connection-level frames.
@@ -811,33 +1280,77 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "HTTP/2 DATA frame received on stream 0.");
         }
 
-        // RFC 9113 §5.2.2 — DATA frame's *full payload length* (including
-        // padding) counts against the connection's receive window. We
-        // consume it before we even know which stream it belongs to so a
-        // misbehaving peer cannot exhaust the connection window by sending
-        // DATA on rapidly-closed streams.
-        int dataPayloadLength = receivedFrame.Frame.PayloadLength;
-        if (dataPayloadLength > 0 && !_connectionReceiveWindow.TryConsume(dataPayloadLength))
+        // RFC 9113 §6.1 — if the padding length equals the frame payload length
+        // or is greater, it is a connection error of type PROTOCOL_ERROR. The
+        // frame reader strips the single pad-length octet, so the remaining
+        // payload (data + padding) must be at least the declared padding length.
+        if (receivedFrame.Frame.DataPadLength > receivedFrame.Payload.Length)
         {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FlowControlError,
-                $"HTTP/2 DATA frame of {dataPayloadLength} octets exceeded the connection-level receive window.");
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 DATA frame on stream {receivedFrame.Frame.StreamId} declares {receivedFrame.Frame.DataPadLength} padding octets, which meets or exceeds the frame payload length.");
         }
 
-        if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out Http2Stream? stream))
+        // RFC 9113 §5.2.2 / §6.9.1 — the DATA frame's *full payload length*
+        // (including padding and the pad-length octet) counts against flow
+        // control, even though only the de-padded data is delivered to the
+        // application. We consume the connection window before we even know
+        // which stream it belongs to so a misbehaving peer cannot exhaust the
+        // connection window by sending DATA on rapidly-closed streams.
+        int flowControlLength = receivedFrame.Frame.PayloadLength;
+
+        Http2Stream? stream;
+        bool recentlyClosed = false;
+        lock (_syncRoot)
         {
-            // Disambiguate idle vs. recently-closed streams (RFC 9113 §5.1):
-            //   - id > highest observed → truly idle stream, never opened
-            //     → connection error PROTOCOL_ERROR.
-            //   - id ≤ highest observed → previously opened stream we have
-            //     since retired (END_STREAM + END_STREAM, or RST_STREAM)
-            //     → stream error STREAM_CLOSED, reset the stream so the
-            //     peer learns it cannot continue using that id.
-            if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+            if (flowControlLength > 0 && !_connectionReceiveWindow.TryConsume(flowControlLength))
             {
                 throw new Http2ConnectionException(
-                    Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 DATA frame received on idle stream {receivedFrame.Frame.StreamId}.");
+                    Http2ErrorCode.FlowControlError,
+                    $"HTTP/2 DATA frame of {flowControlLength} octets exceeded the connection-level receive window.");
+            }
+
+            if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out stream))
+            {
+                // Disambiguate idle vs. recently-closed streams (RFC 9113 §5.1):
+                //   - id > highest observed → truly idle stream, never opened.
+                //   - id ≤ highest observed → previously opened stream we have
+                //     since retired (END_STREAM + END_STREAM, or RST_STREAM).
+                if (receivedFrame.Frame.StreamId > _lastInboundStreamId)
+                {
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.ProtocolError,
+                        $"HTTP/2 DATA frame received on idle stream {receivedFrame.Frame.StreamId}.");
+                }
+
+                recentlyClosed = true;
+            }
+            else if (flowControlLength > 0 && !stream.ReceiveWindow.TryConsume(flowControlLength))
+            {
+                // RFC 9113 §5.2.2 — the same DATA frame also counts against the
+                // stream's receive window. Exhaustion is a stream error per §6.9.1.
+                throw new Http2StreamException(
+                    receivedFrame.Frame.StreamId,
+                    Http2ErrorCode.FlowControlError,
+                    $"HTTP/2 DATA frame of {flowControlLength} octets exceeded the stream {receivedFrame.Frame.StreamId} receive window.");
+            }
+        }
+
+        if (recentlyClosed)
+        {
+            // We consumed the connection window above but are discarding this
+            // DATA (the stream is gone). RFC 9113 §6.9 — credit the connection
+            // window back so the peer's connection-level accounting does not
+            // permanently shrink, then surface the stream error so a RST_STREAM
+            // tells the peer to stop.
+            if (flowControlLength > 0)
+            {
+                lock (_syncRoot)
+                {
+                    _connectionReceiveWindow.TryReplenish(flowControlLength);
+                }
+
+                await EmitWindowUpdateAsync(0, flowControlLength, cancellationToken).ConfigureAwait(false);
             }
 
             throw new Http2StreamException(
@@ -846,24 +1359,49 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 $"HTTP/2 DATA frame received on closed stream {receivedFrame.Frame.StreamId}.");
         }
 
-        // RFC 9113 §5.2.2 — the same DATA frame also counts against the
-        // stream's receive window. Exhaustion is a stream error per §6.9.1
-        // unless the peer was lied to about the initial window — we treat
-        // it conservatively as FLOW_CONTROL_ERROR at the stream level.
-        if (dataPayloadLength > 0 && !stream.ReceiveWindow.TryConsume(dataPayloadLength))
-        {
-            throw new Http2StreamException(
-                receivedFrame.Frame.StreamId,
-                Http2ErrorCode.FlowControlError,
-                $"HTTP/2 DATA frame of {dataPayloadLength} octets exceeded the stream {receivedFrame.Frame.StreamId} receive window.");
-        }
+        // Deliver the de-padded application data to the stream's body pipe,
+        // tagged with its full flow-control cost so consumption credits the
+        // correct amount back to the peer (RFC 9113 §6.9.1). The context was
+        // already dispatched when the header block completed, so DATA never
+        // produces a new context here.
+        int dataLength = receivedFrame.Payload.Length - receivedFrame.Frame.DataPadLength;
+        ReadOnlyMemory<byte> data = dataLength > 0
+            ? receivedFrame.Payload.AsMemory(0, dataLength)
+            : ReadOnlyMemory<byte>.Empty;
 
-        stream.ReceiveData(receivedFrame.Payload, receivedFrame.Frame.DataEndStream);
-        return await TryCompleteStreamAsync(stream).ConfigureAwait(false);
+        stream!.ReceiveData(data, flowControlLength, receivedFrame.Frame.DataEndStream);
+        return null;
     }
 
     private async Task ProcessPingFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
+        // RFC 9113 §6.7 — a PING frame carries exactly 8 octets of opaque data; any other length is
+        // a connection-level FRAME_SIZE_ERROR. Checked ahead of the ACK short-circuit so a
+        // malformed ACK is rejected too.
+        if (receivedFrame.Frame.PayloadLength != 8)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 PING frame payload must be 8 octets; got {receivedFrame.Frame.PayloadLength}.");
+        }
+
+        // RFC 9113 §6.7 — PING is a connection-control frame and MUST be sent on stream 0.
+        if (receivedFrame.Frame.StreamId != 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PING received on stream {receivedFrame.Frame.StreamId}; PING MUST use stream 0.");
+        }
+
+        // CVE-class defence — an unbounded PING stream forces a matching flood of PING ACKs
+        // (amplification). Over the per-window budget → ENHANCE_YOUR_CALM (RFC 9113 §7).
+        if (_floodGuard.TrackPingFrame())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 PING frames exceeded the connection flood limit of {_http2Limits.MaxPingFramesPerWindow} per window.");
+        }
+
         if (receivedFrame.Frame.PingAck)
         {
             return;
@@ -871,7 +1409,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame acknowledgement = new();
         acknowledgement.PreparePing(Http2PingFrameFlags.Acknowledge);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await Http2FrameWriter.WriteAsync(Stream, acknowledgement, receivedFrame.Payload, cancellationToken).ConfigureAwait(false);
@@ -879,23 +1417,30 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
         finally
         {
-            _writeLock.Release();
+            _writeScheduler.Release();
         }
     }
 
-    private async Task<Http2Context?> TryCompleteStreamAsync(Http2Stream stream)
+    /// <summary>
+    /// Dispatches a stream's request head as an <c>IHttpContext</c> once its header
+    /// block is complete, exactly once. The body streams in afterward through the
+    /// stream's body pipe (RFC 9113 lets the server respond before the request body
+    /// finishes arriving). The registered request-parse interceptors run here — as
+    /// the head is assembled into a context, before the consumer observes it.
+    /// </summary>
+    private async Task<Http2Context?> TryDispatchStreamAsync(Http2Stream stream)
     {
-        if (!stream.IsRequestReady)
+        if (!stream.IsHeadReady)
         {
             return null;
         }
 
-        // RFC 9113 §5.1 — keep the stream in our active map until BOTH
-        // halves are closed. After yielding, the stream is in
-        // HalfClosedRemote: the peer has finished sending, but the server
-        // hasn't sent its response yet. A subsequent RST_STREAM from the
-        // peer needs to find the stream so it can fire RequestAborted on
-        // the application's IHttpContext.
+        stream.ContextDispatched = true;
+
+        // RFC 9113 §5.1 — the stream stays in the active map after dispatch:
+        // it is in HalfClosedRemote (or Open, if the body is still arriving),
+        // and a subsequent RST_STREAM from the peer needs to find it so it can
+        // fire RequestAborted on the application's IHttpContext.
         try
         {
             return await stream.CreateContextAsync(
@@ -903,16 +1448,27 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 ConnectionInfo,
                 GetScheme(),
                 CancellationToken.None,
-                _interceptors,
-                _limits.MaxRequestBodySize).ConfigureAwait(false);
+                OnRequestBodyConsumedAsync,
+                _requestInterceptors,
+                _http2Limits.MaxRequestBodySize).ConfigureAwait(false);
+        }
+        catch (HPack.HPackHeaderListSizeExceededException error)
+        {
+            // RFC 9113 §10.5.1 — the decoded field list exceeded the advertised
+            // MAX_HEADER_LIST_SIZE. This is an excessive-load condition (the decode aborts before
+            // fully materialising the list), so escalate with ENHANCE_YOUR_CALM rather than the
+            // PROTOCOL_ERROR used for genuinely malformed field sections below.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 HEADERS frame exceeded the maximum header list size: {error.Message}");
         }
         catch (HPack.HPackDecodingException error)
         {
             // RFC 9113 §8.2 / §8.3 — malformed field sections (illegal
             // pseudo-header order, forbidden connection-specific
             // fields, etc.) are connection-level PROTOCOL_ERRORs. Wrap
-            // the HPack-level exception so the receive loop emits
-            // GOAWAY before tearing down.
+            // the HPack-level exception so the pump emits GOAWAY before
+            // tearing down.
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
                 $"HTTP/2 HEADERS frame contained a malformed field section: {error.Message}");
@@ -925,7 +1481,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // the connection and its other streams are unaffected. HTTP/2 has no REQUEST_REJECTED
             // code (unlike HTTP/3), so CANCEL carries the reset — a neutral per-stream termination
             // consistent with the transport's application-cancel path, without REFUSED_STREAM's
-            // "safe to retry" promise (see docs/DESIGN.md).
+            // "safe to retry" promise (see docs/DESIGN.md). The pump's stream-error handler emits
+            // the RST_STREAM, which also removes the stream and reclaims its receive-window debt.
             throw new Http2StreamException(
                 stream.StreamId,
                 Http2ErrorCode.Cancel,
@@ -933,7 +1490,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
-    private Http2Stream GetOrCreateStream(int streamId)
+    /// <summary>
+    /// Fetches or creates the stream for <paramref name="streamId"/>. Must be
+    /// called while holding <see cref="_syncRoot"/>.
+    /// </summary>
+    private Http2Stream GetOrCreateStreamLocked(int streamId)
     {
         if (!_streams.TryGetValue(streamId, out Http2Stream? stream))
         {
@@ -945,11 +1506,96 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             stream = new Http2Stream(
                 streamId,
                 initialSendWindow: _remoteSettings.InitialWindowSize,
-                initialReceiveWindow: _localSettings.InitialWindowSize);
+                initialReceiveWindow: _localSettings.InitialWindowSize,
+                maxHeaderBlockSize: _http2Limits.MaxRequestHeaderListSize);
             _streams.Add(streamId, stream);
+
+            // RFC 9218 §7.1 — apply any PRIORITY_UPDATE that arrived while this
+            // stream was still idle. It pins the effective priority so the
+            // Priority header cannot later override it (RFC 9218 §8).
+            if (_bufferedPriorities.Remove(streamId, out HttpPriority buffered))
+            {
+                stream.ApplyPriorityUpdate(buffered);
+            }
         }
 
         return stream;
+    }
+
+    /// <summary>
+    /// Removes a stream and credits its outstanding receive-window debt back to the
+    /// connection window, telling the peer via a connection-level <c>WINDOW_UPDATE</c>.
+    /// </summary>
+    /// <remarks>
+    /// RFC 9113 §5.2 / §6.9 — because request-body credit is consumption-driven, a
+    /// stream that is removed while the application never drained its buffered body
+    /// (an ignored body, a reset, an abandoned upload) still holds octets against
+    /// the shared connection receive window. Those octets are now discarded, so the
+    /// connection window MUST be credited back or it would shrink permanently over
+    /// the connection's lifetime and eventually stall inbound DATA on every stream.
+    /// The debt is exactly <c>InitialReceiveWindow - ReceiveWindow.Available</c> —
+    /// what was consumed on receipt minus what consumption already credited.
+    /// </remarks>
+    private async ValueTask<Http2Stream?> RemoveStreamAsync(int streamId, CancellationToken cancellationToken)
+    {
+        int reclaimed = 0;
+        Http2Stream? stream;
+        lock (_syncRoot)
+        {
+            if (!_streams.TryGetValue(streamId, out stream))
+            {
+                return null;
+            }
+
+            if (!stream.ReceiveReclaimed)
+            {
+                stream.ReceiveReclaimed = true;
+                long outstanding = stream.InitialReceiveWindow - stream.ReceiveWindow.Available;
+                if (outstanding > 0)
+                {
+                    reclaimed = (int)Math.Min(outstanding, int.MaxValue);
+                    _connectionReceiveWindow.TryReplenish(reclaimed);
+                }
+            }
+
+            _streams.Remove(streamId);
+        }
+
+        if (reclaimed > 0)
+        {
+            await EmitWindowUpdateAsync(0, reclaimed, cancellationToken).ConfigureAwait(false);
+        }
+
+        // RFC 9113 §6.8 — every exchange-terminating path funnels through this
+        // removal (response sent on the buffered or streaming path, a local
+        // RST_STREAM, a peer RST_STREAM), so releasing the graceful-close drain
+        // accounting here covers them all. The stream-level one-shot latch makes
+        // a second arrival (e.g. reset racing the response) a no-op.
+        AccountExchangeComplete(stream);
+
+        return stream;
+    }
+
+    /// <summary>
+    /// Releases the graceful-close drain accounting for a dispatched
+    /// <paramref name="stream"/>. Idempotent per stream via the stream's one-shot
+    /// accounting latch — and a no-op for streams that were never counted (refused,
+    /// reset, or torn down before dispatch). When the in-flight count reaches zero
+    /// a graceful close that is currently draining is woken (RFC 9113 §6.8).
+    /// </summary>
+    private void AccountExchangeComplete(Http2Stream stream)
+    {
+        if (!stream.TryClaimExchangeAccounting())
+        {
+            return;
+        }
+
+        if (Interlocked.Decrement(ref _activeExchangeCount) == 0)
+        {
+            // Wake a draining GracefulCloseAsync. No-op when no close is in
+            // progress (the signal is only published while draining).
+            _drainSignal?.TrySetResult();
+        }
     }
 
     private async Task WriteHeaderBlockAsync(int streamId, byte[] headerBlock, bool endStream, CancellationToken cancellationToken)
@@ -1013,6 +1659,124 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
     }
 
+    // ---- Streaming response write path (the raw body sink's wire hooks) ----------
+    // Http2ResponseBodyStream forwards here. The application thread runs these
+    // concurrently with the frame pump; shared state is guarded by _syncRoot (send
+    // windows, stream table) and the write scheduler (wire frame sequences).
+
+    /// <summary>
+    /// Acquires the connection write gate for a response write on
+    /// <paramref name="context"/>'s stream, using the stream's RFC 9218 effective
+    /// priority so contending response writers are granted the gate in urgency
+    /// order (RFC 9218 §10).
+    /// </summary>
+    private Task AcquireResponseWriteAsync(Http2Context context, CancellationToken cancellationToken)
+    {
+        HttpPriority priority = context.Stream.EffectivePriority;
+        return _writeScheduler.AcquireAsync(context.StreamId, priority.Urgency, priority.Incremental, cancellationToken);
+    }
+
+    /// <summary>
+    /// Commits the response head for an incrementally-streamed response: encodes the
+    /// field section with <b>no</b> synthesized <c>Content-Length</c> (the body is
+    /// delimited by <c>END_STREAM</c>) and writes the HEADERS block without the
+    /// <c>END_STREAM</c> flag so DATA frames can follow. Holds the connection write
+    /// gate for frame-sequence atomicity (RFC 9113 §4.1).
+    /// </summary>
+    internal async Task WriteStreamingHeadersAsync(Http2Context context, CancellationToken cancellationToken)
+    {
+        byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
+
+        await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeScheduler.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes a chunk of streamed response body as one or more DATA frames, splitting
+    /// on the peer's MAX_FRAME_SIZE and awaiting send-window credit (RFC 9113 §5.2)
+    /// for each frame so a slow reader applies backpressure rather than letting the
+    /// server buffer unbounded. Each frame is flushed through to the transport so the
+    /// peer observes bytes before the response completes; the concurrently-running
+    /// frame pump keeps replenishing credit from inbound <c>WINDOW_UPDATE</c> frames.
+    /// </summary>
+    internal async Task WriteStreamingDataAsync(Http2Context context, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    {
+        int offset = 0;
+
+        while (offset < data.Length)
+        {
+            int maxChunk = Math.Min((int)_remoteSettings.MaxFrameSize, data.Length - offset);
+            int granted = await AcquireSendWindowAsync(context.Stream, maxChunk, cancellationToken).ConfigureAwait(false);
+            ReadOnlyMemory<byte> chunk = data.Slice(offset, granted);
+
+            // The gate is acquired per DATA frame — AFTER the send-window credit,
+            // so a writer parked on flow control never blocks the connection —
+            // which is what lets the scheduler interleave same-urgency incremental
+            // streams frame-by-frame and always favour lower urgencies (RFC 9218 §10).
+            await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                Http2Frame frame = new();
+                frame.PrepareData(context.StreamId);
+                await Http2FrameWriter.WriteAsync(Stream, frame, chunk, cancellationToken).ConfigureAwait(false);
+                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeScheduler.Release();
+            }
+
+            offset += granted;
+        }
+    }
+
+    /// <summary>
+    /// Finalizes a streamed response: emits an empty DATA frame carrying
+    /// <c>END_STREAM</c> (RFC 9113 §5.1), applies the local-half-close transition, and
+    /// then performs the same cleanup as the buffered <see cref="SendAsync"/> — the
+    /// fully-closed stream is removed (reclaiming any undrained receive-window debt),
+    /// while a stream whose peer half is still open is reset with <c>NO_ERROR</c> to
+    /// stop the remaining request body and reclaim the concurrency slot.
+    /// </summary>
+    internal async Task CompleteStreamingAsync(Http2Context context, CancellationToken cancellationToken)
+    {
+        await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Http2Frame frame = new();
+            frame.PrepareData(context.StreamId);
+            frame.DataFlags |= Http2DataFrameFlags.EndStream;
+            await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeScheduler.Release();
+        }
+
+        context.Stream.SendEndStream();
+
+        if (context.Stream.IsClosed)
+        {
+            await RemoveStreamAsync(context.StreamId, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            // The server finished its streamed response before the peer finished the
+            // request body. RFC 9113 §8.1 — reset with NO_ERROR to stop the peer and
+            // reclaim the stream slot (EmitRstStreamAsync also removes the stream).
+            await EmitRstStreamAsync(context.StreamId, Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private static async Task<byte[]> ReadBodyAsync(Stream body, CancellationToken cancellationToken)
     {
         if (body is MemoryStream memoryStream)
@@ -1037,7 +1801,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         while (offset < count)
         {
-            int bytesRead = await stream.ReadAsync(buffer, offset, count - offset, cancellationToken).ConfigureAwait(false);
+            int bytesRead = await stream.ReadAsync(buffer.AsMemory(offset, count - offset), cancellationToken).ConfigureAwait(false);
 
             if (bytesRead == 0)
             {
@@ -1121,7 +1885,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             Http2Frame frame = new();
             frame.PrepareWindowUpdate(streamId, increment);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1129,7 +1893,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1151,7 +1915,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             Http2Frame rstStream = new();
             rstStream.PrepareRstStream(streamId, errorCode);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, rstStream, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1159,7 +1923,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1169,31 +1933,44 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // surface that via GOAWAY.
         }
 
-        if (_streams.TryGetValue(streamId, out Http2Stream? stream))
-        {
-            stream.SendReset();
-            _streams.Remove(streamId);
-        }
+        Http2Stream? stream = await RemoveStreamAsync(streamId, cancellationToken).ConfigureAwait(false);
+        stream?.SendReset();
 
-        if (_continuationStreamId == streamId)
-        {
-            _continuationStreamId = null;
-        }
+        // NOTE: _continuationStreamId is deliberately NOT touched here. This method
+        // is callable from the application thread (SendAsync's abandoned-body /
+        // cancel reset) concurrently with the pump, and _continuationStreamId is a
+        // non-atomic int? owned solely by the pump. A stream can never be both
+        // mid-CONTINUATION (header block incomplete) and dispatched-and-responded-
+        // to, so the app path never targets the active continuation stream; the
+        // pump resets the field itself in ProcessRstStreamFrame when the peer
+        // resets a mid-continuation stream.
     }
 
     /// <summary>
     /// Emits a <c>GOAWAY</c> frame on stream 0 carrying
     /// <paramref name="errorCode"/> and the highest stream ID we have
-    /// observed so far (RFC 9113 §6.8). The receive loop then propagates
-    /// the exception so the listener can tear the connection down.
+    /// observed so far (RFC 9113 §6.8). The pump then propagates the
+    /// exception so the listener can tear the connection down.
     /// </summary>
     private async Task EmitGoAwayAsync(Http2ErrorCode errorCode, CancellationToken cancellationToken)
     {
         try
         {
+            // Snapshot under the stream-table lock: during a graceful close the
+            // pump is still processing HEADERS concurrently with this write, and
+            // announcing an id lower than a stream we actually accepted would
+            // invite the client to retry a request we are about to answer. Any
+            // stream arriving after _gracefulCloseStarted is refused without
+            // bumping _lastInboundStreamId, so the locked read is exact.
+            int lastStreamId;
+            lock (_syncRoot)
+            {
+                lastStreamId = _lastInboundStreamId;
+            }
+
             Http2Frame goAway = new();
-            goAway.PrepareGoAway(_lastInboundStreamId, errorCode);
-            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            goAway.PrepareGoAway(lastStreamId, errorCode);
+            await AcquireControlWriteAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 await Http2FrameWriter.WriteAsync(Stream, goAway, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
@@ -1201,7 +1978,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
             finally
             {
-                _writeLock.Release();
+                _writeScheduler.Release();
             }
         }
         catch
@@ -1216,23 +1993,28 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// Builds the explicit server-side initial <see cref="Http2ConnectionSettings"/>
     /// we advertise to peers. The defaults mostly track the RFC 9113
     /// initial values except for ENABLE_PUSH (0 — Cohesion does not
-    /// implement server push) and MAX_HEADER_LIST_SIZE (a 16 KB DoS
-    /// guard instead of "unlimited").
+    /// implement server push), MAX_CONCURRENT_STREAMS, and
+    /// MAX_HEADER_LIST_SIZE, which are operator-tunable via
+    /// <see cref="Http2ConnectionListenerOptions.Http2Limits"/> (a bounded DoS guard instead of "unlimited").
     /// </summary>
-    private static Http2ConnectionSettings BuildLocalSettings()
+    private static Http2ConnectionSettings BuildLocalSettings(Http2ConnectionListenerOptions.Http2Limits limits)
     {
         return new Http2ConnectionSettings
         {
             HeaderTableSize = Http2ConnectionSettings.InitialHeaderTableSize,
             EnablePush = 0,
-            MaxConcurrentStreams = 100,
+            MaxConcurrentStreams = (uint)limits.MaxStreamsPerConnection,
             InitialWindowSize = Http2ConnectionSettings.InitialInitialWindowSize,
             MaxFrameSize = Http2ConnectionSettings.InitialMaxFrameSize,
-            MaxHeaderListSize = 16_384,
+            MaxHeaderListSize = (uint)limits.MaxRequestHeaderListSize,
             // RFC 8441 §3 — advertise support for the extended CONNECT protocol
             // so peers may bootstrap WebSocket (and other protocols) over a
             // single stream via CONNECT + :protocol.
             EnableConnectProtocol = 1,
+            // RFC 9218 §2.1 — advertise NO_RFC7540_PRIORITIES = 1 so peers use the
+            // extensible-priorities scheme (Priority header + PRIORITY_UPDATE) and
+            // do not expect the deprecated RFC 7540 stream-priority tree.
+            NoRfc7540Priorities = 1,
         };
     }
 
@@ -1257,6 +2039,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 tells the peer
             // it MAY use extended CONNECT (CONNECT + :protocol).
             (Http2SettingsParameter.SETTINGS_ENABLE_CONNECT_PROTOCOL, _localSettings.EnableConnectProtocol),
+            // RFC 9218 §2.1 — SETTINGS_NO_RFC7540_PRIORITIES = 1 tells the peer the
+            // server uses the extensible-priorities scheme, not RFC 7540 priorities.
+            (Http2SettingsParameter.SETTINGS_NO_RFC7540_PRIORITIES, _localSettings.NoRfc7540Priorities),
         };
 
         byte[] payload = new byte[entries.Length * Http2FrameReader.SettingSize];
@@ -1273,16 +2058,26 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     }
 
     /// <summary>
-    /// Performs an RFC 9113 §6.8 graceful close: emits a <c>GOAWAY</c>
-    /// frame carrying <see cref="Http2ErrorCode.NoError"/>, then signals
-    /// the transport's send pipeline that no further bytes will be
-    /// written. The transport's send task reads the remaining bytes,
-    /// performs its final <c>Socket.SendAsync</c> (which waits for the
-    /// kernel to accept the bytes), then exits — at which point the
-    /// underlying socket is torn down through the transport's own
-    /// teardown path.
+    /// Performs an RFC 9113 §6.8 graceful close: refuses new streams, emits a
+    /// <c>GOAWAY</c> frame carrying <see cref="Http2ErrorCode.NoError"/>, waits —
+    /// bounded by <see cref="GracefulDrainWindow"/> — for the request exchanges
+    /// already dispatched to finish their responses, then stops the frame pump and
+    /// signals the transport's send pipeline that no further bytes will be
+    /// written. The transport's send task reads the remaining bytes, performs its
+    /// final <c>Socket.SendAsync</c> (which waits for the kernel to accept the
+    /// bytes), then exits — at which point the underlying socket is torn down
+    /// through the transport's own teardown path.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The frame pump deliberately keeps running through the drain window: it is
+    /// what refuses newly opened streams with <c>RST_STREAM(REFUSED_STREAM)</c> on
+    /// the wire, keeps feeding in-flight request bodies, replenishes send-window
+    /// credit for a streaming response writer, and observes peer resets that
+    /// release the drain early. It is stopped only after the drain completes (or
+    /// its bounded window elapses); GOAWAY-vs-pump write interleaving is prevented
+    /// by the connection write scheduler.
+    /// </para>
     /// <para>
     /// Closes the gap identified by #686: previously, <see cref="Http2Connection.DisposeAsync"/>
     /// invoked <c>IConnection.DisposeAsync</c> directly, which
@@ -1303,12 +2098,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return;
         }
 
-        // EnsureInitializedAsync may not have run if the receive loop was
-        // never started. Skip GOAWAY in that case; the peer has not seen
-        // any HTTP/2 traffic from us yet, so closing the underlying socket
-        // is enough.
+        // EnsureInitializedAsync may not have run if the pump never started (or
+        // has not reached initialization yet). Skip GOAWAY in that case; the peer
+        // has not seen any HTTP/2 traffic from us yet — and nothing can have been
+        // dispatched — so stopping the pump and closing the socket is enough.
         if (!_initialized)
         {
+            await StopPumpAsync().ConfigureAwait(false);
             await CompleteOutputAsync().ConfigureAwait(false);
             return;
         }
@@ -1316,10 +2112,82 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         try
         {
             await EmitGoAwayAsync(Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
+
+            // RFC 9113 §6.8 — after announcing GOAWAY, let the streams already
+            // accepted finish their responses before the pump is stopped and the
+            // output writer completed. New streams opened after this point are
+            // refused with RST_STREAM(REFUSED_STREAM) (see OpenInboundStream /
+            // _gracefulCloseStarted), so the in-flight set only shrinks. The wait
+            // is bounded by GracefulDrainWindow so a stuck response cannot stall
+            // teardown.
+            await DrainActiveExchangesAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
+            await StopPumpAsync().ConfigureAwait(false);
             await CompleteOutputAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Waits — bounded by <see cref="GracefulDrainWindow"/> — for every request
+    /// exchange already dispatched to the application to finish (its response
+    /// sent, its stream reset, or its truncated request shutdown-aborted) before
+    /// the caller stops the pump and completes the connection output. Returns
+    /// immediately when nothing is in flight. When the window elapses (or
+    /// <paramref name="cancellationToken"/> fires) the remaining exchanges are
+    /// abandoned and the caller proceeds to teardown, so shutdown latency stays
+    /// bounded (RFC 9113 §6.8).
+    /// </summary>
+    private async Task DrainActiveExchangesAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _activeExchangeCount) == 0)
+        {
+            return;
+        }
+
+        TaskCompletionSource signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _drainSignal = signal;
+
+        // Re-check after publishing the signal: a decrement to zero that ran
+        // between the initial read and the publish would not have observed the
+        // signal, so close that lost-wakeup window here.
+        if (Volatile.Read(ref _activeExchangeCount) == 0)
+        {
+            return;
+        }
+
+        using CancellationTokenSource timeout = new(GracefulDrainWindow);
+        using CancellationTokenSource linked =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        try
+        {
+            await signal.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Bounded window elapsed (or the caller cancelled). Fall through:
+            // any exchange that did not finish is cut off by the pump stop and
+            // output completion that follow, but the connection tears down
+            // within the window.
+        }
+    }
+
+    private async ValueTask StopPumpAsync()
+    {
+        _pumpCts?.Cancel();
+
+        if (_pumpTask is not null)
+        {
+            try
+            {
+                await _pumpTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // The pump isolates its own failures; awaiting it here is only to
+                // guarantee it has stopped before we write GOAWAY.
+            }
         }
     }
 
@@ -1346,7 +2214,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     public async ValueTask DisposeAsync()
     {
         await GracefulCloseAsync().ConfigureAwait(false);
-        _writeLock.Dispose();
+        _pumpCts?.Dispose();
+        _writeScheduler.Dispose();
     }
 
     private readonly struct ReceivedFrame

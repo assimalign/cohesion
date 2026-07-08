@@ -1,8 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
@@ -11,8 +10,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 
 /// <summary>
 /// Server-side HTTP/2 stream — tracks the RFC 9113 §5.1 lifecycle state
-/// plus the accumulating header block and body bytes received from the
-/// peer.
+/// plus the accumulating header block and the streaming body pipe fed from
+/// the peer's DATA frames.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,16 +22,59 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 /// the connection alive) or an <see cref="Http2ConnectionException"/>
 /// (connection-level — GOAWAY tears the connection down).
 /// </para>
+/// <para>
+/// The body is delivered incrementally through <see cref="_bodyChannel"/>: the
+/// frame pump writes each decoded DATA payload here as it arrives, and the
+/// application drains it through <see cref="Http2RequestBodyStream"/>. This is
+/// what keeps buffered request-body bytes bounded by the advertised receive
+/// window and lets application consumption — not receipt — drive
+/// <c>WINDOW_UPDATE</c> emission. The pump (single writer) and the request
+/// handler (single reader) run concurrently, so state transitions are guarded by
+/// <see cref="_stateLock"/> to keep the local (send) and remote (receive) halves
+/// from racing each other.
+/// </para>
 /// </remarks>
 internal sealed class Http2Stream
 {
     private readonly MemoryStream _headerBlock;
-    private readonly MemoryStream _body;
+    // RFC 9113 §6.10 / §10.5.1 — cap the raw header-block bytes accumulated across a HEADERS frame
+    // and its CONTINUATION frames. Without this bound a CONTINUATION flood — an endless run of
+    // CONTINUATION frames with no END_HEADERS — grows this buffer without limit. The cap is the
+    // advertised SETTINGS_MAX_HEADER_LIST_SIZE; exceeding it is a connection-level ENHANCE_YOUR_CALM.
+    private readonly int _maxHeaderBlockSize;
+    // RFC 9113 §5.2 — inbound DATA is queued here for the application to drain
+    // rather than buffered whole before dispatch. Unbounded at the channel level
+    // (the flow-control window is the real bound); single-writer (the frame pump)
+    // and single-reader (the request handler).
+    private readonly Channel<Http2DataChunk> _bodyChannel;
+    // Guards State transitions: the pump mutates the remote half (Receive*) while
+    // the request handler mutates the local half (Send*), concurrently.
+    private readonly object _stateLock = new();
     // RFC 9113 §5.4.2 — when the peer resets a stream (or we decide to
     // reset it locally), the application MUST be able to learn that its
     // request was abandoned. This token source backs IHttpContext's
     // RequestAborted and is fired whenever the stream is reset.
     private readonly CancellationTokenSource _abortedSource = new();
+    // RFC 9218 §8 — a PRIORITY_UPDATE frame takes precedence over the
+    // Priority request header for the same stream, regardless of arrival
+    // order. Once an update is applied, a later header parse must not
+    // clobber it.
+    private bool _priorityFromUpdate;
+
+    // 0 = body channel still open, 1 = completed. Interlocked because both the
+    // pump (END_STREAM / peer reset) and the request handler (local reset on an
+    // undrained body) can race to complete it.
+    private int _bodyCompleted;
+
+    // RFC 9113 §6.8 — graceful-close drain accounting, a tri-state latch:
+    // 0 = this stream was never counted as an in-flight exchange;
+    // 1 = counted (the pump dispatched its context and incremented the
+    //     connection's active-exchange count);
+    // 2 = accounted complete (exactly one completion path — response sent,
+    //     stream reset, or a truncated-input shutdown abort — claimed the
+    //     decrement). Interlocked because the pump, the request handler, and
+    //     the graceful-close path race for the transitions.
+    private int _exchangeAccounting;
 
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
@@ -46,15 +88,45 @@ internal sealed class Http2Stream
     /// Receive-side flow-control window — the number of DATA octets the
     /// peer may transmit on this stream before we send a
     /// <c>WINDOW_UPDATE</c>. Initialised from our local
-    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c>.
+    /// <c>SETTINGS_INITIAL_WINDOW_SIZE</c> and only replenished as the
+    /// application consumes the body.
     /// </summary>
     public Http2FlowControlWindow ReceiveWindow;
 
-    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow)
+    /// <summary>
+    /// The initial receive-window size, retained so that when the stream is
+    /// removed the connection can reclaim its outstanding receive debt
+    /// (initial minus current available = octets consumed from the shared
+    /// connection window that the application never drained).
+    /// </summary>
+    public long InitialReceiveWindow { get; }
+
+    /// <summary>
+    /// Whether this stream's outstanding receive-window debt has already been
+    /// credited back to the connection window on removal. Guarded by the
+    /// connection's synchronization root, not this stream's state lock, because
+    /// it coordinates the pump's stream removal with the body reader's
+    /// consumption crediting.
+    /// </summary>
+    public bool ReceiveReclaimed { get; set; }
+
+    public Http2Stream(int streamId, long initialSendWindow, long initialReceiveWindow, int maxHeaderBlockSize)
     {
         StreamId = streamId;
+        InitialReceiveWindow = initialReceiveWindow;
         _headerBlock = new MemoryStream();
-        _body = new MemoryStream();
+        _maxHeaderBlockSize = maxHeaderBlockSize;
+        // SingleWriter is false: the frame pump writes DATA chunks (ReceiveData),
+        // but a local reset from the application thread (SendReset via an
+        // abandoned-body / cancel RST_STREAM) can complete the writer concurrently
+        // with an in-flight pump write. SingleReader is true — exactly one request
+        // handler drains the body.
+        _bodyChannel = Channel.CreateUnbounded<Http2DataChunk>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
         State = Http2StreamState.Idle;
         SendWindow = new Http2FlowControlWindow(initialSendWindow);
         ReceiveWindow = new Http2FlowControlWindow(initialReceiveWindow);
@@ -70,6 +142,15 @@ internal sealed class Http2Stream
     /// <summary>The stream identifier (RFC 9113 §5.1.1).</summary>
     public int StreamId { get; }
 
+    /// <summary>
+    /// The effective RFC 9218 priority the connection engine uses to schedule this
+    /// stream's response write. Initialised to <see cref="HttpPriority.Default"/>
+    /// (urgency 3, non-incremental), refined from the <c>Priority</c> request
+    /// header when the request materialises, and overridden by any
+    /// <c>PRIORITY_UPDATE</c> frame (RFC 9218 §8).
+    /// </summary>
+    public HttpPriority EffectivePriority { get; private set; } = HttpPriority.Default;
+
     /// <summary>Current lifecycle state per RFC 9113 §5.1.</summary>
     public Http2StreamState State { get; private set; }
 
@@ -79,14 +160,60 @@ internal sealed class Http2Stream
     /// <summary><see langword="true"/> once the request side has been closed (END_STREAM from the peer or RST_STREAM).</summary>
     public bool InputCompleted { get; private set; }
 
-    /// <summary>The stream is ready to materialise as an <c>IHttpContext</c> once both halves are present.</summary>
-    public bool IsRequestReady => HeadersCompleted && InputCompleted && State != Http2StreamState.Closed;
+    /// <summary>
+    /// <see langword="true"/> once the request head has been dispatched to the
+    /// application as an <c>IHttpContext</c>. The head is dispatched as soon as the
+    /// header block is complete (RFC 9113 lets the server respond before the body
+    /// arrives), so the body streams in afterward; this flag stops the pump from
+    /// dispatching the same stream twice as later DATA frames arrive.
+    /// </summary>
+    public bool ContextDispatched { get; set; }
+
+    /// <summary>
+    /// The stream is ready to materialise as an <c>IHttpContext</c> once its header
+    /// block is complete and it has not already been dispatched or closed.
+    /// </summary>
+    public bool IsHeadReady => HeadersCompleted && !ContextDispatched && State != Http2StreamState.Closed;
+
+    /// <summary>
+    /// Marks this stream as counted toward the connection's in-flight exchange
+    /// total for the RFC 9113 §6.8 graceful-close drain. Called by the pump,
+    /// paired with the connection-level increment, immediately before the
+    /// request context is handed to the consumer.
+    /// </summary>
+    public void MarkExchangeCounted()
+    {
+        Interlocked.CompareExchange(ref _exchangeAccounting, 1, 0);
+    }
+
+    /// <summary>
+    /// Atomically claims the single "exchange complete" accounting slot for this
+    /// stream. Returns <see langword="true"/> only for the first caller — and only
+    /// when the stream was previously counted via <see cref="MarkExchangeCounted"/>
+    /// — so the connection decrements its in-flight exchange count at most once
+    /// per counted stream and never for a stream that was refused, reset, or torn
+    /// down before dispatch.
+    /// </summary>
+    /// <returns><see langword="true"/> if the caller won the accounting slot.</returns>
+    public bool TryClaimExchangeAccounting()
+    {
+        return Interlocked.CompareExchange(ref _exchangeAccounting, 2, 1) == 1;
+    }
 
     /// <summary>
     /// Whether the stream has reached the terminal <see cref="Http2StreamState.Closed"/>
     /// state.
     /// </summary>
-    public bool IsClosed => State == Http2StreamState.Closed;
+    public bool IsClosed
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return State == Http2StreamState.Closed;
+            }
+        }
+    }
 
     /// <summary>
     /// Folds an inbound HEADERS / CONTINUATION payload into the accumulating header
@@ -106,37 +233,40 @@ internal sealed class Http2Stream
     /// </exception>
     public void ReceiveHeaders(ReadOnlySpan<byte> payload, bool endHeaders, bool endStream)
     {
-        // RFC 9113 §5.1 — HEADERS is legal in:
-        //   - Idle: opens the stream (→ Open or → HalfClosedRemote if END_STREAM)
-        //   - Open / HalfClosedLocal: continuation of the request (trailers)
-        // Anything else is a connection error per RFC 9113 §5.1 (PROTOCOL_ERROR
-        // for an unexpected HEADERS on a closed stream, STREAM_CLOSED for one
-        // on a stream we already saw END_STREAM for).
-        switch (State)
+        lock (_stateLock)
         {
-            case Http2StreamState.Idle:
-                State = endStream ? Http2StreamState.HalfClosedRemote : Http2StreamState.Open;
-                break;
-            case Http2StreamState.Open:
-            case Http2StreamState.HalfClosedLocal:
-                // Trailers — the peer is wrapping up its half. END_STREAM
-                // must be set on a trailing HEADERS frame (RFC 9113 §8.1).
-                if (!endStream)
-                {
-                    throw new Http2ConnectionException(
-                        Http2ErrorCode.ProtocolError,
-                        $"HTTP/2 trailing HEADERS on stream {StreamId} must carry END_STREAM.");
-                }
+            // RFC 9113 §5.1 — HEADERS is legal in:
+            //   - Idle: opens the stream (→ Open or → HalfClosedRemote if END_STREAM)
+            //   - Open / HalfClosedLocal: continuation of the request (trailers)
+            // Anything else is a connection error per RFC 9113 §5.1 (PROTOCOL_ERROR
+            // for an unexpected HEADERS on a closed stream, STREAM_CLOSED for one
+            // on a stream we already saw END_STREAM for).
+            switch (State)
+            {
+                case Http2StreamState.Idle:
+                    State = endStream ? Http2StreamState.HalfClosedRemote : Http2StreamState.Open;
+                    break;
+                case Http2StreamState.Open:
+                case Http2StreamState.HalfClosedLocal:
+                    // Trailers — the peer is wrapping up its half. END_STREAM
+                    // must be set on a trailing HEADERS frame (RFC 9113 §8.1).
+                    if (!endStream)
+                    {
+                        throw new Http2ConnectionException(
+                            Http2ErrorCode.ProtocolError,
+                            $"HTTP/2 trailing HEADERS on stream {StreamId} must carry END_STREAM.");
+                    }
 
-                State = State == Http2StreamState.Open
-                    ? Http2StreamState.HalfClosedRemote
-                    : Http2StreamState.Closed;
-                break;
-            case Http2StreamState.HalfClosedRemote:
-            case Http2StreamState.Closed:
-                throw new Http2ConnectionException(
-                    Http2ErrorCode.StreamClosed,
-                    $"HTTP/2 HEADERS frame received on stream {StreamId} in state {State}; the peer has already closed its half.");
+                    State = State == Http2StreamState.Open
+                        ? Http2StreamState.HalfClosedRemote
+                        : Http2StreamState.Closed;
+                    break;
+                case Http2StreamState.HalfClosedRemote:
+                case Http2StreamState.Closed:
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.StreamClosed,
+                        $"HTTP/2 HEADERS frame received on stream {StreamId} in state {State}; the peer has already closed its half.");
+            }
         }
 
         AppendHeaderBytes(payload);
@@ -149,6 +279,7 @@ internal sealed class Http2Stream
         if (endStream)
         {
             InputCompleted = true;
+            CompleteBody();
         }
     }
 
@@ -167,11 +298,14 @@ internal sealed class Http2Stream
         // already received its leading HEADERS frame. The connection-level
         // continuation tracking guards the cross-stream rule; here we just
         // assert that the stream itself is in a sane state.
-        if (State == Http2StreamState.Idle || State == Http2StreamState.Closed)
+        lock (_stateLock)
         {
-            throw new Http2ConnectionException(
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 CONTINUATION frame received on stream {StreamId} in state {State}.");
+            if (State == Http2StreamState.Idle || State == Http2StreamState.Closed)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 CONTINUATION frame received on stream {StreamId} in state {State}.");
+            }
         }
 
         AppendHeaderBytes(payload);
@@ -183,9 +317,15 @@ internal sealed class Http2Stream
     }
 
     /// <summary>
-    /// Folds an inbound DATA payload into the accumulating body and applies the
-    /// END_STREAM transition.
+    /// Queues an inbound DATA payload onto the body pipe and applies the END_STREAM
+    /// transition.
     /// </summary>
+    /// <param name="data">The de-padded application data.</param>
+    /// <param name="flowControlLength">
+    /// The DATA frame's full payload length (including padding) — the octets to
+    /// credit back to the peer once the application consumes this chunk.
+    /// </param>
+    /// <param name="endStream">Whether the frame carried END_STREAM.</param>
     /// <exception cref="Http2StreamException">
     /// Thrown when DATA is received on a stream that has already had its remote
     /// half closed (STREAM_CLOSED — RFC 9113 §5.1).
@@ -194,41 +334,49 @@ internal sealed class Http2Stream
     /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
     /// (no HEADERS yet) — that is a PROTOCOL_ERROR connection-level fault.
     /// </exception>
-    public void ReceiveData(ReadOnlySpan<byte> payload, bool endStream)
+    public void ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
     {
-        switch (State)
+        lock (_stateLock)
         {
-            case Http2StreamState.Idle:
-                throw new Http2ConnectionException(
-                    Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 DATA frame received on stream {StreamId} before HEADERS.");
-            case Http2StreamState.Open:
-                if (endStream)
-                {
-                    State = Http2StreamState.HalfClosedRemote;
-                    InputCompleted = true;
-                }
-                break;
-            case Http2StreamState.HalfClosedLocal:
-                if (endStream)
-                {
-                    State = Http2StreamState.Closed;
-                    InputCompleted = true;
-                }
-                break;
-            case Http2StreamState.HalfClosedRemote:
-            case Http2StreamState.Closed:
-                // The peer is forbidden from sending DATA after it sent
-                // END_STREAM or after we reset the stream.
-                throw new Http2StreamException(
-                    StreamId,
-                    Http2ErrorCode.StreamClosed,
-                    $"HTTP/2 DATA frame received on stream {StreamId} in state {State}.");
+            switch (State)
+            {
+                case Http2StreamState.Idle:
+                    throw new Http2ConnectionException(
+                        Http2ErrorCode.ProtocolError,
+                        $"HTTP/2 DATA frame received on stream {StreamId} before HEADERS.");
+                case Http2StreamState.Open:
+                    if (endStream)
+                    {
+                        State = Http2StreamState.HalfClosedRemote;
+                        InputCompleted = true;
+                    }
+                    break;
+                case Http2StreamState.HalfClosedLocal:
+                    if (endStream)
+                    {
+                        State = Http2StreamState.Closed;
+                        InputCompleted = true;
+                    }
+                    break;
+                case Http2StreamState.HalfClosedRemote:
+                case Http2StreamState.Closed:
+                    // The peer is forbidden from sending DATA after it sent
+                    // END_STREAM or after we reset the stream.
+                    throw new Http2StreamException(
+                        StreamId,
+                        Http2ErrorCode.StreamClosed,
+                        $"HTTP/2 DATA frame received on stream {StreamId} in state {State}.");
+            }
         }
 
-        if (!payload.IsEmpty)
+        if (!data.IsEmpty || flowControlLength > 0)
         {
-            _body.Write(payload);
+            _bodyChannel.Writer.TryWrite(new Http2DataChunk(data, flowControlLength));
+        }
+
+        if (endStream)
+        {
+            CompleteBody();
         }
     }
 
@@ -245,15 +393,20 @@ internal sealed class Http2Stream
     /// </exception>
     public void ReceiveReset()
     {
-        if (State == Http2StreamState.Idle)
+        lock (_stateLock)
         {
-            throw new Http2ConnectionException(
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 RST_STREAM received on idle stream {StreamId}.");
+            if (State == Http2StreamState.Idle)
+            {
+                throw new Http2ConnectionException(
+                    Http2ErrorCode.ProtocolError,
+                    $"HTTP/2 RST_STREAM received on idle stream {StreamId}.");
+            }
+
+            State = Http2StreamState.Closed;
+            InputCompleted = true;
         }
 
-        State = Http2StreamState.Closed;
-        InputCompleted = true;
+        CompleteBody();
         TryFireAbort();
     }
 
@@ -264,13 +417,16 @@ internal sealed class Http2Stream
     /// </summary>
     public void SendEndStream()
     {
-        State = State switch
+        lock (_stateLock)
         {
-            Http2StreamState.Open => Http2StreamState.HalfClosedLocal,
-            Http2StreamState.HalfClosedRemote => Http2StreamState.Closed,
-            // Idempotent / no-op for already-closed states.
-            _ => State,
-        };
+            State = State switch
+            {
+                Http2StreamState.Open => Http2StreamState.HalfClosedLocal,
+                Http2StreamState.HalfClosedRemote => Http2StreamState.Closed,
+                // Idempotent / no-op for already-closed states.
+                _ => State,
+            };
+        }
     }
 
     /// <summary>
@@ -280,8 +436,13 @@ internal sealed class Http2Stream
     /// </summary>
     public void SendReset()
     {
-        State = Http2StreamState.Closed;
-        InputCompleted = true;
+        lock (_stateLock)
+        {
+            State = Http2StreamState.Closed;
+            InputCompleted = true;
+        }
+
+        CompleteBody();
         TryFireAbort();
     }
 
@@ -306,27 +467,110 @@ internal sealed class Http2Stream
     public void CompleteInput()
     {
         InputCompleted = true;
+        CompleteBody();
     }
 
-    private void AppendHeaderBytes(ReadOnlySpan<byte> payload)
+    /// <summary>
+    /// Aborts the request when the connection tears down (wire failure, connection
+    /// error, or cooperative shutdown) while the body is still incoming. Fires
+    /// <see cref="RequestAborted"/> and completes the body pipe so a handler parked
+    /// reading the body observes cancellation — not a clean end-of-stream, which
+    /// would let it mistake a truncated body for a complete one.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the request was actually aborted (its input was
+    /// still incoming — the exchange can no longer complete normally, so the
+    /// graceful-close drain should stop waiting on it); <see langword="false"/>
+    /// when the fully-received request remains answerable and the drain should
+    /// keep waiting for its response.
+    /// </returns>
+    public bool AbortOnShutdown()
     {
-        if (!payload.IsEmpty)
+        CompleteBody();
+
+        // Only a body that was still incoming is truncated. A fully-received body
+        // (END_STREAM already observed) is complete and buffered; the handler must
+        // still be able to read it, so do NOT fire the abort for it.
+        if (!InputCompleted)
         {
-            _headerBlock.Write(payload);
+            TryFireAbort();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void CompleteBody()
+    {
+        // Idempotent: END_STREAM, a peer reset, a local reset, and connection
+        // shutdown can all reach here concurrently.
+        if (Interlocked.Exchange(ref _bodyCompleted, 1) == 0)
+        {
+            _bodyChannel.Writer.TryComplete();
         }
     }
 
     /// <summary>
-    /// Materializes the completed stream as an <see cref="Http2Context"/>, running the registered
-    /// request-parse interceptors (head + body hooks) as the request head is assembled — the HTTP/2
-    /// analogue of the HTTP/1.1 <c>Http1MessageReader</c> invocation point.
+    /// Applies a priority derived from the <c>Priority</c> request header. It is a
+    /// no-op once a <c>PRIORITY_UPDATE</c> has been applied, because an update
+    /// takes precedence over the header regardless of order (RFC 9218 §8).
+    /// </summary>
+    /// <param name="priority">The header-derived priority.</param>
+    public void SetPriorityFromHeader(HttpPriority priority)
+    {
+        if (!_priorityFromUpdate)
+        {
+            EffectivePriority = priority;
+        }
+    }
+
+    /// <summary>
+    /// Applies a priority carried by a <c>PRIORITY_UPDATE</c> frame. This overrides
+    /// any header-derived value and pins the effective priority so a subsequently
+    /// parsed header cannot clobber it (RFC 9218 §8).
+    /// </summary>
+    /// <param name="priority">The update-derived priority.</param>
+    public void ApplyPriorityUpdate(HttpPriority priority)
+    {
+        EffectivePriority = priority;
+        _priorityFromUpdate = true;
+    }
+
+    private void AppendHeaderBytes(ReadOnlySpan<byte> payload)
+    {
+        if (payload.IsEmpty)
+        {
+            return;
+        }
+
+        // RFC 9113 §6.10 / §10.5.1 — reject a header block whose accumulated raw bytes exceed the
+        // advertised SETTINGS_MAX_HEADER_LIST_SIZE. This is the CONTINUATION-flood defence: it trips
+        // before decode, so an attacker cannot pin memory by streaming CONTINUATION frames that
+        // never carry END_HEADERS. ENHANCE_YOUR_CALM signals excessive load (RFC 9113 §7).
+        if (_headerBlock.Length + payload.Length > _maxHeaderBlockSize)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 header block on stream {StreamId} exceeded the maximum of {_maxHeaderBlockSize} octets (CONTINUATION flood).");
+        }
+
+        _headerBlock.Write(payload);
+    }
+
+    /// <summary>
+    /// Materializes the completed request head as an <see cref="Http2Context"/>, running the
+    /// registered request-parse interceptors (head + body hooks) as the head is assembled — the
+    /// HTTP/2 analogue of the HTTP/1.1 <c>Http1MessageReader</c> invocation point. Head hooks run
+    /// before the application observes any body octet (the body streams in through the
+    /// flow-control-bounded pipe afterward); body hooks wrap the streaming body stream.
     /// </summary>
     /// <param name="decoder">The connection's HPACK decoder.</param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
     /// <param name="connectionAborted">The connection-teardown token linked into the request's abort token.</param>
+    /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
-    /// <param name="maxRequestBodySize">The listener-wide body-size cap seeded into the parse context.</param>
+    /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
     /// <returns>The materialized request context, with any hook-attached features flowed in.</returns>
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
@@ -336,10 +580,11 @@ internal sealed class Http2Stream
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
         CancellationToken connectionAborted,
+        Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpRequestInterceptor[] interceptors,
         long? maxRequestBodySize)
     {
-        if (!IsRequestReady)
+        if (!HeadersCompleted)
         {
             throw new InvalidOperationException("The HTTP/2 stream is not ready to create a request context.");
         }
@@ -372,7 +617,10 @@ internal sealed class Http2Stream
             throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
         }
 
-        byte[] bodyBytes = _body.ToArray();
+        // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
+        // rather than being buffered whole before dispatch, so a large upload is
+        // bounded by the advertised receive window and paced by the reader.
+        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted);
         HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
@@ -390,7 +638,17 @@ internal sealed class Http2Stream
             scheme,
             query,
             decodedHeaders.Headers,
-            new MemoryStream(bodyBytes, writable: false));
+            body);
+
+        // RFC 9218 §4 / §8 — the request's Priority header initialises the
+        // effective priority. Parsing is tolerant: a malformed header value is
+        // ignored (the default urgency 3, non-incremental stands), and a
+        // PRIORITY_UPDATE that already arrived for this stream is not overridden.
+        if (decodedHeaders.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+            && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
+        {
+            SetPriorityFromHeader(headerPriority);
+        }
 
         // Request-parse interceptor phase. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
         // tunnel traffic rather than a message body, so body hooks are skipped for it (head hooks

@@ -14,4 +14,11 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.Database" />
 	</ItemGroup>
+
+	<!--
+		Database-project defaults and build-task registrations (schema compile,
+		migration tooling). Model-specific tool wiring is imported from the
+		matching Sdk.Database.<Model>.targets by the Migration targets.
+	-->
+	<Import Project="..\Targets\Sdk.Database.props" />
 </Project>

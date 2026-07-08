@@ -5,18 +5,22 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
-/// Runs the listener's request-parse interceptors over a request whose body has already been
-/// fully buffered — the shape both the HTTP/2 and HTTP/3 transports present at their
-/// context-construction sites (a stream is materialized only once its body is complete).
+/// Runs the listener's request-parse interceptors over a request whose head has just been
+/// assembled into a materialized <see cref="TransportHttpRequest"/> — the shape both the HTTP/2
+/// and HTTP/3 transports present at their context-construction sites.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The HTTP/1.1 parser (<see cref="Http1.Http1MessageReader"/>) invokes the same seam inline on a
-/// streaming read, where the head hook runs before any body octet is consumed from the wire. On
-/// HTTP/2 and HTTP/3 the body is received into a buffer before the head is decoded, so the head
-/// hook here runs before the body is <em>exposed</em> to the application, but not before it was
-/// <em>received</em>. The ordering, CONNECT-skip, empty-body, freeze, and failure-path disposal
-/// semantics are otherwise identical, keeping the seam contract uniform across protocols.
+/// The HTTP/1.1 parser (<see cref="Http1.Http1MessageReader"/>) invokes the same seam inline on
+/// its own read path; this helper reproduces its ordering, CONNECT-skip, empty-body, freeze, and
+/// failure-path disposal semantics for the transports that hand over a completed request object,
+/// keeping the seam contract uniform across protocols. Per-protocol timing (documented on
+/// <see cref="IHttpRequestInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
+/// streaming body, so hooks run before the application observes any body octet (DATA already
+/// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 drains the request
+/// stream before header decode, so hooks run before the body is <em>exposed</em> but not before
+/// it was <em>received</em>. Body hooks therefore wrap a forward-only stream that may still be
+/// arriving — exactly what the hook contract requires wrappers to tolerate.
 /// </para>
 /// <para>
 /// Zero registered interceptors is the fast path: no interception context, no feature collection,
@@ -39,9 +43,10 @@ internal static class HttpRequestInterceptorPipeline
     /// </param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="maxRequestBodySize">
-    /// The listener-wide body-size cap seeded into the parse context. Interceptors may adjust it
-    /// until it is frozen after the head hooks; on these transports the cap is not enforced against
-    /// the already-buffered body (h2/h3 body-cap enforcement is tracked separately — #750/#764).
+    /// The registration's body-size cap seeded into the parse context. Interceptors may adjust it
+    /// until it is frozen after the head hooks; on these transports the value is carried for
+    /// hook-attached features (h2 bounds body buffering via flow-control backpressure, h3 via QUIC
+    /// flow control) — the hard wire-level cap remains tracked follow-up work.
     /// </param>
     /// <param name="isConnect">
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a

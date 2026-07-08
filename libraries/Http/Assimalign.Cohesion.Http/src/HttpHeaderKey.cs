@@ -108,6 +108,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Connection</c> HTTP header name.</summary>
     public static HttpHeaderKey Connection {get;}= new( "Connection");
 
+    /// <summary>Gets the <c>Content-Digest</c> HTTP header name (RFC 9530 &#167; 2).</summary>
+    /// <remarks>
+    /// Carries the integrity digest of the actual message content (the selected representation
+    /// after content codings) as an RFC 9651 Structured Field Dictionary of
+    /// <c>algorithm=:base64-digest:</c> entries. Modeled by <c>HttpDigestField</c> in
+    /// <c>Assimalign.Cohesion.Http.DigestFields</c>.
+    /// </remarks>
+    public static HttpHeaderKey ContentDigest {get;}= new( "Content-Digest");
+
     /// <summary>Gets the <c>Content-Disposition</c> HTTP header name.</summary>
     public static HttpHeaderKey ContentDisposition {get;}= new( "Content-Disposition");
 
@@ -159,6 +168,9 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Expect</c> HTTP header name.</summary>
     public static HttpHeaderKey Expect {get;}= new( "Expect");
 
+    /// <summary>Gets the <c>Forwarded</c> HTTP header name (RFC 7239).</summary>
+    public static HttpHeaderKey Forwarded {get;}= new( "Forwarded");
+
     /// <summary>Gets the <c>From</c> HTTP header name.</summary>
     public static HttpHeaderKey From {get;}= new( "From");
 
@@ -198,6 +210,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>If-Unmodified-Since</c> HTTP header name.</summary>
     public static HttpHeaderKey IfUnmodifiedSince {get;}= new( "If-Unmodified-Since");
 
+    /// <summary>Gets the <c>Last-Event-ID</c> HTTP header name.</summary>
+    /// <remarks>
+    /// Defined by the WHATWG HTML Server-Sent Events specification. A browser
+    /// reconnecting to an <c>text/event-stream</c> endpoint replays the last event
+    /// id it saw in this request header so the server can resume the stream from
+    /// that point.
+    /// </remarks>
+    public static HttpHeaderKey LastEventId {get;}= new( "Last-Event-ID");
+
     /// <summary>Gets the <c>Last-Modified</c> HTTP header name.</summary>
     public static HttpHeaderKey LastModified {get;}= new( "Last-Modified");
 
@@ -222,6 +243,9 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Pragma</c> HTTP header name.</summary>
     public static HttpHeaderKey Pragma {get;}= new( "Pragma");
 
+    /// <summary>Gets the <c>Priority</c> HTTP header name (RFC 9218 &#167; 4 — the extensible-priorities Priority Field Value).</summary>
+    public static HttpHeaderKey Priority {get;}= new( "Priority");
+
     /// <summary>Gets the <c>ProtocolType</c> HTTP header name.</summary>
     public static HttpHeaderKey Protocol {get;}= new( ":protocol");
 
@@ -239,6 +263,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>Referer</c> HTTP header name.</summary>
     public static HttpHeaderKey Referer {get;}= new( "Referer");
+
+    /// <summary>Gets the <c>Repr-Digest</c> HTTP header name (RFC 9530 &#167; 3).</summary>
+    /// <remarks>
+    /// Carries the integrity digest of the representation data (independent of content codings and
+    /// range selection) as an RFC 9651 Structured Field Dictionary. Shares the value model with
+    /// <see cref="ContentDigest"/> (<c>HttpDigestField</c>); full representation-data verification
+    /// depends on content-coding layers not yet present, so this key is modeled but not enforced.
+    /// </remarks>
+    public static HttpHeaderKey ReprDigest {get;}= new( "Repr-Digest");
 
     /// <summary>Gets the <c>Retry-After</c> HTTP header name.</summary>
     public static HttpHeaderKey RetryAfter {get;}= new( "Retry-After");
@@ -316,6 +349,23 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Via</c> HTTP header name.</summary>
     public static HttpHeaderKey Via {get;}= new( "Via");
 
+    /// <summary>Gets the <c>Want-Content-Digest</c> HTTP header name (RFC 9530 &#167; 4).</summary>
+    /// <remarks>
+    /// A request/response preference asking the peer to include <see cref="ContentDigest"/> using
+    /// the listed algorithms, expressed as an RFC 9651 Structured Field Dictionary of
+    /// <c>algorithm=preference</c> integer entries (0 = not acceptable, higher = more preferred).
+    /// Modeled by <c>HttpWantDigestField</c> in <c>Assimalign.Cohesion.Http.DigestFields</c>.
+    /// </remarks>
+    public static HttpHeaderKey WantContentDigest {get;}= new( "Want-Content-Digest");
+
+    /// <summary>Gets the <c>Want-Repr-Digest</c> HTTP header name (RFC 9530 &#167; 4).</summary>
+    /// <remarks>
+    /// A request/response preference asking the peer to include <see cref="ReprDigest"/> using the
+    /// listed algorithms, expressed as an RFC 9651 Structured Field Dictionary of integer
+    /// preferences. Shares the value model with <see cref="WantContentDigest"/>.
+    /// </remarks>
+    public static HttpHeaderKey WantReprDigest {get;}= new( "Want-Repr-Digest");
+
     /// <summary>Gets the <c>Warning</c> HTTP header name.</summary>
     public static HttpHeaderKey Warning {get;}= new( "Warning");
 
@@ -324,6 +374,15 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
 
     /// <summary>Gets the <c>X-Content-Type-Options</c> HTTP header name.</summary>
     public static HttpHeaderKey XContentTypeOptions {get;}= new( "X-Content-Type-Options");
+
+    /// <summary>Gets the <c>X-Forwarded-For</c> HTTP header name (de-facto proxy client-chain header).</summary>
+    public static HttpHeaderKey XForwardedFor {get;}= new( "X-Forwarded-For");
+
+    /// <summary>Gets the <c>X-Forwarded-Host</c> HTTP header name (de-facto original-host header).</summary>
+    public static HttpHeaderKey XForwardedHost {get;}= new( "X-Forwarded-Host");
+
+    /// <summary>Gets the <c>X-Forwarded-Proto</c> HTTP header name (de-facto original-scheme header).</summary>
+    public static HttpHeaderKey XForwardedProto {get;}= new( "X-Forwarded-Proto");
 
     /// <summary>Gets the <c>X-Frame-Options</c> HTTP header name.</summary>
     public static HttpHeaderKey XFrameOptions {get;}= new( "X-Frame-Options");
