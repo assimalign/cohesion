@@ -100,7 +100,7 @@ internal static class HttpRequestInterceptorPipeline
             // Head hooks: attach features and adjust the body-size knob before the body is exposed.
             foreach (IHttpRequestInterceptor interceptor in interceptors)
             {
-                interceptor.OnRequestHead(context);
+                interceptor.AfterRequestHead(context);
             }
 
             // The head hooks have run; freeze the knob so the effective cap is fixed for the
@@ -115,9 +115,17 @@ internal static class HttpRequestInterceptorPipeline
             // run so wrappers over the (empty) representation stay meaningful.
             if (!isConnect)
             {
+                // The body is about to be exposed — the effective knobs are frozen and every head
+                // hook has run. On these transports the octets may already sit buffered (see the
+                // per-protocol timing remarks above); the hook observes "before exposure".
                 foreach (IHttpRequestInterceptor interceptor in interceptors)
                 {
-                    body = interceptor.OnRequestBody(context, body);
+                    interceptor.BeforeRequestBody(context);
+                }
+
+                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                {
+                    body = interceptor.AfterRequestBody(context, body);
                 }
 
                 request.Body = body;

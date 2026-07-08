@@ -21,7 +21,7 @@ internal static class RequestInterceptorDoubles
     /// <summary>Head hook that attaches a <see cref="RecordingFeature"/> carrying the request host.</summary>
     public sealed class HostFeatureAttachingInterceptor : IHttpRequestInterceptor
     {
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             context.Features.Set(new RecordingFeature { ObservedHost = context.Host.Value });
         }
@@ -37,7 +37,7 @@ internal static class RequestInterceptorDoubles
             _cap = cap;
         }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             context.MaxRequestBodySize = _cap;
         }
@@ -55,7 +55,7 @@ internal static class RequestInterceptorDoubles
 
         public TaggedStream? Created { get; private set; }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
         {
             Created = new TaggedStream(body, _tag);
             return Created;
@@ -80,7 +80,7 @@ internal static class RequestInterceptorDoubles
     {
         public DisposableTestFeature? Feature { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             Feature = new DisposableTestFeature();
             context.Features.Set(Feature);
@@ -97,7 +97,7 @@ internal static class RequestInterceptorDoubles
             _statusCode = statusCode;
         }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -113,7 +113,7 @@ internal static class RequestInterceptorDoubles
             _statusCode = statusCode;
         }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -126,7 +126,7 @@ internal static class RequestInterceptorDoubles
 
         public bool WasWritableDuringHeadHook { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             Captured = context;
             WasWritableDuringHeadHook = !context.IsMaxRequestBodySizeReadOnly;
@@ -142,7 +142,7 @@ internal static class RequestInterceptorDoubles
 
         public string? ObservedContentType { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             HeadersWereReadOnly = context.Headers.IsReadOnly;
             ObservedContentType = context.Headers[HttpHeaderKey.ContentType].Value;
@@ -165,12 +165,12 @@ internal static class RequestInterceptorDoubles
 
         public int BodyInvocations { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public void AfterRequestHead(HttpRequestInterceptorContext context)
         {
             HeadInvocations++;
         }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
         {
             BodyInvocations++;
             return body;

@@ -18,10 +18,9 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// Doing so installs an <see cref="IHttpInterimResponseFeature"/> on every exchange, which a handler
 /// resolves via <c>context.InterimResponse</c> (or <c>context.SendEarlyHintsAsync(...)</c>). The
-/// interceptor wraps the transport's interim-response capability
-/// (<see cref="HttpResponseInterceptorContext.InterimResponseWriter"/>); the transport never
-/// references this package — it only invokes the <see cref="IHttpResponseInterceptor"/> and exposes
-/// the capability.
+/// interceptor wraps the transport's exchange control
+/// (<see cref="HttpResponseInterceptorContext.Control"/>); the transport never references this
+/// package — it only invokes the <see cref="IHttpResponseInterceptor"/> and exposes the control.
 /// </para>
 /// <para>
 /// The HTTP/1.1 transport additionally emits <c>100 Continue</c> automatically for a request that

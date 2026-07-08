@@ -13,8 +13,8 @@ namespace Assimalign.Cohesion.Http;
 /// The feature is made available by registering
 /// <see cref="HttpInterimResponses.CreateInterceptor"/> on the transport's response-interceptor list
 /// (<c>HttpConnectionListenerOptions.ResponseInterceptors</c>), the same opt-in way response
-/// streaming and protocol upgrade plug in. Its interceptor wraps the transport's interim-response
-/// capability (<see cref="HttpResponseInterceptorContext.InterimResponseWriter"/>) in this typed
+/// streaming and protocol upgrade plug in. Its interceptor wraps the transport's exchange control
+/// (<see cref="HttpResponseInterceptorContext.Control"/>) in this typed
 /// feature and installs it on every exchange, so a handler resolves it with
 /// <c>context.Features.Get&lt;IHttpInterimResponseFeature&gt;()</c> or the
 /// <see cref="HttpInterimResponseExtensions.InterimResponse"/> convenience. The transport owns the

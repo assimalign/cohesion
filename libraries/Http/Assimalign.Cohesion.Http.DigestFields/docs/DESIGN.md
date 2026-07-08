@@ -90,7 +90,8 @@ reflection" mandate literally:
 ## Server-side verification (the interceptor)
 
 `HttpDigestFields.CreateContentDigestVerifier()` returns a stateless `IHttpRequestInterceptor` — the
-#818 request-parse seam is the natural hook for request-digest validation. It hooks `OnRequestBody`:
+#818 request-parse seam is the natural hook for request-digest validation. It hooks
+`AfterRequestBody`:
 
 1. No `Content-Digest`, or only deprecated/unregistered algorithms → pass the body through
    untouched (nothing this library can verify).
@@ -103,7 +104,7 @@ reflection" mandate literally:
    still observes the body.
 
 Why **eager buffer-and-replay** rather than a lazy verify-on-read wrapper: on HTTP/1.1 the transport
-already materializes the request body into a `MemoryStream` **before** the body hook runs (and
+already materializes the request body into a `MemoryStream` **before** `AfterRequestBody` runs (and
 catches `HttpRequestRejectedException` on its parse path, ahead of dispatch). Reading it there is
 therefore CPU-only — it adds no wire wait — and lets the rejection happen **before the application
 runs**, so the transport answers a real, deterministic `400` and closes the connection. A lazy
@@ -116,9 +117,16 @@ Two ordering/coverage notes:
 - **Register the verifier first**, before any content-decoding interceptor. `Content-Digest` is
   taken over the message content *as received* (post-content-coding, on the wire), so it must be
   verified against the raw body before a decompression wrapper transforms it.
-- **HTTP/1.1 today.** Like `Http.RequestLimits`, the interceptor seam runs on the h1 parse path;
-  h2/h3 invoke head/body hooks from their own context-construction sites as that wiring lands
-  (#819). Nothing here implies h2/h3 request-digest verification exists yet.
+- **All three protocols run the seam, but the eager full read is only safe where the body is
+  already received.** As of #819 the h1 parser and the h2/h3 context-construction sites all
+  invoke the request-parse hooks. h1 and h3 hand `AfterRequestBody` a fully received body, so the
+  verifier's in-hook full read is CPU-only there. On h2, however, the hooks run on the
+  connection's single frame pump and the body may still be **arriving** under flow-control
+  backpressure — an in-hook blocking read of a still-incomplete body would stall the very pump
+  that feeds it (the hook contract's CPU-only rule exists for exactly this). The eager
+  buffer-and-replay verifier is therefore correct for h1/h3 today; verifying h2 streamed bodies
+  needs a lazy verify-on-read wrapper (or verification at body completion) and is tracked as
+  follow-up work rather than papered over here.
 
 The replay stream (`HttpDigestReplayStream`) owns the original body it replaced and disposes it when
 the exchange disposes the stream chain, honoring the seam's "a wrapper owns the stream it wraps"
@@ -156,8 +164,6 @@ and verifiable).
 ## Non-goals and honest gaps
 
 - **Repr-Digest enforcement** — modeled, not verified (see above).
-- **HTTP/2 / HTTP/3 request verification** — the interceptor seam is h1-only at runtime today
-  (mirrors `Http.RequestLimits`); h2/h3 hook wiring is tracked follow-up (#819).
 - **Trailer emission into a streaming response** — the `HttpContentDigester` primitive and the
   trailer-eligibility guarantee exist; wiring the emitted field into the response trailer section
   rides on the streaming write path (#769).

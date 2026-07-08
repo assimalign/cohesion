@@ -157,7 +157,7 @@ internal static class Http1MessageReader
             {
                 foreach (IHttpRequestInterceptor interceptor in interceptors)
                 {
-                    interceptor.OnRequestHead(interception);
+                    interceptor.AfterRequestHead(interception);
                 }
             }
 
@@ -168,6 +168,18 @@ internal static class Http1MessageReader
             long? maxBodySize = interception is not null
                 ? interception.MaxRequestBodySize
                 : limits.MaxRequestBodySize;
+
+            // The body is about to be read off the wire — knobs frozen, head hooks done. Runs
+            // before the automatic 100-continue solicitation below so a hook that rejects here
+            // does so before the body is solicited from the peer. CONNECT tunnels skip it (their
+            // post-head octets are tunnel traffic, not a message body).
+            if (interception is not null && !isConnectTunnel)
+            {
+                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                {
+                    interceptor.BeforeRequestBody(interception);
+                }
+            }
 
             // RFC 9110 §10.1.1 — a request that declares "Expect: 100-continue" with a framed body is
             // waiting for the server to solicit the body before sending it. The reader fully buffers
@@ -226,7 +238,7 @@ internal static class Http1MessageReader
             {
                 foreach (IHttpRequestInterceptor interceptor in interceptors)
                 {
-                    bodyStream = interceptor.OnRequestBody(interception, bodyStream);
+                    bodyStream = interceptor.AfterRequestBody(interception, bodyStream);
                 }
             }
 

@@ -35,14 +35,16 @@ path with zero streaming overhead.
 2. Per exchange, the transport creates its per-protocol raw response body sink and
    runs the registered response interceptors, exposing the sink as
    `HttpResponseInterceptorContext.ResponseBody`.
-3. `HttpResponseStreamingInterceptor.OnResponse` wraps that sink in a
+3. `HttpResponseStreamingInterceptor.BeforeResponse` wraps that sink in a
    `HttpResponseStreamingFeature` and installs it on `context.Features`.
 4. The handler resolves it — `context.Response.Streaming` — and calls
    `WriteAsync` / `FlushAsync` / `CompleteAsync`. The bytes flow through the sink,
    which frames and flushes them to the wire and commits the head on the first
    write/flush.
 5. When the handler returns, the transport's `SendAsync` finalizes the sink (wire
-   terminator) if it was written, or takes the buffered path if it was not.
+   terminator) if it was written, or takes the buffered path if it was not. On
+   either path, the registered interceptors' `AfterResponseAsync` hooks fire after
+   that finalize, once the final response is fully written.
 
 ## The feature is a thin wrapper over the sink
 

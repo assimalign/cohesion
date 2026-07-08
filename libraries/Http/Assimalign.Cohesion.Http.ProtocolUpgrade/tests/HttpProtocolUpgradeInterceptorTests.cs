@@ -23,7 +23,7 @@ public class HttpProtocolUpgradeInterceptorTests
         FakeHttpContext context = new();
 
         // Act
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
 
         // Assert
         IHttpProtocolUpgrade? upgrade = context.Upgrade;
@@ -39,7 +39,7 @@ public class HttpProtocolUpgradeInterceptorTests
         FakeHttpContext context = new();
 
         // Act
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Connect, new HttpHeaderCollection(), new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Connect, new HttpHeaderCollection(), new FakeExchangeControl(new MemoryStream()));
 
         // Assert
         IHttpProtocolUpgrade? upgrade = context.Upgrade;
@@ -56,7 +56,7 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
 
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
 
         context.Upgrade.ShouldBeNull();
     }
@@ -71,7 +71,7 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
 
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
 
         context.Upgrade.ShouldNotBeNull();
     }
@@ -87,18 +87,18 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Upgrade] = "websocket";
 
         FakeHttpContext upgradeShaped = new();
-        RunInterceptors(upgradeShaped, HttpVersion.Http20, HttpMethod.Get, headers, new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(upgradeShaped, HttpVersion.Http20, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
         upgradeShaped.Upgrade.ShouldBeNull();
 
         FakeHttpContext connectShaped = new();
-        RunInterceptors(connectShaped, HttpVersion.Http20, HttpMethod.Connect, new HttpHeaderCollection(), new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(connectShaped, HttpVersion.Http20, HttpMethod.Connect, new HttpHeaderCollection(), new FakeExchangeControl(new MemoryStream()));
         connectShaped.Upgrade.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: No transport takeover capability degrades to a null upgrade")]
     public void Interceptors_OnMissingTakeoverCapability_ShouldNotInstallFeature()
     {
-        // A transport that cannot surrender its connection offers no ConnectionTakeover; the
+        // A hand-built context (or a transport without exchange control) offers no Control; the
         // exchange degrades to "no upgrade available" instead of surfacing a feature whose
         // accept could never work.
         HttpHeaderCollection headers = new();
@@ -106,7 +106,23 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
 
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, connectionTakeover: null);
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, control: null);
+
+        context.Upgrade.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: A control that cannot take over degrades to a null upgrade")]
+    public void Interceptors_OnControlWithoutTakeover_ShouldNotInstallFeature()
+    {
+        // A control whose CanTakeOver is false (an HTTP/2 / HTTP/3 multiplexed exchange) must
+        // degrade to "no upgrade available" — the production gate is
+        // `context.Control is { CanTakeOver: true }`, not mere control presence.
+        HttpHeaderCollection headers = new();
+        headers[HttpHeaderKey.Connection] = "Upgrade";
+        headers[HttpHeaderKey.Upgrade] = "websocket";
+        FakeHttpContext context = new();
+
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream(), canTakeOver: false));
 
         context.Upgrade.ShouldBeNull();
     }
@@ -133,7 +149,7 @@ public class HttpProtocolUpgradeInterceptorTests
     {
         // Arrange
         MemoryStream wire = new();
-        FakeConnectionTakeover takeover = new(wire);
+        FakeExchangeControl takeover = new(wire);
         HttpHeaderCollection headers = new();
         headers[HttpHeaderKey.Connection] = "Upgrade";
         headers[HttpHeaderKey.Upgrade] = "websocket";
@@ -161,7 +177,7 @@ public class HttpProtocolUpgradeInterceptorTests
     {
         // Arrange
         MemoryStream wire = new();
-        FakeConnectionTakeover takeover = new(wire);
+        FakeExchangeControl takeover = new(wire);
         FakeHttpContext context = new();
         RunInterceptors(context, HttpVersion.Http11, HttpMethod.Connect, new HttpHeaderCollection(), takeover, out HttpHeaderCollection responseHeaders);
 
@@ -193,7 +209,7 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Connection] = "Upgrade";
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(wire), out HttpHeaderCollection responseHeaders);
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire), out HttpHeaderCollection responseHeaders);
 
         responseHeaders[new HttpHeaderKey("Sec-WebSocket-Accept")] = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
 
@@ -212,7 +228,7 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Connection] = "Upgrade";
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(wire));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(wire));
         IHttpProtocolUpgrade upgrade = context.Upgrade!;
 
         await upgrade.AcceptAsync();
@@ -230,7 +246,7 @@ public class HttpProtocolUpgradeInterceptorTests
         headers[HttpHeaderKey.Connection] = "Upgrade";
         headers[HttpHeaderKey.Upgrade] = "websocket";
         FakeHttpContext context = new();
-        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeConnectionTakeover(new MemoryStream()));
+        RunInterceptors(context, HttpVersion.Http11, HttpMethod.Get, headers, new FakeExchangeControl(new MemoryStream()));
 
         context.Upgrade.ShouldBeSameAs(context.Upgrade);
     }
@@ -245,15 +261,15 @@ public class HttpProtocolUpgradeInterceptorTests
         HttpVersion version,
         HttpMethod method,
         HttpHeaderCollection requestHeaders,
-        FakeConnectionTakeover? connectionTakeover)
-        => RunInterceptors(context, version, method, requestHeaders, connectionTakeover, out _);
+        IHttpExchangeControl? control)
+        => RunInterceptors(context, version, method, requestHeaders, control, out _);
 
     private static void RunInterceptors(
         FakeHttpContext context,
         HttpVersion version,
         HttpMethod method,
         HttpHeaderCollection requestHeaders,
-        FakeConnectionTakeover? connectionTakeover,
+        IHttpExchangeControl? control,
         out HttpHeaderCollection responseHeaders)
     {
         HttpRequestInterceptorContext headContext = new()
@@ -268,7 +284,7 @@ public class HttpProtocolUpgradeInterceptorTests
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = null,
         };
-        HttpProtocolUpgrade.CreateRequestInterceptor().OnRequestHead(headContext);
+        HttpProtocolUpgrade.CreateRequestInterceptor().AfterRequestHead(headContext);
 
         responseHeaders = new HttpHeaderCollection();
         HttpResponseInterceptorContext responseContext = new()
@@ -278,8 +294,8 @@ public class HttpProtocolUpgradeInterceptorTests
             Features = context.Features,
             ConnectionInfo = HttpConnectionInfo.Empty,
             ResponseBody = Stream.Null,
-            ConnectionTakeover = connectionTakeover,
+            Control = control,
         };
-        HttpProtocolUpgrade.CreateResponseInterceptor().OnResponse(responseContext);
+        HttpProtocolUpgrade.CreateResponseInterceptor().BeforeResponse(responseContext);
     }
 }

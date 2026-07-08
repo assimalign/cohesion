@@ -38,13 +38,14 @@ if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade, Protocol: "webso
 ## Dependencies
 
 - `Assimalign.Cohesion.Http` — the protocol core (`IHttpContext`, the interceptor seams, and the
-  generic `IHttpConnectionTakeover` capability).
+  generic `IHttpExchangeControl` per-exchange control surface).
 - `Assimalign.Cohesion.Http.Cookies` — to drain response cookies onto the transition response.
 
-The HTTP/1.1 transport (`Assimalign.Cohesion.Http.Connections`) offers its connection-takeover
-capability on the response-interceptor seam; this package's interceptors consume it. There is
-**no** compile-time dependency between the transport and this package (the layering constraint
-of #751).
+The server transport (`Assimalign.Cohesion.Http.Connections`) surfaces its exchange control
+(`HttpResponseInterceptorContext.Control`) on the response-interceptor seam; this package's
+interceptors consume its takeover capability — `CanTakeOver` / `TakeOver()`, which only the
+HTTP/1.1 exchange control offers. There is **no** compile-time dependency between the transport
+and this package (the layering constraint of #751).
 
 ## Non-goals
 

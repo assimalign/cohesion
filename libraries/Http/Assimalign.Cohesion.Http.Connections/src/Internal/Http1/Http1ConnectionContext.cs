@@ -52,21 +52,18 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 yield break;
             }
 
-            // Expose the raw chunked response body sink to registered response interceptors so a
-            // feature package (streaming / SSE) can wrap it and install a typed response feature —
-            // without this transport depending on that package. Zero interceptors → buffered fast path.
-            // The connection-takeover capability rides the same seam: an HTTP/1.1 exchange owns its
-            // whole connection, so a feature package (protocol upgrade / CONNECT tunnelling) may
-            // claim the raw stream and finalize the exchange out-of-band. The interim-response
-            // capability (100 Continue on demand, 103 Early Hints) rides it too — a feature package
-            // (Http.InterimResponses) wraps it and emits interim responses ahead of the final one.
+            // Expose the raw chunked response body sink and the exchange control to registered
+            // response interceptors so feature packages (streaming / SSE, protocol upgrade / CONNECT
+            // tunnelling, interim responses) can wrap them and install typed response features —
+            // without this transport depending on any of those packages. Zero interceptors → buffered
+            // fast path. An HTTP/1.1 exchange owns its whole connection, so its control offers the
+            // full surface: interim (1xx) writes, the raw-stream takeover, and the exchange abort.
             if (_responseInterceptors.Length > 0)
             {
                 context.RunResponseInterceptors(
                     _responseInterceptors,
                     new Http1ResponseBodyStream(Stream, context),
-                    new Http1ConnectionTakeover(context, Stream),
-                    new Http1InterimResponseWriter(context, Stream));
+                    new Http1ExchangeControl(context, Stream));
             }
 
             yield return context;
@@ -78,31 +75,72 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         }
     }
 
-    public override ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http1Context http1Context)
         {
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
         }
 
-        // The connection was taken over (accepted protocol upgrade / CONNECT tunnel): the
-        // transition response went straight to the surrendered raw stream and the connection no
-        // longer speaks HTTP. Checked before the sink branch so a misused streaming feature can
-        // never finalize chunked framing into the tunnel (RFC 9110 §7.8 / §9.3.6).
+        // The connection was taken over (accepted protocol upgrade / CONNECT tunnel — the
+        // exchange's directive is TakeOver): the transition response went straight to the
+        // surrendered raw stream and the connection no longer speaks HTTP. Checked before the
+        // sink branch so a misused streaming feature can never finalize chunked framing into the
+        // tunnel (RFC 9110 §7.8 / §9.3.6).
         if (http1Context.ResponseFinalized)
         {
-            return ValueTask.CompletedTask;
+            return;
+        }
+
+        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // directive is Abort). HTTP/1.1 has no per-exchange reset finer than the connection, so
+        // no response is written and the keep-alive loop ends after this exchange.
+        if (http1Context.CancelRequested)
+        {
+            http1Context.KeepAlive = false;
+            return;
         }
 
         // If a response feature streamed to the raw sink, the head and body are already on the
-        // wire; finalize (emit the terminating zero-length chunk) rather than writing a second,
-        // buffered response.
+        // wire (the BeforeResponseHead hooks fired at the sink's head commit); finalize (emit the
+        // terminating zero-length chunk) rather than writing a second, buffered response.
         if (http1Context.ResponseBodySink is { HasStarted: true } sink)
         {
-            return new ValueTask(sink.CompleteAsync(cancellationToken));
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
         }
 
-        return Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken);
+        // The final response head is about to be committed on the buffered path — the last
+        // mutation point. Fire the BeforeResponseHead lifecycle hooks, then re-read the directive
+        // so a hook that aborted or took over the exchange is honored instead of writing the head.
+        await http1Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (http1Context.ResponseFinalized)
+        {
+            return;
+        }
+
+        if (http1Context.CancelRequested)
+        {
+            http1Context.KeepAlive = false;
+            return;
+        }
+
+        // A hook may itself have started the response through the raw sink (its head is then
+        // already on the wire) — finalize that response rather than writing a second one.
+        if (http1Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
+        {
+            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Commit point: from here the final response is on the wire, so the exchange control's
+        // probes must report the response as started (no more interim writes or takeover).
+        http1Context.MarkFinalResponseStarted();
+        await Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken).ConfigureAwait(false);
+        await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

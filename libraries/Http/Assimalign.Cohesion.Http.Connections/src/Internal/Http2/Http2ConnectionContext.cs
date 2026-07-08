@@ -260,8 +260,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                         processed.Context.RunResponseInterceptors(
                             _responseInterceptors,
                             new Http2ResponseBodyStream(this, processed.Context),
-                            connectionTakeover: null,
-                            new Http2InterimResponseWriter(this, processed.Context));
+                            new Http2ExchangeControl(this, processed.Context));
                     }
 
                     // RFC 9113 §6.8 — the request is now an in-flight exchange the
@@ -497,18 +496,44 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         // If a response feature streamed to the raw sink, the head and DATA frames are already on
-        // the wire; finalize the stream (empty DATA + END_STREAM and the same cleanup as the
-        // buffered path) rather than re-sending a buffered response.
+        // the wire (the BeforeResponseHead hooks fired at the sink's head commit); finalize the
+        // stream (empty DATA + END_STREAM and the same cleanup as the buffered path) rather than
+        // re-sending a buffered response.
         if (http2Context.ResponseBodySink is { HasStarted: true } sink)
         {
             await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // The final response head is about to be committed on the buffered path — the last
+        // mutation point. Fire the BeforeResponseHead lifecycle hooks, then re-read the directive
+        // so a hook that aborted the exchange resets the stream instead of writing the head.
+        await http2Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (http2Context.CancelRequested)
+        {
+            await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.Cancel, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // A hook may itself have started the response through the raw sink (its HEADERS block is
+        // then already on the wire) — finalize that response rather than writing a second one.
+        if (http2Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
+        {
+            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
         // RFC 9110 §15.2 — a 1xx status is never a valid final response status. Interim responses go
-        // through IHttpInterimResponseFeature; HTTP/2 has no 101 (the Upgrade mechanism was removed,
-        // RFC 9113 §8.6), so the rejection is unconditional.
+        // through the IHttpExchangeControl interim writes; HTTP/2 has no 101 (the Upgrade mechanism
+        // was removed, RFC 9113 §8.6), so the rejection is unconditional.
         HttpInterimResponseRules.EnsureFinalStatusCode(http2Context.Response.StatusCode);
+
+        // Commit point: from here the final response is on the wire, so the exchange control's
+        // probes must report the response as started (no more interim writes).
+        http2Context.MarkFinalResponseStarted();
 
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
@@ -563,6 +588,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // rather than leaving a HalfClosedLocal stream lingering forever.
             await EmitRstStreamAsync(http2Context.StreamId, Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
         }
+
+        // The final response is fully on the wire and the stream reaped — observe completion.
+        await http2Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

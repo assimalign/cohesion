@@ -14,12 +14,12 @@ namespace Assimalign.Cohesion.Http.Streaming.Tests;
 public class HttpResponseStreamingFeatureTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Streaming] - Interceptor: Should install a streaming feature over the response body sink")]
-    public void Interceptor_OnResponse_ShouldInstallStreamingFeature()
+    public void Interceptor_BeforeResponse_ShouldInstallStreamingFeature()
     {
         RecordingSink sink = new();
         HttpResponseInterceptorContext context = CreateContext(sink);
 
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
         context.Features.Get<IHttpResponseStreamingFeature>().ShouldNotBeNull();
     }
@@ -89,7 +89,7 @@ public class HttpResponseStreamingFeatureTests
     {
         RecordingSink sink = new();
         HttpResponseInterceptorContext context = CreateContext(sink);
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
         FakeHttpResponse response = new(context.Features);
 
@@ -110,7 +110,7 @@ public class HttpResponseStreamingFeatureTests
     {
         RecordingSink sink = new();
         HttpResponseInterceptorContext context = CreateContext(sink);
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
         return (context.Features.Get<IHttpResponseStreamingFeature>()!, sink);
     }
 

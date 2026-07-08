@@ -28,19 +28,21 @@ with zero optional packages installed.
 
 `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` returns a stateless
 `IHttpRequestInterceptor` the composition root registers on the server's listener options. Per
-request, its head hook attaches an internal `HttpMaxRequestBodySizeFeature` to the exchange's
-feature collection.
+request, its `AfterRequestHead` hook attaches an internal `HttpMaxRequestBodySizeFeature` to the
+exchange's feature collection.
 
 The feature is a **write-through view over the parse context**, not a copy:
 
 - `MaxRequestBodySize` reads and writes `HttpRequestInterceptorContext.MaxRequestBodySize` —
   the very value the transport enforces. There is no second source of truth.
 - `IsReadOnly` delegates to the context's transport-owned freeze flag
-  (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob when it starts consuming the
-  body — at body materialization under today's buffered read, at the first body byte once the
-  streaming-body rework lands. Because the feature holds no frozen copy of its own, that timing
-  change is invisible to this package and to feature consumers: the contract ("adjust before the
-  body is read; observe any time") is stable while the transport's definition of "read" evolves.
+  (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob after the last
+  `AfterRequestHead` hook runs, as it starts consuming the body — `BeforeRequestBody` hooks
+  already observe the frozen value. Because the feature holds no frozen copy of its own, any
+  shift in when the transport begins that read (buffered today, first-byte once the
+  streaming-body rework lands) is invisible to this package and to feature consumers: the
+  contract ("adjust before the body is read; observe any time") is stable while the transport's
+  definition of "read" evolves.
 
 The transport keeps the context alive until the request body is consumed (documented on
 `HttpRequestInterceptorContext`), so the view never dangles.
@@ -65,8 +67,9 @@ bridge.
 
 ## Ordering and defaults
 
-Register this package's interceptor **first**. Its head hook attaches the feature; later
-interceptors' head hooks may then look it up (or simply write the context knob — same store).
+Register this package's interceptor **first**. Its `AfterRequestHead` hook attaches the feature;
+later interceptors' `AfterRequestHead` hooks may then look it up (or simply write the context
+knob — same store).
 The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every request carries
 the typed feature — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
 feature is attached uniformly regardless of protocol (enforcement of the cap remains h1-only —
@@ -90,9 +93,11 @@ The migration from the original in-core placement is complete; the pieces sit as
    own: `HttpConnectionListenerOptions.RequestInterceptors` is snapshotted to an array when the
    listener is constructed (post-construction registrations are inert — no racing the accept
    loops); each transport builds one `HttpRequestInterceptorContext` per request (read-only
-   `Headers` view via `AsReadOnly()`), runs head hooks after the head is assembled, freezes the
-   knob, chains body hooks over the materialized stream, and flows the hook-populated feature
-   collection into the exchange through the context constructors' `features` parameters. On h1 the
+   `Headers` view via `AsReadOnly()`), runs `AfterRequestHead` hooks after the head is assembled,
+   freezes the knob, runs `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
+   automatic `Expect: 100-continue` solicitation), chains `AfterRequestBody` hooks over the
+   materialized stream, and flows the hook-populated feature collection into the exchange through
+   the context constructors' `features` parameters. On h1 the
    parser does this inline and enforces whatever cap remains (413); on h2/h3 the shared
    `HttpRequestInterceptorPipeline` does it at the context-construction site (no cap enforcement
    yet — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
@@ -115,14 +120,15 @@ The migration from the original in-core placement is complete; the pieces sit as
 ## Protocol coverage (honest gaps)
 
 - The interceptor **seam** is now wired into **all three** request paths — HTTP/1.1, HTTP/2, and
-  HTTP/3 (#819) — so this package's head hook attaches the typed `IHttpMaxRequestBodySizeFeature`
-  on every request regardless of protocol, and the feature is visible from the first middleware
-  onward on h2/h3 exactly as on h1.
+  HTTP/3 (#819) — so this package's `AfterRequestHead` hook attaches the typed
+  `IHttpMaxRequestBodySizeFeature` on every request regardless of protocol, and the feature is
+  visible from the first middleware onward on h2/h3 exactly as on h1.
 - **Cap *enforcement* remains HTTP/1.1-only.** HTTP/2 dispatches a request at header completion
   and streams the body under flow-control backpressure (h2: `Http2Stream.CreateContextAsync` runs
-  at the frame pump's END_HEADERS dispatch, so head hooks run before the application observes any
-  body octet); HTTP/3 drains the request stream before header decode, so its head hook runs
-  before the body is *exposed*, not before it is *received*. On both, no hard body-size cap is
+  at the frame pump's END_HEADERS dispatch, so `AfterRequestHead` hooks run before the application
+  observes any body octet); HTTP/3 drains the request stream before header decode, so its
+  `AfterRequestHead` hook runs before the body is *exposed*, not before it is *received*. On both,
+  no hard body-size cap is
   enforced yet — h2 bounds buffering via flow-control backpressure and h3 via QUIC flow control
   (see `HttpConnectionListenerLimits.MaxRequestBodySize`; the hard cap is tracked follow-up
   work). A hook that lowers the cap on h2/h3 therefore changes the value the feature reports

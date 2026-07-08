@@ -319,7 +319,7 @@ configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
 Today that is one interceptor: `Http.RequestLimits`'
 max-request-body-size interceptor, which occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
-user-registered interceptors' head hooks can observe it. As of #819 the seam is
+user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
 feature is attached uniformly regardless of protocol. Cap *enforcement* (the
 413) is still HTTP/1.1-only: h2 bounds body buffering via flow-control

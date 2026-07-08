@@ -11,6 +11,14 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
+/// The hooks follow the request's lifecycle in order: <see cref="AfterRequestHead"/> (the head
+/// has been parsed), <see cref="BeforeRequestBody"/> (the body is about to be read or exposed),
+/// and <see cref="AfterRequestBody"/> (the body stream has been materialized). Together with the
+/// <see cref="IHttpResponseInterceptor"/> lifecycle hooks and the
+/// <see cref="IHttpExchangeControl"/> surface, they are the single generic mechanism by which
+/// feature packages tap the connection's handling of an exchange.
+/// </para>
+/// <para>
 /// Interceptors are registered on the server transport's listener options and are invoked in
 /// registration order. A registered instance is shared across <b>all</b> connections and
 /// requests served by the listener: implementations must be stateless and thread-safe, and any
@@ -18,7 +26,7 @@ namespace Assimalign.Cohesion.Http;
 /// instance fields.
 /// </para>
 /// <para>
-/// Both members ship default implementations so an interceptor overrides only the points it
+/// Every member ships a default implementation so an interceptor overrides only the points it
 /// needs; future interception points are added the same way without breaking existing
 /// implementations (see the core design notes on interface evolution via default members).
 /// </para>
@@ -27,8 +35,8 @@ namespace Assimalign.Cohesion.Http;
 /// no blocking waits — because a stalled hook stalls the connection and pins a thread-pool
 /// thread. A hook that needs to reject the current request throws
 /// <see cref="HttpRequestRejectedException"/>; the transport answers with the carried status
-/// code and closes the connection. Any other exception is treated as a programmer error and
-/// propagates.
+/// code and the wire behavior appropriate to its version. Any other exception is treated as a
+/// programmer error and propagates.
 /// </para>
 /// </remarks>
 public interface IHttpRequestInterceptor
@@ -56,7 +64,29 @@ public interface IHttpRequestInterceptor
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown by implementations to reject the request with a 4xx/5xx status.
     /// </exception>
-    void OnRequestHead(HttpRequestInterceptorContext context)
+    void AfterRequestHead(HttpRequestInterceptorContext context)
+    {
+    }
+
+    /// <summary>
+    /// Called once per request, after every head hook has run and the effective body-size cap has
+    /// been frozen, immediately before the transport reads (HTTP/1.1) or exposes (HTTP/2 / HTTP/3)
+    /// the request body. On HTTP/1.1 this precedes the automatic <c>Expect: 100-continue</c>
+    /// solicitation, so a hook that rejects here does so before the body is solicited from the
+    /// peer.
+    /// </summary>
+    /// <remarks>
+    /// The context's knobs are frozen at this point
+    /// (<see cref="HttpRequestInterceptorContext.IsMaxRequestBodySizeReadOnly"/> is
+    /// <see langword="true"/>); the hook observes the effective values and may attach features or
+    /// reject, but can no longer adjust parse-time limits. CONNECT tunnels skip this hook — their
+    /// post-head octets are tunnel traffic, not a message body.
+    /// </remarks>
+    /// <param name="context">The parse-time view of the request being read.</param>
+    /// <exception cref="HttpRequestRejectedException">
+    /// Thrown by implementations to reject the request with a 4xx/5xx status.
+    /// </exception>
+    void BeforeRequestBody(HttpRequestInterceptorContext context)
     {
     }
 
@@ -86,7 +116,7 @@ public interface IHttpRequestInterceptor
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown by implementations to reject the request with a 4xx/5xx status.
     /// </exception>
-    Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+    Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
     {
         return body;
     }

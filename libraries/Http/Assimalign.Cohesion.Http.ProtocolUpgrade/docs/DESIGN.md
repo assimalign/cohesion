@@ -21,21 +21,23 @@ deliberately dropped that dependency in commit `4c21d75`. The bridge back was re
 *entire* upgrade functionality lives here, wired through the transport's two generic interceptor
 seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
 
-1. **Detection** — an `IHttpRequestInterceptor`. `OnRequestHead` sees the parsed head
+1. **Detection** — an `IHttpRequestInterceptor`. `AfterRequestHead` sees the parsed head
    (`Version`, `Method`, read-only `Headers`) before dispatch and records a matched transition as
-   an internal `HttpProtocolUpgradeCandidate` feature. HTTP/1.1 only; CONNECT is `Method ==
+   an internal `HttpProtocolUpgradeCandidate` feature. HTTP/1.1 only — the request-parse seam
+   runs on every protocol version, so the hook checks `Version` itself; CONNECT is `Method ==
    CONNECT` (the transport's `HttpRequestTarget` parser already enforces CONNECT ⇒
    authority-form); an upgrade requires **both** a `Connection: upgrade` token and a non-empty
    `Upgrade` header (a bare `Upgrade` header is not actionable, per §7.8). CONNECT takes
    precedence — §7.8 requires ignoring `Upgrade` on CONNECT.
-2. **Materialization** — an `IHttpResponseInterceptor`. `OnResponse` runs per exchange after the
-   request is fully parsed, sharing the same feature collection. It consumes the candidate and,
-   when the transport offered its **connection-takeover capability**
-   (`HttpResponseInterceptorContext.ConnectionTakeover`, the generic core
-   `IHttpConnectionTakeover` contract), installs the public `IHttpProtocolUpgradeFeature`
-   wrapping an `Http1ProtocolUpgrade`. No takeover capability (a transport that cannot surrender
-   its connection) degrades to *no feature* — `context.Upgrade` reads `null` rather than
-   surfacing an upgrade whose accept could never work.
+2. **Materialization** — an `IHttpResponseInterceptor`. `BeforeResponse` runs per exchange at
+   exchange setup — after the head is parsed, before the application handler — sharing the same
+   feature collection. It consumes the candidate and, when the transport's **exchange control**
+   (`HttpResponseInterceptorContext.Control`, the generic core `IHttpExchangeControl` surface)
+   can surrender the connection (`CanTakeOver`), installs the public
+   `IHttpProtocolUpgradeFeature` wrapping an `Http1ProtocolUpgrade`. A missing control, or a
+   control whose `CanTakeOver` reads `false` (an exchange that cannot surrender its connection —
+   HTTP/2 / HTTP/3 multiplexed streams), degrades to *no feature* — `context.Upgrade` reads
+   `null` rather than surfacing an upgrade whose accept could never work.
 
 One stateless class (`HttpProtocolUpgradeInterceptor`) implements both hooks; per-exchange state
 crosses seams only through the feature collection, per the interceptor contract. A host enables
@@ -48,14 +50,15 @@ options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor()
 
 Nothing is default-installed: like streaming, upgrades are opt-in per listener. Neither the core
 nor the transport carries an upgrade-specific type — the core owns the generic seam
-(`IHttpConnectionTakeover`), the transport owns the raw-stream handover mechanics, and this
-package owns every upgrade semantic.
+(`IHttpExchangeControl`, the single per-exchange control surface, of which takeover is one
+capability), the transport implements it per protocol version and owns the raw-stream handover
+mechanics, and this package owns every upgrade semantic.
 
 ### Why detection is not the transport's job
 
 An earlier design had the transport detect the §7.8 signal and install a bridge feature through
 a core contract. The interceptor seams make that unnecessary: detection is pure token scanning
-over the already-parsed head — exactly what `OnRequestHead` exists for — so moving it here keeps
+over the already-parsed head — exactly what `AfterRequestHead` exists for — so moving it here keeps
 the transport's parser free of feature policy and keeps every RFC-semantics decision (what counts
 as a transition, which token wins, what the response looks like) in one reviewable place. The
 transport keeps only what is physically transport's: CONNECT body-framing at parse time
@@ -87,7 +90,7 @@ recorded as a deliberate deviation in the csproj, matching `Http.ExtendedConnect
 second call **before any byte is written**, so a second response can never reach the wire). It:
 
 1. Resolves the status line (101 for Upgrade, 200 for CONNECT) before side effects.
-2. **Claims the connection first** — `IHttpConnectionTakeover.TakeOver()`. From that instant the
+2. **Claims the connection first** — `IHttpExchangeControl.TakeOver()`. From that instant the
    transport suppresses its own response for the exchange and ends keep-alive, so even a
    cancelled or failed head write cannot be followed by a second HTTP response on a
    desynchronized stream. The takeover is itself one-shot, so two features can never both claim

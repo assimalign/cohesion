@@ -12,12 +12,12 @@ using Assimalign.Cohesion.Http;
 public class HttpRequestLimitsTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Interceptor: Head hook should attach the typed feature")]
-    public void OnRequestHead_ShouldAttachFeature()
+    public void AfterRequestHead_ShouldAttachFeature()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
         IHttpRequestInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
 
-        interceptor.OnRequestHead(context);
+        interceptor.AfterRequestHead(context);
 
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
@@ -29,7 +29,7 @@ public class HttpRequestLimitsTests
     public void Feature_ShouldWriteThroughToContext()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         // Feature write is visible on the context (the enforced value)…
@@ -45,7 +45,7 @@ public class HttpRequestLimitsTests
     public void Feature_ReadOnly_ShouldDelegateToContextFreeze()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         context.FreezeMaxRequestBodySize();
@@ -59,7 +59,7 @@ public class HttpRequestLimitsTests
     public void Feature_OnNegative_ShouldThrow()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         Should.Throw<ArgumentOutOfRangeException>(() => feature.MaxRequestBodySize = -1);
@@ -79,8 +79,8 @@ public class HttpRequestLimitsTests
 
         foreach (IHttpRequestInterceptor interceptor in new[] { limits, wrapper })
         {
-            interceptor.OnRequestHead(context);
-            result = interceptor.OnRequestBody(context, result);
+            interceptor.AfterRequestHead(context);
+            result = interceptor.AfterRequestBody(context, result);
         }
 
         // The limits interceptor passes through (DIM default); the wrapper decorates.
@@ -113,7 +113,7 @@ public class HttpRequestLimitsTests
     /// </summary>
     private sealed class ReadOnlyWrappingInterceptor : IHttpRequestInterceptor
     {
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
         {
             return new ReadOnlyStream(body);
         }

@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Http;
 internal sealed class HttpMaxRequestBodySizeInterceptor : IHttpRequestInterceptor
 {
     /// <inheritdoc />
-    public void OnRequestHead(HttpRequestInterceptorContext context)
+    public void AfterRequestHead(HttpRequestInterceptorContext context)
     {
         context.Features.Set<IHttpMaxRequestBodySizeFeature>(new HttpMaxRequestBodySizeFeature(context));
     }

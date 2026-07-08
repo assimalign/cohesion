@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Default <see cref="IHttpProtocolUpgradeFeature"/> implementation. Installed by
 /// <see cref="HttpProtocolUpgradeInterceptor"/>'s response hook for exchanges whose request head
-/// matched a transition signal and whose transport offered its connection-takeover capability;
+/// matched a transition signal and whose exchange control can surrender the connection;
 /// holds the single-shot <see cref="Http1ProtocolUpgrade"/> that <c>context.Upgrade</c> surfaces.
 /// Ordinary exchanges carry no such feature, so the accessor reads <see langword="null"/>.
 /// </summary>

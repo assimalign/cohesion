@@ -36,7 +36,7 @@ public class WebApplicationServerDefaultsTests
             MaxRequestBodySize = 2048,
         };
 
-        options.RequestInterceptors[0].OnRequestHead(context);
+        options.RequestInterceptors[0].AfterRequestHead(context);
 
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();

@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 internal sealed class HttpResponseStreamingInterceptor : IHttpResponseInterceptor
 {
     /// <inheritdoc />
-    public void OnResponse(HttpResponseInterceptorContext context)
+    public void BeforeResponse(HttpResponseInterceptorContext context)
     {
         context.Features.Set(new HttpResponseStreamingFeature(context.ResponseBody));
     }

@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 public class Http2InterceptorTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hook should attach a feature visible on the dispatched context")]
-    public async Task OnRequestHead_ShouldAttachFeatureVisibleOnContext()
+    public async Task AfterRequestHead_ShouldAttachFeatureVisibleOnContext()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
@@ -39,7 +39,7 @@ public class Http2InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Body hooks should wrap the request stream, last registered outermost")]
-    public async Task OnRequestBody_ShouldWrapStreamInRegistrationOrder()
+    public async Task AfterRequestBody_ShouldWrapStreamInRegistrationOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
             1, "POST", "/upload", "https", "api.test", body: System.Text.Encoding.UTF8.GetBytes("hello"));
@@ -59,7 +59,7 @@ public class Http2InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A rejecting head hook should reset the stream and yield no context")]
-    public async Task OnRequestHead_Rejecting_ShouldResetStreamWithCancel()
+    public async Task AfterRequestHead_Rejecting_ShouldResetStreamWithCancel()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/forbidden", "https", "api.test");
         HttpConnectionListenerOptions options = new();
@@ -74,7 +74,7 @@ public class Http2InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A body-hook rejection should reset the stream and dispose the wrapper chain and features")]
-    public async Task OnRequestBody_Rejecting_ShouldResetStreamAndDisposeWrapperChainAndFeatures()
+    public async Task AfterRequestBody_Rejecting_ShouldResetStreamAndDisposeWrapperChainAndFeatures()
     {
         // Interceptor 1 attaches a disposable feature and wraps the body; interceptor 2 rejects
         // from its body hook. The already-built wrapper chain and the attached feature must both be
@@ -116,7 +116,7 @@ public class Http2InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: Head hooks should observe read-only headers")]
-    public async Task OnRequestHead_Headers_ShouldBeReadOnly()
+    public async Task AfterRequestHead_Headers_ShouldBeReadOnly()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
             1, "GET", "/", "https", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
@@ -172,7 +172,7 @@ public class Http2InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Interceptors: A lowered cap should not reject the streamed body (h2 cap enforcement is follow-up)")]
-    public async Task OnRequestHead_LoweringCap_ShouldNotRejectBody()
+    public async Task AfterRequestHead_LoweringCap_ShouldNotRejectBody()
     {
         // HTTP/2 bounds request-body buffering via flow-control backpressure; the hard wire-level
         // cap is tracked follow-up work (see HttpConnectionListenerLimits.MaxRequestBodySize).

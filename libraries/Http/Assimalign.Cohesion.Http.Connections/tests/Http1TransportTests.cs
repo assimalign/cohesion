@@ -534,7 +534,7 @@ public class Http1TransportTests
     // pair is REGISTERED on the listener options (this test project references
     // the package; the transport library does not), detection rides
     // IHttpRequestInterceptor, and acceptance rides the response seam's
-    // generic IHttpConnectionTakeover capability — RFC 9110 §7.8 Upgrade /
+    // generic IHttpExchangeControl take-over capability — RFC 9110 §7.8 Upgrade /
     // §9.3.6 CONNECT, the 101 / 200 accept paths, stream surrender, SendAsync
     // suppression + keep-alive exit, the "do not consume tunnel octets"
     // framing invariant, and the single-shot AcceptAsync guard.

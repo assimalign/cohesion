@@ -972,18 +972,53 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/3 connection.");
         }
 
-        // If a response feature streamed to the raw sink, the HEADERS and DATA frames are already on
-        // the wire; finalize instead of writing a buffered response.
+        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // directive is Abort). RFC 9114 §4.1 — reset the request stream instead of writing a
+        // response; the QUIC connection and its other streams are unaffected.
+        if (http3Context.CancelRequested)
+        {
+            http3Context.StreamConnection.Abort();
+            return;
+        }
+
+        // If a response feature streamed to the raw sink, the HEADERS and DATA frames are already
+        // on the wire (the BeforeResponseHead hooks fired at the sink's head commit); finalize
+        // instead of writing a buffered response.
         if (http3Context.ResponseBodySink is { HasStarted: true } sink)
         {
             await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // The final response head is about to be committed on the buffered path — the last
+        // mutation point. Fire the BeforeResponseHead lifecycle hooks, then re-read the directive
+        // so a hook that aborted the exchange resets the stream instead of writing the head.
+        await http3Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (http3Context.CancelRequested)
+        {
+            http3Context.StreamConnection.Abort();
+            return;
+        }
+
+        // A hook may itself have started the response through the raw sink (its HEADERS frame is
+        // then already on the wire) — finalize that response rather than writing a second one.
+        if (http3Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
+        {
+            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
         // RFC 9110 §15.2 — a 1xx status is never a valid final response status. Interim responses go
-        // through IHttpInterimResponseFeature; HTTP/3 has no 101 (RFC 9114 §4.2), so the rejection is
-        // unconditional.
+        // through the IHttpExchangeControl interim writes; HTTP/3 has no 101 (RFC 9114 §4.2), so the
+        // rejection is unconditional.
         HttpInterimResponseRules.EnsureFinalStatusCode(http3Context.Response.StatusCode);
+
+        // Commit point: from here the final response is on the wire, so the exchange control's
+        // probes must report the response as started (no more interim writes).
+        http3Context.MarkFinalResponseStarted();
 
         Stream stream = http3Context.StreamConnection.AsStream();
         byte[] bodyBytes = await ReadBodyAsync(http3Context.Response.Body, cancellationToken).ConfigureAwait(false);
@@ -997,6 +1032,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1133,18 +1169,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         // Expose the raw DATA-frame response body sink (over the QUIC stream, whose flow control
-        // provides backpressure) to registered response interceptors so a feature package
-        // (streaming / SSE) can wrap it — without this transport depending on that package. The
-        // interim-response capability (100 Continue / 103 Early Hints) rides the same seam; its
-        // emission writes an additional HEADERS frame on this request stream ahead of the final one
-        // (RFC 9114 §4.1).
+        // provides backpressure) and the exchange control to registered response interceptors so
+        // feature packages (streaming / SSE, interim responses) can wrap them — without this
+        // transport depending on any of those packages. The control's interim writes emit an
+        // additional HEADERS frame on this request stream ahead of the final one (RFC 9114 §4.1);
+        // its abort resets this stream, leaving the QUIC connection's other streams intact.
         if (_responseInterceptors.Length > 0)
         {
             context.RunResponseInterceptors(
                 _responseInterceptors,
                 new Http3ResponseBodyStream(context),
-                connectionTakeover: null,
-                new Http3InterimResponseWriter(this, context));
+                new Http3ExchangeControl(this, context));
         }
 
         // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically

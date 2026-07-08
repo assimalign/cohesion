@@ -23,9 +23,9 @@ depending on this package.
 ## Dependencies
 
 - `Assimalign.Cohesion.Http` (the response-interceptor seam, the
-  `IHttpInterimResponseWriter` transport capability, the feature collection).
+  `IHttpExchangeControl` exchange control, the feature collection).
 - **Not** `Assimalign.Cohesion.Http.Connections` — interim responses are
-  transport-agnostic; the transport owns the wire emission behind the capability.
+  transport-agnostic; the transport owns the wire emission behind the control.
 
 ## Relationship to `Expect: 100-continue`
 

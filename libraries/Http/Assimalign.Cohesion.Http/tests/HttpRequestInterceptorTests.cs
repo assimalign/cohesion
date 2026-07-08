@@ -53,8 +53,9 @@ public class HttpRequestInterceptorTests
         IHttpRequestInterceptor interceptor = new NoOverrideInterceptor();
         using MemoryStream body = new();
 
-        interceptor.OnRequestHead(context); // must not throw
-        interceptor.OnRequestBody(context, body).ShouldBeSameAs(body);
+        interceptor.AfterRequestHead(context); // must not throw
+        interceptor.BeforeRequestBody(context); // must not throw
+        interceptor.AfterRequestBody(context, body).ShouldBeSameAs(body);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - Headers: AsReadOnly view should observe the live store and reject mutation")]

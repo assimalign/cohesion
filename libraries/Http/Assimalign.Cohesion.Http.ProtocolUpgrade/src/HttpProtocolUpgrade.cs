@@ -18,10 +18,11 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The request interceptor detects the wire-level transition signal on the parsed request head;
 /// the response interceptor converts that detection into an <see cref="IHttpProtocolUpgradeFeature"/>
-/// wrapping the transport's connection-takeover capability
-/// (<see cref="HttpResponseInterceptorContext.ConnectionTakeover"/>). A handler then reads
+/// wrapping the transport's exchange control
+/// (<see cref="HttpResponseInterceptorContext.Control"/>, whose takeover surrenders the
+/// connection). A handler then reads
 /// <c>context.Upgrade</c> and accepts the transition to receive the raw duplex stream. Both hooks
-/// are required because detection needs the request head while the takeover capability is offered
+/// are required because detection needs the request head while the exchange control is offered
 /// on the response seam; each is stateless, so the two instances coordinate through the exchange's
 /// feature collection.
 /// </para>
@@ -38,8 +39,8 @@ public static class HttpProtocolUpgrade
 
     /// <summary>
     /// Creates the response interceptor that surfaces a detected transition as an
-    /// <see cref="IHttpProtocolUpgradeFeature"/> over the transport's connection-takeover
-    /// capability. Add it to the transport's response-interceptor list, paired with
+    /// <see cref="IHttpProtocolUpgradeFeature"/> over the transport's exchange control
+    /// (takeover). Add it to the transport's response-interceptor list, paired with
     /// <see cref="CreateRequestInterceptor"/>.
     /// </summary>
     /// <returns>The response interceptor to add to the transport's response-interceptor list.</returns>

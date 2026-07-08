@@ -2,8 +2,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// The response interceptor that makes interim (<c>1xx</c>) responses available on an exchange. It
-/// wraps the transport's interim-response capability
-/// (<see cref="HttpResponseInterceptorContext.InterimResponseWriter"/>) in a typed
+/// wraps the transport's exchange control
+/// (<see cref="HttpResponseInterceptorContext.Control"/>) in a typed
 /// <see cref="IHttpInterimResponseFeature"/> and installs it on the exchange's feature collection —
 /// the seam by which interim responses plug into the transport without the transport depending on
 /// this package.
@@ -11,15 +11,15 @@ namespace Assimalign.Cohesion.Http.Internal;
 internal sealed class HttpInterimResponseInterceptor : IHttpResponseInterceptor
 {
     /// <inheritdoc />
-    public void OnResponse(HttpResponseInterceptorContext context)
+    public void BeforeResponse(HttpResponseInterceptorContext context)
     {
-        // A transport that does not offer the capability (a foreign IHttpContext, a future transport
-        // without interim support) leaves InterimResponseWriter null — install nothing so
+        // A transport that does not offer exchange control (a foreign IHttpContext, a hand-built
+        // test context) leaves Control null — install nothing so
         // context.Features.Get<IHttpInterimResponseFeature>() resolves to null and callers see the
         // capability as absent rather than as a broken feature.
-        if (context.InterimResponseWriter is { } writer)
+        if (context.Control is { } control)
         {
-            context.Features.Set(new HttpInterimResponseFeature(writer));
+            context.Features.Set(new HttpInterimResponseFeature(control));
         }
     }
 }

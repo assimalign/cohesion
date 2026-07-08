@@ -10,19 +10,19 @@ namespace Assimalign.Cohesion.Http;
 /// HTTP/1.1 implementation of <see cref="IHttpProtocolUpgrade"/>. Owns the response transition
 /// for both <c>Connection: upgrade</c> + <c>Upgrade</c> (101 Switching Protocols) and
 /// <c>CONNECT</c> tunnels (200 OK), built over the transport's generic
-/// <see cref="IHttpConnectionTakeover"/> capability.
+/// <see cref="IHttpExchangeControl"/> capability.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Constructed by <see cref="HttpProtocolUpgradeInterceptor"/>'s response hook from
-/// interceptor-seam materials only: the takeover capability, the exchange's live response header
+/// interceptor-seam materials only: the exchange control, the exchange's live response header
 /// collection, and its feature collection (for response cookies). <see cref="AcceptAsync"/> may
 /// be invoked at most once per exchange — a second call surfaces as
 /// <see cref="InvalidOperationException"/> before any byte is written, so it can never produce a
 /// second response on the wire.
 /// </para>
 /// <para>
-/// Acceptance claims the connection first (<see cref="IHttpConnectionTakeover.TakeOver"/> — from
+/// Acceptance claims the connection first (<see cref="IHttpExchangeControl.TakeOver"/> — from
 /// that point the transport suppresses its own response and ends keep-alive), then writes the
 /// status line and the connection-specific response headers (<c>Connection: Upgrade</c> +
 /// <c>Upgrade: &lt;protocol&gt;</c> for an upgrade) directly to the surrendered raw stream.
@@ -41,7 +41,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         HttpHeaderKey.TransferEncoding,
     };
 
-    private readonly IHttpConnectionTakeover _takeover;
+    private readonly IHttpExchangeControl _control;
     private readonly HttpHeaderCollection _responseHeaders;
     private readonly IHttpFeatureCollection _features;
     private int _accepted;
@@ -49,19 +49,19 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
     /// <summary>
     /// Initializes the upgrade for the current exchange.
     /// </summary>
-    /// <param name="takeover">The transport's connection-takeover capability.</param>
+    /// <param name="control">The transport's exchange control, whose takeover surrenders the connection.</param>
     /// <param name="responseHeaders">The exchange's live response header collection.</param>
     /// <param name="features">The exchange's feature collection (drained for response cookies on accept).</param>
     /// <param name="kind">The detected transition kind (Upgrade or Connect).</param>
     /// <param name="protocol">The requested <c>Upgrade</c> protocol token, or <see langword="null"/> for CONNECT.</param>
     public Http1ProtocolUpgrade(
-        IHttpConnectionTakeover takeover,
+        IHttpExchangeControl control,
         HttpHeaderCollection responseHeaders,
         IHttpFeatureCollection features,
         HttpProtocolUpgradeKind kind,
         string? protocol)
     {
-        _takeover = takeover;
+        _control = control;
         _responseHeaders = responseHeaders;
         _features = features;
         Kind = kind;
@@ -95,7 +95,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         // Claim the connection before writing: from here the transport suppresses its own
         // response for the exchange and ends keep-alive, so even a cancelled or failed head
         // write cannot be followed by a second HTTP response on a desynchronized stream.
-        Stream stream = _takeover.TakeOver();
+        Stream stream = _control.TakeOver();
 
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include Content-Length or
         // Transfer-Encoding; the tunnel carries opaque octets. A 101 is body-less by definition

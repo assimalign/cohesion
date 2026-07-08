@@ -12,20 +12,20 @@ namespace Assimalign.Cohesion.Http.InterimResponses.Tests;
 
 /// <summary>
 /// Unit tests for the interim-response feature package: the interceptor wraps the transport's
-/// <see cref="IHttpInterimResponseWriter"/> capability in an <see cref="IHttpInterimResponseFeature"/>,
-/// the feature forwards to the capability, and the ergonomic extensions build the common interim
-/// responses. Uses a recording fake writer and a hand-built <see cref="HttpResponseInterceptorContext"/>
+/// exchange control (<see cref="IHttpExchangeControl"/>) in an <see cref="IHttpInterimResponseFeature"/>,
+/// the feature forwards to the control, and the ergonomic extensions build the common interim
+/// responses. Uses a recording fake control and a hand-built <see cref="HttpResponseInterceptorContext"/>
 /// — no transport is involved (the wire behavior is covered by the transport's InterimResponseTests).
 /// </summary>
 public class HttpInterimResponseFeatureTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Interceptor: Should install the feature over the transport capability")]
-    public void Interceptor_OnResponse_ShouldInstallFeature()
+    public void Interceptor_BeforeResponse_ShouldInstallFeature()
     {
-        RecordingWriter writer = new();
-        HttpResponseInterceptorContext context = CreateContext(writer);
+        RecordingControl control = new();
+        HttpResponseInterceptorContext context = CreateContext(control);
 
-        HttpInterimResponses.CreateInterceptor().OnResponse(context);
+        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldNotBeNull();
     }
@@ -33,9 +33,9 @@ public class HttpInterimResponseFeatureTests
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Interceptor: Should install nothing when the transport offers no capability")]
     public void Interceptor_WithoutCapability_ShouldInstallNothing()
     {
-        HttpResponseInterceptorContext context = CreateContext(writer: null);
+        HttpResponseInterceptorContext context = CreateContext(control: null);
 
-        HttpInterimResponses.CreateInterceptor().OnResponse(context);
+        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
 
         context.Features.Get<IHttpInterimResponseFeature>().ShouldBeNull();
     }
@@ -43,70 +43,70 @@ public class HttpInterimResponseFeatureTests
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Feature: IsInterimResponseSupported mirrors the capability")]
     public void Feature_IsInterimResponseSupported_ShouldMirrorCapability()
     {
-        RecordingWriter writer = new() { CanWrite = true };
-        IHttpInterimResponseFeature feature = CreateFeature(writer);
+        RecordingControl control = new() { CanWrite = true };
+        IHttpInterimResponseFeature feature = CreateFeature(control);
 
         feature.IsInterimResponseSupported.ShouldBeTrue();
 
-        writer.CanWrite = false;
+        control.CanWrite = false;
         feature.IsInterimResponseSupported.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Feature: SendInterimResponseAsync forwards the status and headers to the capability")]
     public async Task Feature_SendInterimResponseAsync_ShouldForwardToCapability()
     {
-        RecordingWriter writer = new();
-        IHttpInterimResponseFeature feature = CreateFeature(writer);
+        RecordingControl control = new();
+        IHttpInterimResponseFeature feature = CreateFeature(control);
 
         HttpHeaderCollection headers = new();
         headers[HttpHeaderKey.Link] = "</a.css>; rel=preload";
         await feature.SendInterimResponseAsync(HttpStatusCode.EarlyHints, headers);
 
-        writer.Calls.Count.ShouldBe(1);
-        writer.Calls[0].StatusCode.Value.ShouldBe(103);
-        writer.Calls[0].Headers.ShouldBeSameAs(headers);
+        control.Calls.Count.ShouldBe(1);
+        control.Calls[0].StatusCode.Value.ShouldBe(103);
+        control.Calls[0].Headers.ShouldBeSameAs(headers);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Extensions: SendEarlyHintsAsync emits 103 with Link fields and reports true")]
     public async Task SendEarlyHintsAsync_ShouldEmit103WithLinks()
     {
-        RecordingWriter writer = new();
-        FakeHttpContext context = CreateContextWithFeature(writer);
+        RecordingControl control = new();
+        FakeHttpContext context = CreateContextWithFeature(control);
 
         bool emitted = await context.SendEarlyHintsAsync(["</a.css>; rel=preload", "</b.js>; rel=preload"]);
 
         emitted.ShouldBeTrue();
-        writer.Calls.Count.ShouldBe(1);
-        writer.Calls[0].StatusCode.Value.ShouldBe(103);
-        writer.Calls[0].Headers.ShouldNotBeNull();
-        writer.Calls[0].Headers!.TryGetValue(HttpHeaderKey.Link, out HttpHeaderValue link).ShouldBeTrue();
+        control.Calls.Count.ShouldBe(1);
+        control.Calls[0].StatusCode.Value.ShouldBe(103);
+        control.Calls[0].Headers.ShouldNotBeNull();
+        control.Calls[0].Headers!.TryGetValue(HttpHeaderKey.Link, out HttpHeaderValue link).ShouldBeTrue();
         link.Count.ShouldBe(2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Extensions: SendContinueAsync emits 100 and reports true")]
     public async Task SendContinueAsync_ShouldEmit100()
     {
-        RecordingWriter writer = new();
-        FakeHttpContext context = CreateContextWithFeature(writer);
+        RecordingControl control = new();
+        FakeHttpContext context = CreateContextWithFeature(control);
 
         bool emitted = await context.SendContinueAsync();
 
         emitted.ShouldBeTrue();
-        writer.Calls.Count.ShouldBe(1);
-        writer.Calls[0].StatusCode.Value.ShouldBe(100);
-        writer.Calls[0].Headers.ShouldBeNull();
+        control.Calls.Count.ShouldBe(1);
+        control.Calls[0].StatusCode.Value.ShouldBe(100);
+        control.Calls[0].Headers.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Extensions: SendEarlyHintsAsync no-ops (false) when unsupported")]
     public async Task SendEarlyHintsAsync_WhenUnsupported_ShouldReturnFalse()
     {
-        RecordingWriter writer = new() { CanWrite = false };
-        FakeHttpContext context = CreateContextWithFeature(writer);
+        RecordingControl control = new() { CanWrite = false };
+        FakeHttpContext context = CreateContextWithFeature(control);
 
         bool emitted = await context.SendEarlyHintsAsync(["</a.css>; rel=preload"]);
 
         emitted.ShouldBeFalse();
-        writer.Calls.ShouldBeEmpty();
+        control.Calls.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Extensions: SendEarlyHintsAsync no-ops (false) when the feature is absent")]
@@ -122,35 +122,44 @@ public class HttpInterimResponseFeatureTests
 
     // ------------------------------------------------------------------- Helpers
 
-    private static HttpResponseInterceptorContext CreateContext(IHttpInterimResponseWriter? writer) => new()
+    private static HttpResponseInterceptorContext CreateContext(IHttpExchangeControl? control) => new()
     {
         Version = HttpVersion.Http11,
         Headers = new HttpHeaderCollection(),
         Features = new HttpFeatureCollection(),
         ConnectionInfo = new HttpConnectionInfo(),
         ResponseBody = Stream.Null,
-        InterimResponseWriter = writer,
+        Control = control,
     };
 
-    private static IHttpInterimResponseFeature CreateFeature(IHttpInterimResponseWriter writer)
+    private static IHttpInterimResponseFeature CreateFeature(IHttpExchangeControl control)
     {
-        HttpResponseInterceptorContext context = CreateContext(writer);
-        HttpInterimResponses.CreateInterceptor().OnResponse(context);
+        HttpResponseInterceptorContext context = CreateContext(control);
+        HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
         return context.Features.Get<IHttpInterimResponseFeature>()!;
     }
 
-    private static FakeHttpContext CreateContextWithFeature(IHttpInterimResponseWriter writer)
+    private static FakeHttpContext CreateContextWithFeature(IHttpExchangeControl control)
     {
-        HttpResponseInterceptorContext interceptorContext = CreateContext(writer);
-        HttpInterimResponses.CreateInterceptor().OnResponse(interceptorContext);
+        HttpResponseInterceptorContext interceptorContext = CreateContext(control);
+        HttpInterimResponses.CreateInterceptor().BeforeResponse(interceptorContext);
         return new FakeHttpContext(interceptorContext.Features);
     }
 
-    private sealed class RecordingWriter : IHttpInterimResponseWriter
+    /// <summary>
+    /// Recording fake <see cref="IHttpExchangeControl"/>: interim-response capability is toggled via
+    /// <see cref="CanWrite"/>, writes are recorded, takeover is never offered, and the directive
+    /// tracks <see cref="Abort"/> trivially.
+    /// </summary>
+    private sealed class RecordingControl : IHttpExchangeControl
     {
         public bool CanWrite { get; set; } = true;
 
         public List<(HttpStatusCode StatusCode, IHttpHeaderCollection? Headers)> Calls { get; } = new();
+
+        public HttpExchangeDirective Directive { get; private set; } = HttpExchangeDirective.Continue;
+
+        public bool HasResponseStarted => !CanWrite;
 
         public bool CanWriteInterimResponse => CanWrite;
 
@@ -162,6 +171,12 @@ public class HttpInterimResponseFeatureTests
             Calls.Add((statusCode, headers));
             return ValueTask.CompletedTask;
         }
+
+        public bool CanTakeOver => false;
+
+        public Stream TakeOver() => throw new InvalidOperationException("This fake control does not offer takeover.");
+
+        public void Abort() => Directive = HttpExchangeDirective.Abort;
     }
 
     /// <summary>

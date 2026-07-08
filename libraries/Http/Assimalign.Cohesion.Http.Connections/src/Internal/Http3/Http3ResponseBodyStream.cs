@@ -24,6 +24,7 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
     private readonly Stream _stream;
 
     public Http3ResponseBodyStream(Http3Context context)
+        : base(context)
     {
         _context = context;
         _stream = context.StreamConnection.AsStream();

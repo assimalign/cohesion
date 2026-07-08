@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 public class Http3InterceptorTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hook should attach a feature visible on the dispatched context")]
-    public async Task OnRequestHead_ShouldAttachFeatureVisibleOnContext()
+    public async Task AfterRequestHead_ShouldAttachFeatureVisibleOnContext()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/", "https", "api.test");
         HttpConnectionListenerOptions options = new();
@@ -38,7 +38,7 @@ public class Http3InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Body hooks should wrap the request stream, last registered outermost")]
-    public async Task OnRequestBody_ShouldWrapStreamInRegistrationOrder()
+    public async Task AfterRequestBody_ShouldWrapStreamInRegistrationOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "POST", "/upload", "https", "api.test", body: Encoding.UTF8.GetBytes("hello"));
@@ -58,7 +58,7 @@ public class Http3InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: A rejecting head hook should abort the stream and yield no context")]
-    public async Task OnRequestHead_Rejecting_ShouldAbortStream()
+    public async Task AfterRequestHead_Rejecting_ShouldAbortStream()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/forbidden", "https", "api.test");
         HttpConnectionListenerOptions options = new();
@@ -73,7 +73,7 @@ public class Http3InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: A body-hook rejection should abort the stream and dispose the wrapper chain and features")]
-    public async Task OnRequestBody_Rejecting_ShouldAbortStreamAndDisposeWrapperChainAndFeatures()
+    public async Task AfterRequestBody_Rejecting_ShouldAbortStreamAndDisposeWrapperChainAndFeatures()
     {
         // Interceptor 1 attaches a disposable feature and wraps the body; interceptor 2 rejects
         // from its body hook. The already-built wrapper chain and the attached feature must both be
@@ -115,7 +115,7 @@ public class Http3InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: Head hooks should observe read-only headers")]
-    public async Task OnRequestHead_Headers_ShouldBeReadOnly()
+    public async Task AfterRequestHead_Headers_ShouldBeReadOnly()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
             "GET", "/", "https", "api.test", headers: new Dictionary<string, string> { ["content-type"] = "text/plain" });
@@ -167,7 +167,7 @@ public class Http3InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Interceptors: A lowered cap should not reject the already-buffered body")]
-    public async Task OnRequestHead_LoweringCap_ShouldNotRejectBufferedBody()
+    public async Task AfterRequestHead_LoweringCap_ShouldNotRejectBufferedBody()
     {
         // Per-protocol timing difference (documented on IHttpRequestInterceptor): HTTP/3 drains the
         // request stream before the head is decoded, so lowering the cap at head-hook time cannot
