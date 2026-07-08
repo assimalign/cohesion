@@ -43,7 +43,31 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Authentication/tests/Assimalign.Cohesion.Web.Authentication.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Cookie/">
+			<File Path="Assimalign.Cohesion.Web.Authentication.Cookie/README.md" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/">
+			<File Path="Assimalign.Cohesion.Web.Authentication.Cookie/docs/DESIGN.md" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Cookie/src/">
+			<Project Path="Assimalign.Cohesion.Web.Authentication.Cookie/src/Assimalign.Cohesion.Web.Authentication.Cookie.csproj" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Cookie/tests/">
+			<Project Path="Assimalign.Cohesion.Web.Authentication.Cookie/tests/Assimalign.Cohesion.Web.Authentication.Cookie.Tests.csproj" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Bearer/">
+			<File Path="Assimalign.Cohesion.Web.Authentication.Bearer/README.md" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/">
+			<File Path="Assimalign.Cohesion.Web.Authentication.Bearer/docs/DESIGN.md" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Bearer/src/">
+			<Project Path="Assimalign.Cohesion.Web.Authentication.Bearer/src/Assimalign.Cohesion.Web.Authentication.Bearer.csproj" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/">
+			<Project Path="Assimalign.Cohesion.Web.Authentication.Bearer/tests/Assimalign.Cohesion.Web.Authentication.Bearer.Tests.csproj" />
+		</Folder>
+		<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/src/">
 		<Project Path="Assimalign.Cohesion.Web.Authorization/src/Assimalign.Cohesion.Web.Authorization.csproj" />
 	</Folder>
