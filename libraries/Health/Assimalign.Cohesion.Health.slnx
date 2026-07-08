@@ -1,0 +1,43 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Health/">
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health/">
+		<File Path="Assimalign.Cohesion.Health/README.md" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health/docs/">
+		<File Path="Assimalign.Cohesion.Health/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health/src/">
+		<Project Path="Assimalign.Cohesion.Health/src/Assimalign.Cohesion.Health.csproj" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health/tests/">
+		<Project Path="Assimalign.Cohesion.Health/tests/Assimalign.Cohesion.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health.Hosting/">
+		<File Path="Assimalign.Cohesion.Health.Hosting/README.md" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.Health.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Health.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.Health.Hosting/src/Assimalign.Cohesion.Health.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/Health/Assimalign.Cohesion.Health.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.Health.Hosting/tests/Assimalign.Cohesion.Health.Hosting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Health/refs/" >
+		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
+	</Folder>
+</Solution>

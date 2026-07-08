@@ -773,6 +773,37 @@
 	<Folder Name="/cohesion/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/">
 		<Project Path="libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/Assimalign.Cohesion.FileSystem.Physical.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Health/">
+		<File Path="libraries/Health/Directory.Build.props" />
+		<File Path="libraries/Health/Directory.Build.targets" />
+		<File Path="libraries/Health/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health/">
+		<File Path="libraries/Health/Assimalign.Cohesion.Health/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health/docs/">
+		<File Path="libraries/Health/Assimalign.Cohesion.Health/docs/DESIGN.md" />
+		<File Path="libraries/Health/Assimalign.Cohesion.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health/src/">
+		<Project Path="libraries/Health/Assimalign.Cohesion.Health/src/Assimalign.Cohesion.Health.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health/tests/">
+		<Project Path="libraries/Health/Assimalign.Cohesion.Health/tests/Assimalign.Cohesion.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health.Hosting/">
+		<File Path="libraries/Health/Assimalign.Cohesion.Health.Hosting/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health.Hosting/docs/">
+		<File Path="libraries/Health/Assimalign.Cohesion.Health.Hosting/docs/DESIGN.md" />
+		<File Path="libraries/Health/Assimalign.Cohesion.Health.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health.Hosting/src/">
+		<Project Path="libraries/Health/Assimalign.Cohesion.Health.Hosting/src/Assimalign.Cohesion.Health.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Health/Assimalign.Cohesion.Health.Hosting/tests/">
+		<Project Path="libraries/Health/Assimalign.Cohesion.Health.Hosting/tests/Assimalign.Cohesion.Health.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/">
 		<File Path="libraries/Hosting/Directory.Build.props" />
 		<File Path="libraries/Hosting/Directory.Build.targets" />
@@ -2010,6 +2041,19 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Functions/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Functions/tests/Assimalign.Cohesion.Web.Functions.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Health/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Health/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Health/src/Assimalign.Cohesion.Web.Health.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Health/tests/Assimalign.Cohesion.Web.Health.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/" />

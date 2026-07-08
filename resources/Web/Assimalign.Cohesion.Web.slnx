@@ -78,6 +78,19 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Functions/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Functions/tests/Assimalign.Cohesion.Web.Functions.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/">
+		<File Path="Assimalign.Cohesion.Web.Health/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/docs/">
+		<File Path="Assimalign.Cohesion.Web.Health/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/src/">
+		<Project Path="Assimalign.Cohesion.Web.Health/src/Assimalign.Cohesion.Web.Health.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Health/tests/Assimalign.Cohesion.Web.Health.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/src/">

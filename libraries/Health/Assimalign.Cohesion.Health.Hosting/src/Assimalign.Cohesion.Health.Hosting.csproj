@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Health.Hosting</RootNamespace>
+		<Description>Cohesion health-check hosting seam: the periodic health-check publisher that rides the Hosting execution menu (BackgroundService) and the builder-time DI extensions that compose the health-check set and register publishers. Bridges the DI-free Assimalign.Cohesion.Health core to the host lifecycle.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+	</ItemGroup>
+</Project>

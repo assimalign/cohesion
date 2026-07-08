@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Health</RootNamespace>
+		<Description>Cohesion Web health endpoint: pipeline middleware that maps /healthz, /livez, and /readyz onto the Assimalign.Cohesion.Health model with tag-based readiness/liveness filtering, 200/503 status mapping, and a pluggable, AOT-safe (Utf8JsonWriter) JSON response writer. Surfaces the produced report through IHttpFeatureCollection.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Health" />
+	</ItemGroup>
+</Project>
