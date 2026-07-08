@@ -128,6 +128,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #752 | A | 1xx interim responses (100-continue, 103 Early Hints) | — |
 | #749 | A | Graceful GOAWAY drain (h2 window + h3 lifecycle) | #748 (h3 half) |
 | #758 | A | QPACK dynamic table + encoder Huffman | #748 |
+| #847 | A | Emit QPACK Section-Ack / Stream-Cancellation on the decoder stream | #758 ✓ |
 | #753 | A/B | RFC 9218 extensible priorities | #747 |
 | #756 | B | RFC 9530 Digest Fields | #747 |
 | #746 | B | RFC 10008 HTTP QUERY method semantics | #747, #755 |
@@ -181,7 +182,11 @@ Real-time hub framework (SignalR-analogue) and gRPC hosting are **decisions, not
 
 ## 5. Progress Log (orchestrator-reconciled from merged PRs)
 
-The orchestrator maintains this table by reconciling merged PRs from GitHub; sessions do not edit it (that avoids shared-doc merge conflicts when many run in parallel). Each row is a merged item and the dependents it unblocks. **Wave 1 (2026-07-03): 13 items merged — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup. Wave 2 dispatched (see the open-PR list).**
+The orchestrator maintains this table by reconciling merged PRs from GitHub; sessions do not edit it (that avoids shared-doc merge conflicts when many run in parallel). Each row is a merged item and the dependents it unblocks.
+
+- **Wave 1 (2026-07-03): 13 merged** — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup.
+- **Wave 2 (2026-07-06): 16 merged + #776 in review ([PR #844](https://github.com/assimalign/cohesion/pull/844))** — #763 TLS, #150 endpoint metadata, #148 matcher, #792 range, #770 forwarded, #755 caching, #769 streaming/SSE, #751 upgrade bridge, #749 GOAWAY drain, #758 QPACK dynamic, #819 interceptor h2/h3, #753 priorities, #756 digest, #764 h2 abuse, #750 h2 backpressure, #757 cookies. Scope-creep filed: #847 (QPACK decoder-stream ack). **→ Stage 1 (Foundations) is complete; nearly the entire remaining backlog is now unblocked leaf work — see the frontier note below.**
+- **Frontier after Wave 2:** unblocked and workable — Web middleware #777/#778/#779/#780/#781/#783/#784/#785/#793/#794/#795, #767 (UseHttp3), routing #786/#787/#788/#789 + #149 (result writers, gates #796→#151), #746 (QUERY), #752 (1xx), #754 (Alt-Svc), #810 (h1 data-rate), #847, #790 (auth handlers — all deps now merged), #773 (UDS/pipes), #775 (health). **Still gated on a decision, not a dependency:** #765 (WebSockets ADR — #751/#748 now merged, so it's actionable) and #782 (URL-rewrite request-mutation seam). Blocked only by #149: #796 (source-gen binding) → #151 (controllers).
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
