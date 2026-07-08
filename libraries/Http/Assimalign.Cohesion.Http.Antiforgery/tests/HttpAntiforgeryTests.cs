@@ -57,6 +57,32 @@ public class HttpAntiforgeryTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should require a token for QUERY despite it being spec-safe (RFC 10008)")]
+    public async Task ValidateRequest_OnQueryWithoutToken_ShouldFail()
+    {
+        // RFC 10008 registers QUERY as safe + idempotent, but it carries a request body, so its
+        // CSRF exposure parallels POST. Antiforgery deliberately does NOT exempt QUERY: a QUERY
+        // request with no token is rejected (the decision recorded in HttpAntiforgeryService.IsSafeMethod).
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create();
+        TestHttpContext queryWithoutToken = new(HttpMethod.Query);
+
+        (await antiforgery.IsRequestValidAsync(queryWithoutToken)).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should accept a QUERY carrying a valid token pair")]
+    public async Task ValidateRequest_OnQueryWithValidPair_ShouldPass()
+    {
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        HttpAntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(new TestHttpContext(HttpMethod.Get));
+
+        TestHttpContext query = new(HttpMethod.Query);
+        query.SetRequestCookie(options.CookieName, tokens.CookieToken!);
+        query.SetRequestHeader(options.HeaderName, tokens.RequestToken!);
+
+        (await antiforgery.IsRequestValidAsync(query)).ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Validate: Should reject a tampered request token")]
     public async Task ValidateRequest_OnTamperedRequestToken_ShouldFail()
     {

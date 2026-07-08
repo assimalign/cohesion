@@ -59,6 +59,29 @@ public class Http2TransportTests
         Encoding.UTF8.GetString(frames[3].Payload).ShouldBe("{\"ok\":true}");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
+    public async Task Http2_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — the QUERY method rides :method like any other token; a DATA frame carries
+        // the query content. Equivalent to the HTTP/1.1 QUERY round-trip on the h2 path.
+        const string queryBody = "{\"select\":\"widgets\"}";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
+            1, "QUERY", "/search", "https", "api.test", body: Encoding.UTF8.GetBytes(queryBody));
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should yield multiple streams in sequence")]
     public async Task Http2_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {
