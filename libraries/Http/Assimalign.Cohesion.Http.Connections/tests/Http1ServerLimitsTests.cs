@@ -21,10 +21,7 @@ public class Http1ServerLimitsTests
         // RFC 9110 §15.5.15 — a request line larger than the configured cap is 414 URI Too Long.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /an-intentionally-very-long-request-target-that-blows-the-cap HTTP/1.1\r\nHost: api.test\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestLineSize = 24;
-
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestLineSize = 24);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("414", Case.Sensitive);
@@ -36,10 +33,7 @@ public class Http1ServerLimitsTests
         // RFC 9110 §15.5.22 — more header fields than the configured maximum is 431.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\nA: 1\r\nB: 2\r\nC: 3\r\nD: 4\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestHeaderCount = 2;
-
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestHeaderCount = 2);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("431", Case.Sensitive);
@@ -52,10 +46,7 @@ public class Http1ServerLimitsTests
         // header count.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\nX-Large: " + new string('v', 512) + "\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestHeadersTotalSize = 64;
-
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestHeadersTotalSize = 64);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("431", Case.Sensitive);
@@ -67,10 +58,7 @@ public class Http1ServerLimitsTests
         // RFC 9110 §15.5.14 — a declared Content-Length over the configured cap is 413.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4096\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 16;
-
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 16);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("413", Case.Sensitive);
@@ -84,10 +72,7 @@ public class Http1ServerLimitsTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "8\r\nabcdefgh\r\n"
             + "0\r\n\r\n");
-        HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 4;
-
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, http1 => http1.Limits.MaxRequestBodySize = 4);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("413", Case.Sensitive);
@@ -99,12 +84,13 @@ public class Http1ServerLimitsTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /widgets HTTP/1.1\r\nHost: api.test\r\n\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestLineSize = 256;
-        options.Limits.MaxRequestHeaderCount = 10;
-        options.Limits.MaxRequestHeadersTotalSize = 4096;
-
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), http1 =>
+        {
+            http1.Limits.MaxRequestLineSize = 256;
+            http1.Limits.MaxRequestHeaderCount = 10;
+            http1.Limits.MaxRequestHeadersTotalSize = 4096;
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -121,11 +107,12 @@ public class Http1ServerLimitsTests
         // request-headers deadline elapses the connection is reclaimed with 408 Request Timeout.
         byte[] partialHead = Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Limits.RequestHeadersTimeout = TimeSpan.FromMilliseconds(150);
-        options.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(30);
-
         TestConnection connection = new(partialHead, completeInput: false);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), http1 =>
+        {
+            http1.Limits.RequestHeadersTimeout = TimeSpan.FromMilliseconds(150);
+            http1.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(30);
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -145,11 +132,12 @@ public class Http1ServerLimitsTests
         // the keep-alive deadline elapses the connection is reclaimed (no response is emitted).
         byte[] firstRequest = Encoding.ASCII.GetBytes("GET /one HTTP/1.1\r\nHost: api.test\r\n\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Limits.KeepAliveTimeout = TimeSpan.FromMilliseconds(150);
-        options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
-
         TestConnection connection = new(firstRequest, completeInput: false);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), http1 =>
+        {
+            http1.Limits.KeepAliveTimeout = TimeSpan.FromMilliseconds(150);
+            http1.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+        });
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -164,10 +152,11 @@ public class Http1ServerLimitsTests
         secondYielded.ShouldBeFalse();
     }
 
-    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, Action<Http1ConnectionListenerOptions> configure)
     {
+        HttpConnectionListenerOptions options = new();
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), configure);
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();

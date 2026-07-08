@@ -109,7 +109,7 @@ therefore CPU-only — it adds no wire wait — and lets the rejection happen **
 runs**, so the transport answers a real, deterministic `400` and closes the connection. A lazy
 wrapper would only discover the mismatch mid-application-read, after dispatch, where there is no
 transport-answered status today. The cost is one transient extra copy of the body, bounded by the
-`HttpServerLimits.MaxRequestBodySize` cap the request-limits package enforces.
+`HttpConnectionListenerLimits.MaxRequestBodySize` cap the request-limits package enforces.
 
 Two ordering/coverage notes:
 

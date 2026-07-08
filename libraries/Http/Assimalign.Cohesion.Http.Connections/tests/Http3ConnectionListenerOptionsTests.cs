@@ -6,12 +6,12 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests;
 
-public class Http3ListenerOptionsTests
+public class Http3ConnectionListenerOptionsTests
 {
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3ListenerOptions: Defaults to the static-only QPACK profile")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3ConnectionListenerOptions: Defaults to the static-only QPACK profile")]
     public void Options_OnCreate_DefaultToStaticOnly()
     {
-        Http3ListenerOptions options = new();
+        Http3ConnectionListenerOptions options = new();
 
         options.QPack.ShouldNotBeNull();
         options.QPack.MaxTableCapacity.ShouldBe(0);

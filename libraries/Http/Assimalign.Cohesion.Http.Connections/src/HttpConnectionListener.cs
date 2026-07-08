@@ -50,7 +50,6 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         _streamListeners = new List<(HttpConnectionFactory, IConnectionListener)>();
         _multiplexedListeners = new List<(HttpMultiplexedConnectionFactory, IMultiplexedConnectionListener)>();
 
-        HttpServerLimits limits = options.Limits;
         // Snapshot: registrations after this point must not race the accept loops or observe a
         // half-mutated list; the empty snapshots keep the parser's zero-interceptor fast paths.
         IHttpRequestInterceptor[] interceptors = [.. options.RequestInterceptors];
@@ -60,9 +59,9 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
         // Each registration carries the factory that turns an accepted transport connection into
         // its protocol-specific HttpConnection; the accept loops dispatch to that factory rather
-        // than switching on the protocol. Factories bind to the listener-wide limits/interceptors
-        // here (once they are snapshotted); the HTTP/3 factory additionally carries the QPACK
-        // options its registration captured.
+        // than switching on the protocol. Factories bind to the listener-wide interceptors here
+        // (once they are snapshotted); each registration's version-specific options (limits,
+        // QPACK) were already captured at Use* time and are closed over by its factory builder.
         foreach (HttpListenerRegistration registration in options.Registrations)
         {
             if (registration.IsMultiplexed)
@@ -71,7 +70,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             }
             else
             {
-                _streamListeners.Add((registration.CreateStreamConnectionFactory(limits, interceptors, responseInterceptors), registration.CreateStreamListener()));
+                _streamListeners.Add((registration.CreateStreamConnectionFactory(interceptors, responseInterceptors), registration.CreateStreamListener()));
             }
 
             protocols |= registration.Protocol;

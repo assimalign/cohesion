@@ -9,12 +9,12 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 internal sealed class Http1Connection : HttpConnection
 {
     private readonly IConnection _connection;
-    private readonly HttpServerLimits _limits;
+    private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
     private readonly IHttpRequestInterceptor[] _interceptors;
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
     private Http1ConnectionContext? _openContext;
 
-    public Http1Connection(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public Http1Connection(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
         : base(isSecure)
     {
         _connection = connection;

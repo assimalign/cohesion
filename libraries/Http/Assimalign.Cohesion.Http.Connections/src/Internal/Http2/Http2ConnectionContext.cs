@@ -116,12 +116,23 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
     private readonly IHttpResponseInterceptor[] _responseInterceptors;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, IHttpResponseInterceptor[] responseInterceptors)
+    // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
+    // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2ConnectionListenerOptions.Http2Limits. The
+    // guard is driven solely from the frame pump — the connection's single inbound frame
+    // processor — so it needs no synchronization of its own.
+    private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
+    private readonly Http2FloodGuard _floodGuard;
+
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpResponseInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
-        _headerDecoder = new HPackDecoder();
+        _http2Limits = limits;
+        _floodGuard = new Http2FloodGuard(limits);
+        // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
+        // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
+        _headerDecoder = new HPackDecoder(maxHeaderListSize: limits.MaxRequestHeaderListSize);
         _streams = new Dictionary<int, Http2Stream>();
-        _localSettings = BuildLocalSettings();
+        _localSettings = BuildLocalSettings(limits);
         _remoteSettings = new Http2ConnectionSettings();
         _responseInterceptors = responseInterceptors;
         _readyContexts = Channel.CreateUnbounded<Http2Context>(new UnboundedChannelOptions
@@ -952,6 +963,19 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "HTTP/2 RST_STREAM frame received on stream 0.");
         }
 
+        // CVE-2023-44487 (HTTP/2 Rapid Reset) — a client opening a stream and immediately
+        // resetting it lets it churn work off the server for near-zero cost. Count each RST_STREAM
+        // that targets a stream we have actually opened (or recently retired); a RST on a
+        // never-opened stream is handled as the idle-stream PROTOCOL_ERROR below and is a distinct
+        // violation, so it is deliberately excluded from the rapid-reset accounting. Over the
+        // per-window budget → GOAWAY(ENHANCE_YOUR_CALM), matching Kestrel's escalation.
+        if (receivedFrame.Frame.StreamId <= _lastInboundStreamId && _floodGuard.TrackStreamReset())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 stream resets exceeded the connection flood limit of {_http2Limits.MaxResetStreamsPerWindow} per window (rapid reset).");
+        }
+
         // Remove-and-reclaim: the peer is abandoning the stream, so its buffered
         // but unconsumed body is discarded and its connection-window debt is
         // credited back (RFC 9113 §6.9).
@@ -1020,6 +1044,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
                 $"SETTINGS frame received on stream {receivedFrame.Frame.StreamId}; SETTINGS frames MUST use stream 0.");
+        }
+
+        // CVE-class defence — a peer that streams SETTINGS frames forces repeated re-parsing and
+        // ACK emission. Count every inbound SETTINGS frame (ACK or not); over the per-window budget
+        // → ENHANCE_YOUR_CALM (RFC 9113 §7).
+        if (_floodGuard.TrackSettingsFrame())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 SETTINGS frames exceeded the connection flood limit of {_http2Limits.MaxSettingsFramesPerWindow} per window.");
         }
 
         if (receivedFrame.Frame.SettingsAck)
@@ -1339,6 +1373,33 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
     private async Task ProcessPingFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
+        // RFC 9113 §6.7 — a PING frame carries exactly 8 octets of opaque data; any other length is
+        // a connection-level FRAME_SIZE_ERROR. Checked ahead of the ACK short-circuit so a
+        // malformed ACK is rejected too.
+        if (receivedFrame.Frame.PayloadLength != 8)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.FrameSizeError,
+                $"HTTP/2 PING frame payload must be 8 octets; got {receivedFrame.Frame.PayloadLength}.");
+        }
+
+        // RFC 9113 §6.7 — PING is a connection-control frame and MUST be sent on stream 0.
+        if (receivedFrame.Frame.StreamId != 0)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 PING received on stream {receivedFrame.Frame.StreamId}; PING MUST use stream 0.");
+        }
+
+        // CVE-class defence — an unbounded PING stream forces a matching flood of PING ACKs
+        // (amplification). Over the per-window budget → ENHANCE_YOUR_CALM (RFC 9113 §7).
+        if (_floodGuard.TrackPingFrame())
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 PING frames exceeded the connection flood limit of {_http2Limits.MaxPingFramesPerWindow} per window.");
+        }
+
         if (receivedFrame.Frame.PingAck)
         {
             return;
@@ -1381,6 +1442,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         {
             return stream.CreateContext(_headerDecoder, ConnectionInfo, GetScheme(), CancellationToken.None, OnRequestBodyConsumedAsync);
         }
+        catch (HPack.HPackHeaderListSizeExceededException error)
+        {
+            // RFC 9113 §10.5.1 — the decoded field list exceeded the advertised
+            // MAX_HEADER_LIST_SIZE. This is an excessive-load condition (the decode aborts before
+            // fully materialising the list), so escalate with ENHANCE_YOUR_CALM rather than the
+            // PROTOCOL_ERROR used for genuinely malformed field sections below.
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 HEADERS frame exceeded the maximum header list size: {error.Message}");
+        }
         catch (HPack.HPackDecodingException error)
         {
             // RFC 9113 §8.2 / §8.3 — malformed field sections (illegal
@@ -1410,7 +1481,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             stream = new Http2Stream(
                 streamId,
                 initialSendWindow: _remoteSettings.InitialWindowSize,
-                initialReceiveWindow: _localSettings.InitialWindowSize);
+                initialReceiveWindow: _localSettings.InitialWindowSize,
+                maxHeaderBlockSize: _http2Limits.MaxRequestHeaderListSize);
             _streams.Add(streamId, stream);
 
             // RFC 9218 §7.1 — apply any PRIORITY_UPDATE that arrived while this
@@ -1896,19 +1968,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// Builds the explicit server-side initial <see cref="Http2ConnectionSettings"/>
     /// we advertise to peers. The defaults mostly track the RFC 9113
     /// initial values except for ENABLE_PUSH (0 — Cohesion does not
-    /// implement server push) and MAX_HEADER_LIST_SIZE (a 16 KB DoS
-    /// guard instead of "unlimited").
+    /// implement server push), MAX_CONCURRENT_STREAMS, and
+    /// MAX_HEADER_LIST_SIZE, which are operator-tunable via
+    /// <see cref="Http2ConnectionListenerOptions.Http2Limits"/> (a bounded DoS guard instead of "unlimited").
     /// </summary>
-    private static Http2ConnectionSettings BuildLocalSettings()
+    private static Http2ConnectionSettings BuildLocalSettings(Http2ConnectionListenerOptions.Http2Limits limits)
     {
         return new Http2ConnectionSettings
         {
             HeaderTableSize = Http2ConnectionSettings.InitialHeaderTableSize,
             EnablePush = 0,
-            MaxConcurrentStreams = 100,
+            MaxConcurrentStreams = (uint)limits.MaxStreamsPerConnection,
             InitialWindowSize = Http2ConnectionSettings.InitialInitialWindowSize,
             MaxFrameSize = Http2ConnectionSettings.InitialMaxFrameSize,
-            MaxHeaderListSize = 16_384,
+            MaxHeaderListSize = (uint)limits.MaxRequestHeaderListSize,
             // RFC 8441 §3 — advertise support for the extended CONNECT protocol
             // so peers may bootstrap WebSocket (and other protocols) over a
             // single stream via CONNECT + :protocol.

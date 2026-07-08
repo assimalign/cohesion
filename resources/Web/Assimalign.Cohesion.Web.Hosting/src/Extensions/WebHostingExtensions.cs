@@ -40,10 +40,13 @@ public static class WebHostingExtensions
     extension(WebApplicationServerBuilder builder)
     {
         /// <summary>
-        /// Configures the web server's listener endpoints and server limits from a Cohesion
+        /// Configures the web server's listener endpoints and per-endpoint limits from a Cohesion
         /// <see cref="IConfiguration"/> section at builder time. Binding is explicit and AOT-safe
-        /// (no reflection); see <see cref="HttpServerLimits"/> for the limit surface and the
-        /// expected section shape (Kestrel <c>appsettings</c> parity).
+        /// (no reflection); the bound <c>Limits</c> section is applied to every endpoint the
+        /// section registers (all keys to HTTP/1.1 endpoints; the shared
+        /// <see cref="HttpConnectionListenerLimits"/> keys to HTTP/2 endpoints). See
+        /// <c>HttpServerConfiguration</c> for the expected section shape (Kestrel
+        /// <c>appsettings</c> parity).
         /// </summary>
         /// <param name="configuration">The configuration to bind from.</param>
         /// <param name="sectionKey">The root section key. Defaults to <c>"Http"</c>.</param>

@@ -58,10 +58,12 @@ public class Http1InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 2; // would reject the 5-octet body
         options.RequestInterceptors.Add(new CapSettingInterceptor(1024));
 
-        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(
+            payload,
+            options,
+            http1 => http1.Limits.MaxRequestBodySize = 2); // would reject the 5-octet body
 
         using StreamReader reader = new(httpContext.Request.Body);
         (await reader.ReadToEndAsync()).ShouldBe("hello");
@@ -175,11 +177,10 @@ public class Http1InterceptorTests
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4096\r\n\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 16;
         DisposableFeatureAttachingInterceptor interceptor = new();
         options.RequestInterceptors.Add(interceptor);
 
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        (bool yielded, string response) = await DriveAsync(payload, options, http1 => http1.Limits.MaxRequestBodySize = 16);
 
         yielded.ShouldBeFalse();
         response.ShouldContain("413", Case.Sensitive);
@@ -235,10 +236,10 @@ public class Http1InterceptorTests
 
     // ------------------------------------------------------------------ helpers
 
-    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload, HttpConnectionListenerOptions options, Action<Http1ConnectionListenerOptions>? configure = null)
     {
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -252,10 +253,10 @@ public class Http1InterceptorTests
         return enumerator.Current;
     }
 
-    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options, Action<Http1ConnectionListenerOptions>? configure = null)
     {
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
