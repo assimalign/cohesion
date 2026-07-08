@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
@@ -14,10 +12,10 @@ using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 namespace Assimalign.Cohesion.Web.Routing.Tests;
 
 /// <summary>
-/// Verifies that the <c>UseRouting()</c> middleware dispatches through the router and that the
-/// route-match state it stores (via the #150 Features-based <c>SetRouteMatch</c>) is resolvable
-/// downstream — the middleware codepath that shares the storage rewritten under it. Composed with
-/// a minimal pipeline builder double that mirrors the real register-order execution.
+/// Verifies that the real <c>AddRouting()</c> / <c>UseRouting()</c> chain dispatches through the
+/// per-application router and that the route-match state it installs (via the #150 Features-based
+/// <c>SetRouteMatch</c>) is resolvable downstream. Composed over <see cref="TestWebApplication"/>,
+/// which mirrors production feature seeding.
 /// </summary>
 public class UseRoutingMiddlewareTests
 {
@@ -34,29 +32,28 @@ public class UseRoutingMiddlewareTests
         // Arrange
         AuthMetadata auth = new("admin");
         RecordingRouterRouteHandler handler = new();
-        Route route = new(HttpMethod.Get, "/users/{id:int}", handler, new RouterRouteMetadataCollection(auth));
         TestHttpContext context = TestHttpContext.Create(HttpMethod.Get, "/users/42");
-        context.Features.Set<IRouterFeature>(new TestRouterFeature(new Router(route)));
 
         bool downstreamRan = false;
-        TestPipelineBuilder builder = new();
-        builder.UseRouting();
-        builder.Use((ctx, next) =>
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Get, "/users/{id:int}", handler, new RouterRouteMetadataCollection(auth)));
+        app.Use((ctx, next) =>
         {
             downstreamRan = true;
             return next.Invoke(ctx);
         });
 
         // Act
-        await builder.Build().ExecuteAsync(context);
+        await app.ExecuteAsync(context);
 
         // Assert
         handler.WasInvoked.ShouldBeTrue();
         downstreamRan.ShouldBeFalse(); // a match is terminal
         context.TryGetRoute(out IRouterRoute? matched).ShouldBeTrue();
-        matched.ShouldBeSameAs(route);
+        matched.ShouldNotBeNull();
         context.TryGetRouteValues(out RouteValueDictionary? values).ShouldBeTrue();
-        values!["id"].ShouldBe("42");
+        values!["id"].ShouldBe(42); // typed conversion flows through the match feature
         context.GetEndpointMetadata<AuthMetadata>().ShouldBeSameAs(auth);
     }
 
@@ -65,19 +62,19 @@ public class UseRoutingMiddlewareTests
     {
         // Arrange
         TestHttpContext context = TestHttpContext.Create(HttpMethod.Get, "/nope");
-        context.Features.Set<IRouterFeature>(new TestRouterFeature(new Router(new Route(HttpMethod.Get, "/users/{id:int}"))));
 
         bool downstreamRan = false;
-        TestPipelineBuilder builder = new();
-        builder.UseRouting();
-        builder.Use((ctx, next) =>
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Get, "/users/{id:int}"));
+        app.Use((ctx, next) =>
         {
             downstreamRan = true;
             return next.Invoke(ctx);
         });
 
         // Act
-        await builder.Build().ExecuteAsync(context);
+        await app.ExecuteAsync(context);
 
         // Assert
         downstreamRan.ShouldBeTrue();
@@ -89,19 +86,19 @@ public class UseRoutingMiddlewareTests
     {
         // Arrange
         TestHttpContext context = TestHttpContext.Create(HttpMethod.Post, "/users/42");
-        context.Features.Set<IRouterFeature>(new TestRouterFeature(new Router(new Route(HttpMethod.Get, "/users/{id:int}"))));
 
         bool downstreamRan = false;
-        TestPipelineBuilder builder = new();
-        builder.UseRouting();
-        builder.Use((ctx, next) =>
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Get, "/users/{id:int}"));
+        app.Use((ctx, next) =>
         {
             downstreamRan = true;
             return next.Invoke(ctx);
         });
 
         // Act
-        await builder.Build().ExecuteAsync(context);
+        await app.ExecuteAsync(context);
 
         // Assert
         downstreamRan.ShouldBeFalse(); // a 405 short-circuits
@@ -109,56 +106,13 @@ public class UseRoutingMiddlewareTests
         context.GetRouteMatch().ShouldBeNull(); // no match feature installed on a 405
     }
 
-    private sealed class TestRouterFeature : IRouterFeature
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - UseRouting: throws when AddRouting was not called")]
+    public void UseRouting_WithoutAddRouting_ShouldThrow()
     {
-        public TestRouterFeature(IRouter router) => Router = router;
+        // Arrange
+        TestWebApplication app = new();
 
-        public IRouter Router { get; }
-
-        public IRouterBuilder Builder { get; } = new RouterBuilder();
-
-        public string Name => nameof(IRouterFeature);
-    }
-
-    /// <summary>
-    /// Minimal <see cref="IWebApplicationPipelineBuilder"/> that composes registered middleware in
-    /// registration order — the same shape the real <c>WebApplication</c> builder produces.
-    /// </summary>
-    private sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
-    {
-        private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
-
-        public IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-        {
-            _middleware.Add(middleware);
-            return this;
-        }
-
-        public IWebApplicationPipelineBuilder Use(IWebApplicationMiddleware middleware)
-            => Use(next => context => middleware.InvokeAsync(context, next));
-
-        public IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-            => throw new NotSupportedException();
-
-        public IWebApplicationPipeline Build()
-        {
-            WebApplicationMiddleware pipeline = _ => Task.CompletedTask;
-            for (int i = _middleware.Count - 1; i >= 0; i--)
-            {
-                pipeline = _middleware[i].Invoke(pipeline);
-            }
-
-            return new TestPipeline(pipeline);
-        }
-    }
-
-    private sealed class TestPipeline : IWebApplicationPipeline
-    {
-        private readonly WebApplicationMiddleware _middleware;
-
-        public TestPipeline(WebApplicationMiddleware middleware) => _middleware = middleware;
-
-        public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
-            => _middleware.Invoke(context);
+        // Act & Assert — UseRouting must resolve the feature AddRouting registers.
+        Should.Throw<InvalidOperationException>(() => app.UseRouting());
     }
 }

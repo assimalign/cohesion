@@ -20,9 +20,10 @@ public class RouteTests
         // Act
         bool matched = route.TryMatch(context, out RouteValueDictionary values);
 
-        // Assert
+        // Assert — the int constraint parses once and surfaces a typed int, not the raw string.
         matched.ShouldBeTrue();
-        values["id"].ShouldBe("42");
+        values["id"].ShouldBe(42);
+        values["id"].ShouldBeOfType<int>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - TryMatch: Should reject non-matching methods")]
@@ -88,7 +89,7 @@ public class RouteTests
 
         // Assert
         pathMatched.ShouldBeTrue();
-        values["id"].ShouldBe("42");
+        values["id"].ShouldBe(42);
         fullMatch.ShouldBeFalse();
     }
 

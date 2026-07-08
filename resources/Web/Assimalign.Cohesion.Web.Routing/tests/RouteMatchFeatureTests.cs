@@ -170,7 +170,7 @@ public class RouteMatchFeatureTests
         handler.InvocationCount.ShouldBe(1);
         context.GetEndpointMetadata<AuthMetadata>().ShouldBeSameAs(auth);
         context.TryGetRouteValues(out RouteValueDictionary? values).ShouldBeTrue();
-        values!["id"].ShouldBe("42");
+        values!["id"].ShouldBe(42);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: Surfaces the precedence-selected route's metadata among competing routes")]

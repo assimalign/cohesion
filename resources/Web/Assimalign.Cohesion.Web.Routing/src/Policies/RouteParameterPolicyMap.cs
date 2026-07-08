@@ -104,17 +104,34 @@ public sealed class RouteParameterPolicyMap
     /// Creates the default route parameter policy map used by router instances.
     /// </summary>
     /// <returns>A default route parameter policy map with the built-in policies registered.</returns>
+    /// <remarks>
+    /// The type policies (<c>int</c>, <c>long</c>, <c>decimal</c>, <c>double</c>, <c>float</c>,
+    /// <c>bool</c>, <c>guid</c>, <c>datetime</c>) both validate the value and convert it to its typed
+    /// representation, parsing once with the invariant culture. The remaining policies (<c>alpha</c>,
+    /// <c>length</c>, <c>minlength</c>, <c>maxlength</c>, <c>min</c>, <c>max</c>, <c>range</c>,
+    /// <c>regex</c>, <c>when</c>) validate the raw text and leave the value a string.
+    /// </remarks>
     public static RouteParameterPolicyMap CreateDefault()
     {
         return new RouteParameterPolicyMap()
-            .Add("int", static _ => new RegexRouteParameterPolicy(@"^-?\d+$"))
-            .Add("long", static _ => new RegexRouteParameterPolicy(@"^-?\d+$"))
+            // Typed conversions (validate + parse-once to the CLR type).
+            .Add("int", static _ => new IntRouteParameterPolicy())
+            .Add("long", static _ => new LongRouteParameterPolicy())
+            .Add("decimal", static _ => new DecimalRouteParameterPolicy())
+            .Add("double", static _ => new DoubleRouteParameterPolicy())
+            .Add("float", static _ => new FloatRouteParameterPolicy())
+            .Add("bool", static _ => new BoolRouteParameterPolicy())
+            .Add("guid", static _ => new GuidRouteParameterPolicy())
+            .Add("datetime", static _ => new DateTimeRouteParameterPolicy())
+            // Text/value validators (leave the value a string).
             .Add("alpha", static _ => new RegexRouteParameterPolicy(@"^[A-Za-z]+$"))
-            .Add("bool", static _ => new RegexRouteParameterPolicy(@"^(true|false)$"))
-            .Add("decimal", static _ => new RegexRouteParameterPolicy(@"^-?\d+(\.\d+)?$"))
-            .Add("guid", static _ => new RegexRouteParameterPolicy(@"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$"))
-            .Add("regex", static argument => CreateRegexPolicy(argument))
+            .Add("length", static argument => CreateLengthPolicy(argument))
+            .Add("minlength", static argument => CreateMinLengthPolicy(argument))
+            .Add("maxlength", static argument => CreateMaxLengthPolicy(argument))
+            .Add("min", static argument => CreateMinPolicy(argument))
+            .Add("max", static argument => CreateMaxPolicy(argument))
             .Add("range", static argument => CreateRangePolicy(argument))
+            .Add("regex", static argument => CreateRegexPolicy(argument))
             .Add("when", static argument => CreateRequiredRouteValuePolicy(argument));
     }
 
@@ -144,6 +161,89 @@ public sealed class RouteParameterPolicyMap
         }
 
         return new RangeRouteParameterPolicy(minimum, maximum);
+    }
+
+    private static LengthRouteParameterPolicy CreateLengthPolicy(string? argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            throw new InvalidOperationException("The 'length' route parameter policy requires an 'n' or 'min,max' argument.");
+        }
+
+        string[] parts = argument.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length == 1 &&
+            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int exact) &&
+            exact >= 0)
+        {
+            return new LengthRouteParameterPolicy(exact);
+        }
+
+        if (parts.Length == 2 &&
+            int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int minLength) &&
+            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int maxLength) &&
+            minLength >= 0 &&
+            maxLength >= minLength)
+        {
+            return new LengthRouteParameterPolicy(minLength, maxLength);
+        }
+
+        throw new InvalidOperationException($"The 'length' route parameter policy argument '{argument}' is invalid.");
+    }
+
+    private static MinLengthRouteParameterPolicy CreateMinLengthPolicy(string? argument)
+    {
+        if (!TryParseNonNegativeInt(argument, out int minLength))
+        {
+            throw new InvalidOperationException($"The 'minlength' route parameter policy requires a non-negative integer argument, but was '{argument}'.");
+        }
+
+        return new MinLengthRouteParameterPolicy(minLength);
+    }
+
+    private static MaxLengthRouteParameterPolicy CreateMaxLengthPolicy(string? argument)
+    {
+        if (!TryParseNonNegativeInt(argument, out int maxLength))
+        {
+            throw new InvalidOperationException($"The 'maxlength' route parameter policy requires a non-negative integer argument, but was '{argument}'.");
+        }
+
+        return new MaxLengthRouteParameterPolicy(maxLength);
+    }
+
+    private static MinRouteParameterPolicy CreateMinPolicy(string? argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument) ||
+            !long.TryParse(argument.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long min))
+        {
+            throw new InvalidOperationException($"The 'min' route parameter policy requires an integer argument, but was '{argument}'.");
+        }
+
+        return new MinRouteParameterPolicy(min);
+    }
+
+    private static MaxRouteParameterPolicy CreateMaxPolicy(string? argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument) ||
+            !long.TryParse(argument.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long max))
+        {
+            throw new InvalidOperationException($"The 'max' route parameter policy requires an integer argument, but was '{argument}'.");
+        }
+
+        return new MaxRouteParameterPolicy(max);
+    }
+
+    private static bool TryParseNonNegativeInt(string? argument, out int value)
+    {
+        if (!string.IsNullOrWhiteSpace(argument) &&
+            int.TryParse(argument.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) &&
+            value >= 0)
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private static RequiredValueRouteParameterPolicy CreateRequiredRouteValuePolicy(string? argument)
