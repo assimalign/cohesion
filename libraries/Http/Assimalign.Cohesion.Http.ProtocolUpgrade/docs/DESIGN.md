@@ -42,7 +42,7 @@ crosses seams only through the feature collection, per the interceptor contract.
 the whole capability by registering the pair:
 
 ```csharp
-options.Interceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
+options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
 options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
 ```
 

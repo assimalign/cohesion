@@ -156,7 +156,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// feature whose state needs deterministic cleanup at request end
     /// implements one of the disposal interfaces and is attached either at
     /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
-    /// (via <see cref="HttpConnectionListenerOptions.Interceptors"/>) or
+    /// (via <see cref="HttpConnectionListenerOptions.RequestInterceptors"/>) or
     /// later by middleware.
     /// </summary>
     public override async ValueTask DisposeAsync()

@@ -451,7 +451,7 @@ infrastructure every parse-time feature shares (`Http.RequestLimits` today;
 digest fields and request decompression are the designed next consumers), so it
 sits here; the concrete `IHttpMaxRequestBodySizeFeature` was deliberately moved
 *out* of this core into `Assimalign.Cohesion.Http.RequestLimits`. Registration
-is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
+is transport-owned (`HttpConnectionListenerOptions.RequestInterceptors` in
 `Http.Connections`) because *when* hooks run is a transport decision; *what*
 they can do is defined here.
 

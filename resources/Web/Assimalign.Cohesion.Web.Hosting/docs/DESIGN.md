@@ -322,7 +322,7 @@ The transport itself stays lean — with zero interceptors it allocates no
 per-request interception state at all — so the "h1 requests always have the
 typed feature" guarantee is a *hosting* policy, not a transport one. It lives
 here because this is the composition root: apps that want a leaner pipeline can
-inspect or clear `HttpConnectionListenerOptions.Interceptors` in their own
+inspect or clear `HttpConnectionListenerOptions.RequestInterceptors` in their own
 `UseServer` callback (user configurations run after the defaults), which keeps
 the default overridable without a dedicated opt-out knob.
 

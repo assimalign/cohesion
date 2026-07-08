@@ -108,7 +108,7 @@ capability is the single source of truth, and the scheme
 
 ### What it is
 
-`HttpConnectionListenerOptions.Interceptors` is the injection seam the transport
+`HttpConnectionListenerOptions.RequestInterceptors` is the injection seam the transport
 exposes for code outside this package to participate at request-parse time. The
 contract — `IHttpRequestInterceptor`, `HttpRequestInterceptorContext`, and the
 typed rejection `HttpRequestRejectedException` — lives in core
@@ -118,8 +118,8 @@ transport never references them:
 
 ```csharp
 HttpConnectionListenerOptions options = new();
-options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
-options.Interceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
+options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+options.RequestInterceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
 Per HTTP/1.1 request the parser:

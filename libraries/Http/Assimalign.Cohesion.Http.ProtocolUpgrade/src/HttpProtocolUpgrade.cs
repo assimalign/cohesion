@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Http;
 /// transport's listener options:
 /// </para>
 /// <code>
-/// options.Interceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
+/// options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
 /// options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
 /// </code>
 /// <para>

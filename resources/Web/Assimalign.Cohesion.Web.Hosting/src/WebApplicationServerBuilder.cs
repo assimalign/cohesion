@@ -138,11 +138,11 @@ public sealed class WebApplicationServerBuilder
     /// request carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
     /// interceptors' head hooks can observe it (HTTP/1.1 is currently the only protocol whose
     /// parse path invokes interceptors). User configurations may still inspect or clear
-    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
+    /// <see cref="HttpConnectionListenerOptions.RequestInterceptors"/> to opt out.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
-        options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+        options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
     }
 }

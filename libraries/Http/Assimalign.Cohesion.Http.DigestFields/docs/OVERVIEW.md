@@ -27,7 +27,7 @@ Usage:
 
 ```csharp
 // Server: verify inbound Content-Digest (register before any content-decoding interceptor).
-listenerOptions.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+listenerOptions.RequestInterceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
 
 // Response: stamp Content-Digest, honoring the client's Want-Content-Digest.
 context.Response.SetContentDigest(body);
