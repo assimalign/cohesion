@@ -669,6 +669,33 @@ text/event-stream` before the first write). The interceptor runs *before* any
 response byte is produced, so an interceptor may still set default response headers
 on `HttpResponseInterceptorContext.Headers`.
 
+### Connection takeover — the second capability on the same seam
+
+`HttpResponseInterceptorContext.ConnectionTakeover` (an optional
+`IHttpConnectionTakeover`) is the seam's escape hatch from HTTP framing
+altogether: where `ResponseBody` frames writes for the negotiated protocol, a
+takeover surrenders the **raw duplex connection stream** and tells the transport
+to suppress its own response for the exchange and stop reusing the connection.
+It exists for HTTP/1.1 connection transitions — the RFC 9110 §7.8 protocol
+upgrade (`101 Switching Protocols`) and the §9.3.6 `CONNECT` tunnel — which by
+definition leave the request/response loop.
+
+The same layering discipline applies: the core defines only the generic
+capability (one one-shot `TakeOver()` method), the HTTP/1.1 transport ships the
+internal implementation and offers it on the context, and the
+`Assimalign.Cohesion.Http.ProtocolUpgrade` package owns *all* upgrade semantics
+— detection (via `IHttpRequestInterceptor` over the parsed head), the
+`context.Upgrade` surface, the 101/200 accept path, and the framing-header
+scrub. Neither the core nor the transport carries an upgrade-specific type; a
+transport that cannot surrender a connection (HTTP/2 / HTTP/3, whose exchanges
+are multiplexed streams and whose protocols removed `Upgrade`) simply leaves
+the member `null`, and the feature package degrades to `context.Upgrade == null`.
+
+The capability is one-shot and claims the connection *before* any transition
+byte is written, so two features can never fight over the same connection and a
+failed accept can never be followed by a second HTTP response on a
+desynchronized stream.
+
 ### AOT posture
 
 Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.

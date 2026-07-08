@@ -386,6 +386,76 @@ HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
 - **A streaming/SSE dependency in this library.** By design — the feature packages
   own it; this transport only exposes the sink and the interceptor seam.
 
+## HTTP/1.1 connection takeover (protocol upgrade / CONNECT)
+
+### What it is
+
+The second capability the HTTP/1.1 transport offers on the response-interceptor
+seam, next to the framed sink: `Http1ConnectionTakeover`, the internal
+implementation of the core `IHttpConnectionTakeover` contract, passed as
+`HttpResponseInterceptorContext.ConnectionTakeover`. Exercising it hands the
+caller the **raw duplex connection stream** with no HTTP framing — the escape
+hatch that RFC 9110 §7.8 protocol upgrades (`101 Switching Protocols`) and
+§9.3.6 `CONNECT` tunnels need, since both transitions take the connection out
+of the HTTP request/response loop entirely.
+
+### The layering (#751): all upgrade semantics live in `Http.ProtocolUpgrade`
+
+This transport deliberately dropped its dependency on
+`Assimalign.Cohesion.Http.ProtocolUpgrade` (commit `4c21d75`) and the bridge
+was restored **without upgrade knowledge re-entering the transport**. The
+transport does not detect upgrade signalling, does not know the
+`context.Upgrade` surface, and installs no upgrade feature. It contributes
+exactly three generic things:
+
+- **The takeover capability** on the response seam (`Http1ConnectionTakeover`,
+  offered per exchange alongside the framed sink whenever response interceptors
+  are registered). `TakeOver()` is one-shot: it flips the exchange's
+  `ResponseFinalized` flag, clears `KeepAlive`, and returns the connection
+  stream.
+- **Response suppression**: `Http1ConnectionContext.SendAsync` no-ops when
+  `ResponseFinalized` is set — checked *before* the streamed-sink branch so a
+  misused streaming feature can never finalize chunked framing into a tunnel.
+- **Keep-alive exit**: the receive loop already stops when `KeepAlive` is
+  false, so no post-transition octet is ever parsed as a next request.
+
+The `Http.ProtocolUpgrade` package owns everything else — detection over the
+parsed head (via `IHttpRequestInterceptor`), the `context.Upgrade` feature
+surface, the 101/200 accept path, and the RFC-mandated framing-header scrub —
+wired by registering its interceptor pair on the listener options
+(`HttpProtocolUpgrade.CreateRequestInterceptor()` /
+`CreateResponseInterceptor()`), exactly how `Http.RequestLimits` and
+`Http.Streaming` plug in. HTTP/2 / HTTP/3 never offer the capability: their
+exchanges are multiplexed streams over a shared connection, and those protocols
+removed the `Upgrade` mechanism (their bootstrap is extended CONNECT, below).
+
+### The no-over-read invariant
+
+Handing over the raw stream is only safe because the HTTP/1.1 parser never
+buffers past the request it parsed: the request line and headers are read
+byte-by-byte, a CONNECT skips body framing entirely (RFC 9110 §9.3.6 — the
+post-header octets belong to the tunnel), and a bodyless upgrade `GET` reads no
+body. Octets a client pipelines behind the handshake therefore stay in the
+connection stream and are readable from the surrendered stream. Preserving this
+byte-exact read boundary is a hard constraint on any future read-path
+optimization (read-ahead buffering would have to hand the remainder over with
+the takeover).
+
+### Unaccepted transitions
+
+If no handler accepts, the exchange follows the normal path: the transport
+writes the buffered response. For an unaccepted upgrade request that is exactly
+right (RFC 9110 §7.8 — a server that does not switch protocols just answers the
+request). For an unaccepted `CONNECT`, any pipelined tunnel octets will fail to
+parse as a next request and the wire-failure classifier drops the connection —
+unchanged from the pre-takeover behavior, and safe (the connection dies rather
+than desynchronizing).
+
+### AOT posture
+
+No reflection or runtime codegen: the takeover is a two-flag flip plus a field
+read, resolved through the existing interceptor seam.
+
 ## Receive-loop failure isolation
 
 Each protocol's inbound processor (`Http1ConnectionContext.ReceiveAsync`, the
