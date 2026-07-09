@@ -15,9 +15,15 @@ controllers, metadata, results).
   but not the method), emitting an RFC 9110 `Allow` header for the latter.
 - Accepts **multiple HTTP methods** per route and serves **HEAD** from a matching **GET**
   route (RFC 9110 §9.3.2).
+- Applies **inline constraints** that both validate and, for type constraints (`int`, `long`,
+  `decimal`, `double`, `float`, `bool`, `guid`, `datetime`), **convert** the value to its CLR type —
+  parsed once, invariant culture — plus text/value validators (`length`, `minlength`, `maxlength`,
+  `min`, `max`, `range`, `regex`, `alpha`, `when`).
 - Carries an immutable, typed **endpoint-metadata bag** on each route and surfaces the
-  **route-match result** (route + values + metadata) as a strongly-typed HTTP feature — the
+  **route-match result** (route + typed values + metadata) as a strongly-typed HTTP feature — the
   reflection-free seam that auth, docs, and observability consume.
+- Keeps routing state **per application** (no process-wide shared builder), so multiple web
+  applications hosted in one process have fully isolated route tables.
 
 ## Key types
 
@@ -28,7 +34,8 @@ controllers, metadata, results).
 | `Route` | A pattern + the HTTP methods it accepts + a handler + its endpoint metadata. |
 | `Router` | Evaluates routes by precedence; produces a `RouteMatch`. |
 | `RouteMatch` / `RouteMatchStatus` | The match outcome: `Matched`, `MethodNotAllowed`, `NoMatch`. |
-| `RouteParameterPolicy*` | Inline constraints (`int`, `range`, `regex`, required-value). |
+| `RouteParameterPolicy` / `TypedRouteParameterPolicy` | Inline constraint base types. `TypedRouteParameterPolicy` validates **and** converts (parse-once); the public extension point for custom typed constraints. |
+| `RouteParameterPolicyMap` | Resolves inline policy names (`int`, `guid`, `length(n)`, `min(n)`, `range(a,b)`, …) to executable policies; `CreateDefault()` registers the built-ins. |
 | `IRouterRouteMetadataCollection` / `RouterRouteMetadataCollection` | Immutable, ordered, reflection-free endpoint-metadata bag (`GetMetadata<T>` is last-wins). |
 | `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata. |
 | `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) over that feature. |

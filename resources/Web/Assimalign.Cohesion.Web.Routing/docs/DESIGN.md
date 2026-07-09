@@ -7,9 +7,9 @@ given an inbound `IHttpContext`, which handler (if any) should run, and — when
 should — whether that is a *no route* (404) or a *wrong method* (405) situation. It also
 carries the **endpoint metadata** each route declares and surfaces the **route-match
 result** to the rest of the pipeline as a typed feature. It is a foundation primitive: the
-API, function, controller, and metadata programming models (issues #149, #151, #786–#789,
-#796) all build on the matcher and the metadata seam defined here, so their behavior must
-be predictable, standards-aware, and reflection-free before those layers are added.
+API, function, controller, and metadata programming models (issues #149, #151, #786–#788,
+#796) all build on the matcher, the typed route values, and the metadata seam defined here, so
+their behavior must be predictable, standards-aware, and reflection-free before those layers are added.
 
 Scope of this library:
 
@@ -197,7 +197,9 @@ public interface IRouteMatchFeature : IHttpFeature
 
 `Metadata` is surfaced directly on the feature because, in this routing model, **the matched route
 *is* the endpoint** — there is no separate `Endpoint` type to indirect through. Consumers therefore
-read one feature and reach the endpoint-metadata seam without a second hop.
+read one feature and reach the endpoint-metadata seam without a second hop. The feature's `Values`
+carry the **typed** route values produced by type constraints (#789), so a consumer reading
+`feature.Values["id"]` for `/{id:int}` gets a boxed `int` without re-parsing.
 
 Both `Router.RouteAsync` and the `UseRouting` middleware install the feature via `SetRouteMatch` on a
 successful match. Resolution is type-keyed (`context.Features.Get<IRouteMatchFeature>()`), so there are
@@ -233,6 +235,29 @@ and dispatches on the result:
 `IRouter.RouteAsync` performs the same dispatch for callers that use the router directly without
 the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
 
+### Per-application router state (the isolation rule) (#789)
+
+**Routing state is per application, never process-wide.** Each web application owns exactly one
+`IRouterFeature` (the `internal RouterFeature`), which holds that application's `IRouterBuilder` and
+the immutable `IRouter` lazily built from it. The wiring guarantees a single builder per app:
+
+- `AddRouting()` (builder time) registers the per-application `RouterFeature` as an `IHttpFeature`.
+  Because it is one DI singleton per application, two applications get two distinct features.
+- `UseRouting()` (pipeline time) resolves that **same** feature off the application context
+  (`builder.Context.Features`) and returns its `Builder`. `MapGet`/`Map` (in `Web.Api`) resolve the
+  same feature the same way. So `AddRouting`, `UseRouting`, and `MapGet` all map into and match
+  against one per-application builder. `UseRouting` throws if `AddRouting` was not called first.
+- At request time the middleware resolves the router from the per-request feature collection
+  (`context.Features.Get<IRouterFeature>()`), which is seeded from the application's features — the
+  same instance whose `Builder` was mapped into.
+
+This replaces the original defect: `UseRouting()` returned a process-wide `static
+RouterBuilder.Shared` while `AddRouting()` registered a *different* per-app builder. Routes mapped
+through `UseRouting()` therefore landed in a static that every application in the process shared —
+breaking Cohesion's multi-service in-process hosting, where several `WebApplication`s must keep
+isolated route tables. The static is deleted; there is no shared builder anywhere in the library.
+`PerApplicationRouterStateTests` proves two applications in one process serve only their own routes.
+
 ## Parameter policies (constraints)
 
 Inline constraints (`{id:int}`, `{id:range(1,10)}`, `{id:regex(...)}`, required-value, …) are
@@ -240,6 +265,44 @@ resolved through a `RouteParameterPolicyMap` and evaluated **inside** `TryMatchP
 constraint means the path did not match *for that route*, so a more general route can still pick
 the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls through to
 `/api/{id}`). Unknown policy references fail fast at `Route` construction, not at request time.
+
+### The constraint model: validators vs. typed conversions (#789)
+
+`RouteParameterPolicy` is the public extension point. The concrete built-ins are `internal sealed`
+(under `Internal/Policies/`) and are surfaced **only by name** through `RouteParameterPolicyMap` —
+consumers never reference them as types, which keeps the public policy surface to the two base
+classes plus `RouteParameterPolicyContext` and `RouteParameterPolicyMap`. There are two kinds:
+
+- **Validators** derive from `RouteParameterPolicy` and only accept/reject the raw text; the value
+  stays a `string`. Built-ins: `alpha`, `length(n)` / `length(min,max)`, `minlength(n)`,
+  `maxlength(n)`, `min(n)`, `max(n)`, `range(min,max)`, `regex(...)`, `when(key=value)`.
+- **Typed conversions** derive from `TypedRouteParameterPolicy`, which both validates **and**
+  converts. Built-ins: `int`, `long`, `decimal`, `double`, `float`, `bool`, `guid`, `datetime`.
+
+The typed-conversion contract is the crux of the #789 fix. Previously a type constraint was just a
+regex (`int` == `^-?\d+$`): it *validated* the shape but the matched value stayed a string, so every
+binding layer above had to re-parse it — and the regex accepted values the CLR type could not hold
+(e.g. an `int` that overflows `Int32`). Now:
+
+- `TypedRouteParameterPolicy.Applies` is **sealed** and owns a single-parse / write-back protocol:
+  it parses the raw text **once** (always with `CultureInfo.InvariantCulture`) via the derived
+  type's `TryConvert`, and on success calls `context.SetParameterValue(typed)` to replace the string
+  in the `RouteValueDictionary` with the strongly-typed value. On failure the candidate is rejected.
+- So after a successful match, `values["id"]` for `/{id:int}` is a boxed `int`, not `"42"`.
+  Consumers (results, binding, auth) read the typed value with no second parse. This is what
+  "constraints produce typed route values" means.
+- Because conversion happens in place on the shared `RouteValueDictionary`, a later validator on the
+  same parameter (e.g. `{id:int:min(1)}`) sees the already-typed value; validators read it back
+  through `Convert.ToString(value, InvariantCulture)`, so order (`int:min` vs `min:int`) does not
+  matter.
+
+**Custom typed conversion.** A custom constraint contributes typed conversion the same way the
+built-ins do: derive from `TypedRouteParameterPolicy`, implement `ConversionType` + `TryConvert`,
+and register it through a `RouteParameterPolicyMap` (`map.Add("version", _ => new …Policy())`). No
+reflection or `TypeConverter` is involved, keeping the path AOT-safe.
+
+Values that are already the target type (a typed default, or a re-evaluated candidate) are accepted
+without re-parsing (`ConversionType.IsInstanceOfType`), so conversion is genuinely once-per-value.
 
 ## AOT posture
 
@@ -249,9 +312,12 @@ the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls throug
 - Endpoint-metadata discovery (`GetMetadata<T>`, feature resolution) is `is`-test / `OfType` based, so
   it is safe for #796 (source-generated binding) to emit metadata objects at build time and for #790
   (auth) to read them at request time under NativeAOT and trimming.
+- Typed conversion (`{id:int}` → boxed `int`) is done by parsing built-in BCL `TryParse` methods
+  under the invariant culture — no reflection, no `TypeConverter`, no runtime code generation — so it
+  is AOT/trim-safe. Custom conversions plug in the same way (`TypedRouteParameterPolicy`).
 - Source-generated endpoint **binding** (turning a matched route into typed handler arguments) is
   intentionally out of scope here and is delivered by the analyzer work in #796; the matcher produces a
-  `RouteValueDictionary` of strings and lets that layer bind.
+  `RouteValueDictionary` whose type-constrained values are already typed and lets that layer bind the rest.
 
 ## Lifecycle and immutability
 
@@ -274,12 +340,16 @@ The endpoint-metadata seam (#150) is consumed by:
 - **#790 Auth scheme model / handlers** — read authorization metadata off the matched endpoint via
   `GetEndpointMetadata<T>()`.
 - **#796 Source-generated binding** — emits metadata objects at build time instead of reflecting over
-  handler signatures at runtime.
-- **#789 Typed route values / per-app router state** — builds on the route model and match feature here.
+  handler signatures at runtime, and binds the typed route values this library now produces.
+
+## Delivered here
+
+- **#789 Typed route values, expanded constraints, per-application router state** — see the constraint
+  model and per-application router state sections above. The additive routing items #786/#787/#788
+  build on the route model and match feature here and were intentionally held until #789 merged.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 
-- **Typed route values, richer constraints, per-app router state** — #789.
 - **Route groups (`MapGroup`)** — #786.
 - **Named routes + link generation (outbound URL building)** — #787. `OutboundPrecedence` is
   computed and preserved for this future work but is not consumed by the matcher.

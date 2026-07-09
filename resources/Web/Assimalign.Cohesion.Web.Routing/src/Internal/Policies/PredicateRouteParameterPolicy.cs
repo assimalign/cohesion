@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Evaluates a route parameter using a custom predicate.
 /// </summary>
-public sealed class PredicateRouteParameterPolicy : RouteParameterPolicy
+internal sealed class PredicateRouteParameterPolicy : RouteParameterPolicy
 {
     private readonly Func<RouteParameterPolicyContext, bool> _predicate;
 
