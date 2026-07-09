@@ -169,19 +169,6 @@ streams on one connection, so a per-connection setting cannot work). Direction l
 connection, not on `ConnectionCapabilities`, because it varies per instance, not per transport
 class.
 
-### Optional stream identifier (`IStreamIdentifierFeature`)
-
-Some consumers need the transport-native identifier a multiplexed transport assigns to a stream —
-the HTTP/3 QPACK decoder keys Section Acknowledgment / Stream Cancellation on the QUIC request
-stream ID (RFC 9204 §4.4). That identifier is **not** on `IConnection`: the synthetic
-`ConnectionId` is an opaque per-process value, not a wire number, and a byte-stream transport has
-no stream ID at all. Rather than widen the contract with a member most connections cannot answer,
-the wire identifier is an **optional capability**, `IStreamIdentifierFeature` (`long StreamId`),
-which a stream connection may also implement (QUIC's does, returning `QuicStream.Id`). A consumer
-discovers it with a type test (`connection is IStreamIdentifierFeature`) and falls back when it is
-absent — the same discover-by-capability posture as `ConnectionCapabilities`, applied to an
-identity that only some transports have. This keeps QUIC specifics off the general surface.
-
 ### Capability selection, not protocol identity
 
 Consumers state *requirements*, not protocol names: HTTP/1.1 needs a reliable, ordered,

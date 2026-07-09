@@ -1226,12 +1226,14 @@ below the boundary and may complete, while `4k` and above are rejected. The
 count advances at *accept*, not at dispatch, so a malformed stream the
 server touched and dropped still falls inside "may have been processed" and
 the client will not retry a request whose side effects may have run. The
-`GOAWAY` boundary is a *count* of accepted streams, not the identity of any
-one stream, so it stays on this count-based derivation even though the wire
-stream ID of an individual request is now reachable through the transport's
-optional `IStreamIdentifierFeature` (used by the QPACK decoder — see "Live
-decoder-stream feedback"); the opaque `ConnectionId` remains a per-process
-value, not a wire identifier.
+connection abstraction surfaces only an opaque `ConnectionId`, not the
+numeric QUIC stream ID, so this count-based derivation is how the HTTP/3
+layer reconstructs wire stream identity — both this boundary and, since the
+QPACK dynamic-table work, each accepted request stream's own wire ID
+(`4 × (k−1)` for the k-th accepted stream, captured off the same
+`Interlocked.Increment`), which keys the decoder-stream Section
+Acknowledgment / Stream Cancellation instructions (see "Live decoder-stream
+feedback").
 
 `SendGoAwayAsync` writes the frame to the retained outbound control stream
 and is best-effort and one-shot: if the receive loop never ran (no control
@@ -1409,13 +1411,22 @@ stateless and sidesteps having to track the client decoder's acknowledgments.
 Section Acknowledgment (§4.4.1) and Stream Cancellation (§4.4.2) are keyed on
 the QUIC **request stream ID**, which the general `IConnection` abstraction
 deliberately does not carry — its `ConnectionId` is a synthetic per-process
-value, and a byte-stream transport has no wire stream number to report. The
-wire stream ID is surfaced instead through the optional
-`Assimalign.Cohesion.Connections.IStreamIdentifierFeature` capability: the QUIC
-stream connection implements it (returning `QuicStream.Id`), and the HTTP/3
-engine reads it with a type test (`streamConnection is IStreamIdentifierFeature`),
-falling back to skipping the stream-keyed instructions when a transport does not
-surface one. This keeps QUIC specifics off the general connection surface.
+value, and a byte-stream transport has no wire stream number to report. Rather
+than widening the transport contract to surface it (a one-off capability
+interface was reviewed and rejected as unwanted coupling), the HTTP/3 engine
+**derives** each request stream's wire ID from the same client-bidi numbering
+law the teardown `GOAWAY` boundary already depends on: client-initiated
+bidirectional streams are numbered `0, 4, 8, …` in creation order (RFC 9000
+§2.1), and a frame for a higher-numbered stream implicitly opens the
+lower-numbered ones of the same type first (§3.2), so a multiplexed transport
+surfaces them in ascending order and the k-th accepted request stream is
+stream `4(k−1)`. The accept loop captures the ID off the same
+`Interlocked.Increment` that advances the `GOAWAY` boundary, so the two
+derivations cannot drift apart, and wire stream identity stays a
+protocol-layer reconstruction — nothing QUIC-specific is added to the
+connection abstraction. (This makes "inbound streams of a type arrive in wire
+order" an explicit dependency of this layer on the multiplexed transport; the
+`GOAWAY` derivation already relied on it.)
 
 With that ID in hand the accept loop emits both instructions on the server's
 decoder stream:
@@ -1438,10 +1449,10 @@ decoder stream:
   swallowing an already-gone decoder stream) so the peer encoder can reclaim the
   outstanding references (§2.2.2.2).
 
-Emission is guarded on the stream ID being available (`IStreamIdentifierFeature`
-present) and on `_decoderStream` existing; it degrades to the pre-dynamic-table
-behavior otherwise. Per-stream failure isolation is preserved — the instructions
-ride the connection-lifetime decoder stream and never fault the accept loop.
+Emission is guarded on `_decoderStream` existing (with the dynamic table
+disabled none of this machinery runs). Per-stream failure isolation is
+preserved — the instructions ride the connection-lifetime decoder stream and
+never fault the accept loop.
 
 ### Decoder representations
 

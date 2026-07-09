@@ -22,12 +22,11 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 /// <c>Open → Closing</c> transition when the holder completes <see cref="Output"/>, and close/dispose
 /// propagation — now live in the driver rather than in a bespoke pipe-pair implementation.
 /// </remarks>
-internal sealed class TestConnection : Connection, IStreamIdentifierFeature
+internal sealed class TestConnection : Connection
 {
     private readonly Connection _self;
     private readonly Connection _peer;
     private readonly ConnectionDirection _direction;
-    private readonly long _streamId;
     private bool _isAborted;
     private bool _isDisposed;
 
@@ -37,11 +36,9 @@ internal sealed class TestConnection : Connection, IStreamIdentifierFeature
         ConnectionCapabilities? capabilities = null,
         EndPoint? localEndPoint = null,
         EndPoint? remoteEndPoint = null,
-        bool completeInput = true,
-        long streamId = 0)
+        bool completeInput = true)
     {
         _direction = direction;
-        _streamId = streamId;
 
         // The pair is created bidirectional (the pipes are always fully functional); the requested
         // direction is only reported, matching the original double, so read-only preloaded streams
@@ -79,13 +76,6 @@ internal sealed class TestConnection : Connection, IStreamIdentifierFeature
     public Exception? AbortReason { get; private set; }
 
     public override ConnectionId Id => _self.Id;
-
-    /// <summary>
-    /// The transport-native stream identifier this double reports through
-    /// <see cref="IStreamIdentifierFeature"/>, mirroring the QUIC stream ID the HTTP/3
-    /// QPACK decoder keys Section Acknowledgment / Stream Cancellation on.
-    /// </summary>
-    public long StreamId => _streamId;
 
     public override EndPoint? LocalEndPoint => _self.LocalEndPoint;
 

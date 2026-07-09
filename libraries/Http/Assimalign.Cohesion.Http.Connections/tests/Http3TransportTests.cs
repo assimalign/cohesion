@@ -622,10 +622,11 @@ public class Http3TransportTests
     {
         // RFC 9204 §4.4.1 — once the decoder resolves a field section that referenced
         // the dynamic table, it emits a Section Acknowledgment on its decoder stream
-        // keyed on the request stream ID, so the peer encoder can advance its Known
-        // Received Count (§2.1.1) and evict acknowledged entries.
-        const long RequestStreamId = 8;
-
+        // keyed on the request stream ID. The ID is derived from QUIC's client-bidi
+        // numbering law (0, 4, 8, … in acceptance order — the same law the GOAWAY
+        // boundary uses): the dynamic request below is the SECOND accepted request
+        // stream, so the acknowledgment must carry stream ID 4 — and no acknowledgment
+        // may appear for the first (static, nothing to acknowledge) stream 0.
         TestConnection control = new(
             HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
             ConnectionDirection.ReadOnly);
@@ -635,16 +636,20 @@ public class Http3TransportTests
                 HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
             ConnectionDirection.ReadOnly);
 
-        // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; dynamic indexed rel 0 → absolute 0.
-        TestConnection request = new(
+        // First request stream (wire ID 0): static-only, owes no acknowledgment.
+        TestConnection staticRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/one", "https", "a"));
+
+        // Second request stream (wire ID 4): encoded RIC 2 → RIC 1; Delta Base 0 →
+        // Base 1; dynamic indexed rel 0 → absolute 0.
+        TestConnection dynamicRequest = new(
             HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
                 encodedRequiredInsertCount: 2,
                 deltaBaseByte: 0x00,
                 literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
-                0),
-            streamId: RequestStreamId);
+                0));
 
-        TestMultiplexedConnection connection = new(control, encoder, request);
+        TestMultiplexedConnection connection = new(control, encoder, staticRequest, dynamicRequest);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
         {
@@ -657,6 +662,8 @@ public class Http3TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/one");
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
         enumerator.Current.Request.Headers[new HttpHeaderKey("x-dyn")].Value.ShouldBe("hello");
 
         // Drive the loop to completion so teardown awaits the encoder drain.
@@ -664,10 +671,12 @@ public class Http3TransportTests
 
         // The decoder stream (OpenedStreams[1]) carries its 0x03 type prefix, the
         // Insert Count Increment for the applied insertion, and the Section
-        // Acknowledgment keyed on the request stream ID.
+        // Acknowledgment keyed on the second request stream's wire ID (4) — not on
+        // the non-referencing first stream (0).
         byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
         decoderOutput[0].ShouldBe((byte)0x03);
-        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.SectionAcknowledgment(RequestStreamId));
+        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.SectionAcknowledgment(4));
+        decoderOutput.ShouldNotContain(QPackDecoderInstructionEncoder.SectionAcknowledgment(0)[0]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit a Stream Cancellation when a dynamic-table stream is abandoned before acknowledgment")]
@@ -677,17 +686,18 @@ public class Http3TransportTests
         // dynamic table but which is abandoned before its Section Acknowledgment (here
         // the blocked-stream budget is 0, so referencing a not-yet-inserted entry is a
         // QPACK_DECOMPRESSION_FAILED connection error) owes a Stream Cancellation on
-        // the decoder stream so the peer encoder can reclaim the outstanding references.
-        const long RequestStreamId = 4;
-
-        TestConnection request = new(
+        // the decoder stream so the peer encoder can reclaim the outstanding
+        // references. The abandoned request is the SECOND accepted request stream, so
+        // the cancellation must carry its derived wire ID 4.
+        TestConnection staticRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/one", "https", "a"));
+        TestConnection dynamicRequest = new(
             HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
                 encodedRequiredInsertCount: 2,
                 deltaBaseByte: 0x00,
                 literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
-                0),
-            streamId: RequestStreamId);
-        TestMultiplexedConnection connection = new(request);
+                0));
+        TestMultiplexedConnection connection = new(staticRequest, dynamicRequest);
         HttpConnectionListenerOptions options = new();
         options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
         {
@@ -699,14 +709,17 @@ public class Http3TransportTests
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
-        // The decompression failure terminates the connection without yielding a context.
+        // The static request is served; the dynamic one hits the decompression
+        // failure, which terminates the connection without yielding its context.
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/one");
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
 
         // The decoder stream (OpenedStreams[1]) carries its 0x03 type prefix then the
-        // Stream Cancellation keyed on the abandoned request stream ID.
+        // Stream Cancellation keyed on the abandoned request stream's wire ID (4).
         byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
         decoderOutput[0].ShouldBe((byte)0x03);
-        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.StreamCancellation(RequestStreamId));
+        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.StreamCancellation(4));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate when a request blocks beyond QPACK_BLOCKED_STREAMS")]

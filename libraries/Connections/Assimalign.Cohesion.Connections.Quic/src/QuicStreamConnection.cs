@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Connections.Quic;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-internal sealed class QuicStreamConnection : Connection, IStreamIdentifierFeature
+internal sealed class QuicStreamConnection : Connection
 {
     private readonly QuicStream _stream;
     private readonly ListenerId _listenerId;
@@ -92,15 +92,6 @@ internal sealed class QuicStreamConnection : Connection, IStreamIdentifierFeatur
 
     /// <inheritdoc />
     public override ConnectionId Id { get; } = ConnectionId.New();
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// The QUIC stream ID (RFC 9000 §2.1) the peer assigned to this stream, surfaced
-    /// for consumers that must key wire-level bookkeeping on it (the HTTP/3 QPACK
-    /// decoder keys Section Acknowledgment / Stream Cancellation on the request stream
-    /// ID — RFC 9204 §4.4). It is distinct from the synthetic <see cref="Id"/>.
-    /// </remarks>
-    public long StreamId => _stream.Id;
 
     /// <inheritdoc />
     public override EndPoint? LocalEndPoint { get; }
