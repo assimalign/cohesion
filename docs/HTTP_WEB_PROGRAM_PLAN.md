@@ -135,7 +135,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #754 | A | Alt-Svc advertisement (RFC 7838) | — |
 | #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
 | #776 | E | Pipeline exception boundary + RFC 9457 ProblemDetails | #762 |
-| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771 |
+| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771, #864 |
 | #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
 | #779 | E | `Web.Compression` (response + request) | #762, #769, #771 |
 | #780 | E | `Web.HttpsPolicy` (HTTPS redirection + HSTS) | #763 |
@@ -147,7 +147,8 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #793 | E | `Web.Testing` factory over the in-memory driver | #762, #772 |
 | #148 | F | Matcher precedence/405 fixes (existing) | — |
 | #150 | F | Endpoint metadata bag (existing) — **fan-out seam** | — |
-| #149 | F | Result writers + content negotiation (existing) | #771 |
+| #864 | F | **IResult result abstraction** (Web.Results hub) — **fan-out seam** | #776 (merge+refold), #769 |
+| #149 | F | Negotiated ObjectResult/Ok<T> + IResultFormatter registry (re-scoped) | #864, #771 |
 | #789 | F | Typed route values, constraints, per-app router state | #148 |
 
 ### Stage 3 — Composition
@@ -168,9 +169,9 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
-| #796 | F | Source-generated endpoint binding + validation (AOT) | #150, #149, #771 |
+| #796 | F | Source-generated endpoint binding + validation (AOT) | #150, #864, #771 |
 | #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
-| #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #796 |
+| #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #864, #796 |
 
 ### Post-v1 follow-ups (filed, not scheduled)
 Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
