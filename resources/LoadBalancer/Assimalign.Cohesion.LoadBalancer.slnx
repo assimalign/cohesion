@@ -12,8 +12,17 @@
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
 		<Project Path="Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
 	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/" />
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.Hosting/src/Assimalign.Cohesion.LoadBalancer.Hosting.csproj" />
+	</Folder>
 	<Folder Name="/LoadBalancer/refs/" >
-		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 	</Folder>
 </Solution>

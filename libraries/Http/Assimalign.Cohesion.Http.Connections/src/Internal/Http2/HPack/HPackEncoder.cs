@@ -59,6 +59,38 @@ internal static partial class HPackEncoder
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
+    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). The resulting
+    /// HEADERS frame is written without <c>END_STREAM</c> so the final response can follow on the same
+    /// stream (RFC 9113 §8.1).
+    /// </summary>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
+    {
+        using MemoryStream buffer = new();
+        WriteStatusHeader(buffer, (int)statusCode);
+
+        if (headers is not null)
+        {
+            foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                    }
+                }
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
     public static bool EncodeIndexedHeaderField(int index, Span<byte> destination, out int bytesWritten)
     {
         if (destination.IsEmpty)

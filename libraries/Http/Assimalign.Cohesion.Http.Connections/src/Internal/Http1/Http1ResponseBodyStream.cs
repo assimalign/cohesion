@@ -29,6 +29,7 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
     private bool _suppressBody;
 
     public Http1ResponseBodyStream(Stream stream, Http1Context context)
+        : base(context)
     {
         _stream = stream;
         _context = context;

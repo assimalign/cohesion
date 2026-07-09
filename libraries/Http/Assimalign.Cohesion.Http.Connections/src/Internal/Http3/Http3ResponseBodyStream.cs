@@ -24,6 +24,7 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
     private readonly Stream _stream;
 
     public Http3ResponseBodyStream(Http3Context context)
+        : base(context)
     {
         _context = context;
         _stream = context.StreamConnection.AsStream();
@@ -31,6 +32,9 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 
     protected override async ValueTask CommitHeadersAsync(CancellationToken cancellationToken)
     {
+        // RFC 9110 §15.2 — the final (streamed) response head must not carry a 1xx status.
+        HttpInterimResponseRules.EnsureFinalStatusCode(_context.Response.StatusCode);
+
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
         await WriteFrameAsync(Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);

@@ -14,12 +14,12 @@
 	</Folder>
 	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/">
 		<File Path="Assimalign.Cohesion.Core/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Core/docs/Overview.md" />
+		<File Path="Assimalign.Cohesion.Core/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/" />
 	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/" />
 	<Folder Name="/Core/Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/">
-		<File Path="Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/Overview.md" />
+		<File Path="Assimalign.Cohesion.Core/docs/Assembly/System.IO/Glob/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Core/Assimalign.Cohesion.Core/src/">
 		<Project Path="Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />

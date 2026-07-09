@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <remarks>
 /// <para>
 /// Stateless — one instance serves every connection and request on the listener. It hooks
-/// <c>OnRequestBody</c>: by the time that hook runs the transport has materialized the request
+/// <c>AfterRequestBody</c>: by the time that hook runs the transport has materialized the request
 /// body, so the verifier reads it in full (to hash it), compares against every supported digest the
 /// field carries, and returns a replay stream so the application still observes the body. A
 /// mismatch, or a malformed <c>Content-Digest</c> field, throws
@@ -24,10 +24,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// untouched.
 /// </para>
 /// </remarks>
-internal sealed class HttpContentDigestInterceptor : IHttpRequestInterceptor
+internal sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+    public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
     {
         if (!context.Headers.TryGetValue(HttpHeaderKey.ContentDigest, out HttpHeaderValue raw) || raw.IsEmpty)
         {

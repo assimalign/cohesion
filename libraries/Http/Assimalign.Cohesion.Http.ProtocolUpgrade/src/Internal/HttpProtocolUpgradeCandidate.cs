@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Http;
 /// (RFC 9110 §7.8 upgrade or §9.3.6 <c>CONNECT</c>). Installed by
 /// <see cref="HttpProtocolUpgradeInterceptor"/>'s request hook and consumed — removed and
 /// replaced with the public <see cref="IHttpProtocolUpgradeFeature"/> — by its response hook,
-/// where the transport's connection-takeover capability becomes available. The two hooks are
+/// where the transport's exchange control (takeover) becomes available. The two hooks are
 /// stateless shared instances, so this feature is how detection state crosses from the request
 /// seam to the response seam within one exchange.
 /// </summary>

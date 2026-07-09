@@ -26,7 +26,7 @@ internal abstract class TransportHttpContext : HttpContext
         ConnectionInfo = connectionInfo;
         _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors
-        // attached features during the read (see IHttpRequestInterceptor); it is used directly —
+        // attached features during the read (see IHttpExchangeInterceptor); it is used directly —
         // no defaults-wrapper layer, which would add a second dictionary probe to every Get on
         // the hot path. A null/foreign collection degrades gracefully: null gets a fresh empty
         // collection (the zero-interceptor fast path), and a non-HttpFeatureCollection
@@ -58,6 +58,21 @@ internal abstract class TransportHttpContext : HttpContext
     public override IDictionary<string, object?> Items { get; }
     public override CancellationToken RequestCancelled => _abortedSource.Token;
 
+    // The response-lifecycle interception state, retained for the exchange's lifetime when at
+    // least one response interceptor is registered so the later lifecycle hooks
+    // (BeforeResponseHeadAsync / AfterResponseAsync) re-invoke against the same context. Null on
+    // the zero-interceptor fast path, which keeps the later invokers true no-ops.
+    private IHttpExchangeInterceptor[]? _responseInterceptors;
+    private HttpExchangeInterceptorResponseContext? _responseInterception;
+    private bool _beforeResponseHeadInvoked;
+    private bool _afterResponseInvoked;
+
+    // Set when the buffered send path commits the final response head (the streaming path is
+    // tracked by the sink's own HasStarted). Feeds HasFinalResponseStarted so the exchange
+    // control's probes (CanWriteInterimResponse / CanTakeOver) observe the buffered commit too —
+    // without this, an AfterResponse hook could write a 1xx after the final response.
+    private bool _finalResponseStarted;
+
     /// <summary>
     /// The transport's raw response body sink for this exchange, or
     /// <see langword="null"/> when no response interceptors are registered (the buffered
@@ -69,39 +84,115 @@ internal abstract class TransportHttpContext : HttpContext
     internal HttpResponseBodyStream? ResponseBodySink { get; private set; }
 
     /// <summary>
-    /// Runs the registered response interceptors, exposing the transport's raw response body
-    /// <paramref name="sink"/> so a feature package can wrap it and install a typed response
-    /// feature on <see cref="Features"/> — without the transport depending on that package.
-    /// The sink is retained so the transport's send path can finalize it if the exchange streamed.
+    /// Whether the final response head has been (or is being) committed to the wire — by the
+    /// buffered send path (<see cref="MarkFinalResponseStarted"/>) or by the streaming sink's
+    /// first head commit. Once <see langword="true"/>, interim responses can no longer precede
+    /// the final response and the exchange can no longer be taken over.
+    /// </summary>
+    internal bool HasFinalResponseStarted =>
+        _finalResponseStarted || (ResponseBodySink?.HasStarted ?? false);
+
+    /// <summary>
+    /// Marks the final response head as committed. Called by each transport's buffered send path
+    /// immediately before it encodes and writes the head (after the <c>BeforeResponseHead</c>
+    /// hooks and directive re-checks have passed).
+    /// </summary>
+    internal void MarkFinalResponseStarted() => _finalResponseStarted = true;
+
+    /// <summary>
+    /// The exchange's current control-flow directive, derived from the transport flags the
+    /// <see cref="IHttpExchangeControl"/> transitions drive: <see cref="Cancel"/> /
+    /// <see cref="IHttpExchangeControl.Abort"/> maps to <see cref="HttpExchangeDirective.Abort"/>;
+    /// a protocol that supports handing off its connection overrides this to report
+    /// <see cref="HttpExchangeDirective.TakeOver"/> (see <c>Http1Context</c>).
+    /// </summary>
+    internal virtual HttpExchangeDirective ExchangeDirective =>
+        CancelRequested ? HttpExchangeDirective.Abort : HttpExchangeDirective.Continue;
+
+    /// <summary>
+    /// Runs the registered response interceptors' <see cref="IHttpExchangeInterceptor.BeforeResponse"/>
+    /// hooks, exposing the transport's raw response body <paramref name="sink"/> and per-exchange
+    /// <paramref name="control"/> so feature packages can wrap them and install typed response
+    /// features on <see cref="Features"/> — without the transport depending on any feature package.
+    /// The interceptors and context are retained so the exchange's later lifecycle hooks
+    /// (<see cref="InvokeBeforeResponseHeadAsync"/> / <see cref="InvokeAfterResponseAsync"/>)
+    /// re-invoke against the same context.
     /// </summary>
     /// <param name="interceptors">The snapshotted response interceptors, in registration order.</param>
     /// <param name="sink">The protocol-specific raw response body sink.</param>
-    /// <param name="connectionTakeover">
-    /// The protocol-specific connection-takeover capability, or <see langword="null"/> when the
-    /// exchange cannot surrender its connection. Only the HTTP/1.1 transport supplies one — an
-    /// HTTP/1.1 exchange owns its whole connection, whereas HTTP/2 / HTTP/3 exchanges are
-    /// multiplexed streams over a shared connection.
+    /// <param name="control">
+    /// The protocol-specific exchange control (interim writes, takeover where physically possible,
+    /// abort, the control-flow directive). Every version supplies one; capabilities a version
+    /// cannot offer report unsupported through the control's probes.
     /// </param>
     internal void RunResponseInterceptors(
-        IHttpResponseInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         HttpResponseBodyStream sink,
-        IHttpConnectionTakeover? connectionTakeover = null)
+        IHttpExchangeControl control)
     {
         ResponseBodySink = sink;
-
-        HttpResponseInterceptorContext interceptorContext = new()
+        _responseInterceptors = interceptors;
+        _responseInterception = new HttpExchangeInterceptorResponseContext
         {
             Version = Version,
             Headers = Response.Headers,
             Features = Features,
             ConnectionInfo = ConnectionInfo,
             ResponseBody = sink,
-            ConnectionTakeover = connectionTakeover,
+            Control = control,
         };
 
-        foreach (IHttpResponseInterceptor interceptor in interceptors)
+        foreach (IHttpExchangeInterceptor interceptor in interceptors)
         {
-            interceptor.OnResponse(interceptorContext);
+            interceptor.BeforeResponse(_responseInterception);
+        }
+    }
+
+    /// <summary>
+    /// Invokes the registered response interceptors'
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> hooks exactly once per
+    /// exchange, immediately before the final response head is committed — called by the buffered
+    /// send path and by the streaming sink's first head commit, whichever happens first. A no-op
+    /// on the zero-interceptor fast path. The guard flag is set before the hooks run so a hook
+    /// that itself triggers a head commit cannot re-enter.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the hooks' work.</param>
+    internal async ValueTask InvokeBeforeResponseHeadAsync(CancellationToken cancellationToken)
+    {
+        if (_responseInterceptors is null || _responseInterception is null || _beforeResponseHeadInvoked)
+        {
+            return;
+        }
+
+        _beforeResponseHeadInvoked = true;
+
+        foreach (IHttpExchangeInterceptor interceptor in _responseInterceptors)
+        {
+            await interceptor.BeforeResponseHeadAsync(_responseInterception, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Invokes the registered response interceptors'
+    /// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/> hooks exactly once per exchange,
+    /// after the final response has been fully written — called at the end of each transport's
+    /// successful send path (buffered and streamed-finalize). Never called for an aborted or
+    /// taken-over exchange, which has no final response to observe. A no-op on the
+    /// zero-interceptor fast path.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the hooks' work.</param>
+    internal async ValueTask InvokeAfterResponseAsync(CancellationToken cancellationToken)
+    {
+        if (_responseInterceptors is null || _responseInterception is null || _afterResponseInvoked)
+        {
+            return;
+        }
+
+        _afterResponseInvoked = true;
+
+        foreach (IHttpExchangeInterceptor interceptor in _responseInterceptors)
+        {
+            await interceptor.AfterResponseAsync(_responseInterception, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -155,7 +246,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// and response body streams. The contract is request-scoped: a
     /// feature whose state needs deterministic cleanup at request end
     /// implements one of the disposal interfaces and is attached either at
-    /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
+    /// parse time by a registered <see cref="IHttpExchangeInterceptor"/>
     /// (via <see cref="HttpConnectionListenerOptions.RequestInterceptors"/>) or
     /// later by middleware.
     /// </summary>

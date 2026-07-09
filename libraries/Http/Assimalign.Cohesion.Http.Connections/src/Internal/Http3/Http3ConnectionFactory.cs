@@ -14,14 +14,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 internal sealed class Http3ConnectionFactory : HttpMultiplexedConnectionFactory
 {
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly Http3QPackOptions _qpackOptions;
 
     public Http3ConnectionFactory(
         Http3ConnectionListenerOptions.Http3Limits limits,
-        IHttpRequestInterceptor[] requestInterceptors,
-        IHttpResponseInterceptor[] responseInterceptors,
+        IHttpExchangeInterceptor[] requestInterceptors,
+        IHttpExchangeInterceptor[] responseInterceptors,
         Http3QPackOptions qpackOptions)
     {
         _limits = limits;

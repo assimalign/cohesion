@@ -134,15 +134,15 @@ public sealed class WebApplicationServerBuilder
     /// <summary>
     /// Installs the web host's default request-parse interceptors. Runs before any user
     /// configuration so the defaults occupy the front of the interceptor order: the
-    /// max-request-body-size interceptor is registered first, guaranteeing every HTTP/1.1
-    /// request carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
-    /// interceptors' head hooks can observe it (HTTP/1.1 is currently the only protocol whose
-    /// parse path invokes interceptors). User configurations may still inspect or clear
-    /// <see cref="HttpConnectionListenerOptions.RequestInterceptors"/> to opt out.
+    /// max-request-body-size interceptor is registered first, guaranteeing every request
+    /// carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
+    /// interceptors' <c>AfterRequestHead</c> hooks can observe it (all three protocol versions
+    /// run the request-parse seam). User configurations may still inspect or clear
+    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
-        options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+        options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
     }
 }

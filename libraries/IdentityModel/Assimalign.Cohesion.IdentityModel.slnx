@@ -7,18 +7,36 @@
 	<Folder Name="/IdentityModel/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/docs/Assembly/Assimalign.Cohesion.IdentityModel/">
+		<File Path="Assimalign.Cohesion.IdentityModel/docs/Assembly/Assimalign.Cohesion.IdentityModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/">
+		<Project Path="Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/tests/">
 		<Project Path="Assimalign.Cohesion.IdentityModel/tests/Assimalign.Cohesion.IdentityModel.Tests.csproj" />
 	</Folder>
-	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/">
-		<Project Path="Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj" />
-	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols/src/Assimalign.Cohesion.IdentityModel.Protocols.csproj" />
 	</Folder>
@@ -26,6 +44,14 @@
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols/tests/Assimalign.Cohesion.IdentityModel.Protocols.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.csproj" />
 	</Folder>
@@ -33,6 +59,14 @@
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/tests/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols.Saml/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Protocols.Saml/docs/Assembly/Assimalign.Cohesion.IdentityModel.Protocols.Saml/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.Saml/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.Saml/src/Assimalign.Cohesion.IdentityModel.Protocols.Saml.csproj" />
 	</Folder>
@@ -40,6 +74,14 @@
 		<Project Path="Assimalign.Cohesion.IdentityModel.Protocols.Saml/tests/Assimalign.Cohesion.IdentityModel.Protocols.Saml.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Token/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 	</Folder>
@@ -47,6 +89,14 @@
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token/tests/Assimalign.Cohesion.IdentityModel.Token.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.csproj" />
 	</Folder>
@@ -54,6 +104,14 @@
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/tests/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/docs/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.Saml/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.Saml/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/docs/Assembly/" />
+	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token.Saml/">
+		<File Path="Assimalign.Cohesion.IdentityModel.Token.Saml/docs/Assembly/Assimalign.Cohesion.IdentityModel.Token.Saml/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/src/">
 		<Project Path="Assimalign.Cohesion.IdentityModel.Token.Saml/src/Assimalign.Cohesion.IdentityModel.Token.Saml.csproj" />
 	</Folder>

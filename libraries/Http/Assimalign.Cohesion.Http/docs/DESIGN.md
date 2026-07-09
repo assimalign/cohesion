@@ -421,27 +421,93 @@ No reflection or dynamic serialization; parsing is span-based via the structured
 the ASCII→`char` bridge on the transport side is stack-allocated for the small field values that
 occur in practice. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
 
-## Request-parse interception seam
+## The exchange interceptor seam
 
-### What it is
+### One seam, one interface, one registration
 
-`IHttpRequestInterceptor` + `HttpRequestInterceptorContext` +
-`HttpRequestRejectedException` form the server-side seam that lets feature
-packages participate while a request is being **parsed** — before it is
-dispatched — without the server transport referencing any feature package:
+`IHttpExchangeInterceptor` is the server transport's **single** extension seam
+for participating in an exchange's lifecycle: one interface whose hooks span the
+request phase (`AfterRequestHead` → `BeforeRequestBody` → `AfterRequestBody`)
+and the response phase (`BeforeResponse` → `BeforeResponseHeadAsync` →
+`AfterResponseAsync`), registered once on the transport's single
+`HttpConnectionListenerOptions.Interceptors` list. A feature is one logical
+unit with one registration — the earlier split into separate request/response
+interceptor interfaces forced a package like `Http.ProtocolUpgrade` (one
+stateless class participating in both phases) into two factories and two
+registrations, a distinction users had to learn that encoded no real layer
+boundary.
 
-- `OnRequestHead(context)` runs after the head is parsed and before the body is
-  surfaced: attach typed features, adjust the body-size knob, or throw the
+Three contract mechanics carry the design:
+
+- **The guided abstract base is the implementation path.**
+  `HttpExchangeInterceptor` implements the interface with virtual no-op
+  members, so an implementation derives from it and overrides only the hooks it
+  participates in. The base is the seam's compatibility surface: future hooks
+  are added there as virtual no-ops (with matching interface members), so
+  implementations built on it keep compiling. The interface itself carries
+  plain members (no default implementations) — it is the contract the transport
+  consumes; implementing it directly is permitted but opts out of the
+  compatibility guarantee. This is the repo's recorded "interface-first with a
+  guided abstract base" pattern.
+- **`Scopes` declares interest.** `HttpInterceptorScopes` (Request / Response /
+  All, default All on the base) tells the transport which phases to invoke the
+  interceptor for. The transport snapshots the single list once and partitions
+  it by scope, which is what keeps the zero-cost fast paths scope-exact: a
+  request-only interceptor (e.g. `Http.RequestLimits`, default-installed by
+  Web.Hosting) is never the reason a response sink and exchange control are
+  constructed.
+- **The sync/async split encodes pump safety.** The four parse-path hooks are
+  `void` and must be CPU-only — on HTTP/2 they run on the connection's single
+  frame pump, where a stalled hook stalls every multiplexed stream; the two
+  send-path hooks are `ValueTask`-returning because awaiting is safe there.
+  The asymmetric signatures are the constraint, stated in the type system.
+
+### Where things live — the delineation rule
+
+The seam sits inside a deliberate layering model, stated once here because every
+"where does this feature go?" question resolves against it:
+
+> **Mechanisms live at the lowest level that can observe what they need;
+> decisions live at the application level. Where a thing registers tells you
+> what it is.**
+
+| Level | Owns | Extension surface |
+|---|---|---|
+| Connections | bytes, pipes, TLS | connection layers (`UseTls`) |
+| Http.Connections | wire framing, protocol conformance, limits, flow control | this interceptor seam (+ the control's wire mechanisms) |
+| Http.* feature packages | one capability each; the bridge from transport tap to app-facing `IHttpFeature` | implement `IHttpExchangeInterceptor`; install features |
+| Web (application) | the pipeline and **all decisions** — cancel/abort, error responses, policies | middleware + `IHttpContext` |
+
+Concretely: aborting an exchange is an application decision, so it has no seam
+member — it is `IHttpContext.Cancel`/`CancelAsync`, which the transport honors
+at its lifecycle checkpoints with version-appropriate wire behavior. A takeover
+is a transport mechanism (`IHttpExchangeControl.TakeOver`) that a feature
+package wraps (`context.Upgrade`) so the *application* decides when to exercise
+it. Interceptors are wiring, not deciders: a parse-path hook that must refuse a
+request throws the typed `HttpRequestRejectedException`; anything else it
+cannot express is, by design, an application concern.
+
+### The request phase
+
+The request-phase hooks let feature packages participate while a request is
+being **parsed** — before it is dispatched — without the server transport
+referencing any feature package. In lifecycle order:
+
+- `AfterRequestHead(context)` runs after the head is parsed and before the body
+  is surfaced: attach typed features, adjust the body-size knob, or throw the
   typed rejection.
-- `Stream OnRequestBody(context, body)` runs after the body stream is
+- `BeforeRequestBody(context)` runs after every head hook and the knob freeze,
+  immediately before the transport reads (HTTP/1.1) or exposes (HTTP/2 / HTTP/3)
+  the body — the knobs are read-only here; observe, attach, or reject. Skipped
+  for CONNECT tunnels.
+- `Stream AfterRequestBody(context, body)` runs after the body stream is
   materialized: return the stream unchanged or a wrapper (read-only decorators,
   digest hashing, decompression). Wrappers own what they wrap.
 
-Both members are default-implemented, following this library's recorded
-"interface evolution via a default member" practice — implementers override
-only the hook they need, and future hook points (a trailer hook is the known
-candidate; an async variant is the known escape hatch) are added the same way
-without breaking anyone.
+Defaults live on the `HttpExchangeInterceptor` base (virtual no-ops), so
+implementers override only the hooks they need; future hook points (a trailer
+hook is the known candidate) are added to the base the same way without
+breaking anyone built on it.
 
 ### Why the seam is core and the features are not
 
@@ -451,7 +517,7 @@ infrastructure every parse-time feature shares (`Http.RequestLimits` today;
 digest fields and request decompression are the designed next consumers), so it
 sits here; the concrete `IHttpMaxRequestBodySizeFeature` was deliberately moved
 *out* of this core into `Assimalign.Cohesion.Http.RequestLimits`. Registration
-is transport-owned (`HttpConnectionListenerOptions.RequestInterceptors` in
+is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
 `Http.Connections`) because *when* hooks run is a transport decision; *what*
 they can do is defined here.
 
@@ -626,36 +692,70 @@ dynamic member access. Builds clean under the trim/AOT analyzers
 - **Cookie `Max-Age`.** That is RFC 6265, a different grammar owned by the cookie
   model; the delta-seconds handling here is `Cache-Control`-specific.
 
-## The response interceptor seam
+### The response phase
 
-`IHttpResponseInterceptor` (+ `HttpResponseInterceptorContext`) is the symmetric
-counterpart to `IHttpRequestInterceptor`: a generic hook the server transport
-invokes while an exchange's response pipeline is being set up, before the handler
-runs. It exists so **response-side capabilities stay out of both the protocol core
-and the transport**. Incremental response streaming — and Server-Sent Events on top
-of it — is the first consumer, and neither the core nor the transport carries any
-streaming/SSE type.
+The response-phase hooks (+ `HttpResponseInterceptorContext`) run along an
+exchange's response lifecycle. They exist so **response-side capabilities stay
+out of both the protocol core and the transport**: incremental response
+streaming (and Server-Sent Events on top of it), interim (`1xx`) responses, and
+protocol upgrade / `CONNECT` takeover are the consumers, and neither the core
+nor the transport carries any streaming/SSE/interim/upgrade type. In lifecycle
+order:
+
+- `BeforeResponse(context)` — exchange setup, before the handler runs: attach
+  typed features, wrap the raw sink, capture the exchange control. Runs inline
+  on the parse/dispatch path (on HTTP/2 the connection's frame pump), so it must
+  be CPU-only.
+- `ValueTask BeforeResponseHeadAsync(context, ct)` — fires exactly once,
+  immediately before the final response head is committed (buffered send or
+  streaming first-commit, whichever happens first). The last point to mutate
+  status/headers or emit an interim response through the control; the transport
+  re-reads the exchange's state after the hooks run, so a concurrent
+  application cancel or a takeover is honored instead of writing the head. Runs
+  on the send path, so awaiting is safe.
+- `ValueTask AfterResponseAsync(context, ct)` — fires exactly once, after the
+  final response is fully written (never for an aborted or taken-over
+  exchange): access logging, metrics, digests.
+
+Defaults live on the `HttpExchangeInterceptor` base (as on the request phase),
+and the two send-path hooks are async by design — they are this seam's realized
+"async escape hatch".
 
 ### Why generic, and how a feature plugs in
 
 The request side already established the pattern: `Http.RequestLimits` participates
-in request parsing via an `IHttpRequestInterceptor` (registered on the listener
+in request parsing via an `IHttpExchangeInterceptor` (registered on the listener
 options), and the transport enforces it without ever referencing that package. The
-response side mirrors it exactly:
+response side mirrors it exactly, with **two transport-backed objects** on the
+context instead of per-capability members:
 
 - The transport exposes its per-protocol **raw response body sink** as a plain
   `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
   frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
   flow-control backpressure), commits the head on the first write/flush, and is
   finalized by the transport when the exchange completes.
-- A feature package (`Assimalign.Cohesion.Http.Streaming`) ships an
-  `IHttpResponseInterceptor` that wraps that sink in a typed
-  `IHttpResponseStreamingFeature` and installs it on `context.Features`. A handler
-  resolves the feature (`context.Response.Streaming`) and writes.
+- The transport exposes its per-exchange **exchange control** as an
+  `IHttpExchangeControl` on `HttpResponseInterceptorContext.Control` — the
+  single generic surface for the transport-owned wire mechanisms outside the
+  normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
+  `WriteInterimResponseAsync`) and the raw-stream takeover (`CanTakeOver` /
+  `TakeOver()`). One control deliberately replaces the former per-capability
+  contracts (`IHttpConnectionTakeover`, `IHttpInterimResponseWriter`): a new
+  wire mechanism composes from the hooks plus this control instead of adding a
+  new core abstraction and new transport plumbing. The control carries
+  mechanisms, not decisions — aborting is `IHttpContext.Cancel`, on the
+  application surface.
+- A feature package ships an `IHttpExchangeInterceptor` that wraps the sink or
+  the control in a typed feature and installs it on `context.Features`:
+  `Http.Streaming` wraps the sink in `IHttpResponseStreamingFeature`;
+  `Http.InterimResponses` wraps the control's interim writes in
+  `IHttpInterimResponseFeature`; `Http.ProtocolUpgrade` wraps the control's
+  takeover in `IHttpProtocolUpgradeFeature`.
 
-So the streaming write/flush API, its state machine, and the SSE wire format all
-live in feature packages; the core owns only the generic interceptor seam, and the
-transport owns only the framing. The one streaming-adjacent thing that stays in the
+So the streaming write/flush API, its state machine, the SSE wire format, the
+interim-response ergonomics, and all upgrade semantics live in feature packages;
+the core owns only the generic seam (hooks + sink + control), and the transport
+owns only the wire mechanics. The one streaming-adjacent thing that stays in the
 core is the well-known **header-name constant** `HttpHeaderKey.LastEventId`,
 alongside the other feature-specific header names already centralized there
 (`Sec-WebSocket-*`, `Grpc-*`).
@@ -665,40 +765,35 @@ alongside the other feature-specific header names already centralized there
 Because the sink commits the head on the first write or flush, the status line and
 headers are committed exactly once and locked thereafter — a rule the streaming
 feature surfaces to callers and the SSE package relies on (set `Content-Type:
-text/event-stream` before the first write). The interceptor runs *before* any
+text/event-stream` before the first write). `BeforeResponse` runs before any
 response byte is produced, so an interceptor may still set default response headers
-on `HttpResponseInterceptorContext.Headers`.
+on `HttpResponseInterceptorContext.Headers`; `BeforeResponseHeadAsync` is the last
+word — it fires immediately before the commit on whichever path commits first.
 
-### Connection takeover — the second capability on the same seam
+### Exchange control semantics that are load-bearing
 
-`HttpResponseInterceptorContext.ConnectionTakeover` (an optional
-`IHttpConnectionTakeover`) is the seam's escape hatch from HTTP framing
-altogether: where `ResponseBody` frames writes for the negotiated protocol, a
-takeover surrenders the **raw duplex connection stream** and tells the transport
-to suppress its own response for the exchange and stop reusing the connection.
-It exists for HTTP/1.1 connection transitions — the RFC 9110 §7.8 protocol
-upgrade (`101 Switching Protocols`) and the §9.3.6 `CONNECT` tunnel — which by
-definition leave the request/response loop.
-
-The same layering discipline applies: the core defines only the generic
-capability (one one-shot `TakeOver()` method), the HTTP/1.1 transport ships the
-internal implementation and offers it on the context, and the
-`Assimalign.Cohesion.Http.ProtocolUpgrade` package owns *all* upgrade semantics
-— detection (via `IHttpRequestInterceptor` over the parsed head), the
-`context.Upgrade` surface, the 101/200 accept path, and the framing-header
-scrub. Neither the core nor the transport carries an upgrade-specific type; a
-transport that cannot surrender a connection (HTTP/2 / HTTP/3, whose exchanges
-are multiplexed streams and whose protocols removed `Upgrade`) simply leaves
-the member `null`, and the feature package degrades to `context.Upgrade == null`.
-
-The capability is one-shot and claims the connection *before* any transition
-byte is written, so two features can never fight over the same connection and a
-failed accept can never be followed by a second HTTP response on a
-desynchronized stream.
+- **Capability probes are report-don't-throw.** `CanTakeOver` is `false` on
+  HTTP/2 / HTTP/3 (multiplexed streams over a shared connection; those protocols
+  removed `Upgrade`) and once the exchange can no longer be handed off;
+  `CanWriteInterimResponse` flips to `false` once the final head is committed.
+  Feature packages degrade (e.g. `context.Upgrade == null`) rather than surface
+  a feature whose action could never work.
+- **`TakeOver()` is one-shot** and claims the connection *before* any transition
+  byte is written, so two features can never fight over the same connection and
+  a failed accept can never be followed by a second HTTP response on a
+  desynchronized stream. From that instant the transport suppresses its own
+  response and stops reusing the connection.
+- **An application cancel (`IHttpContext.Cancel`) is honored at the transport's
+  checkpoints** with the version's wire behavior (h1 writes no response and
+  ends the connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream
+  abort), and the control's probes observe it: a cancelled exchange reports
+  `CanWriteInterimResponse == false` and `CanTakeOver == false`.
+- **`Control` is optional** (`null` in hand-built test contexts).
 
 ### AOT posture
 
-Interface dispatch over a snapshotted interceptor array; no reflection, no codegen.
+Interface dispatch over a snapshotted interceptor array; the control is one small
+per-exchange object; no reflection, no codegen.
 
 ## Range requests and the `If-Range` precondition (RFC 9110 §14 / §13.1.5)
 

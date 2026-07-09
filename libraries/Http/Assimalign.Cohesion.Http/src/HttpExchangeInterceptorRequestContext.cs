@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The parse-time view of a request handed to <see cref="IHttpRequestInterceptor"/>
+/// The parse-time view of a request handed to <see cref="IHttpExchangeInterceptor"/>
 /// implementations by the server transport.
 /// </summary>
 /// <remarks>
@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Http;
 /// construction sites (including test fakes) keep compiling.
 /// </para>
 /// </remarks>
-public sealed class HttpRequestInterceptorContext
+public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
 

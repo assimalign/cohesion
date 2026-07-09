@@ -17,4 +17,16 @@
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
 		<Project Path="Assimalign.Cohesion.Rezolvr/tests/Assimalign.Cohesion.Rezolvr.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/" />
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Hosting/src/Assimalign.Cohesion.Rezolvr.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/Rezolvr/refs/" >
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>
