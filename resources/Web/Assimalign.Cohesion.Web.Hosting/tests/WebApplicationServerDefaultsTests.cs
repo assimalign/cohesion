@@ -23,7 +23,7 @@ public class WebApplicationServerDefaultsTests
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
-        HttpRequestInterceptorContext context = new()
+        HttpExchangeInterceptorRequestContext context = new()
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,
