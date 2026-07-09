@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Default <see cref="IHttpInterimResponseFeature"/> implementation. A thin typed API over the
-/// transport's exchange control (<see cref="HttpResponseInterceptorContext.Control"/>): the
+/// transport's exchange control (<see cref="HttpExchangeInterceptorResponseContext.Control"/>): the
 /// control owns the per-version wire emission and the status-code / ordering rules, while this
 /// feature owns the application-facing surface and its resolution from the feature collection.
 /// </summary>

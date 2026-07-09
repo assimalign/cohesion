@@ -38,34 +38,34 @@ public abstract class HttpExchangeInterceptor : IHttpExchangeInterceptor
     public virtual HttpInterceptorScopes Scopes => HttpInterceptorScopes.All;
 
     /// <inheritdoc />
-    public virtual void AfterRequestHead(HttpRequestInterceptorContext context)
+    public virtual void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
     }
 
     /// <inheritdoc />
-    public virtual void BeforeRequestBody(HttpRequestInterceptorContext context)
+    public virtual void BeforeRequestBody(HttpExchangeInterceptorRequestContext context)
     {
     }
 
     /// <inheritdoc />
-    public virtual Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+    public virtual Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
     {
         return body;
     }
 
     /// <inheritdoc />
-    public virtual void BeforeResponse(HttpResponseInterceptorContext context)
+    public virtual void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
     }
 
     /// <inheritdoc />
-    public virtual ValueTask BeforeResponseHeadAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+    public virtual ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
     {
         return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public virtual ValueTask AfterResponseAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+    public virtual ValueTask AfterResponseAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
     {
         return ValueTask.CompletedTask;
     }

@@ -15,7 +15,7 @@ internal sealed class HttpMaxRequestBodySizeInterceptor : HttpExchangeIntercepto
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
-    public override void AfterRequestHead(HttpRequestInterceptorContext context)
+    public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
         context.Features.Set<IHttpMaxRequestBodySizeFeature>(new HttpMaxRequestBodySizeFeature(context));
     }

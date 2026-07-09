@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Http;
 /// signal on the parsed request head, and its
 /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook converts that detection into an
 /// <see cref="IHttpProtocolUpgradeFeature"/> wrapping the transport's exchange control
-/// (<see cref="HttpResponseInterceptorContext.Control"/>, whose takeover surrenders the
+/// (<see cref="HttpExchangeInterceptorResponseContext.Control"/>, whose takeover surrenders the
 /// connection). A handler then reads <c>context.Upgrade</c> and accepts the transition to receive
 /// the raw duplex stream. The instance is stateless and shared, so the detection state crosses
 /// between its hooks through the exchange's feature collection.

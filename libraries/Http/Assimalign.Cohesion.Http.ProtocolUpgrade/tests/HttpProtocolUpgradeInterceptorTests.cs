@@ -272,7 +272,7 @@ public class HttpProtocolUpgradeInterceptorTests
         IHttpExchangeControl? control,
         out HttpHeaderCollection responseHeaders)
     {
-        HttpRequestInterceptorContext headContext = new()
+        HttpExchangeInterceptorRequestContext headContext = new()
         {
             Version = version,
             Method = method,
@@ -288,7 +288,7 @@ public class HttpProtocolUpgradeInterceptorTests
         interceptor.AfterRequestHead(headContext);
 
         responseHeaders = new HttpHeaderCollection();
-        HttpResponseInterceptorContext responseContext = new()
+        HttpExchangeInterceptorResponseContext responseContext = new()
         {
             Version = version,
             Headers = responseHeaders,

@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 /// <summary>
 /// HTTP/1.1 <see cref="IHttpExchangeControl"/> — the per-exchange control surface offered to
-/// response interceptors through <see cref="HttpResponseInterceptorContext.Control"/>. An HTTP/1.1
+/// response interceptors through <see cref="HttpExchangeInterceptorResponseContext.Control"/>. An HTTP/1.1
 /// exchange owns its whole connection, so this is the one version whose control offers the full
 /// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2) and
 /// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6).

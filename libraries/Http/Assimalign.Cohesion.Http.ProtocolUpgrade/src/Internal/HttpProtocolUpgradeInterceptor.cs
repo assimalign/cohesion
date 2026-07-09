@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http;
 ///   <see cref="HttpProtocolUpgradeCandidate"/> feature.</description></item>
 ///   <item><description><see cref="BeforeResponse"/> consumes the candidate and, when the
 ///   transport's exchange control can surrender the connection
-///   (<see cref="HttpResponseInterceptorContext.Control"/> with
+///   (<see cref="HttpExchangeInterceptorResponseContext.Control"/> with
 ///   <see cref="IHttpExchangeControl.CanTakeOver"/>), installs the public
 ///   <see cref="IHttpProtocolUpgradeFeature"/> wrapping an <see cref="Http1ProtocolUpgrade"/> —
 ///   the object <c>context.Upgrade</c> surfaces to the application.</description></item>
@@ -34,7 +34,7 @@ namespace Assimalign.Cohesion.Http;
 internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public override void AfterRequestHead(HttpRequestInterceptorContext context)
+    public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
         if (context.Version != HttpVersion.Http11)
         {
@@ -63,7 +63,7 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
     }
 
     /// <inheritdoc />
-    public override void BeforeResponse(HttpResponseInterceptorContext context)
+    public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
         HttpProtocolUpgradeCandidate? candidate = context.Features.Get<HttpProtocolUpgradeCandidate>();
         if (candidate is null)

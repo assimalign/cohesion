@@ -130,12 +130,12 @@ internal static class Http1MessageReader
         // interception context, no feature collection, no per-request interception allocations —
         // the transport enforces the listener-wide limits exactly as before the seam existed.
         HttpFeatureCollection? features = null;
-        HttpRequestInterceptorContext? interception = null;
+        HttpExchangeInterceptorRequestContext? interception = null;
 
         if (interceptors.Length > 0)
         {
             features = new HttpFeatureCollection();
-            interception = new HttpRequestInterceptorContext
+            interception = new HttpExchangeInterceptorRequestContext
             {
                 Version = HttpVersion.Http11,
                 Method = method,

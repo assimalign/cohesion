@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// response-lifecycle state machine (commit-the-head-once on the first write/flush, idempotent
 /// completion) and forwards the wire-specific framing to a small set of <see langword="protected"/>
 /// hooks each protocol overrides. It is exposed to response features through
-/// <see cref="HttpResponseInterceptorContext.ResponseBody"/>.
+/// <see cref="HttpExchangeInterceptorResponseContext.ResponseBody"/>.
 /// </summary>
 /// <remarks>
 /// <para>

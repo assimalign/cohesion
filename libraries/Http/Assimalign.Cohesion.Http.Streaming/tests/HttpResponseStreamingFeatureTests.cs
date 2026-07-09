@@ -17,7 +17,7 @@ public class HttpResponseStreamingFeatureTests
     public void Interceptor_BeforeResponse_ShouldInstallStreamingFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
 
         HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
@@ -88,7 +88,7 @@ public class HttpResponseStreamingFeatureTests
     public void ResponseStreamingAccessor_ShouldResolveInstalledFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
         HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
         FakeHttpResponse response = new(context.Features);
@@ -109,12 +109,12 @@ public class HttpResponseStreamingFeatureTests
     private static (IHttpResponseStreamingFeature Feature, RecordingSink Sink) CreateFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
         HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
         return (context.Features.Get<IHttpResponseStreamingFeature>()!, sink);
     }
 
-    private static HttpResponseInterceptorContext CreateContext(Stream sink) => new()
+    private static HttpExchangeInterceptorResponseContext CreateContext(Stream sink) => new()
     {
         Version = HttpVersion.Http11,
         Headers = new HttpHeaderCollection(),

@@ -48,8 +48,8 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// Layering: interceptors are wiring, not decision makers. They attach typed
 /// <see cref="IHttpFeature"/>s, transform parse/emit-time state, and wrap the transport's
-/// mechanisms (<see cref="HttpResponseInterceptorContext.ResponseBody"/>,
-/// <see cref="HttpResponseInterceptorContext.Control"/>) into application-facing features — the
+/// mechanisms (<see cref="HttpExchangeInterceptorResponseContext.ResponseBody"/>,
+/// <see cref="HttpExchangeInterceptorResponseContext.Control"/>) into application-facing features — the
 /// application then makes the decisions through those features and through
 /// <see cref="IHttpContext"/> (aborting an exchange is <see cref="IHttpContext.Cancel"/>, an
 /// application-layer act; there is no abort on this seam). A request-parse hook that must refuse a
@@ -74,9 +74,9 @@ public interface IHttpExchangeInterceptor
     /// <remarks>
     /// <para>
     /// The context's header view is read-only; derived or normalized values belong in
-    /// <see cref="HttpRequestInterceptorContext.Features"/>. The
-    /// <see cref="HttpRequestInterceptorContext.MaxRequestBodySize"/> knob may be adjusted here
-    /// while <see cref="HttpRequestInterceptorContext.IsMaxRequestBodySizeReadOnly"/> is
+    /// <see cref="HttpExchangeInterceptorRequestContext.Features"/>. The
+    /// <see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/> knob may be adjusted here
+    /// while <see cref="HttpExchangeInterceptorRequestContext.IsMaxRequestBodySizeReadOnly"/> is
     /// <see langword="false"/>.
     /// </para>
     /// <para>
@@ -90,7 +90,7 @@ public interface IHttpExchangeInterceptor
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown by implementations to reject the request with a 4xx/5xx status.
     /// </exception>
-    void AfterRequestHead(HttpRequestInterceptorContext context);
+    void AfterRequestHead(HttpExchangeInterceptorRequestContext context);
 
     /// <summary>
     /// Called once per request, after every head hook has run and the effective body-size cap has
@@ -104,7 +104,7 @@ public interface IHttpExchangeInterceptor
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown by implementations to reject the request with a 4xx/5xx status.
     /// </exception>
-    void BeforeRequestBody(HttpRequestInterceptorContext context);
+    void BeforeRequestBody(HttpExchangeInterceptorRequestContext context);
 
     /// <summary>
     /// Called once per request, after the request body stream has been materialized and before
@@ -132,12 +132,12 @@ public interface IHttpExchangeInterceptor
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown by implementations to reject the request with a 4xx/5xx status.
     /// </exception>
-    Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body);
+    Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body);
 
     /// <summary>
     /// Called once per exchange, after the request head has been parsed and before the application
     /// handler runs. Implementations attach response features, may wrap the raw response body sink
-    /// exposed on the context, and may capture <see cref="HttpResponseInterceptorContext.Control"/>
+    /// exposed on the context, and may capture <see cref="HttpExchangeInterceptorResponseContext.Control"/>
     /// into a feature for later use; nothing has been written to the wire yet, so the response
     /// status and headers are still fully mutable by the application afterward. Requires
     /// <see cref="HttpInterceptorScopes.Response"/>.
@@ -147,15 +147,15 @@ public interface IHttpExchangeInterceptor
     /// frame pump — so implementations must be CPU-only: no I/O, no locks, no blocking waits.
     /// </remarks>
     /// <param name="context">The response-lifecycle view of the exchange.</param>
-    void BeforeResponse(HttpResponseInterceptorContext context);
+    void BeforeResponse(HttpExchangeInterceptorResponseContext context);
 
     /// <summary>
     /// Called exactly once per exchange, immediately before the final response head is committed
     /// to the wire — on the buffered path when the transport writes the response, or on the
     /// streaming path when the first body write/flush commits the head. This is the last point at
-    /// which the response status and <see cref="HttpResponseInterceptorContext.Headers"/> can be
+    /// which the response status and <see cref="HttpExchangeInterceptorResponseContext.Headers"/> can be
     /// mutated (content negotiation, compression headers, security headers) or an interim
-    /// (<c>1xx</c>) response emitted through <see cref="HttpResponseInterceptorContext.Control"/>.
+    /// (<c>1xx</c>) response emitted through <see cref="HttpExchangeInterceptorResponseContext.Control"/>.
     /// Requires <see cref="HttpInterceptorScopes.Response"/>.
     /// </summary>
     /// <remarks>
@@ -168,7 +168,7 @@ public interface IHttpExchangeInterceptor
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>
     /// <returns>A task that completes when the hook's work is done.</returns>
-    ValueTask BeforeResponseHeadAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken);
+    ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken);
 
     /// <summary>
     /// Called exactly once per exchange, after the final response has been fully written to the
@@ -184,5 +184,5 @@ public interface IHttpExchangeInterceptor
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>
     /// <returns>A task that completes when the hook's work is done.</returns>
-    ValueTask AfterResponseAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken);
+    ValueTask AfterResponseAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken);
 }

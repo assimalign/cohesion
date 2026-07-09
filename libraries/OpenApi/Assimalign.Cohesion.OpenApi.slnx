@@ -13,6 +13,7 @@
 		<File Path="Assimalign.Cohesion.OpenApi/README.md" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi/docs/COVERAGE.md" />
 		<File Path="Assimalign.Cohesion.OpenApi/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.OpenApi/docs/OVERVIEW.md" />
 	</Folder>
@@ -21,6 +22,59 @@
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi/tests/Assimalign.Cohesion.OpenApi.Tests.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/">
+		<File Path="Assimalign.Cohesion.OpenApi.Attributes/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Attributes/docs/AUTHORING.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Attributes/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Attributes/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/tests/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Attributes/tests/Assimalign.Cohesion.OpenApi.Attributes.Tests.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/">
+		<File Path="Assimalign.Cohesion.OpenApi.Fluent/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Fluent/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Fluent/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/src/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Fluent/src/Assimalign.Cohesion.OpenApi.Fluent.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/tests/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Fluent/tests/Assimalign.Cohesion.OpenApi.Fluent.Tests.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/">
+		<File Path="Assimalign.Cohesion.OpenApi.Generation/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Generation/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Generation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/tests/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Generation/tests/Assimalign.Cohesion.OpenApi.Generation.Tests.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/">
+		<File Path="Assimalign.Cohesion.OpenApi.Integration/README.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Integration/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Integration/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/src/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Integration/src/Assimalign.Cohesion.OpenApi.Integration.csproj" />
+	</Folder>
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/tests/">
+		<Project Path="Assimalign.Cohesion.OpenApi.Integration/tests/Assimalign.Cohesion.OpenApi.Integration.Tests.csproj" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Serialization/">
 		<File Path="Assimalign.Cohesion.OpenApi.Serialization/README.md" />
@@ -48,23 +102,12 @@
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Validation/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Validation/tests/Assimalign.Cohesion.OpenApi.Validation.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj" />
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/">
+		<File Path="Assimalign.Cohesion.OpenApi.Versioning/README.md" />
 	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/tests/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Attributes/tests/Assimalign.Cohesion.OpenApi.Attributes.Tests.csproj" />
-	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/src/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Fluent/src/Assimalign.Cohesion.OpenApi.Fluent.csproj" />
-	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/tests/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Fluent/tests/Assimalign.Cohesion.OpenApi.Fluent.Tests.csproj" />
-	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj" />
-	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Generation/tests/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Generation/tests/Assimalign.Cohesion.OpenApi.Generation.Tests.csproj" />
+	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/docs/">
+		<File Path="Assimalign.Cohesion.OpenApi.Versioning/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenApi.Versioning/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/src/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Versioning/src/Assimalign.Cohesion.OpenApi.Versioning.csproj" />
@@ -72,10 +115,9 @@
 	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/tests/">
 		<Project Path="Assimalign.Cohesion.OpenApi.Versioning/tests/Assimalign.Cohesion.OpenApi.Versioning.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/src/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Integration/src/Assimalign.Cohesion.OpenApi.Integration.csproj" />
-	</Folder>
-	<Folder Name="/OpenApi/Assimalign.Cohesion.OpenApi.Integration/tests/">
-		<Project Path="Assimalign.Cohesion.OpenApi.Integration/tests/Assimalign.Cohesion.OpenApi.Integration.Tests.csproj" />
+	<Folder Name="/OpenApi/refs/" >
+		<Project Path="../Content/Assimalign.Cohesion.Content.Yaml/src/Assimalign.Cohesion.Content.Yaml.csproj" />
+		<Project Path="../Content/Assimalign.Cohesion.Content/src/Assimalign.Cohesion.Content.csproj" />
+		<Project Path="../Content/Assimalign.Cohesion.Content.Text/src/Assimalign.Cohesion.Content.Text.csproj" />
 	</Folder>
 </Solution>

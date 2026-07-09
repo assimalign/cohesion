@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Http;
 /// construction sites (including test fakes) keep compiling.
 /// </para>
 /// </remarks>
-public sealed class HttpRequestInterceptorContext
+public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
 

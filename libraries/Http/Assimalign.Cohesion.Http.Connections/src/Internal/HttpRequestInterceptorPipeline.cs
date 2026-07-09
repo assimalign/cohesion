@@ -77,7 +77,7 @@ internal static class HttpRequestInterceptorPipeline
         }
 
         HttpFeatureCollection features = new();
-        HttpRequestInterceptorContext context = new()
+        HttpExchangeInterceptorRequestContext context = new()
         {
             Version = version,
             Method = request.Method,

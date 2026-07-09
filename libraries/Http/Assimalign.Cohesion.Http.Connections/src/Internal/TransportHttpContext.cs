@@ -63,7 +63,7 @@ internal abstract class TransportHttpContext : HttpContext
     // (BeforeResponseHeadAsync / AfterResponseAsync) re-invoke against the same context. Null on
     // the zero-interceptor fast path, which keeps the later invokers true no-ops.
     private IHttpExchangeInterceptor[]? _responseInterceptors;
-    private HttpResponseInterceptorContext? _responseInterception;
+    private HttpExchangeInterceptorResponseContext? _responseInterception;
     private bool _beforeResponseHeadInvoked;
     private bool _afterResponseInvoked;
 
@@ -132,7 +132,7 @@ internal abstract class TransportHttpContext : HttpContext
     {
         ResponseBodySink = sink;
         _responseInterceptors = interceptors;
-        _responseInterception = new HttpResponseInterceptorContext
+        _responseInterception = new HttpExchangeInterceptorResponseContext
         {
             Version = Version,
             Headers = Response.Headers,

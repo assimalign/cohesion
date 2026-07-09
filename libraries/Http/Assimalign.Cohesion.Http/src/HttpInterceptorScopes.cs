@@ -32,7 +32,7 @@ public enum HttpInterceptorScopes
     /// <see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/>, and
     /// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/>. Declaring this scope is what
     /// causes the transport to construct the per-exchange raw response body sink and exchange
-    /// control it exposes on <see cref="HttpResponseInterceptorContext"/>.
+    /// control it exposes on <see cref="HttpExchangeInterceptorResponseContext"/>.
     /// </summary>
     Response = 2,
 

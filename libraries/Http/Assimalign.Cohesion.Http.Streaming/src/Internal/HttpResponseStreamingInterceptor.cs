@@ -11,7 +11,7 @@ internal sealed class HttpResponseStreamingInterceptor : HttpExchangeInterceptor
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
 
-    public override void BeforeResponse(HttpResponseInterceptorContext context)
+    public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
         context.Features.Set(new HttpResponseStreamingFeature(context.ResponseBody));
     }

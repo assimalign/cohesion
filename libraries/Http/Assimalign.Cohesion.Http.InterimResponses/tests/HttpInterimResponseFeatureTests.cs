@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http.InterimResponses.Tests;
 /// Unit tests for the interim-response feature package: the interceptor wraps the transport's
 /// exchange control (<see cref="IHttpExchangeControl"/>) in an <see cref="IHttpInterimResponseFeature"/>,
 /// the feature forwards to the control, and the ergonomic extensions build the common interim
-/// responses. Uses a recording fake control and a hand-built <see cref="HttpResponseInterceptorContext"/>
+/// responses. Uses a recording fake control and a hand-built <see cref="HttpExchangeInterceptorResponseContext"/>
 /// — no transport is involved (the wire behavior is covered by the transport's InterimResponseTests).
 /// </summary>
 public class HttpInterimResponseFeatureTests
@@ -23,7 +23,7 @@ public class HttpInterimResponseFeatureTests
     public void Interceptor_BeforeResponse_ShouldInstallFeature()
     {
         RecordingControl control = new();
-        HttpResponseInterceptorContext context = CreateContext(control);
+        HttpExchangeInterceptorResponseContext context = CreateContext(control);
 
         HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
 
@@ -33,7 +33,7 @@ public class HttpInterimResponseFeatureTests
     [Fact(DisplayName = "Cohesion Test [Http.InterimResponses] - Interceptor: Should install nothing when the transport offers no capability")]
     public void Interceptor_WithoutCapability_ShouldInstallNothing()
     {
-        HttpResponseInterceptorContext context = CreateContext(control: null);
+        HttpExchangeInterceptorResponseContext context = CreateContext(control: null);
 
         HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
 
@@ -122,7 +122,7 @@ public class HttpInterimResponseFeatureTests
 
     // ------------------------------------------------------------------- Helpers
 
-    private static HttpResponseInterceptorContext CreateContext(IHttpExchangeControl? control) => new()
+    private static HttpExchangeInterceptorResponseContext CreateContext(IHttpExchangeControl? control) => new()
     {
         Version = HttpVersion.Http11,
         Headers = new HttpHeaderCollection(),
@@ -134,14 +134,14 @@ public class HttpInterimResponseFeatureTests
 
     private static IHttpInterimResponseFeature CreateFeature(IHttpExchangeControl control)
     {
-        HttpResponseInterceptorContext context = CreateContext(control);
+        HttpExchangeInterceptorResponseContext context = CreateContext(control);
         HttpInterimResponses.CreateInterceptor().BeforeResponse(context);
         return context.Features.Get<IHttpInterimResponseFeature>()!;
     }
 
     private static FakeHttpContext CreateContextWithFeature(IHttpExchangeControl control)
     {
-        HttpResponseInterceptorContext interceptorContext = CreateContext(control);
+        HttpExchangeInterceptorResponseContext interceptorContext = CreateContext(control);
         HttpInterimResponses.CreateInterceptor().BeforeResponse(interceptorContext);
         return new FakeHttpContext(interceptorContext.Features);
     }

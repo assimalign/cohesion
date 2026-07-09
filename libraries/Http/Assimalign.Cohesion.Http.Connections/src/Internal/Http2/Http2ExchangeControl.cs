@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 
 /// <summary>
 /// HTTP/2 <see cref="IHttpExchangeControl"/> — the per-exchange control surface offered to
-/// response interceptors through <see cref="HttpResponseInterceptorContext.Control"/>. Interim
+/// response interceptors through <see cref="HttpExchangeInterceptorResponseContext.Control"/>. Interim
 /// (<c>1xx</c>) responses are emitted as additional HEADERS blocks on the exchange's stream ahead
 /// of the final response (RFC 9113 §8.1), delegated to
 /// <see cref="Http2ConnectionContext.WriteInterimResponseAsync"/> which holds the connection write

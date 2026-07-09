@@ -17,7 +17,7 @@ public class HttpContentDigestInterceptorTests
     {
         byte[] content = Encoding.UTF8.GetBytes("payload that matches its digest");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpRequestInterceptorContext context = CreateContext(digest);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest);
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         Stream result = verifier.AfterRequestBody(context, new MemoryStream(content));
@@ -33,7 +33,7 @@ public class HttpContentDigestInterceptorTests
         byte[] declared = Encoding.UTF8.GetBytes("the original payload");
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpRequestInterceptorContext context = CreateContext(digest);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest);
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
@@ -45,7 +45,7 @@ public class HttpContentDigestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A malformed Content-Digest is rejected with 400")]
     public void AfterRequestBody_Malformed_Rejects400()
     {
-        HttpRequestInterceptorContext context = CreateContext("sha-256=12345");
+        HttpExchangeInterceptorRequestContext context = CreateContext("sha-256=12345");
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
@@ -57,7 +57,7 @@ public class HttpContentDigestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: No Content-Digest passes through unchanged")]
     public void AfterRequestBody_NoDigest_PassesThrough()
     {
-        HttpRequestInterceptorContext context = CreateContext(contentDigest: null);
+        HttpExchangeInterceptorRequestContext context = CreateContext(contentDigest: null);
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
@@ -69,7 +69,7 @@ public class HttpContentDigestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http.DigestFields] - Verifier: A deprecated-only Content-Digest passes through unverified")]
     public void AfterRequestBody_DeprecatedOnly_PassesThrough()
     {
-        HttpRequestInterceptorContext context = CreateContext("md5=:1B2M2Y8AsgTpgAmY7PhCfg==:");
+        HttpExchangeInterceptorRequestContext context = CreateContext("md5=:1B2M2Y8AsgTpgAmY7PhCfg==:");
         IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
@@ -83,7 +83,7 @@ public class HttpContentDigestInterceptorTests
     {
         byte[] content = Encoding.UTF8.GetBytes("owned body");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
-        HttpRequestInterceptorContext context = CreateContext(digest);
+        HttpExchangeInterceptorRequestContext context = CreateContext(digest);
         var original = new TrackingStream(content);
 
         Stream result = HttpDigestFields.CreateContentDigestVerifier().AfterRequestBody(context, original);
@@ -92,7 +92,7 @@ public class HttpContentDigestInterceptorTests
         original.IsDisposed.ShouldBeTrue();
     }
 
-    private static HttpRequestInterceptorContext CreateContext(string? contentDigest)
+    private static HttpExchangeInterceptorRequestContext CreateContext(string? contentDigest)
     {
         var headers = new HttpHeaderCollection();
         if (contentDigest is not null)
@@ -100,7 +100,7 @@ public class HttpContentDigestInterceptorTests
             headers.Add(HttpHeaderKey.ContentDigest, contentDigest);
         }
 
-        return new HttpRequestInterceptorContext
+        return new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,

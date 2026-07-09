@@ -12,7 +12,7 @@ public class HttpRequestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Should round-trip the max request body size knob")]
     public void Context_MaxRequestBodySize_ShouldRoundTrip()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
 
         context.MaxRequestBodySize.ShouldBe(1024);
 
@@ -26,7 +26,7 @@ public class HttpRequestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Should reject a negative max request body size")]
     public void Context_MaxRequestBodySize_OnNegative_ShouldThrow()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
 
         Should.Throw<ArgumentOutOfRangeException>(() => context.MaxRequestBodySize = -1);
     }
@@ -34,7 +34,7 @@ public class HttpRequestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Should freeze the knob idempotently and reject later writes")]
     public void Context_Freeze_ShouldRejectLaterWrites()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
 
         context.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
 
@@ -49,7 +49,7 @@ public class HttpRequestInterceptorTests
     [Fact(DisplayName = "Cohesion Test [Http] - Interceptor: The base class virtual defaults should no-op and pass the body stream through")]
     public void Interceptor_Defaults_ShouldPassThrough()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: null);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
         IHttpExchangeInterceptor interceptor = new NoOverrideInterceptor();
         using MemoryStream body = new();
 
@@ -130,9 +130,9 @@ public class HttpRequestInterceptorTests
         Should.Throw<ArgumentOutOfRangeException>(() => new HttpRequestRejectedException(new HttpStatusCode(status)));
     }
 
-    private static HttpRequestInterceptorContext CreateContext(long? maxRequestBodySize)
+    private static HttpExchangeInterceptorRequestContext CreateContext(long? maxRequestBodySize)
     {
-        return new HttpRequestInterceptorContext
+        return new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,

@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// The transport's per-exchange <b>wire mechanisms</b> that fall outside the normal response path,
-/// surfaced through <see cref="HttpResponseInterceptorContext.Control"/>: interim (<c>1xx</c>)
+/// surfaced through <see cref="HttpExchangeInterceptorResponseContext.Control"/>: interim (<c>1xx</c>)
 /// writes ahead of the final response, and the raw-stream takeover that protocol upgrades /
 /// <c>CONNECT</c> tunnels need. It is the single generic surface feature packages wrap into
 /// application-facing features — one contract instead of a per-capability contract for every wire

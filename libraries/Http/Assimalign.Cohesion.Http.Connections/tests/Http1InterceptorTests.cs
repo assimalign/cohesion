@@ -282,7 +282,7 @@ public class Http1InterceptorTests
 
     private sealed class FeatureAttachingInterceptor : HttpExchangeInterceptor
     {
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.Features.Set(new TestFeature { ObservedHost = context.Host.Value });
         }
@@ -297,7 +297,7 @@ public class Http1InterceptorTests
             _cap = cap;
         }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.MaxRequestBodySize = _cap;
         }
@@ -314,7 +314,7 @@ public class Http1InterceptorTests
 
         public TaggedStream? Created { get; private set; }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             Created = new TaggedStream(body, _tag);
             return Created;
@@ -337,7 +337,7 @@ public class Http1InterceptorTests
     {
         public DisposableTestFeature? Feature { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Feature = new DisposableTestFeature();
             context.Features.Set(Feature);
@@ -353,7 +353,7 @@ public class Http1InterceptorTests
             _statusCode = statusCode;
         }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -368,7 +368,7 @@ public class Http1InterceptorTests
             _statusCode = statusCode;
         }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -376,11 +376,11 @@ public class Http1InterceptorTests
 
     private sealed class ContextCapturingInterceptor : HttpExchangeInterceptor
     {
-        public HttpRequestInterceptorContext? Captured { get; private set; }
+        public HttpExchangeInterceptorRequestContext? Captured { get; private set; }
 
         public bool WasWritableDuringHeadHook { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Captured = context;
             WasWritableDuringHeadHook = !context.IsMaxRequestBodySizeReadOnly;
@@ -395,7 +395,7 @@ public class Http1InterceptorTests
 
         public string? ObservedContentType { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadersWereReadOnly = context.Headers.IsReadOnly;
             ObservedContentType = context.Headers[HttpHeaderKey.ContentType].Value;
@@ -417,12 +417,12 @@ public class Http1InterceptorTests
 
         public int BodyInvocations { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadInvocations++;
         }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             BodyInvocations++;
             return body;

@@ -29,7 +29,7 @@ internal sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
     /// <inheritdoc />
     public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
-    public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+    public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
     {
         if (!context.Headers.TryGetValue(HttpHeaderKey.ContentDigest, out HttpHeaderValue raw) || raw.IsEmpty)
         {

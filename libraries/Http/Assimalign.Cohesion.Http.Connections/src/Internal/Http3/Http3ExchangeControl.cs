@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
 /// <summary>
 /// HTTP/3 <see cref="IHttpExchangeControl"/> — the per-exchange control surface offered to
-/// response interceptors through <see cref="HttpResponseInterceptorContext.Control"/>. Interim
+/// response interceptors through <see cref="HttpExchangeInterceptorResponseContext.Control"/>. Interim
 /// (<c>1xx</c>) responses are emitted as additional QPACK-encoded HEADERS frames on the request
 /// stream ahead of the final HEADERS frame (RFC 9114 §4.1), delegated to
 /// <see cref="Http3ConnectionContext.WriteInterimResponseAsync"/>. Takeover is unsupported —

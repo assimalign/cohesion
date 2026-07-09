@@ -21,7 +21,7 @@ internal static class RequestInterceptorDoubles
     /// <summary>Head hook that attaches a <see cref="RecordingFeature"/> carrying the request host.</summary>
     public sealed class HostFeatureAttachingInterceptor : HttpExchangeInterceptor
     {
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.Features.Set(new RecordingFeature { ObservedHost = context.Host.Value });
         }
@@ -37,7 +37,7 @@ internal static class RequestInterceptorDoubles
             _cap = cap;
         }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.MaxRequestBodySize = _cap;
         }
@@ -55,7 +55,7 @@ internal static class RequestInterceptorDoubles
 
         public TaggedStream? Created { get; private set; }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             Created = new TaggedStream(body, _tag);
             return Created;
@@ -80,7 +80,7 @@ internal static class RequestInterceptorDoubles
     {
         public DisposableTestFeature? Feature { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Feature = new DisposableTestFeature();
             context.Features.Set(Feature);
@@ -97,7 +97,7 @@ internal static class RequestInterceptorDoubles
             _statusCode = statusCode;
         }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -113,7 +113,7 @@ internal static class RequestInterceptorDoubles
             _statusCode = statusCode;
         }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
@@ -122,11 +122,11 @@ internal static class RequestInterceptorDoubles
     /// <summary>Head hook that captures the parse context and its writability at hook time.</summary>
     public sealed class ContextCapturingInterceptor : HttpExchangeInterceptor
     {
-        public HttpRequestInterceptorContext? Captured { get; private set; }
+        public HttpExchangeInterceptorRequestContext? Captured { get; private set; }
 
         public bool WasWritableDuringHeadHook { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Captured = context;
             WasWritableDuringHeadHook = !context.IsMaxRequestBodySizeReadOnly;
@@ -142,7 +142,7 @@ internal static class RequestInterceptorDoubles
 
         public string? ObservedContentType { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadersWereReadOnly = context.Headers.IsReadOnly;
             ObservedContentType = context.Headers[HttpHeaderKey.ContentType].Value;
@@ -165,12 +165,12 @@ internal static class RequestInterceptorDoubles
 
         public int BodyInvocations { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadInvocations++;
         }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             BodyInvocations++;
             return body;

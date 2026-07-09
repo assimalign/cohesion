@@ -14,7 +14,7 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Interceptor: Head hook should attach the typed feature")]
     public void AfterRequestHead_ShouldAttachFeature()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
         IHttpExchangeInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
 
         interceptor.AfterRequestHead(context);
@@ -28,7 +28,7 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Should write through to the context knob the transport enforces")]
     public void Feature_ShouldWriteThroughToContext()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
         HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
@@ -44,7 +44,7 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Read-only lifecycle should delegate to the transport-owned freeze")]
     public void Feature_ReadOnly_ShouldDelegateToContextFreeze()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
         HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
@@ -58,7 +58,7 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Should reject a negative per-request cap")]
     public void Feature_OnNegative_ShouldThrow()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
         HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
@@ -70,7 +70,7 @@ public class HttpRequestLimitsTests
     {
         // Demonstrates the stream-override capability of the seam: each interceptor receives the
         // previous result, so the last registered ends up outermost.
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: null);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
         IHttpExchangeInterceptor limits = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
         IHttpExchangeInterceptor wrapper = new ReadOnlyWrappingInterceptor();
 
@@ -91,9 +91,9 @@ public class HttpRequestLimitsTests
         buffer.ShouldBe(new byte[] { 1, 2, 3 });
     }
 
-    private static HttpRequestInterceptorContext CreateContext(long? maxRequestBodySize)
+    private static HttpExchangeInterceptorRequestContext CreateContext(long? maxRequestBodySize)
     {
-        return new HttpRequestInterceptorContext
+        return new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,
@@ -113,7 +113,7 @@ public class HttpRequestLimitsTests
     /// </summary>
     private sealed class ReadOnlyWrappingInterceptor : HttpExchangeInterceptor
     {
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             return new ReadOnlyStream(body);
         }

@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http;
 
 /// <summary>
 /// Write-through <see cref="IHttpMaxRequestBodySizeFeature"/> implementation: a typed view over
-/// the parse context's <see cref="HttpRequestInterceptorContext.MaxRequestBodySize"/> knob.
+/// the parse context's <see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/> knob.
 /// Reads and writes flow to the context — the value the transport actually enforces — and the
 /// read-only lifecycle delegates to the transport-owned freeze flag, so the feature's contract
 /// survives the transport changing <em>when</em> it freezes (buffered materialization today,
@@ -18,14 +18,14 @@ internal sealed class HttpMaxRequestBodySizeFeature : IHttpMaxRequestBodySizeFea
     /// </summary>
     public const string FeatureName = "Assimalign.Cohesion.Http.MaxRequestBodySize";
 
-    private readonly HttpRequestInterceptorContext _context;
+    private readonly HttpExchangeInterceptorRequestContext _context;
 
     /// <summary>
     /// Initializes the feature as a view over the supplied parse context.
     /// </summary>
     /// <param name="context">The parse context whose body-size knob this feature projects.</param>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    public HttpMaxRequestBodySizeFeature(HttpRequestInterceptorContext context)
+    public HttpMaxRequestBodySizeFeature(HttpExchangeInterceptorRequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         _context = context;

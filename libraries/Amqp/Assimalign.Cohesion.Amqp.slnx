@@ -30,5 +30,6 @@
 	<Folder Name="/Amqp/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
+		<Project Path="../Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
 	</Folder>
 </Solution>

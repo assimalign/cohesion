@@ -687,25 +687,25 @@ public class InterceptorLifecycleTests
 
         public int ResponseHookCount { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context) => RequestHookCount++;
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context) => RequestHookCount++;
 
-        public override void BeforeRequestBody(HttpRequestInterceptorContext context) => RequestHookCount++;
+        public override void BeforeRequestBody(HttpExchangeInterceptorRequestContext context) => RequestHookCount++;
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             RequestHookCount++;
             return body;
         }
 
-        public override void BeforeResponse(HttpResponseInterceptorContext context) => ResponseHookCount++;
+        public override void BeforeResponse(HttpExchangeInterceptorResponseContext context) => ResponseHookCount++;
 
-        public override ValueTask BeforeResponseHeadAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+        public override ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
         {
             ResponseHookCount++;
             return ValueTask.CompletedTask;
         }
 
-        public override ValueTask AfterResponseAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+        public override ValueTask AfterResponseAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
         {
             ResponseHookCount++;
             return ValueTask.CompletedTask;
@@ -721,19 +721,19 @@ public class InterceptorLifecycleTests
 
         public bool? KnobFrozenAtBeforeBody { get; private set; }
 
-        public override void AfterRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Invocations.Add("after-head");
             KnobFrozenAtHead = context.IsMaxRequestBodySizeReadOnly;
         }
 
-        public override void BeforeRequestBody(HttpRequestInterceptorContext context)
+        public override void BeforeRequestBody(HttpExchangeInterceptorRequestContext context)
         {
             Invocations.Add("before-body");
             KnobFrozenAtBeforeBody = context.IsMaxRequestBodySizeReadOnly;
         }
 
-        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             Invocations.Add("after-body");
             return body;
@@ -749,7 +749,7 @@ public class InterceptorLifecycleTests
     {
         public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
 
-        public override void BeforeRequestBody(HttpRequestInterceptorContext context)
+        public override void BeforeRequestBody(HttpExchangeInterceptorRequestContext context)
             => throw new HttpRequestRejectedException(HttpStatusCode.ExpectationFailed);
     }
 
@@ -769,22 +769,22 @@ public class InterceptorLifecycleTests
 
         public IHttpExchangeControl? CapturedControl { get; private set; }
 
-        public Action<HttpResponseInterceptorContext>? OnBeforeResponseHead { get; set; }
+        public Action<HttpExchangeInterceptorResponseContext>? OnBeforeResponseHead { get; set; }
 
-        public override void BeforeResponse(HttpResponseInterceptorContext context)
+        public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
         {
             BeforeResponseCount++;
             CapturedControl = context.Control;
         }
 
-        public override ValueTask BeforeResponseHeadAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+        public override ValueTask BeforeResponseHeadAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
         {
             BeforeResponseHeadCount++;
             OnBeforeResponseHead?.Invoke(context);
             return ValueTask.CompletedTask;
         }
 
-        public override ValueTask AfterResponseAsync(HttpResponseInterceptorContext context, CancellationToken cancellationToken)
+        public override ValueTask AfterResponseAsync(HttpExchangeInterceptorResponseContext context, CancellationToken cancellationToken)
         {
             AfterResponseCount++;
             return ValueTask.CompletedTask;

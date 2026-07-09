@@ -31,8 +31,4 @@
 	<Folder Name="/Security/Assimalign.Cohesion.Security.DataProtection/tests/">
 		<Project Path="Assimalign.Cohesion.Security.DataProtection/tests/Assimalign.Cohesion.Security.DataProtection.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Security/refs/" >
-		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
-	</Folder>
 </Solution>

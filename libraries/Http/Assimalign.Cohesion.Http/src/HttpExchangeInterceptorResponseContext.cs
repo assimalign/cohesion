@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Http;
 /// fakes) keep compiling.
 /// </para>
 /// </remarks>
-public sealed class HttpResponseInterceptorContext
+public sealed class HttpExchangeInterceptorResponseContext
 {
     /// <summary>
     /// Gets the HTTP version of the exchange.

@@ -17,4 +17,16 @@
 	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
 		<Project Path="Assimalign.Cohesion.NatGateway/tests/Assimalign.Cohesion.NatGateway.Tests.csproj" />
 	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/" />
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.NatGateway.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.NatGateway.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.NatGateway.Hosting/src/Assimalign.Cohesion.NatGateway.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/NatGateway/refs/" >
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

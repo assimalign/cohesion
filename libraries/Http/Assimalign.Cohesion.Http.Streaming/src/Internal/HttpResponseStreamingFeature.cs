@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Default <see cref="IHttpResponseStreamingFeature"/> implementation. A thin typed API over the
-/// transport's raw response body sink (<see cref="HttpResponseInterceptorContext.ResponseBody"/>):
+/// transport's raw response body sink (<see cref="HttpExchangeInterceptorResponseContext.ResponseBody"/>):
 /// the sink owns the wire framing and header-commit timing, while this feature owns the ergonomic
 /// start/write/flush/complete surface and the write-after-complete guard.
 /// </summary>
