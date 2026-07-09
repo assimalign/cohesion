@@ -23,6 +23,12 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     private readonly Http3PeerSettings _peerSettings = new();
     private readonly CancellationTokenSource _teardownSource = new();
     private readonly QPackDecoderState? _decoderState;
+    // Serializes writes to the single outbound QPACK decoder stream. Two producers
+    // share it once the dynamic table is enabled: the encoder-stream drain (Insert
+    // Count Increment) and the accept loop (Section Acknowledgment / Stream
+    // Cancellation, keyed on the request stream ID). A PipeWriter tolerates no
+    // concurrent writers, so every decoder instruction goes out under this gate.
+    private readonly SemaphoreSlim _decoderWriteGate = new(1, 1);
     private IConnection? _controlStream;
     private IConnection? _decoderStream;
     private Task? _peerControlDrainTask;
@@ -188,10 +194,19 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 // RFC 9114 §5.2 — this bidirectional stream is now an accepted
                 // request stream; advance the boundary the teardown GOAWAY
                 // announces so it falls inside "may have been processed" whether
-                // it yields a context or is dropped as malformed below.
-                Interlocked.Increment(ref _processedRequestStreamCount);
+                // it yields a context or is dropped as malformed below. The same
+                // client-bidi numbering law the GOAWAY boundary is derived from
+                // (RFC 9000 §2.1: IDs 0, 4, 8, … assigned in order, and a frame
+                // for a higher-numbered stream implicitly opens the lower ones
+                // first — §3.2 — so streams of a type surface in ascending order)
+                // also yields this stream's own wire ID: the k-th accepted
+                // request stream is stream 4(k−1). That ID keys the QPACK
+                // Section Acknowledgment / Stream Cancellation decoder
+                // instructions (RFC 9204 §4.4); capturing it off the same
+                // increment keeps the two derivations from ever drifting apart.
+                long requestStreamId = 4L * (Interlocked.Increment(ref _processedRequestStreamCount) - 1);
 
-                RequestReadOutcome outcome = await TryReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false);
+                RequestReadOutcome outcome = await TryReadRequestAsync(streamConnection, requestStreamId, cancellationToken).ConfigureAwait(false);
 
                 if (outcome.TerminateConnection)
                 {
@@ -340,6 +355,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             await _qpackEncoderDrainTask.ConfigureAwait(false);
         }
 
+        // Both decoder-stream producers have unwound (the accept loop has exited and
+        // the encoder drain has been awaited above), so no write is in flight.
+        _decoderWriteGate.Dispose();
         _teardownSource.Dispose();
     }
 
@@ -704,8 +722,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// <summary>
     /// Writes a QPACK decoder-stream instruction (Insert Count Increment, or —
     /// with a stream ID — Section Acknowledgment / Stream Cancellation) to the
-    /// server's outbound decoder stream. Called only from the single encoder-drain
-    /// task, so the writer is never contended.
+    /// server's outbound decoder stream. The encoder-stream drain and the accept
+    /// loop both emit instructions here, so the write is serialized by
+    /// <see cref="_decoderWriteGate"/> — a <see cref="PipeWriter"/> tolerates no
+    /// concurrent writers.
     /// </summary>
     private async Task SendDecoderInstructionAsync(byte[] instruction, CancellationToken cancellationToken)
     {
@@ -714,7 +734,41 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             return;
         }
 
-        await _decoderStream.Output.WriteAsync(instruction, cancellationToken).ConfigureAwait(false);
+        await _decoderWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _decoderStream.Output.WriteAsync(instruction, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _decoderWriteGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Emits a QPACK Stream Cancellation (RFC 9204 §4.4.2) for a request stream that
+    /// referenced the dynamic table but was abandoned before its field section could
+    /// be acknowledged, letting the peer encoder reclaim the outstanding references
+    /// (RFC 9204 §2.2.2.2). Best-effort: the stream is being abandoned — usually
+    /// because connection teardown cancelled the decode — so a detached token is used
+    /// to still attempt the write, and a decoder-stream that is already gone is
+    /// swallowed rather than surfaced.
+    /// </summary>
+    /// <param name="streamId">The abandoned request stream identifier.</param>
+    private async Task TrySendStreamCancellationAsync(long streamId)
+    {
+        try
+        {
+            await SendDecoderInstructionAsync(
+                QPackDecoderInstructionEncoder.StreamCancellation(streamId),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex) when (IsPerStreamFailure(ex))
+        {
+        }
     }
 
     private void ApplySettings(byte[] payload)
@@ -882,12 +936,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// QUIC varint, an I/O error on this stream alone — is absorbed and
     /// returns <see langword="null"/>, signalling the caller to drop this
     /// stream and keep accepting more on the same QUIC connection.
+    /// <paramref name="requestStreamId"/> is the stream's wire ID, derived at
+    /// accept from the client-bidi numbering law (see <see cref="ReceiveAsync"/>).
     /// </summary>
-    private async Task<RequestReadOutcome> TryReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    private async Task<RequestReadOutcome> TryReadRequestAsync(IConnection streamConnection, long requestStreamId, CancellationToken cancellationToken)
     {
         try
         {
-            return new RequestReadOutcome(await ReadRequestAsync(streamConnection, cancellationToken).ConfigureAwait(false), terminate: false);
+            return new RequestReadOutcome(await ReadRequestAsync(streamConnection, requestStreamId, cancellationToken).ConfigureAwait(false), terminate: false);
         }
         catch (QPackException)
         {
@@ -1059,7 +1115,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<Http3Context?> ReadRequestAsync(IConnection streamConnection, CancellationToken cancellationToken)
+    private async Task<Http3Context?> ReadRequestAsync(IConnection streamConnection, long requestStreamId, CancellationToken cancellationToken)
     {
         Stream stream = streamConnection.AsStream();
         using MemoryStream requestBuffer = new();
@@ -1108,17 +1164,49 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             // stream instead of hanging it.
             using CancellationTokenSource decodeCancellation =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _teardownSource.Token);
-            QPackDecodeResult decode = await _decoderState.DecodeRequestAsync(headerBlock, decodeCancellation.Token).ConfigureAwait(false);
-            request = Http3HeaderCodec.BuildRequest(decode.Fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
 
-            // A field section that referenced the dynamic table owes a Section
-            // Acknowledgment on the decoder stream (RFC 9204 §4.4.1). The
-            // instruction is keyed on the QUIC request stream ID, which the
-            // connection abstraction does not yet surface, so live emission is
-            // deferred (see docs/DESIGN.md and the filed follow-up). Insert Count
-            // Increment — which needs no stream ID — is emitted by the encoder
-            // drain and keeps the peer's Known Received Count advancing.
-            _ = decode.ReferencedDynamicTable;
+            // Parse the field section prefix up front, from a single insert-count
+            // snapshot, so the "references the dynamic table" decision is known even
+            // if the decode is later abandoned — a referencing stream reset before it
+            // is acknowledged owes a Stream Cancellation (RFC 9204 §2.2.2.2). The
+            // requestStreamId keying both instructions was derived at accept from the
+            // client-bidi numbering law (see ReceiveAsync).
+            QPackFieldSectionPrefix prefix = _decoderState.ReadPrefix(headerBlock);
+            bool referencedDynamicTable = prefix.RequiredInsertCount > 0;
+            bool decodeCompleted = false;
+
+            try
+            {
+                QPackDecodeResult decode = await _decoderState.DecodeRequestAsync(headerBlock, prefix, decodeCancellation.Token).ConfigureAwait(false);
+                decodeCompleted = true;
+
+                // RFC 9204 §4.4.1 — a field section that referenced the dynamic table
+                // is acknowledged on the decoder stream so the peer encoder can advance
+                // its Known Received Count (§2.1.1) and safely evict acknowledged
+                // entries. Emitted as soon as the section decodes — ahead of HTTP-layer
+                // validation and interceptors — so a request later dropped as malformed
+                // or refused has still had its QPACK section acknowledged (the decode
+                // itself succeeded, which is what the acknowledgment attests to).
+                if (referencedDynamicTable)
+                {
+                    await SendDecoderInstructionAsync(
+                        QPackDecoderInstructionEncoder.SectionAcknowledgment(requestStreamId),
+                        decodeCancellation.Token).ConfigureAwait(false);
+                }
+
+                request = Http3HeaderCodec.BuildRequest(decode.Fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
+            }
+            finally
+            {
+                // The section referenced the dynamic table but the decode did not
+                // complete (a decompression failure or connection teardown cancelled
+                // it), so no Section Acknowledgment went out: tell the peer encoder to
+                // reclaim the outstanding references (RFC 9204 §2.2.2.2 / §4.4.2).
+                if (referencedDynamicTable && !decodeCompleted)
+                {
+                    await TrySendStreamCancellationAsync(requestStreamId).ConfigureAwait(false);
+                }
+            }
         }
         else
         {

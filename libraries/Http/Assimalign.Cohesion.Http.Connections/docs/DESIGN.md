@@ -1469,6 +1469,15 @@ receive start, symmetric to its control stream). Both server-opened streams
 are critical streams — left open for the connection lifetime and released by
 the connection-first teardown, never completed early.
 
+The server's decoder stream now carries the full RFC 9204 §4.4 instruction
+set: the encoder drain writes **Insert Count Increment** (§4.4.3), and the
+accept loop writes **Section Acknowledgment** (§4.4.1) and **Stream
+Cancellation** (§4.4.2), both keyed on the request stream ID (see "Live
+decoder-stream feedback" below). Because two producers — the background
+encoder drain and the accept loop — now share the single decoder-stream
+`PipeWriter`, every decoder instruction is written under a `SemaphoreSlim`
+gate (`_decoderWriteGate`); a `PipeWriter` tolerates no concurrent writers.
+
 ### Push streams
 
 A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
@@ -1530,7 +1539,12 @@ server touched and dropped still falls inside "may have been processed" and
 the client will not retry a request whose side effects may have run. The
 connection abstraction surfaces only an opaque `ConnectionId`, not the
 numeric QUIC stream ID, so this count-based derivation is how the HTTP/3
-layer reconstructs the boundary.
+layer reconstructs wire stream identity — both this boundary and, since the
+QPACK dynamic-table work, each accepted request stream's own wire ID
+(`4 × (k−1)` for the k-th accepted stream, captured off the same
+`Interlocked.Increment`), which keys the decoder-stream Section
+Acknowledgment / Stream Cancellation instructions (see "Live decoder-stream
+feedback").
 
 `SendGoAwayAsync` writes the frame to the retained outbound control stream
 and is best-effort and one-shot: if the receive loop never ran (no control
@@ -1703,15 +1717,53 @@ an encoder is never required to use the dynamic table, so responses reference
 the static table or literals and never insert. This keeps response encoding
 stateless and sidesteps having to track the client decoder's acknowledgments.
 
-> **Known limitation — Section Acknowledgment / Stream Cancellation.** These
-> two decoder instructions are keyed on the QUIC **request stream ID**, which
-> the `Assimalign.Cohesion.Connections` `IConnection` abstraction does not yet
-> surface (the QUIC stream connection reports a synthetic `ConnectionId`, not
-> the wire stream ID). The instruction encoders are implemented and unit
-> tested, and Insert Count Increment — which needs no stream ID — is emitted
-> live, keeping the peer's Known Received Count advancing. Wiring Section
-> Acknowledgment / Stream Cancellation into the live path is deferred pending a
-> transport surface for the QUIC stream ID (filed as a follow-up).
+### Live decoder-stream feedback (Section Acknowledgment / Stream Cancellation)
+
+Section Acknowledgment (§4.4.1) and Stream Cancellation (§4.4.2) are keyed on
+the QUIC **request stream ID**, which the general `IConnection` abstraction
+deliberately does not carry — its `ConnectionId` is a synthetic per-process
+value, and a byte-stream transport has no wire stream number to report. Rather
+than widening the transport contract to surface it (a one-off capability
+interface was reviewed and rejected as unwanted coupling), the HTTP/3 engine
+**derives** each request stream's wire ID from the same client-bidi numbering
+law the teardown `GOAWAY` boundary already depends on: client-initiated
+bidirectional streams are numbered `0, 4, 8, …` in creation order (RFC 9000
+§2.1), and a frame for a higher-numbered stream implicitly opens the
+lower-numbered ones of the same type first (§3.2), so a multiplexed transport
+surfaces them in ascending order and the k-th accepted request stream is
+stream `4(k−1)`. The accept loop captures the ID off the same
+`Interlocked.Increment` that advances the `GOAWAY` boundary, so the two
+derivations cannot drift apart, and wire stream identity stays a
+protocol-layer reconstruction — nothing QUIC-specific is added to the
+connection abstraction. (This makes "inbound streams of a type arrive in wire
+order" an explicit dependency of this layer on the multiplexed transport; the
+`GOAWAY` derivation already relied on it.)
+
+With that ID in hand the accept loop emits both instructions on the server's
+decoder stream:
+
+- **Section Acknowledgment** is written as soon as a field section that
+  referenced the dynamic table decodes — *before* the HTTP/3 field-section
+  validation and the request-interceptor phase. The acknowledgment attests only
+  that the QPACK **decode** succeeded, so a request later dropped as malformed
+  (RFC 9114 §4.2/§4.3) or refused by an interceptor has still had its section
+  acknowledged, and the peer encoder's Known Received Count (§2.1.1) advances so
+  it can evict the acknowledged entries.
+- **Stream Cancellation** covers the converse: the section referenced the
+  dynamic table but the decode was abandoned before it could be acknowledged (a
+  `QPACK_DECOMPRESSION_FAILED` failure, or connection teardown cancelling a
+  blocked wait). To know a section "referenced the dynamic table" even when the
+  decode throws, the field section prefix is parsed up front
+  (`QPackDecoderState.ReadPrefix`, a single insert-count snapshot reused by the
+  decode) so the Required Insert Count is known before the blocking wait; a
+  `finally` then emits the Stream Cancellation best-effort (a detached token,
+  swallowing an already-gone decoder stream) so the peer encoder can reclaim the
+  outstanding references (§2.2.2.2).
+
+Emission is guarded on `_decoderStream` existing (with the dynamic table
+disabled none of this machinery runs). Per-stream failure isolation is
+preserved — the instructions ride the connection-lifetime decoder stream and
+never fault the accept loop.
 
 ### Decoder representations
 
@@ -1781,10 +1833,6 @@ and string primitives.
   server never opens a QPACK *encoder* stream and never has to track the
   client decoder's Section Acknowledgments to encode safely. The dynamic
   table implemented here is decoder-side only (inbound requests).
-- **Live Section Acknowledgment / Stream Cancellation.** Implemented and unit
-  tested as instruction encoders, but not emitted on the live path pending a
-  transport surface for the QUIC request stream ID (see the Known limitation
-  above). Insert Count Increment is emitted live.
 - **Acting on the peer's `QPACK_MAX_TABLE_CAPACITY`.** The server reads the
   peer's SETTINGS but, being a static-only encoder, does not use the peer's
   advertised decoder capacity to size a response-side table.
