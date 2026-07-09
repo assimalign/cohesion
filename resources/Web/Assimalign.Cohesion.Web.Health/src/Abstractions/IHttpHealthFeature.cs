@@ -1,6 +1,5 @@
 namespace Assimalign.Cohesion.Web.Health;
 
-using Assimalign.Cohesion.Health;
 using Assimalign.Cohesion.Http;
 
 /// <summary>

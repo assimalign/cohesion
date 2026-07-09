@@ -2,7 +2,6 @@ using System;
 
 namespace Assimalign.Cohesion.Web.Health;
 
-using Assimalign.Cohesion.Health;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Health.Internal;
 
@@ -11,14 +10,17 @@ using Assimalign.Cohesion.Web.Health.Internal;
 /// <c>/readyz</c>) onto an <see cref="IHealthCheckService"/>.
 /// </summary>
 /// <remarks>
-/// The <see cref="IHealthCheckService"/> is supplied explicitly and resolved at build time — the
-/// middleware never performs request-time service location. In a hosted Web application, resolve
-/// it from the application's services after <c>Build()</c>:
+/// The <see cref="IHealthCheckService"/> is supplied explicitly and built at composition time — the
+/// middleware never performs request-time service location. A resource composes its own built-in
+/// checks internally (gated on its <c>EnableHealthCheck</c> option) and maps the endpoint:
 /// <code>
-/// builder.Services.AddHealthChecks().AddCheck("db", ...);
-/// WebApplication app = builder.Build();
-/// app.MapHealthChecks(app.Context.ServiceProvider.GetRequiredService&lt;IHealthCheckService&gt;());
+/// // inside the resource's hosting wiring, when options.EnableHealthCheck is set:
+/// IHealthCheckService health = HealthChecks.CreateBuilder()
+///     .AddCheck("database", new DatabaseConnectivityCheck(...), tags: new[] { HealthTags.Ready })
+///     .Build();
+/// pipeline.MapHealthChecks(options.HealthCheckPath ?? "/healthz", health);
 /// </code>
+/// The application developer sees only the resource's options, never these types.
 /// </remarks>
 public static class WebApplicationExtensions
 {

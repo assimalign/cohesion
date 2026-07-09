@@ -1,6 +1,5 @@
 namespace Assimalign.Cohesion.Web.Health.Internal;
 
-using Assimalign.Cohesion.Health;
 
 /// <summary>
 /// The default <see cref="IHttpHealthFeature"/> attached to the request once a health endpoint

@@ -1,6 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.Health</RootNamespace>
-		<Description>Cohesion health-check foundation: the IHealthCheck contract, Healthy/Degraded/Unhealthy report model, a builder-time registry, tag-based readiness/liveness filtering, and the IHealthPublisher seam. Zero dependencies, AOT-safe. The periodic publisher and DI wiring live in Assimalign.Cohesion.Health.Hosting; the /healthz endpoint lives in Assimalign.Cohesion.Web.Health.</Description>
-	</PropertyGroup>
-</Project>

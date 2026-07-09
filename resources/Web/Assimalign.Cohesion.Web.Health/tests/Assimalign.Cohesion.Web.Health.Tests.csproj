@@ -13,7 +13,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Health" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

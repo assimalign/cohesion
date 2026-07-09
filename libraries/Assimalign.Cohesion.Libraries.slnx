@@ -525,37 +525,6 @@
 	<Folder Name="/libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/">
 		<Project Path="FileSystem/Assimalign.Cohesion.FileSystem.Physical/tests/Assimalign.Cohesion.FileSystem.Physical.Tests.csproj" />
 	</Folder>
-	<Folder Name="/libraries/Health/">
-		<File Path="Health/Directory.Build.props" />
-		<File Path="Health/Directory.Build.targets" />
-		<File Path="Health/README.md" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health/">
-		<File Path="Health/Assimalign.Cohesion.Health/README.md" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health/docs/">
-		<File Path="Health/Assimalign.Cohesion.Health/docs/DESIGN.md" />
-		<File Path="Health/Assimalign.Cohesion.Health/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health/src/">
-		<Project Path="Health/Assimalign.Cohesion.Health/src/Assimalign.Cohesion.Health.csproj" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health/tests/">
-		<Project Path="Health/Assimalign.Cohesion.Health/tests/Assimalign.Cohesion.Health.Tests.csproj" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health.Hosting/">
-		<File Path="Health/Assimalign.Cohesion.Health.Hosting/README.md" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health.Hosting/docs/">
-		<File Path="Health/Assimalign.Cohesion.Health.Hosting/docs/DESIGN.md" />
-		<File Path="Health/Assimalign.Cohesion.Health.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health.Hosting/src/">
-		<Project Path="Health/Assimalign.Cohesion.Health.Hosting/src/Assimalign.Cohesion.Health.Hosting.csproj" />
-	</Folder>
-	<Folder Name="/libraries/Health/Assimalign.Cohesion.Health.Hosting/tests/">
-		<Project Path="Health/Assimalign.Cohesion.Health.Hosting/tests/Assimalign.Cohesion.Health.Hosting.Tests.csproj" />
-	</Folder>
 	<Folder Name="/libraries/Hosting/">
 		<File Path="Hosting/Directory.Build.props" />
 		<File Path="Hosting/Directory.Build.targets" />

@@ -1,15 +1,23 @@
 # Assimalign.Cohesion.Web.Health
 
-The HTTP health endpoint for Cohesion Web applications. Maps `/healthz`, `/livez`, and
-`/readyz` onto the `Assimalign.Cohesion.Health` model with tag-based readiness/liveness
-filtering, 200/503 status mapping, and a pluggable AOT-safe (`Utf8JsonWriter`) JSON writer.
-The produced report is surfaced through `IHttpFeatureCollection` as `IHttpHealthFeature`.
+Cohesion health checks, delivered over HTTP. One package owns the health model (`IHealthCheck`,
+`Healthy`/`Degraded`/`Unhealthy` report, a builder-time registry, readiness/liveness tag
+filtering) and the `/healthz` · `/livez` · `/readyz` pipeline endpoint with an AOT-safe
+(`Utf8JsonWriter`) response writer. The produced report is surfaced through
+`IHttpFeatureCollection` as `IHttpHealthFeature`.
+
+Health lives in the Web area because it is delivered over HTTP (Kubernetes probes are HTTP
+endpoints). Resources consume this package as a **private implementation detail**
+(`CohesionPrivateProjectReference` + `CohesionFrameworkPrivateAssembly`) and expose health only
+through their own options (`EnableHealthCheck`, path) — the application developer never sees
+these types.
 
 ```csharp
-IHealthCheckService health = app.Context.ServiceProvider.GetRequiredService<IHealthCheckService>();
-app.MapHealthChecks(health);
-app.MapReadinessCheck(health);
-app.MapLivenessCheck(health);
+// inside a resource, when its EnableHealthCheck option is set:
+IHealthCheckService health = HealthChecks.CreateBuilder()
+    .AddCheck("database", new DatabaseConnectivityCheck(...), tags: new[] { HealthTags.Ready })
+    .Build();
+pipeline.MapHealthChecks(options.HealthCheckPath ?? "/healthz", health);
 ```
 
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).

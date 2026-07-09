@@ -2,7 +2,6 @@ using System;
 
 namespace Assimalign.Cohesion.Web.Health;
 
-using Assimalign.Cohesion.Health;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Health.Internal;
 

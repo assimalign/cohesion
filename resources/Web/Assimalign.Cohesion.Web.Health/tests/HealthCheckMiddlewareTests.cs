@@ -2,7 +2,6 @@ using System;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Health;
 using Assimalign.Cohesion.Http;
 
 using Shouldly;
