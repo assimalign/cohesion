@@ -2,9 +2,7 @@ name: Dns
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Dns/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-dns.yml" # When Pipeline File Changes
 permissions:
   contents: read

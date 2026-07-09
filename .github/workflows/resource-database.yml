@@ -1,8 +1,7 @@
 name: Database
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'resources/Database/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
 
@@ -25,7 +24,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'resources'
           category: 'Database'
           project: ${{ matrix.projects }}

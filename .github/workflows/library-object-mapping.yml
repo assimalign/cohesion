@@ -2,9 +2,7 @@ name: ObjectMapping
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/ObjectMapping/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-object-mapping.yml" # When Pipeline File Changes
 permissions:
   contents: read

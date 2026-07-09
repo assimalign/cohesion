@@ -7,15 +7,21 @@
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees
-*.obsidian
-.linqpad
+.claude/settings.json
+CLAUDE.md
+graphify-out
+
 .dotnet-cli-home
 .codex-temp
 
+# Temp
+
+
 
 # Extensions & Local Tooling
-
+*.obsidian
 .nuke/temp
+.linqpad
 
 scripts/**/*.txt
 scripts/modules

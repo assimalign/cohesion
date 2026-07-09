@@ -2,9 +2,7 @@ name: FileSystem
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/FileSystem/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-filesystem.yml" # When Pipeline File Changes
 permissions:
   contents: read
@@ -32,7 +30,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'FileSystem'
           project: ${{ matrix.projects }}

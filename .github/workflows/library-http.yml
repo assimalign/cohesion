@@ -2,9 +2,7 @@ name: Http
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Http/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-http.yml" # When Pipeline File Changes
 permissions:
   contents: read
@@ -36,7 +34,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'Http'
           project: ${{ matrix.projects }}

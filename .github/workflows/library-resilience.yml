@@ -1,8 +1,7 @@
 name: Resilience
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'libraries/Resilience/**'
       - '.github/workflows/library-resilience.yml'                 # When Pipeline File Changes
 
@@ -31,7 +30,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'Resilience'
           project: ${{ matrix.projects }}

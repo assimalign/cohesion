@@ -2,9 +2,7 @@ name: Security
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Security/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-security.yml" # When Pipeline File Changes
 permissions:
   contents: read

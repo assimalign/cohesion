@@ -1,8 +1,7 @@
 name: ApplicationModel
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'libraries/ApplicationModel/**'
       - '.github/workflows/library-application-model.yml'                 # When Pipeline File Changes
 
@@ -25,7 +24,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'ApplicationModel'
           project: ${{ matrix.projects }}
