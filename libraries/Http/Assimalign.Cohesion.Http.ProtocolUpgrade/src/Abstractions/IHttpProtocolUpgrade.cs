@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Http;
 /// (<c>101 Switching Protocols</c> for an Upgrade, <c>200 OK</c> for a CONNECT) and
 /// any required <c>Connection</c> / <c>Upgrade</c> response headers, then surrenders
 /// the underlying transport stream to the caller. Acceptance exercises the transport's
-/// connection-takeover capability (<see cref="IHttpConnectionTakeover"/>), so the regular
+/// exchange control's takeover (<see cref="IHttpExchangeControl.TakeOver"/>), so the regular
 /// response pipeline is suppressed — the transport's send for the same exchange becomes a
 /// no-op and the connection leaves the keep-alive request loop.
 /// </para>
@@ -58,6 +58,8 @@ public interface IHttpProtocolUpgrade
     /// <returns>The duplex transport stream. The caller assumes ownership and is
     /// responsible for closing it when the transition completes.</returns>
     /// <exception cref="System.InvalidOperationException">Thrown when the
-    /// transition has already been accepted on this exchange.</exception>
+    /// transition has already been accepted on this exchange, or when the exchange can no longer
+    /// be taken over — the final response has started or the exchange was aborted
+    /// (<see cref="IHttpExchangeControl.TakeOver"/> guards the claim).</exception>
     ValueTask<Stream> AcceptAsync(CancellationToken cancellationToken = default);
 }

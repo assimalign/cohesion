@@ -7,14 +7,14 @@ the transport via the response-interceptor seam.
 
 Let a handler start a response and write its body incrementally — flushing bytes to
 the client as they are produced — over any transport that exposes the
-`IHttpResponseInterceptor` seam, without the transport (or the protocol core)
+`IHttpExchangeInterceptor` seam, without the transport (or the protocol core)
 depending on this package.
 
 ## Scope
 
 - `IHttpResponseStreamingFeature` — the typed streaming API (`StartAsync`,
   `WriteAsync`, `FlushAsync`, `CompleteAsync`, `HasStarted`).
-- `HttpResponseStreaming.CreateInterceptor()` — the `IHttpResponseInterceptor` a
+- `HttpResponseStreaming.CreateInterceptor()` — the `IHttpExchangeInterceptor` a
   host registers to make streaming available on every exchange.
 - `Response.Streaming` / `Response.SupportsStreaming` — ergonomic accessors on
   `IHttpResponse`.
@@ -28,7 +28,7 @@ depending on this package.
 
 ```csharp
 // Host / composition root — opt into streaming:
-options.ResponseInterceptors.Add(HttpResponseStreaming.CreateInterceptor());
+options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
 
 // Handler:
 context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain";

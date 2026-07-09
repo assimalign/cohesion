@@ -21,4 +21,16 @@
 	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
 		<Project Path="Assimalign.Cohesion.MessageHub.Client/tests/Assimalign.Cohesion.MessageHub.Client.Tests.csproj" />
 	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/" />
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.MessageHub.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.MessageHub.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.MessageHub.Hosting/src/Assimalign.Cohesion.MessageHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/MessageHub/refs/" >
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
 </Solution>

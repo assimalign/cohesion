@@ -191,6 +191,39 @@ internal static class Http3HeaderCodec
             new MemoryStream(bodyBytes, writable: false));
     }
 
+    /// <summary>
+    /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
+    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). Written as an
+    /// additional HEADERS frame on the request stream, before the final HEADERS frame (RFC 9114 §4.1).
+    /// </summary>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
+    {
+        List<(string Name, string Value)> fields =
+        [
+            (":status", ((int)statusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        ];
+
+        if (headers is not null)
+        {
+            foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        fields.Add((header.Key.Value.ToLowerInvariant(), value));
+                    }
+                }
+            }
+        }
+
+        return QPackFieldSectionEncoder.Encode(fields);
+    }
+
     public static byte[] EncodeResponseHeaders(Http3Context context, byte[] bodyBytes)
     {
         HttpHeaderCollection headers = context.Response.Headers;

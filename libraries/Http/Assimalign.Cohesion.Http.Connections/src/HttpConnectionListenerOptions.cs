@@ -41,45 +41,30 @@ public sealed class HttpConnectionListenerOptions
     internal List<HttpListenerRegistration> Registrations { get; } = new List<HttpListenerRegistration>();
 
     /// <summary>
-    /// Gets the ordered list of request-parse interceptors invoked while each request is being
-    /// read, before it is dispatched to the application. See
-    /// <see cref="IHttpRequestInterceptor"/> for the hook contract.
+    /// Gets the ordered list of exchange interceptors — the transport's single extension seam for
+    /// participating in an exchange's lifecycle. See <see cref="IHttpExchangeInterceptor"/> for
+    /// the hook contract; feature packages register through their factory (for example
+    /// <c>HttpResponseStreaming.CreateInterceptor()</c>) and derive from
+    /// <see cref="HttpExchangeInterceptor"/> to override only the hooks they need.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;
-    /// mutations after that point have no effect on the listener. A registered instance is shared
-    /// across every connection and request the listener serves, so implementations must be
-    /// stateless and thread-safe — per-request state belongs in the exchange's feature collection.
+    /// One list, one ordering: interceptors are invoked in registration order at every lifecycle
+    /// point they declare through <see cref="IHttpExchangeInterceptor.Scopes"/>. The list is
+    /// snapshotted (and partitioned by scope) when the <see cref="HttpConnectionListener"/> is
+    /// constructed; mutations after that point have no effect on the listener. A registered
+    /// instance is shared across every connection and request the listener serves, so
+    /// implementations must be stateless and thread-safe — per-request state belongs in the
+    /// exchange's feature collection.
     /// </para>
     /// <para>
-    /// When the list is empty the transport takes a fast path with no per-request interception
-    /// state allocated at all.
+    /// The zero-cost fast paths are scope-exact: when no registered interceptor declares
+    /// <see cref="HttpInterceptorScopes.Request"/> the parser allocates no per-request
+    /// interception state, and when none declares <see cref="HttpInterceptorScopes.Response"/> no
+    /// response sink or exchange control is ever constructed.
     /// </para>
     /// </remarks>
-    public IList<IHttpRequestInterceptor> RequestInterceptors { get; } = new List<IHttpRequestInterceptor>();
-
-    /// <summary>
-    /// Gets the ordered list of response interceptors invoked while each exchange's response
-    /// pipeline is being set up, before the application handler runs. See
-    /// <see cref="IHttpResponseInterceptor"/> for the hook contract.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This is the symmetric counterpart to <see cref="RequestInterceptors"/>: response-side feature
-    /// packages (incremental streaming, Server-Sent Events, later compression) plug in here so the
-    /// transport can expose its raw response body sink to them without depending on the feature
-    /// package. The list is snapshotted when the <see cref="HttpConnectionListener"/> is constructed;
-    /// mutations after that point have no effect. A registered instance is shared across every
-    /// connection and request the listener serves, so implementations must be stateless and
-    /// thread-safe.
-    /// </para>
-    /// <para>
-    /// When the list is empty the transport takes the buffered fast path with no per-exchange
-    /// response-sink allocation at all.
-    /// </para>
-    /// </remarks>
-    public IList<IHttpResponseInterceptor> ResponseInterceptors { get; } = new List<IHttpResponseInterceptor>();
+    public IList<IHttpExchangeInterceptor> Interceptors { get; } = new List<IHttpExchangeInterceptor>();
 
     /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
@@ -336,7 +321,7 @@ public sealed class HttpConnectionListenerOptions
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
         IConnectionListener listener,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listener);
 
@@ -350,7 +335,7 @@ public sealed class HttpConnectionListenerOptions
     private HttpConnectionListenerOptions UseStreamListener(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
 

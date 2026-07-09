@@ -50,10 +50,14 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         _streamListeners = new List<(HttpConnectionFactory, IConnectionListener)>();
         _multiplexedListeners = new List<(HttpMultiplexedConnectionFactory, IMultiplexedConnectionListener)>();
 
-        // Snapshot: registrations after this point must not race the accept loops or observe a
-        // half-mutated list; the empty snapshots keep the parser's zero-interceptor fast paths.
-        IHttpRequestInterceptor[] interceptors = [.. options.RequestInterceptors];
-        IHttpResponseInterceptor[] responseInterceptors = [.. options.ResponseInterceptors];
+        // Snapshot the single interceptor list once (registrations after this point must not race
+        // the accept loops or observe a half-mutated list), then partition it by declared scope —
+        // registration order preserved within each partition. The partitioning is what keeps the
+        // zero-cost fast paths scope-exact: an all-request registration produces an empty response
+        // partition (no sink or exchange control is ever constructed), and vice versa.
+        IHttpExchangeInterceptor[] snapshot = [.. options.Interceptors];
+        IHttpExchangeInterceptor[] interceptors = FilterByScope(snapshot, HttpInterceptorScopes.Request);
+        IHttpExchangeInterceptor[] responseInterceptors = FilterByScope(snapshot, HttpInterceptorScopes.Response);
 
         HttpProtocol protocols = HttpProtocol.None;
 
@@ -308,5 +312,32 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
             _disposeCancellationTokenSource.Cancel();
         }
+    }
+
+    /// <summary>
+    /// Partitions the snapshotted interceptors by declared scope, preserving registration order.
+    /// Each interceptor's <see cref="IHttpExchangeInterceptor.Scopes"/> is read exactly once (the
+    /// contract makes it constant, and a single read keeps a misbehaving implementation from
+    /// desynchronizing the partition). Runs once, at listener construction; the resulting arrays
+    /// live for the listener's lifetime and are shared by every connection it accepts.
+    /// </summary>
+    private static IHttpExchangeInterceptor[] FilterByScope(IHttpExchangeInterceptor[] snapshot, HttpInterceptorScopes scope)
+    {
+        List<IHttpExchangeInterceptor> filtered = new(snapshot.Length);
+
+        foreach (IHttpExchangeInterceptor interceptor in snapshot)
+        {
+            if ((interceptor.Scopes & scope) != 0)
+            {
+                filtered.Add(interceptor);
+            }
+        }
+
+        if (filtered.Count == snapshot.Length)
+        {
+            return snapshot;
+        }
+
+        return filtered.Count == 0 ? Array.Empty<IHttpExchangeInterceptor>() : [.. filtered];
     }
 }

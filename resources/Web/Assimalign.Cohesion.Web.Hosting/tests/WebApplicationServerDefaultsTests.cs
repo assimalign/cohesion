@@ -19,11 +19,11 @@ public class WebApplicationServerDefaultsTests
 
         WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
 
-        options.RequestInterceptors.Count.ShouldBe(1);
+        options.Interceptors.Count.ShouldBe(1);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
-        HttpRequestInterceptorContext context = new()
+        HttpExchangeInterceptorRequestContext context = new()
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,
@@ -36,7 +36,7 @@ public class WebApplicationServerDefaultsTests
             MaxRequestBodySize = 2048,
         };
 
-        options.RequestInterceptors[0].OnRequestHead(context);
+        options.Interceptors[0].AfterRequestHead(context);
 
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();

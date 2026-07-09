@@ -12,8 +12,20 @@
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/src/">
 		<Project Path="Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
 	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/" />
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.LogSpace.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.LogSpace.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.LogSpace.Hosting/src/Assimalign.Cohesion.LogSpace.Hosting.csproj" />
+	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">
 		<Project Path="Assimalign.Cohesion.LogSpace.Telemetry/src/Assimalign.Cohesion.LogSpace.Telemetry.csproj" />
+	</Folder>
+	<Folder Name="/LogSpace/refs/" >
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
 </Solution>

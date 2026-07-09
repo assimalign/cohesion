@@ -3,7 +3,7 @@ $BasePath = $PSScriptRoot
 Import-Module Assimalign.Cohesion.DevScripts -Force
 
 $Solutions = @(
-    "$BasePath\Assimalign.Cohesion.slnx",
+    # "$BasePath\Assimalign.Cohesion.slnx",
     "$BasePath\frameworks\Assimalign.Cohesion.Frameworks.slnx",
     "$BasePath\libraries\Assimalign.Cohesion.Libraries.slnx",
     "$BasePath\resources\Assimalign.Cohesion.Resources.slnx",

@@ -488,6 +488,7 @@ internal static class HttpProtocolPayloadFactory
         31 => ("content-type", string.Empty),
         32 => ("cookie", string.Empty),
         38 => ("host", string.Empty),
+        45 => ("link", string.Empty),
         46 => ("location", string.Empty),
         54 => ("server", string.Empty),
         55 => ("set-cookie", string.Empty),

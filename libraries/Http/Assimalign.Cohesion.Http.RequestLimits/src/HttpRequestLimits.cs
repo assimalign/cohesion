@@ -24,7 +24,7 @@ public static class HttpRequestLimits
     /// per request.
     /// </summary>
     /// <returns>A stateless interceptor to register on the server's listener options.</returns>
-    public static IHttpRequestInterceptor CreateMaxRequestBodySizeInterceptor()
+    public static IHttpExchangeInterceptor CreateMaxRequestBodySizeInterceptor()
     {
         return new HttpMaxRequestBodySizeInterceptor();
     }

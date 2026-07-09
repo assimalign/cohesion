@@ -10,13 +10,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 internal sealed class Http2ConnectionFactory : HttpConnectionFactory
 {
     private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
 
     public Http2ConnectionFactory(
         Http2ConnectionListenerOptions.Http2Limits limits,
-        IHttpRequestInterceptor[] requestInterceptors,
-        IHttpResponseInterceptor[] responseInterceptors)
+        IHttpExchangeInterceptor[] requestInterceptors,
+        IHttpExchangeInterceptor[] responseInterceptors)
     {
         _limits = limits;
         _requestInterceptors = requestInterceptors;

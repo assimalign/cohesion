@@ -14,12 +14,12 @@ namespace Assimalign.Cohesion.Http.Streaming.Tests;
 public class HttpResponseStreamingFeatureTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Streaming] - Interceptor: Should install a streaming feature over the response body sink")]
-    public void Interceptor_OnResponse_ShouldInstallStreamingFeature()
+    public void Interceptor_BeforeResponse_ShouldInstallStreamingFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
 
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
         context.Features.Get<IHttpResponseStreamingFeature>().ShouldNotBeNull();
     }
@@ -88,8 +88,8 @@ public class HttpResponseStreamingFeatureTests
     public void ResponseStreamingAccessor_ShouldResolveInstalledFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
 
         FakeHttpResponse response = new(context.Features);
 
@@ -109,12 +109,12 @@ public class HttpResponseStreamingFeatureTests
     private static (IHttpResponseStreamingFeature Feature, RecordingSink Sink) CreateFeature()
     {
         RecordingSink sink = new();
-        HttpResponseInterceptorContext context = CreateContext(sink);
-        HttpResponseStreaming.CreateInterceptor().OnResponse(context);
+        HttpExchangeInterceptorResponseContext context = CreateContext(sink);
+        HttpResponseStreaming.CreateInterceptor().BeforeResponse(context);
         return (context.Features.Get<IHttpResponseStreamingFeature>()!, sink);
     }
 
-    private static HttpResponseInterceptorContext CreateContext(Stream sink) => new()
+    private static HttpExchangeInterceptorResponseContext CreateContext(Stream sink) => new()
     {
         Version = HttpVersion.Http11,
         Headers = new HttpHeaderCollection(),
