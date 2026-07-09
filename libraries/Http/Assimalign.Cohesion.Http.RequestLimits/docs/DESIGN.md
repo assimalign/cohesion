@@ -12,7 +12,7 @@ That placement conflated two different kinds of surface:
 
 - **Seams** — generic extensibility infrastructure with no opinion about any one capability:
   `IHttpFeature`, `IHttpFeatureCollection`, and now `IHttpExchangeInterceptor` +
-  `HttpRequestInterceptorContext`. These belong in core, exactly like the shared wire rules in
+  `HttpExchangeInterceptorRequestContext`. These belong in core, exactly like the shared wire rules in
   `HttpFieldNormalization`.
 - **Features** — concrete capabilities: extended CONNECT, sessions, cookies, forms, and
   per-request body-size limiting. These belong in their own packages that reference only core.
@@ -33,7 +33,7 @@ exchange's feature collection.
 
 The feature is a **write-through view over the parse context**, not a copy:
 
-- `MaxRequestBodySize` reads and writes `HttpRequestInterceptorContext.MaxRequestBodySize` —
+- `MaxRequestBodySize` reads and writes `HttpExchangeInterceptorRequestContext.MaxRequestBodySize` —
   the very value the transport enforces. There is no second source of truth.
 - `IsReadOnly` delegates to the context's transport-owned freeze flag
   (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob after the last
@@ -45,7 +45,7 @@ The feature is a **write-through view over the parse context**, not a copy:
   definition of "read" evolves.
 
 The transport keeps the context alive until the request body is consumed (documented on
-`HttpRequestInterceptorContext`), so the view never dangles.
+`HttpExchangeInterceptorRequestContext`), so the view never dangles.
 
 ### Why a typed seam here, when ExtendedConnect chose an Items-key bridge
 
@@ -92,7 +92,7 @@ The migration from the original in-core placement is complete; the pieces sit as
 2. **Transport enforces, never seeds.** `Http.Connections` carries no body-size feature of its
    own: `HttpConnectionListenerOptions.Interceptors` is snapshotted to an array when the
    listener is constructed (post-construction registrations are inert — no racing the accept
-   loops); each transport builds one `HttpRequestInterceptorContext` per request (read-only
+   loops); each transport builds one `HttpExchangeInterceptorRequestContext` per request (read-only
    `Headers` view via `AsReadOnly()`), runs `AfterRequestHead` hooks after the head is assembled,
    freezes the knob, runs `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
    automatic `Expect: 100-continue` solicitation), chains `AfterRequestBody` hooks over the

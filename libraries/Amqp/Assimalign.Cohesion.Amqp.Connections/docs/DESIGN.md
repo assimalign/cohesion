@@ -187,6 +187,6 @@ over `ArrayBufferWriter<byte>` / `ReadOnlySequence<byte>`. Fully NativeAOT compa
   listener/factory; never an AMQP concern.
 - **`Assimalign.Cohesion.Amqp`** — the core AMQP library (placeholder today) intended to build
   session/link/messaging semantics on top of this transport layer.
-- **`Assimalign.Cohesion.Http.Transports`** — the sibling application-protocol transport; the
+- **`Assimalign.Cohesion.Http.Connections`** — the sibling application-protocol transport; the
   two consume the connection contracts with the same capability-gated, pre-composed-TLS
   pattern.

@@ -694,7 +694,7 @@ dynamic member access. Builds clean under the trim/AOT analyzers
 
 ### The response phase
 
-The response-phase hooks (+ `HttpResponseInterceptorContext`) run along an
+The response-phase hooks (+ `HttpExchangeInterceptorResponseContext`) run along an
 exchange's response lifecycle. They exist so **response-side capabilities stay
 out of both the protocol core and the transport**: incremental response
 streaming (and Server-Sent Events on top of it), interim (`1xx`) responses, and
@@ -730,12 +730,12 @@ response side mirrors it exactly, with **two transport-backed objects** on the
 context instead of per-capability members:
 
 - The transport exposes its per-protocol **raw response body sink** as a plain
-  `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
+  `System.IO.Stream` on `HttpExchangeInterceptorResponseContext.ResponseBody`. That sink
   frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
   flow-control backpressure), commits the head on the first write/flush, and is
   finalized by the transport when the exchange completes.
 - The transport exposes its per-exchange **exchange control** as an
-  `IHttpExchangeControl` on `HttpResponseInterceptorContext.Control` — the
+  `IHttpExchangeControl` on `HttpExchangeInterceptorResponseContext.Control` — the
   single generic surface for the transport-owned wire mechanisms outside the
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
   `WriteInterimResponseAsync`) and the raw-stream takeover (`CanTakeOver` /
@@ -767,7 +767,7 @@ headers are committed exactly once and locked thereafter — a rule the streamin
 feature surfaces to callers and the SSE package relies on (set `Content-Type:
 text/event-stream` before the first write). `BeforeResponse` runs before any
 response byte is produced, so an interceptor may still set default response headers
-on `HttpResponseInterceptorContext.Headers`; `BeforeResponseHeadAsync` is the last
+on `HttpExchangeInterceptorResponseContext.Headers`; `BeforeResponseHeadAsync` is the last
 word — it fires immediately before the commit on whichever path commits first.
 
 ### Exchange control semantics that are load-bearing

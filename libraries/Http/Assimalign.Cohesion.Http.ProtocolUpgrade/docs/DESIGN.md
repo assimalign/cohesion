@@ -32,7 +32,7 @@ seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
 2. **Materialization** — an `IHttpExchangeInterceptor`. `BeforeResponse` runs per exchange at
    exchange setup — after the head is parsed, before the application handler — sharing the same
    feature collection. It consumes the candidate and, when the transport's **exchange control**
-   (`HttpResponseInterceptorContext.Control`, the generic core `IHttpExchangeControl` surface)
+   (`HttpExchangeInterceptorResponseContext.Control`, the generic core `IHttpExchangeControl` surface)
    can surrender the connection (`CanTakeOver`), installs the public
    `IHttpProtocolUpgradeFeature` wrapping an `Http1ProtocolUpgrade`. A missing control, or a
    control whose `CanTakeOver` reads `false` (an exchange that cannot surrender its connection —

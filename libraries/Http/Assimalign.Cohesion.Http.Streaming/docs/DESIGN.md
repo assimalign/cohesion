@@ -34,7 +34,7 @@ path with zero streaming overhead.
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol raw response body sink and
    runs the registered response interceptors, exposing the sink as
-   `HttpResponseInterceptorContext.ResponseBody`.
+   `HttpExchangeInterceptorResponseContext.ResponseBody`.
 3. `HttpResponseStreamingInterceptor.BeforeResponse` wraps that sink in a
    `HttpResponseStreamingFeature` and installs it on `context.Features`.
 4. The handler resolves it — `context.Response.Streaming` — and calls
