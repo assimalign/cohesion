@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Keeps a route candidate only when another route value matches an expected value.
 /// </summary>
-public sealed class RequiredValueRouteParameterPolicy : RouteParameterPolicy
+internal sealed class RequiredValueRouteParameterPolicy : RouteParameterPolicy
 {
     /// <summary>
     /// Creates a new route-value-based parameter policy.

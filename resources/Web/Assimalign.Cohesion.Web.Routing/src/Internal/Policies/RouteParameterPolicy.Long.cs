@@ -6,15 +6,8 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route value is a 64-bit signed integer and converts it to a <see cref="long"/>.
 /// </summary>
-public sealed class LongRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class LongRouteParameterPolicy : TypedRouteParameterPolicy
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="LongRouteParameterPolicy"/> class.
-    /// </summary>
-    internal LongRouteParameterPolicy()
-    {
-    }
-
     /// <inheritdoc />
     public override Type ConversionType => typeof(long);
 

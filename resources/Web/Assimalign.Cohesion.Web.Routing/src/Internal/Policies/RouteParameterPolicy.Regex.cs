@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates a route parameter using a regular expression.
 /// </summary>
-public sealed class RegexRouteParameterPolicy : RouteParameterPolicy
+internal sealed class RegexRouteParameterPolicy : RouteParameterPolicy
 {
     private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromSeconds(10);
     private readonly Func<Regex>? _regexFactory;

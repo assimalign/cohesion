@@ -6,15 +6,8 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// Validates that a route value is a boolean (<c>true</c> or <c>false</c>, case-insensitive) and
 /// converts it to a <see cref="bool"/>.
 /// </summary>
-public sealed class BoolRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class BoolRouteParameterPolicy : TypedRouteParameterPolicy
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="BoolRouteParameterPolicy"/> class.
-    /// </summary>
-    internal BoolRouteParameterPolicy()
-    {
-    }
-
     /// <inheritdoc />
     public override Type ConversionType => typeof(bool);
 

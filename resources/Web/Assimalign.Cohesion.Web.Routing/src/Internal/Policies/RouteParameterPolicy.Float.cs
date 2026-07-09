@@ -7,16 +7,9 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// Validates that a route value is a single-precision floating-point number and converts it to a
 /// <see cref="float"/>.
 /// </summary>
-public sealed class FloatRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class FloatRouteParameterPolicy : TypedRouteParameterPolicy
 {
     private const NumberStyles Styles = NumberStyles.Float | NumberStyles.AllowThousands;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="FloatRouteParameterPolicy"/> class.
-    /// </summary>
-    internal FloatRouteParameterPolicy()
-    {
-    }
 
     /// <inheritdoc />
     public override Type ConversionType => typeof(float);

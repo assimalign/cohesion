@@ -4,24 +4,24 @@ using System.Globalization;
 namespace Assimalign.Cohesion.Web.Routing.Policies;
 
 /// <summary>
-/// Validates that a route value is an integer greater than or equal to an inclusive minimum
-/// (<c>min(n)</c>).
+/// Validates that a route value is an integer less than or equal to an inclusive maximum
+/// (<c>max(n)</c>).
 /// </summary>
-public sealed class MinRouteParameterPolicy : RouteParameterPolicy
+internal sealed class MaxRouteParameterPolicy : RouteParameterPolicy
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="MinRouteParameterPolicy"/> class.
+    /// Initializes a new instance of the <see cref="MaxRouteParameterPolicy"/> class.
     /// </summary>
-    /// <param name="min">The inclusive minimum value.</param>
-    internal MinRouteParameterPolicy(long min)
+    /// <param name="max">The inclusive maximum value.</param>
+    internal MaxRouteParameterPolicy(long max)
     {
-        Min = min;
+        Max = max;
     }
 
     /// <summary>
-    /// Gets the inclusive minimum allowed value of the route parameter.
+    /// Gets the inclusive maximum allowed value of the route parameter.
     /// </summary>
-    public long Min { get; }
+    public long Max { get; }
 
     /// <inheritdoc />
     public override bool Applies(RouteParameterPolicyContext context)
@@ -33,7 +33,7 @@ public sealed class MinRouteParameterPolicy : RouteParameterPolicy
             string? text = Convert.ToString(value, CultureInfo.InvariantCulture);
             if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
             {
-                return parsed >= Min;
+                return parsed <= Max;
             }
         }
 

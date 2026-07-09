@@ -268,8 +268,10 @@ the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls throug
 
 ### The constraint model: validators vs. typed conversions (#789)
 
-`RouteParameterPolicy` is the public extension point; concrete built-ins are `public sealed` with
-`internal` constructors, surfaced through `RouteParameterPolicyMap`. There are two kinds:
+`RouteParameterPolicy` is the public extension point. The concrete built-ins are `internal sealed`
+(under `Internal/Policies/`) and are surfaced **only by name** through `RouteParameterPolicyMap` —
+consumers never reference them as types, which keeps the public policy surface to the two base
+classes plus `RouteParameterPolicyContext` and `RouteParameterPolicyMap`. There are two kinds:
 
 - **Validators** derive from `RouteParameterPolicy` and only accept/reject the raw text; the value
   stays a `string`. Built-ins: `alpha`, `length(n)` / `length(min,max)`, `minlength(n)`,

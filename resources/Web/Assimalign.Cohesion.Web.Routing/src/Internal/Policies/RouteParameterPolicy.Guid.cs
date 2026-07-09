@@ -5,15 +5,8 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route value is a <see cref="Guid"/> and converts it to one.
 /// </summary>
-public sealed class GuidRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class GuidRouteParameterPolicy : TypedRouteParameterPolicy
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="GuidRouteParameterPolicy"/> class.
-    /// </summary>
-    internal GuidRouteParameterPolicy()
-    {
-    }
-
     /// <inheritdoc />
     public override Type ConversionType => typeof(Guid);
 

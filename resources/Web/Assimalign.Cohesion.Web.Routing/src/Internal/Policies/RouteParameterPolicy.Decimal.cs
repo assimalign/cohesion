@@ -6,15 +6,8 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route value is a decimal number and converts it to a <see cref="decimal"/>.
 /// </summary>
-public sealed class DecimalRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class DecimalRouteParameterPolicy : TypedRouteParameterPolicy
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DecimalRouteParameterPolicy"/> class.
-    /// </summary>
-    internal DecimalRouteParameterPolicy()
-    {
-    }
-
     /// <inheritdoc />
     public override Type ConversionType => typeof(decimal);
 

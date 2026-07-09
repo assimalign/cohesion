@@ -6,15 +6,8 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route value is a 32-bit signed integer and converts it to an <see cref="int"/>.
 /// </summary>
-public sealed class IntRouteParameterPolicy : TypedRouteParameterPolicy
+internal sealed class IntRouteParameterPolicy : TypedRouteParameterPolicy
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IntRouteParameterPolicy"/> class.
-    /// </summary>
-    internal IntRouteParameterPolicy()
-    {
-    }
-
     /// <inheritdoc />
     public override Type ConversionType => typeof(int);
 

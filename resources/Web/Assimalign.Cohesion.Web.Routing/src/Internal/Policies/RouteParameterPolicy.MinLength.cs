@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route value's text length is at least a given minimum (<c>minlength(n)</c>).
 /// </summary>
-public sealed class MinLengthRouteParameterPolicy : RouteParameterPolicy
+internal sealed class MinLengthRouteParameterPolicy : RouteParameterPolicy
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="MinLengthRouteParameterPolicy"/> class.

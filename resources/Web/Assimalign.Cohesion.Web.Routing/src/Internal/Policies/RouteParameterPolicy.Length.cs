@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// Validates that a route value's text length is exactly a given length (<c>length(n)</c>) or falls
 /// within an inclusive length range (<c>length(min,max)</c>).
 /// </summary>
-public sealed class LengthRouteParameterPolicy : RouteParameterPolicy
+internal sealed class LengthRouteParameterPolicy : RouteParameterPolicy
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="LengthRouteParameterPolicy"/> class enforcing an

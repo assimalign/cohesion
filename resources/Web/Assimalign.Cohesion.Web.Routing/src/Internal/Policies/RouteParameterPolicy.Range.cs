@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Web.Routing.Policies;
 /// <summary>
 /// Validates that a route parameter value falls within an inclusive numeric range.
 /// </summary>
-public sealed class RangeRouteParameterPolicy : RouteParameterPolicy
+internal sealed class RangeRouteParameterPolicy : RouteParameterPolicy
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RangeRouteParameterPolicy" /> class.
