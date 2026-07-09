@@ -3,8 +3,11 @@ using System.IO;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The response-setup view of an exchange handed to <see cref="IHttpResponseInterceptor"/>
-/// implementations by the server transport, before the application handler runs.
+/// The response-lifecycle view of an exchange handed to <see cref="IHttpExchangeInterceptor"/>
+/// implementations by the server transport — at exchange setup (before the application handler
+/// runs) and again, the same instance, at the later lifecycle hooks
+/// (<see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> /
+/// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,13 +16,13 @@ namespace Assimalign.Cohesion.Http;
 /// middleware onward and participate in the exchange's normal feature-disposal walk.
 /// </para>
 /// <para>
-/// The context is not thread-safe; it must only be touched from the exchange's setup/dispatch
-/// flow. All required members are set by the transport at construction. Members added in future
+/// The context is not thread-safe; it must only be touched from the exchange's handling flow
+/// (the interceptor hooks and the features they install). All required members are set by the transport at construction. Members added in future
 /// versions will be optional with sensible defaults so existing construction sites (including test
 /// fakes) keep compiling.
 /// </para>
 /// </remarks>
-public sealed class HttpResponseInterceptorContext
+public sealed class HttpExchangeInterceptorResponseContext
 {
     /// <summary>
     /// Gets the HTTP version of the exchange.
@@ -30,7 +33,8 @@ public sealed class HttpResponseInterceptorContext
     /// Gets the response header collection. Mutable — an interceptor may set default response
     /// headers here (they are committed to the wire when the response starts). Once the response
     /// has started the headers are locked, so interceptor edits made during
-    /// <see cref="IHttpResponseInterceptor.OnResponse"/> always precede the commit.
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/> always precede the commit
+    /// (<see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> has the last word).
     /// </summary>
     public required HttpHeaderCollection Headers { get; init; }
 
@@ -61,19 +65,22 @@ public sealed class HttpResponseInterceptorContext
     public required Stream ResponseBody { get; init; }
 
     /// <summary>
-    /// Gets the transport's connection-takeover capability for exchanges that can leave the HTTP
-    /// request/response loop entirely (HTTP/1.1 protocol upgrade / <c>CONNECT</c> tunnelling), or
-    /// <see langword="null"/> when the exchange cannot surrender its connection — HTTP/2 and
-    /// HTTP/3 exchanges are multiplexed streams over a shared connection, so the capability is
-    /// absent there.
+    /// Gets the transport's per-exchange control surface — the single generic seam by which a
+    /// feature package reads and directs the exchange's control flow
+    /// (<see cref="IHttpExchangeControl.Directive"/>: continue, abort, or give up control) and
+    /// performs the transport-owned wire actions that fall outside the normal response path:
+    /// interim (<c>1xx</c>) writes such as <c>103 Early Hints</c>, and the raw-stream takeover
+    /// that protocol upgrades / <c>CONNECT</c> tunnels need. <see langword="null"/> when the
+    /// transport does not offer exchange control (for example a hand-built test context).
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="ResponseBody"/>, which frames writes for the negotiated protocol, a
-    /// takeover bypasses HTTP framing altogether: <see cref="IHttpConnectionTakeover.TakeOver"/>
-    /// yields the raw duplex stream and suppresses the transport's own response for the exchange.
-    /// A feature that captures this capability should defer exercising it until the application
-    /// explicitly accepts the transition. Optional with a <see langword="null"/> default so
-    /// existing construction sites (including test fakes) keep compiling.
+    /// The control is offered on all three protocol versions; capabilities that are not physically
+    /// possible on a version report themselves unsupported through the control's probes
+    /// (<see cref="IHttpExchangeControl.CanTakeOver"/> is <see langword="false"/> on HTTP/2 and
+    /// HTTP/3, whose exchanges are multiplexed streams over a shared connection). A feature that
+    /// captures this control should defer exercising a transition until the application explicitly
+    /// accepts it. Optional with a <see langword="null"/> default so existing construction sites
+    /// (including test fakes) keep compiling.
     /// </remarks>
-    public IHttpConnectionTakeover? ConnectionTakeover { get; init; }
+    public IHttpExchangeControl? Control { get; init; }
 }

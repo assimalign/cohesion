@@ -250,6 +250,24 @@ public class Http1TransportTests
         body.ShouldBe(bodyText);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse a QUERY request line and deliver its content body (RFC 10008)")]
+    public async Task Http1_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — QUERY carries the query in the request content. The transport already
+        // accepts arbitrary token methods and frames a Content-Length body, so QUERY-with-body
+        // round-trips through the existing HTTP/1.1 harness with no transport change.
+        const string queryBody = "SELECT id FROM widgets WHERE color = 'blue'";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            $"QUERY /search HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/sql\r\nContent-Length: {queryBody.Length}\r\n\r\n{queryBody}");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should accept repeated Content-Length headers with the same value")]
     public async Task Http1_OnRepeatedContentLengthSameValue_ShouldAcceptBody()
     {
@@ -534,7 +552,7 @@ public class Http1TransportTests
     // pair is REGISTERED on the listener options (this test project references
     // the package; the transport library does not), detection rides
     // IHttpRequestInterceptor, and acceptance rides the response seam's
-    // generic IHttpConnectionTakeover capability — RFC 9110 §7.8 Upgrade /
+    // generic IHttpExchangeControl take-over capability — RFC 9110 §7.8 Upgrade /
     // §9.3.6 CONNECT, the 101 / 200 accept paths, stream surrender, SendAsync
     // suppression + keep-alive exit, the "do not consume tunnel octets"
     // framing invariant, and the single-shot AcceptAsync guard.
@@ -741,8 +759,7 @@ public class Http1TransportTests
     {
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
-        options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         return options;
     }
 

@@ -10,11 +10,11 @@ internal sealed class Http2Connection : HttpConnection
 {
     private readonly IConnection _connection;
     private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private Http2ConnectionContext? _context;
 
-    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpRequestInterceptor[] requestInterceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2Connection(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors)
         : base(isSecure)
     {
         _connection = connection;

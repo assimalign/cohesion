@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// its own read path; this helper reproduces its ordering, CONNECT-skip, empty-body, freeze, and
 /// failure-path disposal semantics for the transports that hand over a completed request object,
 /// keeping the seam contract uniform across protocols. Per-protocol timing (documented on
-/// <see cref="IHttpRequestInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
+/// <see cref="IHttpExchangeInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
 /// streaming body, so hooks run before the application observes any body octet (DATA already
 /// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 drains the request
 /// stream before header decode, so hooks run before the body is <em>exposed</em> but not before
@@ -62,7 +62,7 @@ internal static class HttpRequestInterceptorPipeline
     /// ever exist to own their disposal walk.
     /// </exception>
     public static async ValueTask<HttpFeatureCollection?> InvokeAsync(
-        IHttpRequestInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         HttpVersion version,
         TransportHttpRequest request,
         HttpConnectionInfo connectionInfo,
@@ -77,7 +77,7 @@ internal static class HttpRequestInterceptorPipeline
         }
 
         HttpFeatureCollection features = new();
-        HttpRequestInterceptorContext context = new()
+        HttpExchangeInterceptorRequestContext context = new()
         {
             Version = version,
             Method = request.Method,
@@ -98,9 +98,9 @@ internal static class HttpRequestInterceptorPipeline
         try
         {
             // Head hooks: attach features and adjust the body-size knob before the body is exposed.
-            foreach (IHttpRequestInterceptor interceptor in interceptors)
+            foreach (IHttpExchangeInterceptor interceptor in interceptors)
             {
-                interceptor.OnRequestHead(context);
+                interceptor.AfterRequestHead(context);
             }
 
             // The head hooks have run; freeze the knob so the effective cap is fixed for the
@@ -115,9 +115,17 @@ internal static class HttpRequestInterceptorPipeline
             // run so wrappers over the (empty) representation stay meaningful.
             if (!isConnect)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                // The body is about to be exposed — the effective knobs are frozen and every head
+                // hook has run. On these transports the octets may already sit buffered (see the
+                // per-protocol timing remarks above); the hook observes "before exposure".
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
-                    body = interceptor.OnRequestBody(context, body);
+                    interceptor.BeforeRequestBody(context);
+                }
+
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
+                {
+                    body = interceptor.AfterRequestBody(context, body);
                 }
 
                 request.Body = body;

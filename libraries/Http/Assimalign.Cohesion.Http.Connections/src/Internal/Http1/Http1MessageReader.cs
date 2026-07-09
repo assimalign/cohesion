@@ -43,7 +43,7 @@ internal static class Http1MessageReader
         HttpConnectionInfo connectionInfo,
         HttpScheme scheme,
         Http1ConnectionListenerOptions.Http1Limits limits,
-        IHttpRequestInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         Http1ReadTimeout readTimeout,
         CancellationToken connectionToken)
     {
@@ -130,12 +130,12 @@ internal static class Http1MessageReader
         // interception context, no feature collection, no per-request interception allocations —
         // the transport enforces the listener-wide limits exactly as before the seam existed.
         HttpFeatureCollection? features = null;
-        HttpRequestInterceptorContext? interception = null;
+        HttpExchangeInterceptorRequestContext? interception = null;
 
         if (interceptors.Length > 0)
         {
             features = new HttpFeatureCollection();
-            interception = new HttpRequestInterceptorContext
+            interception = new HttpExchangeInterceptorRequestContext
             {
                 Version = HttpVersion.Http11,
                 Method = method,
@@ -155,9 +155,9 @@ internal static class Http1MessageReader
         {
             if (interception is not null)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
-                    interceptor.OnRequestHead(interception);
+                    interceptor.AfterRequestHead(interception);
                 }
             }
 
@@ -168,6 +168,36 @@ internal static class Http1MessageReader
             long? maxBodySize = interception is not null
                 ? interception.MaxRequestBodySize
                 : limits.MaxRequestBodySize;
+
+            // The body is about to be read off the wire — knobs frozen, head hooks done. Runs
+            // before the automatic 100-continue solicitation below so a hook that rejects here
+            // does so before the body is solicited from the peer. CONNECT tunnels skip it (their
+            // post-head octets are tunnel traffic, not a message body).
+            if (interception is not null && !isConnectTunnel)
+            {
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
+                {
+                    interceptor.BeforeRequestBody(interception);
+                }
+            }
+
+            // RFC 9110 §10.1.1 — a request that declares "Expect: 100-continue" with a framed body is
+            // waiting for the server to solicit the body before sending it. The reader fully buffers
+            // the body before dispatch, so a client that withholds it (curl, .NET HttpClient with
+            // ExpectContinue) would otherwise deadlock — the read below blocks for octets the client
+            // will not send until it sees 100 Continue. Emit 100 Continue now, after the head hooks
+            // ran (a hook may have rejected first) and before reading the body, to unblock the
+            // handshake. CONNECT tunnels carry no framed body and are skipped. Lazy, application-driven
+            // solicit-on-first-read (so a handler could answer 401/417 without reading the body) is
+            // de-scoped behind the streaming-body rework — see docs/DESIGN.md.
+            if (!isConnectTunnel && ShouldSolicitContinue(headers))
+            {
+                await Http1MessageWriter.WriteInterimResponseAsync(
+                    stream,
+                    HttpStatusCode.Continue,
+                    headers: null,
+                    readToken).ConfigureAwait(false);
+            }
 
             byte[] bodyBytes;
             HttpTrailerCollection? requestTrailers = null;
@@ -206,9 +236,9 @@ internal static class Http1MessageReader
             // run so wrappers over the (empty) representation stay meaningful.
             if (interception is not null && !isConnectTunnel)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
-                    bodyStream = interceptor.OnRequestBody(interception, bodyStream);
+                    bodyStream = interceptor.AfterRequestBody(interception, bodyStream);
                 }
             }
 
@@ -351,6 +381,55 @@ internal static class Http1MessageReader
                 headers[key] = value;
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the transport should automatically emit <c>100 Continue</c> before reading the body:
+    /// the request declares <c>Expect: 100-continue</c> (RFC 9110 §10.1.1) and carries a framing that
+    /// indicates a message body. Absent the expectation, or with no body to solicit, no interim
+    /// response is sent.
+    /// </summary>
+    private static bool ShouldSolicitContinue(HttpHeaderCollection headers)
+    {
+        return HeaderContainsToken(headers, HttpHeaderKey.Expect, "100-continue")
+            && RequestHasBody(headers);
+    }
+
+    /// <summary>
+    /// Whether the request's framing indicates a message body (RFC 9112 §6): a <c>Transfer-Encoding</c>
+    /// header, or a <c>Content-Length</c> with a non-zero value. A <c>Content-Length: 0</c> (or an
+    /// absent length with no transfer coding) indicates no body, so <c>100 Continue</c> is not
+    /// solicited for it.
+    /// </summary>
+    private static bool RequestHasBody(HttpHeaderCollection headers)
+    {
+        if (headers.ContainsKey(HttpHeaderKey.TransferEncoding))
+        {
+            return true;
+        }
+
+        if (headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue contentLength))
+        {
+            foreach (string? entry in contentLength)
+            {
+                if (entry is null)
+                {
+                    continue;
+                }
+
+                foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    // Any non-"0" segment means a body is expected. A malformed value also lands here
+                    // and is rejected by the body reader afterward; soliciting first is harmless.
+                    if (!string.Equals(segment, "0", StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool HeaderContainsToken(HttpHeaderCollection headers, HttpHeaderKey key, string expected)

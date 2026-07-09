@@ -3,18 +3,19 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The interceptor pair that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
-/// available on an exchange. One stateless class implements both seams:
+/// The exchange interceptor that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
+/// available on an exchange. One stateless instance participates in both phases:
 /// </summary>
 /// <remarks>
 /// <list type="number">
-///   <item><description><see cref="OnRequestHead"/> detects the RFC 9110 §7.8 upgrade signal
+///   <item><description><see cref="AfterRequestHead"/> detects the RFC 9110 §7.8 upgrade signal
 ///   (<c>Connection: upgrade</c> token <b>and</b> a non-empty <c>Upgrade</c> header) or the
 ///   §9.3.6 <c>CONNECT</c> shape on the parsed head, and records it as an internal
 ///   <see cref="HttpProtocolUpgradeCandidate"/> feature.</description></item>
-///   <item><description><see cref="OnResponse"/> consumes the candidate and, when the transport
-///   offers its connection-takeover capability
-///   (<see cref="HttpResponseInterceptorContext.ConnectionTakeover"/>), installs the public
+///   <item><description><see cref="BeforeResponse"/> consumes the candidate and, when the
+///   transport's exchange control can surrender the connection
+///   (<see cref="HttpExchangeInterceptorResponseContext.Control"/> with
+///   <see cref="IHttpExchangeControl.CanTakeOver"/>), installs the public
 ///   <see cref="IHttpProtocolUpgradeFeature"/> wrapping an <see cref="Http1ProtocolUpgrade"/> —
 ///   the object <c>context.Upgrade</c> surfaces to the application.</description></item>
 /// </list>
@@ -30,10 +31,10 @@ namespace Assimalign.Cohesion.Http;
 /// instance fields.
 /// </para>
 /// </remarks>
-internal sealed class HttpProtocolUpgradeInterceptor : IHttpRequestInterceptor, IHttpResponseInterceptor
+internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public void OnRequestHead(HttpRequestInterceptorContext context)
+    public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
         if (context.Version != HttpVersion.Http11)
         {
@@ -62,7 +63,7 @@ internal sealed class HttpProtocolUpgradeInterceptor : IHttpRequestInterceptor, 
     }
 
     /// <inheritdoc />
-    public void OnResponse(HttpResponseInterceptorContext context)
+    public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
         HttpProtocolUpgradeCandidate? candidate = context.Features.Get<HttpProtocolUpgradeCandidate>();
         if (candidate is null)
@@ -74,15 +75,16 @@ internal sealed class HttpProtocolUpgradeInterceptor : IHttpRequestInterceptor, 
         // visible on the exchange.
         context.Features.Remove(HttpProtocolUpgradeCandidate.FeatureName);
 
-        // Defensive: the HTTP/1.1 transport always offers the capability on this seam, but a
-        // transport that cannot surrender its connection degrades to "no upgrade available"
-        // rather than surfacing a feature whose accept could never work.
-        if (context.ConnectionTakeover is not { } takeover)
+        // Defensive: the HTTP/1.1 exchange control can always surrender its connection, but an
+        // exchange whose control cannot (HTTP/2 / HTTP/3 multiplexed streams, or a hand-built
+        // context with no control) degrades to "no upgrade available" rather than surfacing a
+        // feature whose accept could never work.
+        if (context.Control is not { CanTakeOver: true } control)
         {
             return;
         }
 
-        Http1ProtocolUpgrade upgrade = new(takeover, context.Headers, context.Features, candidate.Kind, candidate.Protocol);
+        Http1ProtocolUpgrade upgrade = new(control, context.Headers, context.Features, candidate.Kind, candidate.Protocol);
         context.Features.Set(new HttpProtocolUpgradeFeature(upgrade));
     }
 

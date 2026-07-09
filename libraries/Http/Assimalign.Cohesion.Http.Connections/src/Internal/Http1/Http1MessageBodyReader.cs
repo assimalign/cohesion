@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 ///   <item><description>The body is capped at the effective per-request maximum body size
 ///   (<c>maxBodySize</c>, seeded from <see cref="Http1ConnectionListenerOptions.Http1Limits.MaxRequestBodySize"/> and
 ///   adjustable by request-parse interceptors via
-///   <see cref="HttpRequestInterceptorContext.MaxRequestBodySize"/>) so a
+///   <see cref="HttpExchangeInterceptorRequestContext.MaxRequestBodySize"/>) so a
 ///   malicious peer cannot send Content-Length: 2^63 and exhaust the heap. A <see langword="null"/>
 ///   cap leaves the body unbounded; an exceeded cap is rejected with 413.</description></item>
 /// </list>

@@ -21,6 +21,7 @@ internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
     private readonly Http2Context _context;
 
     public Http2ResponseBodyStream(Http2ConnectionContext connection, Http2Context context)
+        : base(context)
     {
         _connection = connection;
         _context = context;

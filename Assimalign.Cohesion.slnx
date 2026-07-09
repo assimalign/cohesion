@@ -851,6 +851,13 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/tests/Assimalign.Cohesion.Http.ExtendedConnect.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.InterimResponses/src/Assimalign.Cohesion.Http.InterimResponses.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.InterimResponses/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.InterimResponses/tests/Assimalign.Cohesion.Http.InterimResponses.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Streaming/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Streaming/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
@@ -1990,6 +1997,30 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication/tests/Assimalign.Cohesion.Web.Authentication.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/src/Assimalign.Cohesion.Web.Authentication.Cookie.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie/tests/Assimalign.Cohesion.Web.Authentication.Cookie.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/src/Assimalign.Cohesion.Web.Authentication.Bearer.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer/tests/Assimalign.Cohesion.Web.Authentication.Bearer.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authorization/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authorization/src/">

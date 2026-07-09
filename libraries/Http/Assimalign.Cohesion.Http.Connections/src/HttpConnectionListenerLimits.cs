@@ -41,7 +41,7 @@ public abstract class HttpConnectionListenerLimits
     /// accumulated chunked body) exceeds this bound is rejected with <c>413 Content Too Large</c>
     /// (RFC 9110 §15.5.14). Defaults to <c>30000000</c> (~28.6 MB). This is the connection-wide
     /// default, seeded into each request's parse context; a registered
-    /// <see cref="Assimalign.Cohesion.Http.IHttpRequestInterceptor"/> may raise or lower the cap
+    /// <see cref="Assimalign.Cohesion.Http.IHttpExchangeInterceptor"/> may raise or lower the cap
     /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
     /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>). Enforced by the
     /// HTTP/1.1 read path today; HTTP/2 bounds body buffering via flow-control backpressure, with

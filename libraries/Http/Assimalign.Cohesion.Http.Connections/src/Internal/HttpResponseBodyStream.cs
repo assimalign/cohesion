@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// response-lifecycle state machine (commit-the-head-once on the first write/flush, idempotent
 /// completion) and forwards the wire-specific framing to a small set of <see langword="protected"/>
 /// hooks each protocol overrides. It is exposed to response features through
-/// <see cref="HttpResponseInterceptorContext.ResponseBody"/>.
+/// <see cref="HttpExchangeInterceptorResponseContext.ResponseBody"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,8 +29,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class HttpResponseBodyStream : Stream
 {
+    private readonly TransportHttpContext _owner;
     private bool _started;
     private bool _completed;
+
+    protected HttpResponseBodyStream(TransportHttpContext owner)
+    {
+        _owner = owner;
+    }
 
     /// <summary>
     /// Whether the response has started — the head has been (or is being) committed because at least
@@ -138,6 +144,37 @@ internal abstract class HttpResponseBodyStream : Stream
         if (_started)
         {
             return;
+        }
+
+        // An exchange that was already aborted or taken over must not have a head written for it —
+        // and per the hook contract, its BeforeResponseHead hooks are not invoked either (they are
+        // "not invoked when the exchange was aborted or taken over before the head commit").
+        if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
+        {
+            throw new InvalidOperationException(
+                "The response head cannot be committed: the exchange was aborted or its connection was taken over.");
+        }
+
+        // The final response head is about to be committed by the streaming path — this is the
+        // last mutation point, so fire the BeforeResponseHead lifecycle hooks (fire-once; shared
+        // guard with the buffered path lives on the owning context) and honor a directive a hook
+        // may have set. _started is deliberately NOT set until the commit path is reached: a hook
+        // that throws (or aborts) must not leave HasStarted true with no head on the wire, or the
+        // transport's send path would "finalize" a response that never started.
+        await _owner.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (_started)
+        {
+            // A BeforeResponseHead hook itself wrote to this sink, which re-entered this method
+            // (the fire-once guard made the inner hook invocation a no-op) and already committed
+            // the head. Nothing left to do for the outer frame.
+            return;
+        }
+
+        if (_owner.ExchangeDirective != HttpExchangeDirective.Continue)
+        {
+            throw new InvalidOperationException(
+                "The response head cannot be committed: the exchange was aborted or its connection was taken over.");
         }
 
         _started = true;

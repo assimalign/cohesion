@@ -6,10 +6,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// and installs it on the exchange's feature collection — the seam by which streaming plugs into the
 /// transport without the transport depending on this package.
 /// </summary>
-internal sealed class HttpResponseStreamingInterceptor : IHttpResponseInterceptor
+internal sealed class HttpResponseStreamingInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public void OnResponse(HttpResponseInterceptorContext context)
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
+
+    public override void BeforeResponse(HttpExchangeInterceptorResponseContext context)
     {
         context.Features.Set(new HttpResponseStreamingFeature(context.ResponseBody));
     }
