@@ -26,7 +26,7 @@ internal abstract class TransportHttpContext : HttpContext
         ConnectionInfo = connectionInfo;
         _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors
-        // attached features during the read (see IHttpRequestInterceptor); it is used directly —
+        // attached features during the read (see IHttpExchangeInterceptor); it is used directly —
         // no defaults-wrapper layer, which would add a second dictionary probe to every Get on
         // the hot path. A null/foreign collection degrades gracefully: null gets a fresh empty
         // collection (the zero-interceptor fast path), and a non-HttpFeatureCollection
@@ -62,7 +62,7 @@ internal abstract class TransportHttpContext : HttpContext
     // least one response interceptor is registered so the later lifecycle hooks
     // (BeforeResponseHeadAsync / AfterResponseAsync) re-invoke against the same context. Null on
     // the zero-interceptor fast path, which keeps the later invokers true no-ops.
-    private IHttpResponseInterceptor[]? _responseInterceptors;
+    private IHttpExchangeInterceptor[]? _responseInterceptors;
     private HttpResponseInterceptorContext? _responseInterception;
     private bool _beforeResponseHeadInvoked;
     private bool _afterResponseInvoked;
@@ -110,7 +110,7 @@ internal abstract class TransportHttpContext : HttpContext
         CancelRequested ? HttpExchangeDirective.Abort : HttpExchangeDirective.Continue;
 
     /// <summary>
-    /// Runs the registered response interceptors' <see cref="IHttpResponseInterceptor.BeforeResponse"/>
+    /// Runs the registered response interceptors' <see cref="IHttpExchangeInterceptor.BeforeResponse"/>
     /// hooks, exposing the transport's raw response body <paramref name="sink"/> and per-exchange
     /// <paramref name="control"/> so feature packages can wrap them and install typed response
     /// features on <see cref="Features"/> — without the transport depending on any feature package.
@@ -126,7 +126,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// cannot offer report unsupported through the control's probes.
     /// </param>
     internal void RunResponseInterceptors(
-        IHttpResponseInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         HttpResponseBodyStream sink,
         IHttpExchangeControl control)
     {
@@ -142,7 +142,7 @@ internal abstract class TransportHttpContext : HttpContext
             Control = control,
         };
 
-        foreach (IHttpResponseInterceptor interceptor in interceptors)
+        foreach (IHttpExchangeInterceptor interceptor in interceptors)
         {
             interceptor.BeforeResponse(_responseInterception);
         }
@@ -150,7 +150,7 @@ internal abstract class TransportHttpContext : HttpContext
 
     /// <summary>
     /// Invokes the registered response interceptors'
-    /// <see cref="IHttpResponseInterceptor.BeforeResponseHeadAsync"/> hooks exactly once per
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> hooks exactly once per
     /// exchange, immediately before the final response head is committed — called by the buffered
     /// send path and by the streaming sink's first head commit, whichever happens first. A no-op
     /// on the zero-interceptor fast path. The guard flag is set before the hooks run so a hook
@@ -166,7 +166,7 @@ internal abstract class TransportHttpContext : HttpContext
 
         _beforeResponseHeadInvoked = true;
 
-        foreach (IHttpResponseInterceptor interceptor in _responseInterceptors)
+        foreach (IHttpExchangeInterceptor interceptor in _responseInterceptors)
         {
             await interceptor.BeforeResponseHeadAsync(_responseInterception, cancellationToken).ConfigureAwait(false);
         }
@@ -174,7 +174,7 @@ internal abstract class TransportHttpContext : HttpContext
 
     /// <summary>
     /// Invokes the registered response interceptors'
-    /// <see cref="IHttpResponseInterceptor.AfterResponseAsync"/> hooks exactly once per exchange,
+    /// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/> hooks exactly once per exchange,
     /// after the final response has been fully written — called at the end of each transport's
     /// successful send path (buffered and streamed-finalize). Never called for an aborted or
     /// taken-over exchange, which has no final response to observe. A no-op on the
@@ -190,7 +190,7 @@ internal abstract class TransportHttpContext : HttpContext
 
         _afterResponseInvoked = true;
 
-        foreach (IHttpResponseInterceptor interceptor in _responseInterceptors)
+        foreach (IHttpExchangeInterceptor interceptor in _responseInterceptors)
         {
             await interceptor.AfterResponseAsync(_responseInterception, cancellationToken).ConfigureAwait(false);
         }
@@ -246,7 +246,7 @@ internal abstract class TransportHttpContext : HttpContext
     /// and response body streams. The contract is request-scoped: a
     /// feature whose state needs deterministic cleanup at request end
     /// implements one of the disposal interfaces and is attached either at
-    /// parse time by a registered <see cref="IHttpRequestInterceptor"/>
+    /// parse time by a registered <see cref="IHttpExchangeInterceptor"/>
     /// (via <see cref="HttpConnectionListenerOptions.RequestInterceptors"/>) or
     /// later by middleware.
     /// </summary>

@@ -284,7 +284,8 @@ public class HttpProtocolUpgradeInterceptorTests
             ConnectionInfo = HttpConnectionInfo.Empty,
             MaxRequestBodySize = null,
         };
-        HttpProtocolUpgrade.CreateRequestInterceptor().AfterRequestHead(headContext);
+        IHttpExchangeInterceptor interceptor = HttpProtocolUpgrade.CreateInterceptor();
+        interceptor.AfterRequestHead(headContext);
 
         responseHeaders = new HttpHeaderCollection();
         HttpResponseInterceptorContext responseContext = new()
@@ -296,6 +297,6 @@ public class HttpProtocolUpgradeInterceptorTests
             ResponseBody = Stream.Null,
             Control = control,
         };
-        HttpProtocolUpgrade.CreateResponseInterceptor().BeforeResponse(responseContext);
+        interceptor.BeforeResponse(responseContext);
     }
 }

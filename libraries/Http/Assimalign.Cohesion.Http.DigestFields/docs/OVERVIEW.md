@@ -7,7 +7,7 @@ request verifier.
 
 - **Depends on:** `Assimalign.Cohesion.Http` (core) only — for the four `HttpHeaderKey` constants,
   the `StructuredFieldDictionary` toolkit the field values are built on, and the
-  `IHttpRequestInterceptor` request-parse seam. The server transport
+  `IHttpExchangeInterceptor` request-parse seam. The server transport
   (`Assimalign.Cohesion.Http.Connections`) never references this package.
 - **Value model:** `HttpDigestField` (a `Content-Digest` / `Repr-Digest` value — an ordered map of
   algorithm → digest bytes) and `HttpWantDigestField` (a `Want-*` value — algorithm → integer
@@ -16,7 +16,7 @@ request verifier.
   verify; the deprecated registry entries (`md5`, `sha`, `unixsum`, `unixcksum`) are recognized on
   parse but never used (RFC 9530 §5).
 - **Server verification:** `HttpDigestFields.CreateContentDigestVerifier()` returns an
-  `IHttpRequestInterceptor` the composition root registers on its listener; it verifies an inbound
+  `IHttpExchangeInterceptor` the composition root registers on its listener; it verifies an inbound
   `Content-Digest` against the request body and rejects a mismatch (or a malformed field) with
   `400 Bad Request` before dispatch.
 - **Response stamping:** `IHttpResponse.SetContentDigest(...)` computes and stamps `Content-Digest`,
@@ -27,7 +27,7 @@ Usage:
 
 ```csharp
 // Server: verify inbound Content-Digest (register before any content-decoding interceptor).
-listenerOptions.RequestInterceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
+listenerOptions.Interceptors.Add(HttpDigestFields.CreateContentDigestVerifier());
 
 // Response: stamp Content-Digest, honoring the client's Want-Content-Digest.
 context.Response.SetContentDigest(body);

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Http;
 /// This is a response feature package, not part of the protocol core or the transport. It is made
 /// available on an exchange by registering its response interceptor
 /// (<see cref="HttpResponseStreaming.CreateInterceptor"/>) on the server transport's
-/// <c>ResponseInterceptors</c>; the interceptor wraps the transport's raw response body sink and
+/// <c>Interceptors</c> list; the interceptor wraps the transport's raw response body sink and
 /// installs this feature, so the transport never depends on this package. A handler resolves it via
 /// <c>context.Features.Get&lt;IHttpResponseStreamingFeature&gt;()</c> or the ergonomic
 /// <c>context.Response.Streaming</c> accessor.

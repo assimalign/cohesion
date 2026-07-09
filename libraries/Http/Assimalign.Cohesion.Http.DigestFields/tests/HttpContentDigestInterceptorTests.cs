@@ -18,7 +18,7 @@ public class HttpContentDigestInterceptorTests
         byte[] content = Encoding.UTF8.GetBytes("payload that matches its digest");
         string digest = HttpDigestField.ForContent(content, HttpDigestAlgorithm.Sha256).Serialize();
         HttpRequestInterceptorContext context = CreateContext(digest);
-        IHttpRequestInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
+        IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         Stream result = verifier.AfterRequestBody(context, new MemoryStream(content));
 
@@ -34,7 +34,7 @@ public class HttpContentDigestInterceptorTests
         byte[] actual = Encoding.UTF8.GetBytes("the tampered payload");
         string digest = HttpDigestField.ForContent(declared, HttpDigestAlgorithm.Sha256).Serialize();
         HttpRequestInterceptorContext context = CreateContext(digest);
-        IHttpRequestInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
+        IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
             () => verifier.AfterRequestBody(context, new MemoryStream(actual)));
@@ -46,7 +46,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_Malformed_Rejects400()
     {
         HttpRequestInterceptorContext context = CreateContext("sha-256=12345");
-        IHttpRequestInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
+        IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
 
         HttpRequestRejectedException ex = Should.Throw<HttpRequestRejectedException>(
             () => verifier.AfterRequestBody(context, new MemoryStream(new byte[] { 1, 2, 3 })));
@@ -58,7 +58,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_NoDigest_PassesThrough()
     {
         HttpRequestInterceptorContext context = CreateContext(contentDigest: null);
-        IHttpRequestInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
+        IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
         Stream result = verifier.AfterRequestBody(context, body);
@@ -70,7 +70,7 @@ public class HttpContentDigestInterceptorTests
     public void AfterRequestBody_DeprecatedOnly_PassesThrough()
     {
         HttpRequestInterceptorContext context = CreateContext("md5=:1B2M2Y8AsgTpgAmY7PhCfg==:");
-        IHttpRequestInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
+        IHttpExchangeInterceptor verifier = HttpDigestFields.CreateContentDigestVerifier();
         using var body = new MemoryStream(new byte[] { 1, 2, 3 });
 
         Stream result = verifier.AfterRequestBody(context, body);

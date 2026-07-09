@@ -114,8 +114,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // keep the field a plain int.
     private int _peerLastStreamId = -1;
 
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
 
     // Operator-tunable HTTP/2 abuse limits and the per-connection flood detectors that enforce the
     // frame-rate attack classes (rapid reset, SETTINGS flood, PING flood). See Http2ConnectionListenerOptions.Http2Limits. The
@@ -124,7 +124,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
     private readonly Http2FloodGuard _floodGuard;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpRequestInterceptor[] requestInterceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
         _http2Limits = limits;

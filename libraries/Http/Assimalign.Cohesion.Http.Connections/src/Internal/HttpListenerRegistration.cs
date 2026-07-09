@@ -15,16 +15,16 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class HttpListenerRegistration
 {
     private readonly Func<IConnectionListener>? _streamListenerFactory;
-    private readonly Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
-    private readonly Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
         Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
         Protocol = protocol;
         _streamListenerFactory = streamListenerFactory;
@@ -46,14 +46,14 @@ internal sealed class HttpListenerRegistration
     public static HttpListenerRegistration ForStream(
         HttpProtocol protocol,
         Func<IConnectionListener> listenerFactory,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
     }
 
     public static HttpListenerRegistration ForMultiplexed(
         Func<IMultiplexedConnectionListener> listenerFactory,
-        Func<IHttpRequestInterceptor[], IHttpResponseInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
     {
         return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, streamConnectionFactoryBuilder: null, listenerFactory, connectionFactoryBuilder);
     }
@@ -81,7 +81,7 @@ internal sealed class HttpListenerRegistration
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
     /// <returns>The stream connection factory.</returns>
-    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
     {
         return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
     }
@@ -104,7 +104,7 @@ internal sealed class HttpListenerRegistration
     /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
     /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
     /// <returns>The multiplexed connection factory.</returns>
-    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
     {
         return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
     }

@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The parse-time view of a request handed to <see cref="IHttpRequestInterceptor"/>
+/// The parse-time view of a request handed to <see cref="IHttpExchangeInterceptor"/>
 /// implementations by the server transport.
 /// </summary>
 /// <remarks>

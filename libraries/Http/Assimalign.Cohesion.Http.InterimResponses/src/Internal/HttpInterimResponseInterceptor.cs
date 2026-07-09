@@ -8,10 +8,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// the seam by which interim responses plug into the transport without the transport depending on
 /// this package.
 /// </summary>
-internal sealed class HttpInterimResponseInterceptor : IHttpResponseInterceptor
+internal sealed class HttpInterimResponseInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public void BeforeResponse(HttpResponseInterceptorContext context)
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Response;
+
+    public override void BeforeResponse(HttpResponseInterceptorContext context)
     {
         // A transport that does not offer exchange control (a foreign IHttpContext, a hand-built
         // test context) leaves Control null — install nothing so

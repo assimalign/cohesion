@@ -138,18 +138,25 @@ capability is the single source of truth, and the scheme
 
 ### What it is
 
-`HttpConnectionListenerOptions.RequestInterceptors` is the injection seam the transport
-exposes for code outside this package to participate at request-parse time. The
-contract — `IHttpRequestInterceptor`, `HttpRequestInterceptorContext`, and the
-typed rejection `HttpRequestRejectedException` — lives in core
+`HttpConnectionListenerOptions.Interceptors` is the **single** injection seam the
+transport exposes for code outside this package to participate in an exchange's
+lifecycle — one list, one registration order, spanning the request-parse hooks
+and the response hooks. The contract — `IHttpExchangeInterceptor` (implemented by
+deriving from the guided `HttpExchangeInterceptor` base), the phase contexts, and
+the typed rejection `HttpRequestRejectedException` — lives in core
 `Assimalign.Cohesion.Http` (a generic seam, like `IHttpFeature`), so feature
 packages implement hooks without referencing this transport package and this
-transport never references them:
+transport never references them. The `HttpConnectionListener` snapshots the list
+once at construction and partitions it by each interceptor's declared
+`HttpInterceptorScopes` — request-scoped hooks and response-scoped machinery are
+invoked only for interceptors that declared that phase, which keeps the zero-cost
+fast paths scope-exact (a request-only default like `Http.RequestLimits` never
+causes a response sink or exchange control to be constructed):
 
 ```csharp
 HttpConnectionListenerOptions options = new();
-options.RequestInterceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
-options.RequestInterceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
+options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+options.Interceptors.Add(new RequestDigestInterceptor(/* parse-time hashing */));
 ```
 
 Per request each transport (using the HTTP/1.1 parser as the reference; HTTP/2
@@ -392,7 +399,7 @@ that this library never references.
   the framing to per-protocol subclasses: `Http1ResponseBodyStream` (chunked transfer
   coding), `Http2ResponseBodyStream` / `Http3ResponseBodyStream` (`DATA` frames). This
   is where the header-commit timing and the wire framing live.
-- **`IHttpResponseInterceptor`** (core Http) + `HttpConnectionListenerOptions.ResponseInterceptors`
+- **`IHttpExchangeInterceptor`** (core Http) + `HttpConnectionListenerOptions.Interceptors`
   — the symmetric counterpart to the request-interceptor seam, now a **lifecycle-hook
   set** rather than a single invocation point. At context setup, when any response
   interceptor is registered, the transport creates the per-protocol sink and exchange
@@ -401,8 +408,9 @@ that this library never references.
   `BeforeResponse` hooks. The same context is re-presented to the later hooks:
   `BeforeResponseHeadAsync` fires exactly once immediately before the final head is
   committed (buffered send or streaming first-commit, whichever happens first —
-  the last point at which status/headers can be mutated, an interim response emitted,
-  or the exchange redirected via the control), and `AfterResponseAsync` fires exactly
+  the last point at which status/headers can be mutated or an interim response
+  emitted; the transport re-reads the exchange's state after the hooks run), and
+  `AfterResponseAsync` fires exactly
   once after the final response is fully written (never for an aborted or taken-over
   exchange). A feature package's interceptor wraps the sink or the control in a typed
   feature and installs it on `context.Features`; the transport neither knows nor cares
@@ -410,19 +418,22 @@ that this library never references.
   frame pump) and must be CPU-only; the two async hooks run on the exchange's send
   path where awaiting is safe.
 
-Response interceptors are snapshotted on the `HttpConnectionListener` (like request
-interceptors) and threaded to all three protocol connections. **Zero response
-interceptors is a true fast path**: no sink or control is created, no interception
-context is retained, the later hook invokers are no-ops, and the buffered response
-path runs exactly as before.
+The response-scoped partition of the single interceptor list is threaded to all
+three protocol connections. **Zero response-scoped interceptors is a true fast
+path**: no sink or control is created, no interception context is retained, the
+later hook invokers are no-ops, and the buffered response path runs exactly as
+before — even when request-scoped interceptors are registered.
 
 ### The `SendAsync` inversion
 
 The connection loop still calls `connectionContext.SendAsync(context)` after the
-handler returns. Each transport's `SendAsync` branches at the top: an exchange whose
-directive is `TakeOver` (HTTP/1.1 only) or `Abort` never writes a response — takeover
-suppresses the send entirely, abort maps to the version's wire rejection (h1 ends the
-connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream abort). Otherwise,
+handler returns. Each transport's `SendAsync` branches at the top on the exchange's
+internal directive: a taken-over exchange (HTTP/1.1 only) or an
+application-cancelled one (`IHttpContext.Cancel` — abort is authored on the
+application surface, never the seam) never writes a response — takeover
+suppresses the send entirely, a cancel maps to the version's wire rejection (h1
+ends the connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream
+abort). Otherwise,
 if a response feature wrote to the raw sink (`ResponseBodySink is { HasStarted: true }`),
 `SendAsync` **finalizes** the sink — emitting the terminating zero-length chunk
 (HTTP/1.1) or the empty `END_STREAM` DATA frame (HTTP/2) — instead of writing a
@@ -651,9 +662,8 @@ The takeover members of the exchange control
 caller the **raw duplex connection stream** with no HTTP framing — the escape
 hatch that RFC 9110 §7.8 protocol upgrades (`101 Switching Protocols`) and
 §9.3.6 `CONNECT` tunnels need, since both transitions take the connection out
-of the HTTP request/response loop entirely — and transitions the exchange's
-directive to `HttpExchangeDirective.TakeOver`: the transport has given up
-control of the exchange.
+of the HTTP request/response loop entirely — from that instant the transport
+has given up control of the exchange (its internal directive reads `TakeOver`).
 
 ### The layering (#751): all upgrade semantics live in `Http.ProtocolUpgrade`
 
@@ -665,9 +675,9 @@ transport does not detect upgrade signalling, does not know the
 exactly three generic things:
 
 - **The takeover members of the exchange control** (`Http1ExchangeControl`,
-  offered per exchange alongside the framed sink whenever response interceptors
-  are registered). `TakeOver()` is one-shot: it flips the exchange's
-  `ResponseFinalized` flag (directive → `TakeOver`), clears `KeepAlive`, and
+  offered per exchange alongside the framed sink whenever response-scoped
+  interceptors are registered). `TakeOver()` is one-shot: it flips the exchange's
+  `ResponseFinalized` flag (the internal directive reads `TakeOver`), clears `KeepAlive`, and
   returns the connection stream.
 - **Response suppression**: `Http1ConnectionContext.SendAsync` no-ops when
   `ResponseFinalized` is set — checked *before* the streamed-sink branch so a
@@ -678,11 +688,11 @@ exactly three generic things:
   false, so no post-transition octet is ever parsed as a next request.
 
 The `Http.ProtocolUpgrade` package owns everything else — detection over the
-parsed head (via `IHttpRequestInterceptor.AfterRequestHead`), the
+parsed head (via `IHttpExchangeInterceptor.AfterRequestHead`), the
 `context.Upgrade` feature surface, the 101/200 accept path, and the
-RFC-mandated framing-header scrub — wired by registering its interceptor pair
-on the listener options (`HttpProtocolUpgrade.CreateRequestInterceptor()` /
-`CreateResponseInterceptor()`), exactly how `Http.RequestLimits` and
+RFC-mandated framing-header scrub — wired by registering its single exchange
+interceptor on the listener options (`HttpProtocolUpgrade.CreateInterceptor()`),
+exactly how `Http.RequestLimits` and
 `Http.Streaming` plug in. HTTP/2 / HTTP/3 controls report
 `CanTakeOver == false` (their `TakeOver()` throws): their exchanges are
 multiplexed streams over a shared connection, and those protocols removed the

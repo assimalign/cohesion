@@ -10,10 +10,12 @@ namespace Assimalign.Cohesion.Http;
 /// read-only lifecycle delegates to the context's transport-owned freeze flag rather than being
 /// copied at a fixed point in the parse.
 /// </remarks>
-internal sealed class HttpMaxRequestBodySizeInterceptor : IHttpRequestInterceptor
+internal sealed class HttpMaxRequestBodySizeInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public void AfterRequestHead(HttpRequestInterceptorContext context)
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+    public override void AfterRequestHead(HttpRequestInterceptorContext context)
     {
         context.Features.Set<IHttpMaxRequestBodySizeFeature>(new HttpMaxRequestBodySizeFeature(context));
     }

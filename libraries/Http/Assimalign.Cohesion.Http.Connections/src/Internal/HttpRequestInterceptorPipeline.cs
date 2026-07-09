@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// its own read path; this helper reproduces its ordering, CONNECT-skip, empty-body, freeze, and
 /// failure-path disposal semantics for the transports that hand over a completed request object,
 /// keeping the seam contract uniform across protocols. Per-protocol timing (documented on
-/// <see cref="IHttpRequestInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
+/// <see cref="IHttpExchangeInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
 /// streaming body, so hooks run before the application observes any body octet (DATA already
 /// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 drains the request
 /// stream before header decode, so hooks run before the body is <em>exposed</em> but not before
@@ -62,7 +62,7 @@ internal static class HttpRequestInterceptorPipeline
     /// ever exist to own their disposal walk.
     /// </exception>
     public static async ValueTask<HttpFeatureCollection?> InvokeAsync(
-        IHttpRequestInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         HttpVersion version,
         TransportHttpRequest request,
         HttpConnectionInfo connectionInfo,
@@ -98,7 +98,7 @@ internal static class HttpRequestInterceptorPipeline
         try
         {
             // Head hooks: attach features and adjust the body-size knob before the body is exposed.
-            foreach (IHttpRequestInterceptor interceptor in interceptors)
+            foreach (IHttpExchangeInterceptor interceptor in interceptors)
             {
                 interceptor.AfterRequestHead(context);
             }
@@ -118,12 +118,12 @@ internal static class HttpRequestInterceptorPipeline
                 // The body is about to be exposed — the effective knobs are frozen and every head
                 // hook has run. On these transports the octets may already sit buffered (see the
                 // per-protocol timing remarks above); the hook observes "before exposure".
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     interceptor.BeforeRequestBody(context);
                 }
 
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     body = interceptor.AfterRequestBody(context, body);
                 }

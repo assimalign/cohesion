@@ -5,47 +5,45 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The transport's per-exchange control surface, surfaced through
-/// <see cref="HttpResponseInterceptorContext.Control"/>. It is the <b>single generic seam</b> by
-/// which interceptor hooks and feature packages tap the connection's handling of the current
-/// exchange: reading and directing its control flow (<see cref="HttpExchangeDirective"/> —
-/// continue, abort, or give up control) and performing the transport-owned wire actions that must
-/// happen outside the normal buffered-response path (interim <c>1xx</c> writes, raw-stream
-/// takeover).
+/// The transport's per-exchange <b>wire mechanisms</b> that fall outside the normal response path,
+/// surfaced through <see cref="HttpResponseInterceptorContext.Control"/>: interim (<c>1xx</c>)
+/// writes ahead of the final response, and the raw-stream takeover that protocol upgrades /
+/// <c>CONNECT</c> tunnels need. It is the single generic surface feature packages wrap into
+/// application-facing features — one contract instead of a per-capability contract for every wire
+/// action.
 /// </summary>
 /// <remarks>
 /// <para>
-/// One generic control surface deliberately replaces per-capability contracts (the former
+/// One generic control deliberately replaces per-capability contracts (the former
 /// <c>IHttpConnectionTakeover</c> and <c>IHttpInterimResponseWriter</c>): feature packages —
-/// protocol upgrade, interim responses, and future WebSockets / compression / timeout features —
-/// compose from this contract plus the <see cref="IHttpRequestInterceptor"/> /
-/// <see cref="IHttpResponseInterceptor"/> lifecycle hooks, so tapping a new lifecycle point never
-/// requires a new core abstraction or new transport plumbing. The transport implements this
-/// per protocol version and owns every wire encoding behind it; feature packages reference only
-/// the protocol core.
+/// protocol upgrade, interim responses, and future WebSockets / compression features — compose
+/// from this contract plus the <see cref="IHttpExchangeInterceptor"/> lifecycle hooks, so tapping
+/// a new wire mechanism never requires a new core abstraction or new transport plumbing. The
+/// transport implements this per protocol version and owns every wire encoding behind it; feature
+/// packages reference only the protocol core.
+/// </para>
+/// <para>
+/// <b>This control carries mechanisms, not decisions.</b> The layering rule: mechanisms live at
+/// the lowest level that can observe what they need; decisions live at the application level.
+/// Feature packages wrap these mechanisms into typed features (<c>context.Upgrade</c>,
+/// <c>context.InterimResponse</c>), and the <em>application</em> decides when to exercise them.
+/// Aborting an exchange is likewise an application decision and has no member here — it is
+/// <see cref="IHttpContext.Cancel"/> / <see cref="IHttpContext.CancelAsync"/>, which the transport
+/// honors at its lifecycle checkpoints with the wire behavior appropriate to its version (HTTP/2
+/// resets the stream, HTTP/3 resets the request stream, HTTP/1.1 writes no response and ends the
+/// connection after the exchange).
 /// </para>
 /// <para>
 /// Capability probes (<see cref="CanWriteInterimResponse"/>, <see cref="CanTakeOver"/>) are the
 /// report-don't-throw discovery path: a caller checks them and learns the exchange state without
 /// provoking an exception. The imperative members throw only on genuine misuse (taking over an
 /// exchange that cannot be taken over, writing an interim response after the final response
-/// started).
-/// </para>
-/// <para>
-/// The control is exchange-scoped and is not thread-safe; it must be driven from the exchange's
-/// handling flow (interceptor hooks, the application handler, features it installed).
+/// started). The control is exchange-scoped and is not thread-safe; it must be driven from the
+/// exchange's handling flow (interceptor hooks, the application handler, features it installed).
 /// </para>
 /// </remarks>
 public interface IHttpExchangeControl
 {
-    /// <summary>
-    /// Gets the exchange's current control-flow directive: <see cref="HttpExchangeDirective.Continue"/>
-    /// until <see cref="Abort"/> or <see cref="TakeOver"/> transitions it. The transport reads this
-    /// at its lifecycle checkpoints to decide whether to keep driving the exchange, reject it on
-    /// the wire, or suppress its own response entirely.
-    /// </summary>
-    HttpExchangeDirective Directive { get; }
-
     /// <summary>
     /// Gets whether the final response has started — its head has been (or is being) committed to
     /// the wire. Once <see langword="true"/>, interim responses can no longer precede it and the
@@ -97,17 +95,18 @@ public interface IHttpExchangeControl
     /// connection — those protocols removed the <c>Upgrade</c> mechanism (RFC 9113 §8.6,
     /// RFC 9114 §4.2) and bootstrap other protocols via extended CONNECT — so takeover reports
     /// <see langword="false"/> there. Also <see langword="false"/> once the exchange has already
-    /// been taken over or the final response has started.
+    /// been taken over, the final response has started, or the exchange has been aborted.
     /// </summary>
     bool CanTakeOver { get; }
 
     /// <summary>
     /// Takes over the exchange's connection — the transport gives up control: it suppresses its
     /// own response for the exchange (the normal send becomes a no-op, so nothing is
-    /// double-written onto what is now a raw byte stream), stops reusing the connection for
-    /// further HTTP requests, and transitions <see cref="Directive"/> to
-    /// <see cref="HttpExchangeDirective.TakeOver"/>. This is the escape hatch RFC 9110 §7.8
-    /// protocol upgrades (<c>101 Switching Protocols</c>) and §9.3.6 <c>CONNECT</c> tunnels need.
+    /// double-written onto what is now a raw byte stream) and stops reusing the connection for
+    /// further HTTP requests. This is the escape hatch RFC 9110 §7.8 protocol upgrades
+    /// (<c>101 Switching Protocols</c>) and §9.3.6 <c>CONNECT</c> tunnels need. The takeover is
+    /// one-shot and claims the connection <em>before</em> any transition byte is written, so two
+    /// features can never fight over the same connection.
     /// </summary>
     /// <returns>
     /// The raw duplex transport stream, positioned at the first octet after the parsed request —
@@ -118,18 +117,8 @@ public interface IHttpExchangeControl
     /// <exception cref="System.InvalidOperationException">
     /// The exchange cannot be taken over (<see cref="CanTakeOver"/> is <see langword="false"/>):
     /// the protocol multiplexes exchanges over a shared connection, the exchange was already taken
-    /// over (the capability is one-shot), or the final response has started.
+    /// over (the capability is one-shot), the final response has started, or the exchange was
+    /// aborted.
     /// </exception>
     Stream TakeOver();
-
-    /// <summary>
-    /// Aborts the exchange at the protocol layer, transitioning <see cref="Directive"/> to
-    /// <see cref="HttpExchangeDirective.Abort"/>. The transport rejects the exchange with the wire
-    /// behavior appropriate to its version: HTTP/2 resets the stream (<c>RST_STREAM</c>) and
-    /// HTTP/3 resets the request stream — each leaving the multiplexed connection's other streams
-    /// intact — while HTTP/1.1, which has no per-exchange reset finer than the connection, writes
-    /// no response and ends the connection after the exchange. The exchange's cancellation token
-    /// is tripped so in-flight handler work observes the abort.
-    /// </summary>
-    void Abort();
 }

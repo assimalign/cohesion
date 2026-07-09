@@ -11,8 +11,8 @@ internal sealed class Http3Connection : HttpConnection
 {
     private readonly IMultiplexedConnection _connection;
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly Http3QPackOptions _qpackOptions;
     private Http3ConnectionContext? _openContext;
 
@@ -24,8 +24,8 @@ internal sealed class Http3Connection : HttpConnection
         IMultiplexedConnection connection,
         bool isSecure,
         Http3ConnectionListenerOptions.Http3Limits limits,
-        IHttpRequestInterceptor[] requestInterceptors,
-        IHttpResponseInterceptor[] responseInterceptors,
+        IHttpExchangeInterceptor[] requestInterceptors,
+        IHttpExchangeInterceptor[] responseInterceptors,
         Http3QPackOptions qpackOptions)
         : base(isSecure)
     {

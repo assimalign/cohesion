@@ -9,9 +9,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 /// HTTP/1.1 <see cref="IHttpExchangeControl"/> — the per-exchange control surface offered to
 /// response interceptors through <see cref="HttpResponseInterceptorContext.Control"/>. An HTTP/1.1
 /// exchange owns its whole connection, so this is the one version whose control offers the full
-/// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2),
-/// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6),
-/// and the exchange abort.
+/// surface: interim (<c>1xx</c>) writes straight onto the connection stream (RFC 9110 §15.2) and
+/// the raw-stream takeover that protocol upgrades / <c>CONNECT</c> tunnels need (§7.8 / §9.3.6).
+/// Aborting is not a control mechanism — it is the application-owned
+/// <see cref="IHttpContext.Cancel"/>, which <see cref="Http1ConnectionContext.SendAsync"/> honors
+/// by writing no response and ending the connection after the exchange.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,9 +43,6 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         _context = context;
         _stream = stream;
     }
-
-    /// <inheritdoc />
-    public HttpExchangeDirective Directive => _context.ExchangeDirective;
 
     /// <inheritdoc />
     public bool HasResponseStarted =>
@@ -96,6 +95,4 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
         return _stream;
     }
 
-    /// <inheritdoc />
-    public void Abort() => _context.Cancel();
 }

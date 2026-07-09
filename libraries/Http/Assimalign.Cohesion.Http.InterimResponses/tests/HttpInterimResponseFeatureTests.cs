@@ -149,7 +149,7 @@ public class HttpInterimResponseFeatureTests
     /// <summary>
     /// Recording fake <see cref="IHttpExchangeControl"/>: interim-response capability is toggled via
     /// <see cref="CanWrite"/>, writes are recorded, takeover is never offered, and the directive
-    /// tracks <see cref="Abort"/> trivially.
+    /// takeover is never offered.
     /// </summary>
     private sealed class RecordingControl : IHttpExchangeControl
     {
@@ -157,7 +157,6 @@ public class HttpInterimResponseFeatureTests
 
         public List<(HttpStatusCode StatusCode, IHttpHeaderCollection? Headers)> Calls { get; } = new();
 
-        public HttpExchangeDirective Directive { get; private set; } = HttpExchangeDirective.Continue;
 
         public bool HasResponseStarted => !CanWrite;
 
@@ -175,8 +174,6 @@ public class HttpInterimResponseFeatureTests
         public bool CanTakeOver => false;
 
         public Stream TakeOver() => throw new InvalidOperationException("This fake control does not offer takeover.");
-
-        public void Abort() => Directive = HttpExchangeDirective.Abort;
     }
 
     /// <summary>

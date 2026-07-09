@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 /// (<c>1xx</c>) responses are emitted as additional QPACK-encoded HEADERS frames on the request
 /// stream ahead of the final HEADERS frame (RFC 9114 §4.1), delegated to
 /// <see cref="Http3ConnectionContext.WriteInterimResponseAsync"/>. Takeover is unsupported —
-/// HTTP/3 exchanges are multiplexed QUIC streams over a shared connection (RFC 9114 §4.2). Abort
-/// resets the single request stream via the exchange's cancel path, leaving the QUIC connection's
-/// other streams intact.
+/// HTTP/3 exchanges are multiplexed QUIC streams over a shared connection (RFC 9114 §4.2).
+/// Aborting is not a control mechanism — it is the application-owned
+/// <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting the single request
+/// stream, leaving the QUIC connection's other streams intact.
 /// </summary>
 internal sealed class Http3ExchangeControl : IHttpExchangeControl
 {
@@ -25,9 +26,6 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
         _connection = connection;
         _context = context;
     }
-
-    /// <inheritdoc />
-    public HttpExchangeDirective Directive => _context.ExchangeDirective;
 
     /// <inheritdoc />
     public bool HasResponseStarted => _context.HasFinalResponseStarted;
@@ -62,6 +60,4 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
             "HTTP/3 exchanges are multiplexed QUIC streams over a shared connection and cannot be taken over (RFC 9114 §4.2).");
     }
 
-    /// <inheritdoc />
-    public void Abort() => _context.Cancel();
 }

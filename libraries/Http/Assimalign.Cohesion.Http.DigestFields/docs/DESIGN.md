@@ -89,7 +89,7 @@ reflection" mandate literally:
 
 ## Server-side verification (the interceptor)
 
-`HttpDigestFields.CreateContentDigestVerifier()` returns a stateless `IHttpRequestInterceptor` — the
+`HttpDigestFields.CreateContentDigestVerifier()` returns a stateless `IHttpExchangeInterceptor` — the
 #818 request-parse seam is the natural hook for request-digest validation. It hooks
 `AfterRequestBody`:
 

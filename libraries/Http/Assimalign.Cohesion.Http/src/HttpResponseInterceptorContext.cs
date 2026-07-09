@@ -3,11 +3,11 @@ using System.IO;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The response-lifecycle view of an exchange handed to <see cref="IHttpResponseInterceptor"/>
+/// The response-lifecycle view of an exchange handed to <see cref="IHttpExchangeInterceptor"/>
 /// implementations by the server transport — at exchange setup (before the application handler
 /// runs) and again, the same instance, at the later lifecycle hooks
-/// (<see cref="IHttpResponseInterceptor.BeforeResponseHeadAsync"/> /
-/// <see cref="IHttpResponseInterceptor.AfterResponseAsync"/>).
+/// (<see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> /
+/// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,8 +33,8 @@ public sealed class HttpResponseInterceptorContext
     /// Gets the response header collection. Mutable — an interceptor may set default response
     /// headers here (they are committed to the wire when the response starts). Once the response
     /// has started the headers are locked, so interceptor edits made during
-    /// <see cref="IHttpResponseInterceptor.BeforeResponse"/> always precede the commit
-    /// (<see cref="IHttpResponseInterceptor.BeforeResponseHeadAsync"/> has the last word).
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/> always precede the commit
+    /// (<see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> has the last word).
     /// </summary>
     public required HttpHeaderCollection Headers { get; init; }
 

@@ -15,7 +15,7 @@ public class HttpRequestLimitsTests
     public void AfterRequestHead_ShouldAttachFeature()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        IHttpRequestInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
+        IHttpExchangeInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
 
         interceptor.AfterRequestHead(context);
 
@@ -71,13 +71,13 @@ public class HttpRequestLimitsTests
         // Demonstrates the stream-override capability of the seam: each interceptor receives the
         // previous result, so the last registered ends up outermost.
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: null);
-        IHttpRequestInterceptor limits = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
-        IHttpRequestInterceptor wrapper = new ReadOnlyWrappingInterceptor();
+        IHttpExchangeInterceptor limits = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
+        IHttpExchangeInterceptor wrapper = new ReadOnlyWrappingInterceptor();
 
         using MemoryStream original = new(new byte[] { 1, 2, 3 });
         Stream result = original;
 
-        foreach (IHttpRequestInterceptor interceptor in new[] { limits, wrapper })
+        foreach (IHttpExchangeInterceptor interceptor in new[] { limits, wrapper })
         {
             interceptor.AfterRequestHead(context);
             result = interceptor.AfterRequestBody(context, result);
@@ -111,9 +111,9 @@ public class HttpRequestLimitsTests
     /// Sample stream-override interceptor: wraps the request body in a read-only decorator —
     /// the "readonly stream wrapper" scenario the seam exists to enable.
     /// </summary>
-    private sealed class ReadOnlyWrappingInterceptor : IHttpRequestInterceptor
+    private sealed class ReadOnlyWrappingInterceptor : HttpExchangeInterceptor
     {
-        public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
         {
             return new ReadOnlyStream(body);
         }
@@ -146,7 +146,7 @@ public class HttpRequestLimitsTests
 
         protected override void Dispose(bool disposing)
         {
-            // A wrapper owns the stream it wraps (see IHttpRequestInterceptor docs).
+            // A wrapper owns the stream it wraps (see IHttpExchangeInterceptor docs).
             if (disposing)
             {
                 _inner.Dispose();

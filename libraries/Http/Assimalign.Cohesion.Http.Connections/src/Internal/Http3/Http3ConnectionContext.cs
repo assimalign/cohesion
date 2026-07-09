@@ -45,8 +45,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     // connection dispose path (Interlocked one-shot latch).
     private int _goAwaySent;
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
-    private readonly IHttpRequestInterceptor[] _requestInterceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _requestInterceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     // RFC 9218 §7.2 — the effective priority of request streams the peer has
     // re-prioritized via a control-stream PRIORITY_UPDATE. This is the HTTP/3
     // engine's observable priority state; response ordering across streams is
@@ -64,8 +64,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         IMultiplexedConnection connection,
         bool isSecure,
         Http3ConnectionListenerOptions.Http3Limits limits,
-        IHttpRequestInterceptor[] requestInterceptors,
-        IHttpResponseInterceptor[] responseInterceptors,
+        IHttpExchangeInterceptor[] requestInterceptors,
+        IHttpExchangeInterceptor[] responseInterceptors,
         Http3QPackOptions qpackOptions)
     {
         _connection = connection;

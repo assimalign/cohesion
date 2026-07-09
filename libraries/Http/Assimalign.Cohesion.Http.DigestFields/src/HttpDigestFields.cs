@@ -19,5 +19,5 @@ public static class HttpDigestFields
     /// one offering only deprecated/unregistered algorithms, is passed through unverified.
     /// </remarks>
     /// <returns>The content-digest verification interceptor.</returns>
-    public static IHttpRequestInterceptor CreateContentDigestVerifier() => new HttpContentDigestInterceptor();
+    public static IHttpExchangeInterceptor CreateContentDigestVerifier() => new HttpContentDigestInterceptor();
 }

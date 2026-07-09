@@ -43,7 +43,7 @@ internal static class Http1MessageReader
         HttpConnectionInfo connectionInfo,
         HttpScheme scheme,
         Http1ConnectionListenerOptions.Http1Limits limits,
-        IHttpRequestInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         Http1ReadTimeout readTimeout,
         CancellationToken connectionToken)
     {
@@ -155,7 +155,7 @@ internal static class Http1MessageReader
         {
             if (interception is not null)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     interceptor.AfterRequestHead(interception);
                 }
@@ -175,7 +175,7 @@ internal static class Http1MessageReader
             // post-head octets are tunnel traffic, not a message body).
             if (interception is not null && !isConnectTunnel)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     interceptor.BeforeRequestBody(interception);
                 }
@@ -236,7 +236,7 @@ internal static class Http1MessageReader
             // run so wrappers over the (empty) representation stay meaningful.
             if (interception is not null && !isConnectTunnel)
             {
-                foreach (IHttpRequestInterceptor interceptor in interceptors)
+                foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     bodyStream = interceptor.AfterRequestBody(interception, bodyStream);
                 }

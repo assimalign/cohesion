@@ -3,8 +3,8 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// The interceptor pair that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
-/// available on an exchange. One stateless class implements both seams:
+/// The exchange interceptor that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
+/// available on an exchange. One stateless instance participates in both phases:
 /// </summary>
 /// <remarks>
 /// <list type="number">
@@ -31,10 +31,10 @@ namespace Assimalign.Cohesion.Http;
 /// instance fields.
 /// </para>
 /// </remarks>
-internal sealed class HttpProtocolUpgradeInterceptor : IHttpRequestInterceptor, IHttpResponseInterceptor
+internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public void AfterRequestHead(HttpRequestInterceptorContext context)
+    public override void AfterRequestHead(HttpRequestInterceptorContext context)
     {
         if (context.Version != HttpVersion.Http11)
         {
@@ -63,7 +63,7 @@ internal sealed class HttpProtocolUpgradeInterceptor : IHttpRequestInterceptor, 
     }
 
     /// <inheritdoc />
-    public void BeforeResponse(HttpResponseInterceptorContext context)
+    public override void BeforeResponse(HttpResponseInterceptorContext context)
     {
         HttpProtocolUpgradeCandidate? candidate = context.Features.Get<HttpProtocolUpgradeCandidate>();
         if (candidate is null)

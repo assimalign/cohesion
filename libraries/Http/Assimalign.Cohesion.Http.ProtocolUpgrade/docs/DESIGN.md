@@ -21,7 +21,7 @@ deliberately dropped that dependency in commit `4c21d75`. The bridge back was re
 *entire* upgrade functionality lives here, wired through the transport's two generic interceptor
 seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
 
-1. **Detection** — an `IHttpRequestInterceptor`. `AfterRequestHead` sees the parsed head
+1. **Detection** — an `IHttpExchangeInterceptor`. `AfterRequestHead` sees the parsed head
    (`Version`, `Method`, read-only `Headers`) before dispatch and records a matched transition as
    an internal `HttpProtocolUpgradeCandidate` feature. HTTP/1.1 only — the request-parse seam
    runs on every protocol version, so the hook checks `Version` itself; CONNECT is `Method ==
@@ -29,7 +29,7 @@ seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
    authority-form); an upgrade requires **both** a `Connection: upgrade` token and a non-empty
    `Upgrade` header (a bare `Upgrade` header is not actionable, per §7.8). CONNECT takes
    precedence — §7.8 requires ignoring `Upgrade` on CONNECT.
-2. **Materialization** — an `IHttpResponseInterceptor`. `BeforeResponse` runs per exchange at
+2. **Materialization** — an `IHttpExchangeInterceptor`. `BeforeResponse` runs per exchange at
    exchange setup — after the head is parsed, before the application handler — sharing the same
    feature collection. It consumes the candidate and, when the transport's **exchange control**
    (`HttpResponseInterceptorContext.Control`, the generic core `IHttpExchangeControl` surface)
@@ -44,8 +44,7 @@ crosses seams only through the feature collection, per the interceptor contract.
 the whole capability by registering the pair:
 
 ```csharp
-options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
-options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
+options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 ```
 
 Nothing is default-installed: like streaming, upgrades are opt-in per listener. Neither the core
@@ -74,8 +73,9 @@ transport keeps only what is physically transport's: CONNECT body-framing at par
 - `HttpContextProtocolUpgradeExtensions` — `context.Upgrade`, a plain nullable feature read (the
   interceptors install the feature eagerly, so the accessor allocates nothing and never throws
   for ordinary exchanges).
-- `HttpProtocolUpgrade` — the public entry point: `CreateRequestInterceptor()` /
-  `CreateResponseInterceptor()` (mirrors `HttpResponseStreaming.CreateInterceptor()`).
+- `HttpProtocolUpgrade` — the public entry point: `CreateInterceptor()` (mirrors
+  `HttpResponseStreaming.CreateInterceptor()`); the one instance participates in
+  both phases (`HttpInterceptorScopes.All`).
 - Internal: `HttpProtocolUpgradeInterceptor` (both hooks), `HttpProtocolUpgradeCandidate`
   (parse-time marker), `Http1ProtocolUpgrade` (accept path), `HttpProtocolUpgradeFeature`
   (feature holder). Interface-first: all implementations are internal.
@@ -123,7 +123,7 @@ transport's DESIGN.md.)
 - **No client-side initiation.** Server-side accept surface only.
 - **No HTTP/2 / HTTP/3 upgrade.** Those versions removed `Upgrade`; their bootstrap is extended
   CONNECT (`Assimalign.Cohesion.Http.ExtendedConnect`).
-- **No default installation.** Hosts opt in per listener by registering the interceptor pair.
+- **No default installation.** Hosts opt in per listener by registering the interceptor.
 
 ## AOT posture
 

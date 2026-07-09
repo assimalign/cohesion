@@ -46,11 +46,11 @@ public class HttpRequestInterceptorTests
         Should.Throw<InvalidOperationException>(() => context.MaxRequestBodySize = 5);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http] - Interceptor: Default members should no-op and pass the body stream through")]
+    [Fact(DisplayName = "Cohesion Test [Http] - Interceptor: The base class virtual defaults should no-op and pass the body stream through")]
     public void Interceptor_Defaults_ShouldPassThrough()
     {
         HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: null);
-        IHttpRequestInterceptor interceptor = new NoOverrideInterceptor();
+        IHttpExchangeInterceptor interceptor = new NoOverrideInterceptor();
         using MemoryStream body = new();
 
         interceptor.AfterRequestHead(context); // must not throw
@@ -146,7 +146,7 @@ public class HttpRequestInterceptorTests
         };
     }
 
-    private sealed class NoOverrideInterceptor : IHttpRequestInterceptor
+    private sealed class NoOverrideInterceptor : HttpExchangeInterceptor
     {
     }
 }

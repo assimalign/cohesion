@@ -13,10 +13,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
     private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
-    private readonly IHttpResponseInterceptor[] _responseInterceptors;
+    private readonly IHttpExchangeInterceptor[] _interceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpRequestInterceptor[] interceptors, IHttpResponseInterceptor[] responseInterceptors)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
         : base(connection, isSecure)
     {
         _limits = limits;

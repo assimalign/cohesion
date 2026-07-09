@@ -741,8 +741,7 @@ public class Http1TransportTests
     {
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
-        options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
         return options;
     }
 

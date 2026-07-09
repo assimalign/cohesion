@@ -2,7 +2,7 @@
 
 Interim (`1xx`) responses are a response-side capability, not protocol machinery,
 so they ship as their own feature package that plugs into the transport through
-the generic `IHttpResponseInterceptor` seam — the same way
+the generic `IHttpExchangeInterceptor` seam — the same way
 `Assimalign.Cohesion.Http.Streaming` plugs into response writing and
 `Assimalign.Cohesion.Http.ProtocolUpgrade` plugs into connection takeover. Neither
 the protocol core nor the transport (`Assimalign.Cohesion.Http.Connections`)
@@ -16,7 +16,7 @@ That coupled three layers to one capability and broke the repository convention
 that HTTP features live in their own packages behind the interceptor seam. This
 package removes that coupling, mirroring the streaming/upgrade split:
 
-- **The core** owns only the generic `IHttpResponseInterceptor` seam and the single
+- **The core** owns only the generic `IHttpExchangeInterceptor` seam and the single
   generic exchange-control surface, `IHttpExchangeControl`, surfaced as
   `HttpResponseInterceptorContext.Control`. Interim writes are two members of that
   one contract (`CanWriteInterimResponse` / `WriteInterimResponseAsync`) rather
@@ -39,7 +39,7 @@ least one response interceptor is registered).
 ## How it works
 
 1. A host adds `HttpInterimResponses.CreateInterceptor()` to
-   `HttpConnectionListenerOptions.ResponseInterceptors`.
+   `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol exchange control and runs
    the registered response interceptors, exposing it as
    `HttpResponseInterceptorContext.Control`.

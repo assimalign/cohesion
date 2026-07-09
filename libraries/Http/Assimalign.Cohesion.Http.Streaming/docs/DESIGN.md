@@ -2,9 +2,9 @@
 
 Incremental response streaming is a response-side capability, not protocol
 machinery, so it ships as its own feature package that plugs into the transport
-through the generic `IHttpResponseInterceptor` seam — the same way
+through the generic `IHttpExchangeInterceptor` seam — the same way
 `Assimalign.Cohesion.Http.RequestLimits` plugs into request parsing via
-`IHttpRequestInterceptor`. Neither the protocol core nor the transport
+`IHttpExchangeInterceptor`. Neither the protocol core nor the transport
 (`Assimalign.Cohesion.Http.Connections`) depends on this package.
 
 ## Why a separate package
@@ -14,7 +14,7 @@ to every exchange by the transport — couples three layers to one capability. I
 also forces the transport to know about "streaming." This package removes that
 coupling:
 
-- **The core** owns only the generic `IHttpResponseInterceptor` seam and the raw
+- **The core** owns only the generic `IHttpExchangeInterceptor` seam and the raw
   write/flush primitive (a `System.IO.Stream`). It has no streaming type.
 - **The transport** owns the per-protocol framing (chunked / `DATA` frames /
   flow control) behind a raw response body sink (`HttpResponseBodyStream`) that it
@@ -31,7 +31,7 @@ path with zero streaming overhead.
 ## How it works
 
 1. A host adds `HttpResponseStreaming.CreateInterceptor()` to
-   `HttpConnectionListenerOptions.ResponseInterceptors`.
+   `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol raw response body sink and
    runs the registered response interceptors, exposing the sink as
    `HttpResponseInterceptorContext.ResponseBody`.

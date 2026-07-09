@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The feature is made available by registering
 /// <see cref="HttpInterimResponses.CreateInterceptor"/> on the transport's response-interceptor list
-/// (<c>HttpConnectionListenerOptions.ResponseInterceptors</c>), the same opt-in way response
+/// (<c>HttpConnectionListenerOptions.Interceptors</c>), the same opt-in way response
 /// streaming and protocol upgrade plug in. Its interceptor wraps the transport's exchange control
 /// (<see cref="HttpResponseInterceptorContext.Control"/>) in this typed
 /// feature and installs it on every exchange, so a handler resolves it with

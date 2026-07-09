@@ -11,7 +11,7 @@ The max-request-body-size feature originally shipped inside core `Assimalign.Coh
 That placement conflated two different kinds of surface:
 
 - **Seams** — generic extensibility infrastructure with no opinion about any one capability:
-  `IHttpFeature`, `IHttpFeatureCollection`, and now `IHttpRequestInterceptor` +
+  `IHttpFeature`, `IHttpFeatureCollection`, and now `IHttpExchangeInterceptor` +
   `HttpRequestInterceptorContext`. These belong in core, exactly like the shared wire rules in
   `HttpFieldNormalization`.
 - **Features** — concrete capabilities: extended CONNECT, sessions, cookies, forms, and
@@ -27,7 +27,7 @@ with zero optional packages installed.
 ## How it works
 
 `HttpRequestLimits.CreateMaxRequestBodySizeInterceptor()` returns a stateless
-`IHttpRequestInterceptor` the composition root registers on the server's listener options. Per
+`IHttpExchangeInterceptor` the composition root registers on the server's listener options. Per
 request, its `AfterRequestHead` hook attaches an internal `HttpMaxRequestBodySizeFeature` to the
 exchange's feature collection.
 
@@ -60,7 +60,7 @@ Items bridge cannot express:
    middleware runs, without the transport knowing the feature type.
 3. **Stream wrapping** — returning a replacement body stream has no Items-key analogue.
 
-Those three are exactly the `IHttpRequestInterceptor` surface, which is why the escalation to a
+Those three are exactly the `IHttpExchangeInterceptor` surface, which is why the escalation to a
 compile-time shared seam (in core, shared by all future parse-time features) is justified. New
 capabilities that only need one-way post-parse publication should still prefer the Items-key
 bridge.
@@ -90,7 +90,7 @@ The migration from the original in-core placement is complete; the pieces sit as
    assemblies use the `Assimalign.Cohesion.Http` namespace (recorded csproj deviation), so the
    move was source-compatible for consumers; only project references changed.
 2. **Transport enforces, never seeds.** `Http.Connections` carries no body-size feature of its
-   own: `HttpConnectionListenerOptions.RequestInterceptors` is snapshotted to an array when the
+   own: `HttpConnectionListenerOptions.Interceptors` is snapshotted to an array when the
    listener is constructed (post-construction registrations are inert — no racing the accept
    loops); each transport builds one `HttpRequestInterceptorContext` per request (read-only
    `Headers` view via `AsReadOnly()`), runs `AfterRequestHead` hooks after the head is assembled,

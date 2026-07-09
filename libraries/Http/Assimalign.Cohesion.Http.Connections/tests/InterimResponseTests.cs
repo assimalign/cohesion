@@ -28,7 +28,7 @@ public class InterimResponseTests
     // Expect: 100-continue handshake and the 1xx-as-final-status guard are transport behavior and do
     // NOT need this.
     private static void EnableInterimResponses(HttpConnectionListenerOptions options)
-        => options.ResponseInterceptors.Add(HttpInterimResponses.CreateInterceptor());
+        => options.Interceptors.Add(HttpInterimResponses.CreateInterceptor());
 
     // ------------------------------------------------------------------ HTTP/1.1
 
@@ -167,7 +167,7 @@ public class InterimResponseTests
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
         options.UseHttp1(new TestConnectionListener(connection));
-        options.ResponseInterceptors.Add(HttpResponseStreaming.CreateInterceptor());
+        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
         EnableInterimResponses(options);
 
         await using HttpConnectionListener listener = new(options);

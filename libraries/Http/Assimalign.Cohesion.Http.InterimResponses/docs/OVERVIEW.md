@@ -8,14 +8,14 @@ transport via the response-interceptor seam.
 Let a handler emit one or more interim responses ahead of the final response
 (RFC 9110 §15.2) — most usefully `100 Continue` (§10.1.1) on demand and
 `103 Early Hints` (RFC 8297) with `Link` fields — over any transport that exposes
-the `IHttpResponseInterceptor` seam, without the transport (or the protocol core)
+the `IHttpExchangeInterceptor` seam, without the transport (or the protocol core)
 depending on this package.
 
 ## Scope
 
 - `IHttpInterimResponseFeature` — the typed interim-response API
   (`IsInterimResponseSupported`, `SendInterimResponseAsync`).
-- `HttpInterimResponses.CreateInterceptor()` — the `IHttpResponseInterceptor` a
+- `HttpInterimResponses.CreateInterceptor()` — the `IHttpExchangeInterceptor` a
   host registers to make interim responses available on every exchange.
 - `context.InterimResponse` / `context.SendEarlyHintsAsync(...)` /
   `context.SendContinueAsync()` — ergonomic accessors on `IHttpContext`.
@@ -40,7 +40,7 @@ and an explicit, handler-driven `100 Continue`.
 
 ```csharp
 // Host / composition root — opt into interim responses:
-options.ResponseInterceptors.Add(HttpInterimResponses.CreateInterceptor());
+options.Interceptors.Add(HttpInterimResponses.CreateInterceptor());
 
 // Handler — send 103 Early Hints before doing the slow work:
 await context.SendEarlyHintsAsync(["</style.css>; rel=preload; as=style"]);

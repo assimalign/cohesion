@@ -581,7 +581,7 @@ internal sealed class Http2Stream
         HttpScheme fallbackScheme,
         CancellationToken connectionAborted,
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
-        IHttpRequestInterceptor[] interceptors,
+        IHttpExchangeInterceptor[] interceptors,
         long? maxRequestBodySize)
     {
         if (!HeadersCompleted)

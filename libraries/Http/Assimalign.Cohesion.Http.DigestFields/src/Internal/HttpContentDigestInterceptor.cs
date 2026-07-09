@@ -24,10 +24,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// untouched.
 /// </para>
 /// </remarks>
-internal sealed class HttpContentDigestInterceptor : IHttpRequestInterceptor
+internal sealed class HttpContentDigestInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
-    public Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+    public override Stream AfterRequestBody(HttpRequestInterceptorContext context, Stream body)
     {
         if (!context.Headers.TryGetValue(HttpHeaderKey.ContentDigest, out HttpHeaderValue raw) || raw.IsEmpty)
         {

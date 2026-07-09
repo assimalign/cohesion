@@ -13,8 +13,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
 /// <see cref="Http2ConnectionContext.WriteInterimResponseAsync"/> which holds the connection write
 /// gate so the interim HEADERS never interleave with concurrent frames. Takeover is unsupported —
 /// HTTP/2 exchanges are multiplexed streams over a shared connection and the protocol removed the
-/// <c>Upgrade</c> mechanism (RFC 9113 §8.6). Abort resets the single stream via the exchange's
-/// cancel path (<c>RST_STREAM(CANCEL)</c>), leaving the connection's other streams intact.
+/// <c>Upgrade</c> mechanism (RFC 9113 §8.6). Aborting is not a control mechanism — it is the
+/// application-owned <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting
+/// the single stream (<c>RST_STREAM(CANCEL)</c>), leaving the connection's other streams intact.
 /// </summary>
 internal sealed class Http2ExchangeControl : IHttpExchangeControl
 {
@@ -26,9 +27,6 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
         _connection = connection;
         _context = context;
     }
-
-    /// <inheritdoc />
-    public HttpExchangeDirective Directive => _context.ExchangeDirective;
 
     /// <inheritdoc />
     public bool HasResponseStarted => _context.HasFinalResponseStarted;
@@ -63,6 +61,4 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
             "HTTP/2 exchanges are multiplexed streams over a shared connection and cannot be taken over (RFC 9113 §8.6).");
     }
 
-    /// <inheritdoc />
-    public void Abort() => _context.Cancel();
 }

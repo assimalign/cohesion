@@ -12,15 +12,14 @@ capability on `IHttpContext`, wired entirely through the server transport's inte
 
 ## Usage
 
-Register the interceptor pair on the listener options (both are required — detection rides the
+Register the single interceptor on the listener options (one registration — detection rides the
 request seam, acceptance rides the response seam):
 
 ```csharp
 using Assimalign.Cohesion.Http;
 
 HttpConnectionListenerOptions options = new();
-options.RequestInterceptors.Add(HttpProtocolUpgrade.CreateRequestInterceptor());
-options.ResponseInterceptors.Add(HttpProtocolUpgrade.CreateResponseInterceptor());
+options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 ```
 
 Then, in a handler:
