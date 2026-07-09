@@ -32,7 +32,7 @@ public class InterimResponseTests
 
     // ------------------------------------------------------------------ HTTP/1.1
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http1: Expect 100-continue solicits the body with 100 Continue before reading it, then completes normally")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interim/Http1: Expect 100-continue solicits the body with 100 Continue at the first body read, then completes normally")]
     public async Task Http1_Expect100Continue_ShouldEmit100BeforeBody_AndPreserveKeepAlive()
     {
         // The client sends the head with Expect: 100-continue and WITHHOLDS the body until it observes
@@ -46,24 +46,26 @@ public class InterimResponseTests
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
 
+        // #810: the request dispatches at head — the withheld body no longer blocks dispatch, so a
+        // handler can inspect the head (and could answer 401 / 417) before anything is solicited.
         await using IAsyncEnumerator<IHttpContext> enumerator = connectionContext.ReceiveAsync().GetAsyncEnumerator();
-        Task<bool> moveNext = enumerator.MoveNextAsync().AsTask();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue("the request dispatches at head; the withheld body must not block dispatch");
+        IHttpContext context = enumerator.Current;
 
         StringBuilder wire = new();
 
-        // The transport solicits the body before it is read; the request is not yet dispatched.
+        // The handler starts reading the body; the first read solicits it with 100 Continue.
+        using StreamReader bodyReader = new(context.Request.Body, Encoding.ASCII);
+        Task<string> bodyRead = bodyReader.ReadToEndAsync();
+
         await PumpUntilAsync(connection, wire, text => text.Contains("100 Continue", StringComparison.Ordinal));
-        moveNext.IsCompleted.ShouldBeFalse("the request must not dispatch until the withheld body arrives");
+        bodyRead.IsCompleted.ShouldBeFalse("the body read must be parked on the withheld body");
 
         // The client now releases the body having seen 100 Continue.
         await connection.WriteInputAsync(Encoding.ASCII.GetBytes("hello"));
         connection.CompleteInput();
 
-        (await moveNext).ShouldBeTrue();
-        IHttpContext context = enumerator.Current;
-
-        using StreamReader bodyReader = new(context.Request.Body, Encoding.ASCII);
-        (await bodyReader.ReadToEndAsync()).ShouldBe("hello");
+        (await bodyRead).ShouldBe("hello");
 
         context.Response.StatusCode = HttpStatusCode.Ok;
         context.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes("done"));

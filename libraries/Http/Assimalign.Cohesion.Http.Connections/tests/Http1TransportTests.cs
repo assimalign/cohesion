@@ -78,7 +78,14 @@ public class Http1TransportTests
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
+        // The body is streamed and dispatched at head, so the trailer section is only available once
+        // the body has been fully read.
         httpContext.Request.Trailers.IsSupported.ShouldBeTrue();
+        using (StreamReader reader = new(httpContext.Request.Body))
+        {
+            (await reader.ReadToEndAsync()).ShouldBe("hello");
+        }
+
         httpContext.Request.Trailers["X-Checksum"].Value.ShouldBe("abc123");
     }
 
@@ -236,6 +243,30 @@ public class Http1TransportTests
         secondPath.ShouldBe("/two");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should drain an unread request body before serving the next keep-alive request")]
+    public async Task Http1_OnUnreadBodyThenKeepAlive_ShouldDrainAndServeNextRequest()
+    {
+        // The body is streamed and dispatched at head, so an application may leave it unread. Before
+        // the next request on a keep-alive connection is served, the transport must consume the unread
+        // body so the next request's framing realigns. Here /one's 5-octet body is never read.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /one HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello"
+            + "GET /two HTTP/1.1\r\nHost: api.test\r\nConnection: close\r\n\r\n");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/one"); // body deliberately left unread
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/two");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should deliver Content-Length framed body intact")]
     public async Task Http1_OnContentLengthBody_ShouldDeliverBodyIntact()
     {
@@ -383,45 +414,47 @@ public class Http1TransportTests
         httpContext.Request.Headers.ContainsKey(new HttpHeaderKey("X-Trace-Id")).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject trailers that contain framing-related headers")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject trailers that contain framing-related headers on the body read")]
     public async Task Http1_OnChunkedBodyWithForbiddenTrailer_ShouldThrow()
     {
         // RFC 9112 §7.1.2 — Content-Length, Transfer-Encoding, and Host are forbidden as
-        // trailer fields. Letting them through would be a smuggling vector.
+        // trailer fields. Letting them through would be a smuggling vector. The body is streamed,
+        // so the trailer section (and this rejection) surfaces on the body read.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "5\r\nhello\r\n"
             + "0\r\nContent-Length: 5\r\n\r\n");
 
-        await AssertConnectionDroppedAsync(payload);
+        await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed chunk sizes")]
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed chunk sizes on the body read")]
     [InlineData("xyz")]    // non-hex
     [InlineData("-1")]     // signed
     [InlineData(" 5")]     // leading whitespace
     [InlineData("")]       // empty
     public async Task Http1_OnMalformedChunkSize_ShouldThrow(string chunkSize)
     {
-        // RFC 9112 §7.1 — chunk-size is 1*HEXDIG with no leading sign and no whitespace.
+        // RFC 9112 §7.1 — chunk-size is 1*HEXDIG with no leading sign and no whitespace. The chunked
+        // body is decoded incrementally after dispatch, so the malformed size surfaces on the read.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + $"{chunkSize}\r\n");
 
-        await AssertConnectionDroppedAsync(payload);
+        await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunked body that ends before the terminating zero chunk")]
     public async Task Http1_OnChunkedBodyTruncatedBeforeFinalChunk_ShouldThrow()
     {
         // RFC 9112 §7.1 — a chunked body MUST end with a zero chunk. Truncation before the
-        // terminator is a half-message; the parser must surface that rather than treating
-        // it as success.
+        // terminator is a half-message; the streamed read surfaces the end-of-stream rather than
+        // treating it as success.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "5\r\nhello\r\n");
 
-        await AssertConnectionDroppedAsync(payload);
+        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a chunk that ends before its declared size is reached")]
@@ -433,21 +466,22 @@ public class Http1TransportTests
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
             + "10\r\nshort");
 
-        await AssertConnectionDroppedAsync(payload);
+        await AssertBodyReadThrowsAsync<EndOfStreamException>(payload);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject Content-Length declarations exceeding the body size cap")]
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject Content-Length declarations exceeding the body size cap on the body read")]
     public async Task Http1_OnContentLengthExceedingCap_ShouldThrow()
     {
         // DoS guard — a peer that claims Content-Length: 10 GB would otherwise force a
-        // 10 GB allocation. Cohesion caps the body at the registration's configured
-        // Http1Limits.MaxRequestBodySize (default ~28.6 MB) and rejects oversize declarations
-        // before reading a single byte from the stream. 200 MB is well over the default cap.
+        // 10 GB read. Cohesion caps the body at the registration's configured
+        // Http1Limits.MaxRequestBodySize (default ~28.6 MB) and rejects an oversize declaration
+        // before reading a single body byte, surfaced (413) when the application reads the body.
+        // 200 MB is well over the default cap.
         const long oversize = 200L * 1024 * 1024;
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: {oversize}\r\n\r\n");
 
-        await AssertConnectionDroppedAsync(payload);
+        await AssertBodyReadThrowsAsync<IOException>(payload);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should drop a connection that closes mid-request-line and keep the listener accepting")]
@@ -813,5 +847,26 @@ public class Http1TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
 
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Asserts that a request whose <em>body</em> is malformed or over a limit is still dispatched at
+    /// head (the streamed body read is where the fault surfaces), and that reading the body throws
+    /// <typeparamref name="TException"/>.
+    /// </summary>
+    private static async Task AssertBodyReadThrowsAsync<TException>(byte[] payload)
+        where TException : Exception
+    {
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        await Should.ThrowAsync<TException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
+    }
+
+    private static async Task ReadBodyToEndAsync(Stream body)
+    {
+        byte[] buffer = new byte[8192];
+        while (await body.ReadAsync(buffer) > 0)
+        {
+        }
     }
 }
