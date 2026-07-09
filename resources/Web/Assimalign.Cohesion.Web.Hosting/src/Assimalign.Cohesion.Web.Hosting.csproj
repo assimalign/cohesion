@@ -11,5 +11,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
 	</ItemGroup>
 </Project>

@@ -4,8 +4,18 @@
 
 The familiar property-style `context.User` access from ASP.NET Core,
 restored on top of a wire-level HTTP protocol core that does not know
-about identity. The package is intentionally narrow: one feature
-contract, one default implementation, one extension property.
+about identity, **plus the scheme registration model and per-request
+dispatch surface** that concrete scheme handlers (Cookie, Bearer) plug
+into.
+
+The package began (before #790) as one feature contract, one default
+implementation, and one extension property — the per-request principal
+only. Issue #790 grew it into the home for the **authentication scheme
+model**: the handler contract, the named-scheme registry with
+default-scheme selection, the `ClaimsPrincipal`-based result types, and
+the request-time dispatch service. The concrete handlers still live in
+their own packages (`…Cookie`, `…Bearer`); this package owns only the
+model they share. See "The scheme model" below.
 
 The design is shaped by three constraints that pull in different
 directions:
@@ -121,17 +131,92 @@ default like `context.User` &mdash; **never** the retired skeleton's
 `ClaimsPrincipal.Current` fallback, which reads ambient thread state
 and has no place in a per-exchange model.
 
+## The scheme model
+
+The model added by #790 mirrors the ASP.NET Core authentication shape,
+adapted to Cohesion's DI-free, feature-keyed conventions.
+
+**`IAuthenticationHandler` + `IAuthenticationSignInHandler`.** A handler
+owns one scheme's wire behavior: `AuthenticateAsync` (read/validate a
+credential), `ChallengeAsync` (prompt for one), `ForbidAsync` (deny an
+authenticated-but-unauthorized request). Schemes that also establish a
+session — the cookie handler — additionally implement
+`IAuthenticationSignInHandler` (`SignInAsync`/`SignOutAsync`). The split
+means a bearer scheme, which validates a caller-supplied token on every
+request and holds no session, cannot be signed into by mistake — the
+dispatch service throws instead of silently no-op'ing.
+
+**`AuthenticationScheme` carries a `Func<IAuthenticationHandler>`, not a
+type.** Handlers are produced by a factory delegate captured at builder
+time, never by reflection or a container `Activator`. The factory closes
+over the scheme's already-constructed options (and, for cookies, its
+ticket protector), so scheme resolution is allocation-cheap and fully
+AOT-safe. This is the key adaptation away from ASP.NET Core, which
+resolves handlers from DI by type.
+
+**The result is `ClaimsPrincipal`-based, deliberately.** `AuthenticateResult`
+and `AuthenticationTicket` carry a `System.Security.Claims.ClaimsPrincipal`,
+matching `context.User` and the rest of the Web pipeline — *not*
+IdentityModel's `IIdentitySubject`. The two identity models meet in
+exactly one place: the bearer handler's mapper, which projects a
+validated JWT onto a principal. Keeping the Web layer in `ClaimsPrincipal`
+avoids forcing every middleware and endpoint to learn a second claim
+vocabulary. The success/failure-as-values shape (a computed `Succeeded`,
+an unconstructible "succeeded-with-failure" state) mirrors the
+IdentityModel `TokenValidationResult`/`AuthenticationResult` contracts so
+the family reads consistently.
+
+**Dispatch travels as a feature, not a service resolve.**
+`IAuthenticationService` extends `IHttpFeature`: it is a builder-time
+singleton installed on every request's feature collection (the same
+mechanism `RouterFeature` uses). `context.AuthenticateAsync()` and
+friends resolve it type-keyed from `context.Features` — there is no
+request-time service location. The service reads `AuthenticationOptions`
+live, so schemes registered by chained `AddCookie`/`AddJwtBearer` calls
+that run *after* the service is created are still resolved; and it caches
+each request's handler on `context.Items` so an authenticate followed by
+a challenge reuses one initialized instance.
+
+**Result feature alongside the principal feature.**
+`IAuthenticationResultFeature` holds the default-scheme `AuthenticateResult`
+(ticket, properties, failure) so authorization and diagnostics can inspect
+*how* the principal was established, next to `IHttpAuthenticationFeature`
+which holds only `context.User`. This mirrors ASP.NET Core's
+`IAuthenticateResultFeature`.
+
+**`IApiEndpointMetadata` is the redirect-vs-status seam.** A cookie
+challenge on a browser endpoint redirects to a login page; on an API
+endpoint it must emit a bare `401`. The decision keys on the endpoint
+metadata marker `IApiEndpointMetadata` (mirroring the .NET 10 cookie
+handler), resolved reflection-free through the #150 metadata bag surfaced
+by `Web.Routing`. The marker is defined here (an empty interface) but read
+only by the cookie handler; the bearer handler is always an API scheme and
+needs no check.
+
+**Builder-time registration lives in `*.Hosting`.** Per the framework's
+layering, this package defines the model and the request-time service but
+does *not* wire schemes — `AddAuthentication`/`AddCookie`/`AddJwtBearer`
+(which construct the data-protection key ring and read configuration) live
+in `Assimalign.Cohesion.Web.Hosting`, the only place DI/config/crypto
+composition is sanctioned. `AuthenticationService.Create` and the public
+handler factories (`CookieAuthentication.CreateHandler`,
+`JwtBearerAuthentication.CreateHandler`) are the seams Hosting uses to
+build the model while the concrete handler and service implementations
+stay `internal`.
+
 ## Family map
 
 | Package | Role | Dependencies |
 |---------|------|---------------|
-| `Assimalign.Cohesion.Web.Authentication` | Authenticated principal feature + extension property | `Assimalign.Cohesion.Http` |
-| Future: `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler | This package |
-| Future: `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler | This package |
+| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) | `Assimalign.Cohesion.Http` |
+| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
+| `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) | This package, `IdentityModel.Token.JsonWebToken` |
+| `&hellip;Web.Hosting` | Builder-time registration (`AddAuthentication`/`AddCookie`/`AddJwtBearer`, `UseAuthentication`) + key-ring composition | The three above + `Security.DataProtection` |
 
 Dependency direction is one-way: scheme handlers depend on this
 package; this package depends on the protocol core. The protocol core
-never gains a back-reference.
+never gains a back-reference. Only `*.Hosting` depends on the handler
+packages, because only the composition root wires them.
 
 ## AOT posture
 
@@ -146,9 +231,17 @@ serialization or runtime-policy surface is consumed by this package.
 
 ## Non-goals
 
-- **Authentication scheme implementations.** Cookie, Bearer, and other
-  scheme handlers belong in dedicated packages. This package only
-  defines the per-request principal surface.
+- **Concrete scheme handlers.** This package defines the scheme *model*
+  (the handler contract, the registry, the dispatch service); the actual
+  Cookie and Bearer handlers live in dedicated packages, and any other
+  scheme (API key, mutual-TLS) is a further package or a custom
+  `IAuthenticationHandler`. This package ships no handler.
+- **Builder-time wiring.** `AddAuthentication`/`AddCookie`/`AddJwtBearer`
+  and `UseAuthentication` live in `Web.Hosting`; this package is
+  request-path only and free of DI/config/crypto dependencies.
+- **OAuth2 / OIDC interactive login.** Authorization-code and other
+  redirect-based sign-in flows are follow-ups behind the IdentityModel
+  and IdentityHub epics, not part of this scheme model.
 - **Authorization.** Policy evaluation, role checks, and requirement
   handlers live in `Assimalign.Cohesion.Web.Authorization`.
 - **Wire-level identity.** TLS client certificates, mutual-TLS
