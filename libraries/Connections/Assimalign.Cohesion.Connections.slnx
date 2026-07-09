@@ -31,6 +31,17 @@
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.InMemory/tests/">
 		<Project Path="Assimalign.Cohesion.Connections.InMemory/tests/Assimalign.Cohesion.Connections.InMemory.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.NamedPipes/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/">
+		<File Path="Assimalign.Cohesion.Connections.NamedPipes/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.NamedPipes/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/">
+		<Project Path="Assimalign.Cohesion.Connections.NamedPipes/src/Assimalign.Cohesion.Connections.NamedPipes.csproj" />
+	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.NamedPipes/tests/">
+		<Project Path="Assimalign.Cohesion.Connections.NamedPipes/tests/Assimalign.Cohesion.Connections.NamedPipes.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/" />
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Quic/docs/">
 		<File Path="Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md" />
@@ -54,6 +65,10 @@
 		<Project Path="Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Tcp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Tcp/src/">
 		<Project Path="Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
 	</Folder>

@@ -1056,6 +1056,10 @@
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Security/tests/Assimalign.Cohesion.Connections.Security.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
 	</Folder>
@@ -1075,6 +1079,17 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.InMemory/tests/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.InMemory/tests/Assimalign.Cohesion.Connections.InMemory.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/Assimalign.Cohesion.Connections.NamedPipes.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/tests/">
+		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/tests/Assimalign.Cohesion.Connections.NamedPipes.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/ObjectMapping/">
 		<File Path="libraries/ObjectMapping/Directory.Build.props" />

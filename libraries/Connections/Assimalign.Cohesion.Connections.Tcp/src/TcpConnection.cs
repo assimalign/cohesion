@@ -29,6 +29,7 @@ internal sealed class TcpConnection : Connection
     private readonly SocketPipeSenderPool _senderPool;
     private readonly Socket _socket;
     private readonly ListenerId _listenerId;
+    private readonly ConnectionProtocol _protocol;
     private readonly IDisposable? _ownedResource;
     private readonly int _memoryPoolBlockSize;
     private readonly Lock _lock = new();
@@ -47,10 +48,19 @@ internal sealed class TcpConnection : Connection
     {
         _socket = socket;
         _listenerId = listenerId;
+        _protocol = SocketConnectionProtocol.FromAddressFamily(socket.AddressFamily);
         _ownedResource = ownedResource;
 
         LocalEndPoint = socket.LocalEndPoint;
         RemoteEndPoint = socket.RemoteEndPoint;
+
+        Capabilities = new ConnectionCapabilities(
+            _protocol,
+            ConnectionDelivery.Stream,
+            IsReliable: true,
+            IsOrdered: true,
+            IsMultiplexed: false,
+            ConnectionSecurity.None);
 
         _pair = DuplexPipePair.Create(settings.PipeOptions.InputOptions, settings.PipeOptions.OutputOptions);
         _receiver = new SocketPipeReceiver(settings.PipeOptions.ReceiverScheduler);
@@ -64,7 +74,7 @@ internal sealed class TcpConnection : Connection
 
         _state = ConnectionState.Open;
 
-        ConnectionEventSource.Log.ConnectionStart(ConnectionProtocol.Tcp, listenerId, Id);
+        ConnectionEventSource.Log.ConnectionStart(_protocol, listenerId, Id);
     }
 
     /// <inheritdoc />
@@ -83,13 +93,12 @@ internal sealed class TcpConnection : Connection
     public override PipeWriter Output => _pair.Output;
 
     /// <inheritdoc />
-    public override ConnectionCapabilities Capabilities { get; } = new ConnectionCapabilities(
-        ConnectionProtocol.Tcp,
-        ConnectionDelivery.Stream,
-        IsReliable: true,
-        IsOrdered: true,
-        IsMultiplexed: false,
-        ConnectionSecurity.None);
+    /// <remarks>
+    /// <see cref="ConnectionCapabilities.Protocol"/> reflects the socket's address family, so a
+    /// connection over a Unix domain socket reports <see cref="ConnectionProtocol.UnixDomainSocket"/>.
+    /// The delivery guarantees (reliable, ordered byte stream) are identical for both families.
+    /// </remarks>
+    public override ConnectionCapabilities Capabilities { get; }
 
     /// <inheritdoc />
     public override ConnectionState State => _state;
@@ -170,7 +179,7 @@ internal sealed class TcpConnection : Connection
                 if (result.BytesTransferred == 0)
                 {
                     // Finished: the remote host has finished sending data.
-                    ConnectionEventSource.Log.ConnectionFinished(ConnectionProtocol.Tcp, _listenerId, Id);
+                    ConnectionEventSource.Log.ConnectionFinished(_protocol, _listenerId, Id);
                     break;
                 }
 
@@ -182,7 +191,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Paused: the consumer is applying back-pressure, so receiving is paused.
-                    ConnectionEventSource.Log.ConnectionPaused(ConnectionProtocol.Tcp, _listenerId, Id);
+                    ConnectionEventSource.Log.ConnectionPaused(_protocol, _listenerId, Id);
                 }
 
                 FlushResult flushResult = await flushResultTask;
@@ -190,7 +199,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Resumed: the consumer caught up and the connection has resumed receiving data.
-                    ConnectionEventSource.Log.ConnectionResumed(ConnectionProtocol.Tcp, _listenerId, Id);
+                    ConnectionEventSource.Log.ConnectionResumed(_protocol, _listenerId, Id);
                 }
                 if (flushResult.IsCompleted || flushResult.IsCanceled)
                 {
@@ -209,7 +218,7 @@ internal sealed class TcpConnection : Connection
             // avoid the duplicate is not worthwhile.
             if (!_isSocketDisposed)
             {
-                ConnectionEventSource.Log.ConnectionReset(ConnectionProtocol.Tcp, _listenerId, Id);
+                ConnectionEventSource.Log.ConnectionReset(_protocol, _listenerId, Id);
             }
         }
         catch (Exception exception)
@@ -222,13 +231,13 @@ internal sealed class TcpConnection : Connection
                 if (!_isSocketDisposed)
                 {
                     // This is unexpected if the socket hasn't been disposed yet.
-                    ConnectionEventSource.Log.ConnectionError(ConnectionProtocol.Tcp, _listenerId, Id, exception.Message);
+                    ConnectionEventSource.Log.ConnectionError(_protocol, _listenerId, Id, exception.Message);
                 }
             }
             else
             {
                 ConnectionEventSource.Log.ConnectionError(
-                    ConnectionProtocol.Tcp,
+                    _protocol,
                     _listenerId,
                     Id,
                     $"A connection error occurred while receiving data: {exception.Message}");
@@ -322,7 +331,7 @@ internal sealed class TcpConnection : Connection
         when (SocketHelper.IsConnectionResetError(exception.SocketErrorCode))
         {
             error = new ConnectionResetException(exception.Message, exception);
-            ConnectionEventSource.Log.ConnectionReset(ConnectionProtocol.Tcp, _listenerId, Id);
+            ConnectionEventSource.Log.ConnectionReset(_protocol, _listenerId, Id);
         }
         catch (Exception exception)
         when ((exception is SocketException socketException && SocketHelper.IsConnectionAbortError(socketException.SocketErrorCode)) || exception is ObjectDisposedException)
@@ -334,7 +343,7 @@ internal sealed class TcpConnection : Connection
         {
             error = exception;
             ConnectionEventSource.Log.ConnectionError(
-                ConnectionProtocol.Tcp,
+                _protocol,
                 _listenerId,
                 Id,
                 $"A connection error occurred while sending data: {exception.Message}");
