@@ -58,6 +58,30 @@ public class Http3TransportTests
         Encoding.UTF8.GetString(frames[1].Payload).ShouldBe("quic");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
+    public async Task Http3_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — the QUERY method rides :method like any other token; a DATA frame carries
+        // the query content. Equivalent to the HTTP/1.1 and HTTP/2 QUERY round-trips on the h3 path.
+        const string queryBody = "{\"select\":\"widgets\"}";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
+            "QUERY", "/search", "https", "a", body: Encoding.UTF8.GetBytes(queryBody));
+        TestConnection stream = new(payload);
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should yield multiple inbound request streams")]
     public async Task Http3_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {

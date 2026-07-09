@@ -250,6 +250,24 @@ public class Http1TransportTests
         body.ShouldBe(bodyText);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should parse a QUERY request line and deliver its content body (RFC 10008)")]
+    public async Task Http1_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — QUERY carries the query in the request content. The transport already
+        // accepts arbitrary token methods and frames a Content-Length body, so QUERY-with-body
+        // round-trips through the existing HTTP/1.1 harness with no transport change.
+        const string queryBody = "SELECT id FROM widgets WHERE color = 'blue'";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            $"QUERY /search HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/sql\r\nContent-Length: {queryBody.Length}\r\n\r\n{queryBody}");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should accept repeated Content-Length headers with the same value")]
     public async Task Http1_OnRepeatedContentLengthSameValue_ShouldAcceptBody()
     {

@@ -57,6 +57,14 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>Accept-Language</c> HTTP header name.</summary>
     public static HttpHeaderKey AcceptLanguage {get;}= new( "Accept-Language");
 
+    /// <summary>Gets the <c>Accept-Query</c> HTTP response header name (RFC 10008 &#167; 3).</summary>
+    /// <remarks>
+    /// Advertised by a resource to signal that it supports the QUERY method and to describe the
+    /// query-format media type(s) it accepts in QUERY request content. Its value is an RFC 9651
+    /// Structured Field List of media ranges (Tokens or Strings), modeled by <c>HttpAcceptQuery</c>.
+    /// </remarks>
+    public static HttpHeaderKey AcceptQuery {get;}= new( "Accept-Query");
+
     /// <summary>Gets the <c>Accept-Ranges</c> HTTP header name.</summary>
     public static HttpHeaderKey AcceptRanges {get;}= new( "Accept-Ranges");
 

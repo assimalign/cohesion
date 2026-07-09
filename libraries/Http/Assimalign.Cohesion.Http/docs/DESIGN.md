@@ -694,7 +694,7 @@ dynamic member access. Builds clean under the trim/AOT analyzers
 
 ### The response phase
 
-The response-phase hooks (+ `HttpResponseInterceptorContext`) run along an
+The response-phase hooks (+ `HttpExchangeInterceptorResponseContext`) run along an
 exchange's response lifecycle. They exist so **response-side capabilities stay
 out of both the protocol core and the transport**: incremental response
 streaming (and Server-Sent Events on top of it), interim (`1xx`) responses, and
@@ -730,12 +730,12 @@ response side mirrors it exactly, with **two transport-backed objects** on the
 context instead of per-capability members:
 
 - The transport exposes its per-protocol **raw response body sink** as a plain
-  `System.IO.Stream` on `HttpResponseInterceptorContext.ResponseBody`. That sink
+  `System.IO.Stream` on `HttpExchangeInterceptorResponseContext.ResponseBody`. That sink
   frames each write (HTTP/1.1 chunked, HTTP/2 / HTTP/3 `DATA` frames with
   flow-control backpressure), commits the head on the first write/flush, and is
   finalized by the transport when the exchange completes.
 - The transport exposes its per-exchange **exchange control** as an
-  `IHttpExchangeControl` on `HttpResponseInterceptorContext.Control` — the
+  `IHttpExchangeControl` on `HttpExchangeInterceptorResponseContext.Control` — the
   single generic surface for the transport-owned wire mechanisms outside the
   normal response path: interim (`1xx`) writes (`CanWriteInterimResponse` /
   `WriteInterimResponseAsync`) and the raw-stream takeover (`CanTakeOver` /
@@ -767,7 +767,7 @@ headers are committed exactly once and locked thereafter — a rule the streamin
 feature surfaces to callers and the SSE package relies on (set `Content-Type:
 text/event-stream` before the first write). `BeforeResponse` runs before any
 response byte is produced, so an interceptor may still set default response headers
-on `HttpResponseInterceptorContext.Headers`; `BeforeResponseHeadAsync` is the last
+on `HttpExchangeInterceptorResponseContext.Headers`; `BeforeResponseHeadAsync` is the last
 word — it fires immediately before the commit on whichever path commits first.
 
 ### Exchange control semantics that are load-bearing
@@ -1035,3 +1035,128 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
 - **`X-Forwarded-Port` and other vendor headers.** The scope is the three
   ubiquitous `X-Forwarded-*` headers plus RFC 7239; other vendor variants are a
   consumer overlay if ever needed.
+
+## The QUERY method (RFC 10008)
+
+RFC 10008 registers `QUERY`: a **safe, idempotent** method that carries the query
+in the request **content** rather than the request target, ending the
+POST-for-search workaround (a body that no longer defeats caching, and a target
+URI no longer bounded by the query's size). The wire already accepts arbitrary
+token methods and frames a body from the headers on all three transports, so the
+method is a *semantics* addition to the core value-object layer — not a transport
+change. This section records the three semantic decisions QUERY forced.
+
+### Method classification lives on `HttpMethod`
+
+`HttpMethod` gained four `bool` classification properties — `IsSafe`,
+`IsIdempotent`, `IsCacheable`, and `CacheKeyIncludesContent` — because the
+*method* is the correct home for facts the RFC defines *about the method*, and
+every consumer that reasons about them (antiforgery, a future output cache,
+retry policy, a CORS preflight decision) already holds an `HttpMethod`. They are
+plain switches over the canonical (upper-cased) token — fully AOT/trim-safe, no
+layering impact — and they answer:
+
+| Method | `IsSafe` | `IsIdempotent` | `IsCacheable` | `CacheKeyIncludesContent` |
+|---|---|---|---|---|
+| GET, HEAD | ✓ | ✓ | ✓ | ✗ |
+| OPTIONS, TRACE | ✓ | ✓ | ✗ | ✗ |
+| **QUERY** | ✓ | ✓ | ✓ | **✓** |
+| PUT, DELETE | ✗ | ✓ | ✗ | ✗ |
+| POST | ✗ | ✗ | ✓ | ✗ |
+| PATCH, CONNECT | ✗ | ✗ | ✗ | ✗ |
+| *unknown extension token* | ✗ | ✗ | ✗ | ✗ |
+
+`IsSafe`/`IsIdempotent` are RFC 9110 §9.2.1–9.2.2; `IsCacheable` is the RFC 9110
+§9.2.3 "defined as cacheable" set (GET/HEAD/POST) plus QUERY. An **unknown**
+extension token reports `false` for all four — its semantics are unknown, so the
+conservative classification is "no property assumed". This makes the properties
+total (a default-constructed `HttpMethod`, whose `Value` is `null`, also reports
+`false` across the board via the switch's default arm).
+
+`HttpMethod.Query` and the `"QUERY"` arm in `GetCanonicalizedValue` were the only
+other additions. Adding the constant is **non-breaking**: `HttpMethod` equality
+is `OrdinalIgnoreCase` over the token, so any pre-existing `new HttpMethod("QUERY")`
+already compared equal to the new canonical value.
+
+### `Accept-Query` is an SFV consumer, projected onto `HttpMediaType`
+
+`HttpAcceptQuery` is the field-specific consumer for the `Accept-Query` response
+header (RFC 10008 §3) — the header a resource emits to advertise QUERY support and
+the query-format media type(s) it accepts. Per §3 the field is an RFC 9651
+Structured Field **List** whose members are media ranges expressed as **either
+Tokens or Strings** ("the choice … is semantically insignificant"), with
+media-type parameters carried as structured-field parameters
+(`"application/jsonpath", application/sql;charset="UTF-8"`).
+
+Two reuse decisions keep it thin:
+
+- **Parsing goes *through* `StructuredFieldList`**, not around it — the same
+  discipline `HttpPriority` and the digest fields follow. `HttpAcceptQuery` only
+  adds the media-range interpretation: it rejects an inner-list member, reads the
+  bare Token/String, folds the member's parameters back into canonical textual
+  form (`item.Parameters.Serialize()`), and hands the reconstructed
+  `type/subtype;params` to `HttpMediaType.TryParse`. So an advertised range shares
+  **one** representation with `Accept`/`Content-Type`, and `Accepts(contentType)`
+  reuses `HttpMediaType.Includes` (RFC 9110 §12.5.1 matching) instead of a second
+  media-range engine.
+- **Serialization emits canonical SFV**: each range is a Token when it matches the
+  `sf-token` grammar (media ranges almost always do — `/` and `*` are token
+  characters) and a String otherwise, with parameters as structured-field String
+  parameters. A parse→serialize round-trip therefore normalizes to canonical form
+  (e.g. a quoted `"application/sql"` token-normalizes) rather than preserving the
+  wire spelling — the same posture as the rest of the SFV toolkit.
+
+Like the other core field types it is a `readonly struct` with
+`TryParse`/`Parse`/`Serialize` and value equality, not an interface — an immutable
+protocol value with one correct parse and no injectable behavior.
+
+### Caching: the core supplies the method facts; the cache supplies the policy
+
+RFC 10008 §2.7 makes QUERY responses cacheable **with the request content in the
+cache key**. The core expresses exactly the two method-level facts a cache needs —
+`IsCacheable` (the response *may* be stored) and `CacheKeyIncludesContent` (the
+key MUST incorporate the request content and its related metadata) — and stops
+there, mirroring the established split with the RFC 9111 caching primitives
+(#755): `HttpCacheControl`/`HttpFreshness` supply the *directive parsing and
+freshness arithmetic*, and the **policy** (a store, cache-key derivation,
+revalidation, the POST/QUERY "explicit freshness required" rule) belongs to the
+consuming cache — the future server-owned output cache (#795). A cache composes
+the two: `method.IsCacheable && (has explicit freshness) → store`, keyed on
+`method + target + (method.CacheKeyIncludesContent ? request content : ∅) + Vary`.
+Keeping the fact in the core and the policy in the cache is what lets #795 be
+built without re-deriving method semantics from the RFC.
+
+### Antiforgery: QUERY is spec-safe but stays token-required
+
+The one deliberately non-mechanical decision. `HttpAntiforgeryService.IsSafeMethod`
+exempts only the **bodiless** safe methods (GET/HEAD/OPTIONS/TRACE) from token
+validation. QUERY is spec-safe and idempotent — `HttpMethod.IsSafe` reports `true`
+— but it **carries a request body**, so its CSRF exposure parallels POST: a
+cross-site `<form>`/`fetch` can drive a state-influencing QUERY the same way it can
+a POST. QUERY is therefore **not** exempt (a QUERY with no valid token is
+rejected), and the antiforgery exempt set stays an explicit list rather than being
+repointed at `HttpMethod.IsSafe` — repointing would silently exempt QUERY and
+regress the protection. The rationale is recorded in code at `IsSafeMethod` and
+pinned by tests; if a caller genuinely wants read-only QUERY endpoints exempt,
+that is an explicit opt-in for that endpoint, not a change to the default.
+
+### AOT posture
+
+The classification properties are token switches; `HttpAcceptQuery` parses and
+serializes via the span-based SFV toolkit and `HttpMediaType`. No reflection, no
+runtime codegen, no dynamic dispatch. Builds clean under the trim/AOT analyzers
+(`IsAotCompatible=true`).
+
+### Non-goals
+
+- **The server MUST-level request rules.** RFC 10008 §2.1/§2.3 (reject a QUERY with
+  a missing/inconsistent `Content-Type`), §2.5 (do not rewrite a QUERY redirect to
+  GET), and §2.6 (conditional QUERY behaves like conditional GET) are *server
+  request-handling* behavior, not value-object semantics. They belong to the
+  request pipeline / transport that consumes these primitives, which reuses the
+  existing conditional-request (`HttpConditionalRequest`) and redirect machinery;
+  the core only supplies the method classification and `Accept-Query` model.
+- **A cache.** As above — no store, cache-key derivation, or revalidation here.
+- **Field wiring.** Reading `Accept-Query` off a response, emitting it, and the
+  content-type negotiation for QUERY content are the consumer's job, consistent
+  with the media-type and caching sections.

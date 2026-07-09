@@ -1,4 +1,4 @@
-# Assimalign.Cohesion.Http.Transports — Design
+# Assimalign.Cohesion.Http.Connections — Design
 
 This document captures the design intent behind the shipped HTTP transport
 surface. It is intentionally focused on the design decisions a future
@@ -166,7 +166,7 @@ request's lifecycle hooks in order:
 
 1. Parses the head (request line + headers) under the configured limits, then
    derives host/scheme.
-2. Builds one `HttpRequestInterceptorContext` — head data, a **read-only**
+2. Builds one `HttpExchangeInterceptorRequestContext` — head data, a **read-only**
    header view (`HttpHeaderCollection.AsReadOnly()`), a fresh feature
    collection, and the body-size knob seeded from the registration's
    `Http1Limits.MaxRequestBodySize` — and runs every `AfterRequestHead` hook in
@@ -403,7 +403,7 @@ that this library never references.
   — the symmetric counterpart to the request-interceptor seam, now a **lifecycle-hook
   set** rather than a single invocation point. At context setup, when any response
   interceptor is registered, the transport creates the per-protocol sink and exchange
-  control, builds a `HttpResponseInterceptorContext` exposing them as `ResponseBody` /
+  control, builds a `HttpExchangeInterceptorResponseContext` exposing them as `ResponseBody` /
   `Control`, retains that context for the exchange's lifetime, and runs the
   `BeforeResponse` hooks. The same context is re-presented to the later hooks:
   `BeforeResponseHeadAsync` fires exactly once immediately before the final head is
@@ -531,7 +531,7 @@ capability.
 
 - The **core** (`Assimalign.Cohesion.Http`) defines `IHttpExchangeControl` — the
   single per-exchange control surface on
-  `HttpResponseInterceptorContext.Control` — whose interim-write members
+  `HttpExchangeInterceptorResponseContext.Control` — whose interim-write members
   (`CanWriteInterimResponse` / `WriteInterimResponseAsync`) carry this capability.
   Unlike the control's takeover members (HTTP/1.1-only), interim writes are
   offered on **all three** versions.
@@ -658,7 +658,7 @@ guards are integer range checks.
 The takeover members of the exchange control
 (`IHttpExchangeControl.CanTakeOver` / `TakeOver()`, implemented by
 `Http1ExchangeControl` and surfaced on
-`HttpResponseInterceptorContext.Control`). Exercising `TakeOver()` hands the
+`HttpExchangeInterceptorResponseContext.Control`). Exercising `TakeOver()` hands the
 caller the **raw duplex connection stream** with no HTTP framing — the escape
 hatch that RFC 9110 §7.8 protocol upgrades (`101 Switching Protocols`) and
 §9.3.6 `CONNECT` tunnels need, since both transitions take the connection out
@@ -861,7 +861,7 @@ only for the reads it bounds.
 
 The transport no longer seeds any feature itself. The per-request override
 flows through the request-parse interceptor seam (see "Per-request feature
-injection" above): the parser seeds `HttpRequestInterceptorContext
+injection" above): the parser seeds `HttpExchangeInterceptorRequestContext
 .MaxRequestBodySize` from `Limits.MaxRequestBodySize`, `AfterRequestHead` hooks may adjust
 it, the parser freezes it and enforces whatever value remains (413 on
 violation). The typed `IHttpMaxRequestBodySizeFeature` lives in the

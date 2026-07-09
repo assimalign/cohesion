@@ -241,5 +241,5 @@ source generator. Fully NativeAOT compatible.
   library's `Internal` namespace and is shared with the drivers via `InternalsVisibleTo`; there is
   no separate toolbox assembly.
 - **`Assimalign.Cohesion.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
-- **`Assimalign.Cohesion.Http.Transports` / `Assimalign.Cohesion.Amqp.Transports`** — application
+- **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
   protocols consuming these contracts by capability.

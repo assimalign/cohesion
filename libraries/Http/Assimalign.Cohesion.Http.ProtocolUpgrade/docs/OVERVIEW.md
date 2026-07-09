@@ -41,7 +41,7 @@ if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade, Protocol: "webso
 - `Assimalign.Cohesion.Http.Cookies` — to drain response cookies onto the transition response.
 
 The server transport (`Assimalign.Cohesion.Http.Connections`) surfaces its exchange control
-(`HttpResponseInterceptorContext.Control`) on the response-interceptor seam; this package's
+(`HttpExchangeInterceptorResponseContext.Control`) on the response-interceptor seam; this package's
 interceptors consume its takeover capability — `CanTakeOver` / `TakeOver()`, which only the
 HTTP/1.1 exchange control offers. There is **no** compile-time dependency between the transport
 and this package (the layering constraint of #751).

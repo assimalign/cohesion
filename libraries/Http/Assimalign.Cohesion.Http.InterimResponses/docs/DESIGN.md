@@ -18,7 +18,7 @@ package removes that coupling, mirroring the streaming/upgrade split:
 
 - **The core** owns only the generic `IHttpExchangeInterceptor` seam and the single
   generic exchange-control surface, `IHttpExchangeControl`, surfaced as
-  `HttpResponseInterceptorContext.Control`. Interim writes are two members of that
+  `HttpExchangeInterceptorResponseContext.Control`. Interim writes are two members of that
   one contract (`CanWriteInterimResponse` / `WriteInterimResponseAsync`) rather
   than a per-capability contract of their own, so this feature added no core
   abstraction. The core has no interim *feature* type.
@@ -42,7 +42,7 @@ least one response interceptor is registered).
    `HttpConnectionListenerOptions.Interceptors`.
 2. Per exchange, the transport creates its per-protocol exchange control and runs
    the registered response interceptors, exposing it as
-   `HttpResponseInterceptorContext.Control`.
+   `HttpExchangeInterceptorResponseContext.Control`.
 3. `HttpInterimResponseInterceptor.BeforeResponse` wraps that control in a
    `HttpInterimResponseFeature` and installs it on `context.Features` (only when
    the control is present).

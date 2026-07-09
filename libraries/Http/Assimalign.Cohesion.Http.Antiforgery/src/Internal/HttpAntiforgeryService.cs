@@ -200,6 +200,14 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
 
     private static bool IsSafeMethod(HttpMethod method)
     {
+        // The antiforgery-exempt set is deliberately narrower than the RFC 9110 §9.2.1 "safe"
+        // set (HttpMethod.IsSafe): it is the *bodiless* safe methods only. QUERY (RFC 10008) is
+        // spec-safe and idempotent — so HttpMethod.IsSafe reports true — but it carries a request
+        // body, which is precisely the CSRF vector antiforgery defends against: a cross-site
+        // <form>/fetch can drive a state-influencing QUERY the same way it can a POST. QUERY is
+        // therefore intentionally NOT exempt here (it still requires a valid token), even though
+        // it is spec-safe. Repointing this at HttpMethod.IsSafe would silently exempt QUERY and
+        // regress that protection, so the exempt set stays an explicit list.
         return method == HttpMethod.Get
             || method == HttpMethod.Head
             || method == HttpMethod.Options
