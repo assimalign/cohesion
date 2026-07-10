@@ -11,6 +11,15 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal abstract class HttpConnectionFactory
 {
     /// <summary>
+    /// The precomputed RFC 7838 <c>Alt-Svc</c> response-header value this stream protocol injects on
+    /// its responses to advertise the listener's HTTP/3 endpoint, or <see langword="null"/> when
+    /// advertisement is disabled or no HTTP/3 listener is registered. Set once by
+    /// <see cref="HttpConnectionListener"/> after every listener has been materialized (so the h3
+    /// endpoint is known) and before the first connection is accepted; read on the response path.
+    /// </summary>
+    public string? AltSvcHeaderValue { get; set; }
+
+    /// <summary>
     /// Wraps <paramref name="connection"/> in the protocol-specific connection.
     /// </summary>
     /// <param name="connection">The accepted transport connection.</param>

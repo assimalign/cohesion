@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Channels;
@@ -81,6 +82,20 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         }
 
         Protocols = protocols;
+
+        // Compute the Alt-Svc advertisement once — every listener has now been materialized, so the
+        // HTTP/3 endpoint (if any) is known — and push it onto the stream factories that inject it on
+        // their responses. Set before the first connection is accepted (accept loops start lazily on
+        // the first AcceptOrListenAsync), so no factory observes a half-set value.
+        string? altSvcHeaderValue = BuildAltSvcHeaderValue(options.AltServiceAdvertisement, _multiplexedListeners, _streamListeners.Count);
+        if (altSvcHeaderValue is not null)
+        {
+            foreach ((HttpConnectionFactory factory, IConnectionListener _) in _streamListeners)
+            {
+                factory.AltSvcHeaderValue = altSvcHeaderValue;
+            }
+        }
+
         _acceptLoops = new List<Task>(_streamListeners.Count + _multiplexedListeners.Count);
         _acceptedConnections = Channel.CreateBounded<HttpConnection>(new BoundedChannelOptions(options.BacklogCapacity)
         {
@@ -96,6 +111,95 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     /// Gets the configured HTTP protocols supported by this listener.
     /// </summary>
     public HttpProtocol Protocols { get; }
+
+    /// <summary>
+    /// Builds the RFC 7838 <c>Alt-Svc</c> header value the stream protocols advertise, or
+    /// <see langword="null"/> when advertisement does not apply. Advertisement requires the opt-in
+    /// flag, at least one HTTP/3 listener to advertise, and at least one stream listener to carry the
+    /// header. The h3 port is taken from the first HTTP/3 listener endpoint unless an explicit
+    /// authority is configured.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when advertisement is enabled but the h3 port cannot be determined — the configured
+    /// authority is malformed, or the HTTP/3 listener endpoint exposes no port and no explicit
+    /// authority was supplied.
+    /// </exception>
+    private static string? BuildAltSvcHeaderValue(
+        HttpAltServiceAdvertisementOptions advertisement,
+        List<(HttpMultiplexedConnectionFactory Factory, IMultiplexedConnectionListener Listener)> multiplexedListeners,
+        int streamListenerCount)
+    {
+        if (!advertisement.Enabled || multiplexedListeners.Count == 0 || streamListenerCount == 0)
+        {
+            return null;
+        }
+
+        long maxAgeSeconds = (long)advertisement.MaxAge.TotalSeconds;
+
+        HttpAltService alternative;
+        if (!string.IsNullOrEmpty(advertisement.Authority))
+        {
+            if (!TryParseAuthority(advertisement.Authority, out string? host, out int port))
+            {
+                throw new InvalidOperationException(
+                    $"The configured Alt-Svc authority '{advertisement.Authority}' is not a valid 'host:port' or ':port' value.");
+            }
+
+            alternative = HttpAltService.Http3(host, port, maxAgeSeconds);
+        }
+        else if (TryGetPort(multiplexedListeners[0].Listener.EndPoint, out int derivedPort))
+        {
+            // Advertise on the request's own host (empty host); only the port is carried over.
+            alternative = HttpAltService.Http3(host: null, derivedPort, maxAgeSeconds);
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Alt-Svc advertisement is enabled but the HTTP/3 listener endpoint does not expose a port; " +
+                $"set {nameof(HttpAltServiceAdvertisementOptions)}.{nameof(HttpAltServiceAdvertisementOptions.Authority)} explicitly.");
+        }
+
+        return alternative.Format();
+    }
+
+    private static bool TryGetPort(EndPoint endPoint, out int port)
+    {
+        switch (endPoint)
+        {
+            case IPEndPoint ipEndPoint:
+                port = ipEndPoint.Port;
+                return true;
+            case DnsEndPoint dnsEndPoint:
+                port = dnsEndPoint.Port;
+                return true;
+            default:
+                port = 0;
+                return false;
+        }
+    }
+
+    private static bool TryParseAuthority(string authority, out string? host, out int port)
+    {
+        host = null;
+        port = 0;
+
+        int colonIndex = authority.LastIndexOf(':');
+        if (colonIndex < 0
+            || !int.TryParse(authority.AsSpan(colonIndex + 1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int parsedPort)
+            || parsedPort < 0
+            || parsedPort > 65535)
+        {
+            return false;
+        }
+
+        port = parsedPort;
+        if (colonIndex > 0)
+        {
+            host = authority.Substring(0, colonIndex);
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Accepts the next available HTTP connection from the configured connection listeners.

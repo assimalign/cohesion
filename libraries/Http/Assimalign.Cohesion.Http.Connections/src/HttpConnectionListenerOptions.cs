@@ -67,6 +67,37 @@ public sealed class HttpConnectionListenerOptions
     public IList<IHttpExchangeInterceptor> Interceptors { get; } = new List<IHttpExchangeInterceptor>();
 
     /// <summary>
+    /// Gets the HTTP/3 (QUIC) <c>Alt-Svc</c> advertisement configuration for this listener.
+    /// </summary>
+    /// <remarks>
+    /// Advertisement is opt-in and off by default. When it is enabled and the listener serves both
+    /// a stream protocol (HTTP/1.1 or HTTP/2) and an HTTP/3 multiplexed listener, the server injects
+    /// an RFC 7838 <c>Alt-Svc</c> header on HTTP/1.1 and HTTP/2 responses so clients can discover the
+    /// h3 endpoint. See <see cref="HttpAltServiceAdvertisementOptions"/> and
+    /// <see cref="AdvertiseAltService(Action{HttpAltServiceAdvertisementOptions})"/>.
+    /// </remarks>
+    public HttpAltServiceAdvertisementOptions AltServiceAdvertisement { get; } = new HttpAltServiceAdvertisementOptions();
+
+    /// <summary>
+    /// Enables HTTP/3 <c>Alt-Svc</c> advertisement and configures its parameters (max-age, explicit
+    /// authority). Equivalent to setting
+    /// <see cref="HttpAltServiceAdvertisementOptions.Enabled"/> to <see langword="true"/> and
+    /// applying <paramref name="configure"/> to <see cref="AltServiceAdvertisement"/>.
+    /// </summary>
+    /// <param name="configure">Configures the advertisement parameters.</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
+    public HttpConnectionListenerOptions AdvertiseAltService(Action<HttpAltServiceAdvertisementOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        AltServiceAdvertisement.Enabled = true;
+        configure(AltServiceAdvertisement);
+
+        return this;
+    }
+
+    /// <summary>
     /// Gets or sets the maximum number of accepted HTTP connections that may be buffered
     /// before producers wait for <see cref="HttpConnectionListener.AcceptOrListenAsync(System.Threading.CancellationToken)"/>
     /// to dequeue them.

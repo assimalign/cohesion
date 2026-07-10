@@ -421,6 +421,45 @@ No reflection or dynamic serialization; parsing is span-based via the structured
 the ASCII→`char` bridge on the transport side is stack-allocated for the small field values that
 occur in practice. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
 
+## Alternative services (RFC 7838 `Alt-Svc`)
+
+### The value object
+
+`HttpAltService` is a `readonly struct` modeling one RFC 7838 §3 *alt-value*: an ALPN
+`ProtocolId` bound to an alt-authority (`Host` — optional, `null` meaning "the request's own
+host" — plus a required `Port`), with the caching parameters `MaxAgeSeconds` (`ma`) and `Persist`
+(`persist=1`). It carries `Format`/`ToString` for the single alt-value, static
+`FormatHeader`/`TryParseHeader` for the comma-separated list form and the special case-sensitive
+`clear` token, and value equality — the same shape as the other core value objects
+(`HttpMediaType`, `HttpPriority`, `HttpEntityTag`). The alt-authority is serialized as a
+quoted-string (`h3=":443"`, `h2="alt.example.com:8000"`) so a host that contains a colon (an IPv6
+literal) round-trips; the parser splits the authority at its last colon to keep the port.
+
+### Why it lives in the protocol core, and who emits it
+
+The type is pure parsing/representation with no transport dependency, so it sits in Lane B beside
+the other field value objects. It is the discovery primitive for HTTP/3 (RFC 9114 §3.1): a server
+that speaks h3 over QUIC alongside h1/h2 over TCP advertises the h3 endpoint by emitting an
+`Alt-Svc` response header, and a TCP client learns the alternative from it. **Emission is the
+transport's job**, not the core's — `Assimalign.Cohesion.Http.Connections` is the only component
+that knows whether an h3 multiplexed listener is registered alongside the stream listeners, so it
+owns the advertisement policy (opt-in, `ma`, explicit-authority override) and the header injection.
+This core type only formats and parses the value; see the Http.Connections `DESIGN.md` for the
+advertisement design. `ma`/`persist` are modeled as data for a future client-side alternative
+cache; honoring a received `Alt-Svc` is a client concern this library does not implement.
+
+### Tolerant parsing, strict port
+
+Parsing skips OWS, ignores unrecognized parameters (RFC 7838 §3), and treats an empty alt-authority
+host as same-host, but rejects a missing or non-numeric port and an unquoted alt-authority — a
+malformed alt-value fails its `TryParse` rather than being silently coerced. `clear` is matched
+case-sensitively per the RFC.
+
+### AOT posture
+
+No reflection or dynamic serialization; the format path uses a small `StringBuilder` and the parse
+path is span-based. Builds clean under the trim/AOT analyzers (`IsAotCompatible=true`).
+
 ## The exchange interceptor seam
 
 ### One seam, one interface, one registration

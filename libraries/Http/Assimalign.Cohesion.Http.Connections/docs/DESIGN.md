@@ -2013,6 +2013,109 @@ falls back to a pooled buffer otherwise. The scheduler is a plain lock + list wi
 a pure selection function. Builds clean under the trim/AOT analyzers
 (`IsAotCompatible=true`).
 
+## Alt-Svc advertisement (RFC 7838)
+
+### What it is
+
+A server that speaks HTTP/3 over QUIC alongside HTTP/1.1 / HTTP/2 over TCP has a
+discovery problem: a client that connects on a TCP-based protocol has no way to
+learn the h3 endpoint exists unless the server tells it. RFC 7838 solves this with
+the `Alt-Svc` response header — `Alt-Svc: h3=":443"; ma=86400` advertises "the same
+origin is also reachable via HTTP/3 on port 443, cache that for 86400 seconds"
+(RFC 9114 §3.1 makes this the standard h3 discovery path). Without it the h3
+listener this package can already stand up is dark to every client that didn't
+already know to try it.
+
+Two pieces cooperate: the **typed value** `HttpAltService` in the core
+`Assimalign.Cohesion.Http` library (RFC 7838 §3 alt-value: `protocol-id`, quoted
+alt-authority with optional host + required port, `ma`, `persist`, and the special
+`clear` token — with round-trip `Format`/`TryParse`), and the **emission** here,
+where the listener is the only component that knows whether an HTTP/3
+`IMultiplexedConnectionListener` is registered alongside the stream listeners.
+
+### Where the advertisement is decided and injected
+
+Advertisement is opt-in via `HttpConnectionListenerOptions.AltServiceAdvertisement`
+(or the `AdvertiseAltService(...)` fluent form): an `Enabled` flag, a `MaxAge`
+(emitted as `ma`, default 24h), and an optional explicit `Authority`. Parameters
+beyond `ma` (such as `persist=1`) are deliberately not server knobs — an application
+that needs them sets the header itself via the typed `HttpAltService`, and the
+server's guarded injection yields to it. `HttpConnectionListener` computes the
+header value **once, at construction**,
+after every listener has been materialized so the h3 endpoint is known. The value is
+produced only when advertisement is enabled **and** at least one HTTP/3 listener is
+registered **and** at least one stream listener exists to carry it; otherwise it is
+`null` and nothing is injected. The h3 port is derived as `:"<port>"` from the first
+multiplexed listener's `EndPoint` (advertising the alternative on the request's own
+host), unless `Authority` overrides it — needed when the QUIC bind port is not the
+port clients reach (port-mapping load balancer) or the alternative lives on another
+host. If advertisement is enabled but the port cannot be determined (endpoint exposes
+no port and no explicit `Authority`), construction fails loud rather than silently
+not advertising.
+
+The precomputed value is pushed onto the stream connection factories
+(`HttpConnectionFactory.AltSvcHeaderValue`) before the first connection is accepted
+— the accept loops start lazily on the first `AcceptOrListenAsync`, so no factory
+observes a half-set value — and flows factory → connection → connection context.
+
+### Why injection is at head-commit, guarded — not an exchange interceptor
+
+The header is injected at the point each transport serializes the response head, via
+the shared `HttpAltServiceInjector.Inject`, which adds `Alt-Svc` **only when the
+header is absent**. The injection runs after the application handler *and* after the
+`BeforeResponseHead` lifecycle hooks have fired, so any `Alt-Svc` set by the
+application or by a hook always wins (an explicit acceptance requirement, and the
+natural RFC 7838 posture — the server fills a gap, it does not override policy).
+
+Riding the exchange-interceptor seam (`IHttpExchangeInterceptor`, whose
+`BeforeResponseHeadAsync` hook does fire at exactly this commit point) was
+deliberately rejected, for two reasons. First, a server-registered interceptor is
+listener-wide: it would run on HTTP/3 exchanges too, which must never be decorated —
+you do not advertise h3 to a client already on h3 — turning a constant header add
+into a per-exchange version check inside a hook. Second, and more structurally, the
+interceptor list's zero-registration fast path is scope-exact: when no interceptor
+declares the response scope, no response sink or exchange control is ever
+constructed. Registering an internal interceptor just to add one precomputed header
+would push **every** exchange onto the interceptor slow path whenever advertisement
+is enabled. Direct injection is one `ContainsKey` + assignment at each head-commit
+site and leaves the fast path intact.
+
+The four commit sites are the h1 buffered path (`Http1ConnectionContext.SendAsync` →
+`Http1MessageWriter`), the h1 streaming sink
+(`Http1ResponseBodyStream.CommitHeadersAsync`), the h2 buffered path
+(`Http2ConnectionContext.SendAsync`), and the h2 streaming head
+(`WriteStreamingHeadersAsync`). On every one of them the injection sits after the
+lifecycle hooks and the abort/takeover directive re-checks, immediately before the
+head is serialized. Interim (1xx) responses are not decorated — only the final
+response head carries the advertisement.
+
+This is, by design, the **first server-injected response header** in this package
+(there is no automatic `Date`/`Server` injection); the guard-on-absence pattern and
+the shared injector are the seam a future auto-header would reuse.
+
+### AOT posture
+
+No reflection or dynamic dispatch. `HttpAltService` is a span-based value type; the
+per-listener header value is a single string computed at construction and read on the
+response path. `IsAotCompatible=true` holds.
+
+### Non-goals
+
+- **The HTTP/2 `ALTSVC` frame (type `0x0a`, RFC 7838 §4).** Not implemented. The
+  `Alt-Svc` **response header** is valid on HTTP/2 responses and is what mainstream
+  servers (e.g. Kestrel) emit for h3 discovery, so it fully satisfies the discovery
+  need. The frame is an alternative delivery mechanism (notably it can advertise for
+  an origin the current request is not for), which this package has no requirement
+  for; adding it would be wire machinery with no consumer. Recorded here so its
+  absence is understood as intentional.
+- **Client-side `Alt-Svc` cache / alt-authority selection.** `HttpAltService` parses
+  the header and models `ma`/`persist` caching semantics as data, but this package is
+  the server side; honoring a received `Alt-Svc` (maintaining the client's alternative
+  cache, racing connections) is a client concern and out of scope.
+- **`clear` emission on the live server path.** `HttpAltService.ClearToken` and parse
+  support exist for completeness and round-tripping, but the server emitter only
+  advertises the configured h3 alternative; it never emits `Alt-Svc: clear`.
+
 ## Scope decision: server push (de-scoped)
 
 Cohesion **does not implement HTTP/2 or HTTP/3 server push.** This is a
