@@ -12,12 +12,12 @@ using Assimalign.Cohesion.Http;
 public class HttpRequestLimitsTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Interceptor: Head hook should attach the typed feature")]
-    public void OnRequestHead_ShouldAttachFeature()
+    public void AfterRequestHead_ShouldAttachFeature()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        IHttpRequestInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
+        IHttpExchangeInterceptor interceptor = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
 
-        interceptor.OnRequestHead(context);
+        interceptor.AfterRequestHead(context);
 
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
@@ -28,8 +28,8 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Should write through to the context knob the transport enforces")]
     public void Feature_ShouldWriteThroughToContext()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         // Feature write is visible on the context (the enforced value)…
@@ -44,8 +44,8 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Read-only lifecycle should delegate to the transport-owned freeze")]
     public void Feature_ReadOnly_ShouldDelegateToContextFreeze()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         context.FreezeMaxRequestBodySize();
@@ -58,8 +58,8 @@ public class HttpRequestLimitsTests
     [Fact(DisplayName = "Cohesion Test [Http.RequestLimits] - Feature: Should reject a negative per-request cap")]
     public void Feature_OnNegative_ShouldThrow()
     {
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: 1024);
-        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().OnRequestHead(context);
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: 1024);
+        HttpRequestLimits.CreateMaxRequestBodySizeInterceptor().AfterRequestHead(context);
         IHttpMaxRequestBodySizeFeature feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>()!;
 
         Should.Throw<ArgumentOutOfRangeException>(() => feature.MaxRequestBodySize = -1);
@@ -70,17 +70,17 @@ public class HttpRequestLimitsTests
     {
         // Demonstrates the stream-override capability of the seam: each interceptor receives the
         // previous result, so the last registered ends up outermost.
-        HttpRequestInterceptorContext context = CreateContext(maxRequestBodySize: null);
-        IHttpRequestInterceptor limits = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
-        IHttpRequestInterceptor wrapper = new ReadOnlyWrappingInterceptor();
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        IHttpExchangeInterceptor limits = HttpRequestLimits.CreateMaxRequestBodySizeInterceptor();
+        IHttpExchangeInterceptor wrapper = new ReadOnlyWrappingInterceptor();
 
         using MemoryStream original = new(new byte[] { 1, 2, 3 });
         Stream result = original;
 
-        foreach (IHttpRequestInterceptor interceptor in new[] { limits, wrapper })
+        foreach (IHttpExchangeInterceptor interceptor in new[] { limits, wrapper })
         {
-            interceptor.OnRequestHead(context);
-            result = interceptor.OnRequestBody(context, result);
+            interceptor.AfterRequestHead(context);
+            result = interceptor.AfterRequestBody(context, result);
         }
 
         // The limits interceptor passes through (DIM default); the wrapper decorates.
@@ -91,9 +91,9 @@ public class HttpRequestLimitsTests
         buffer.ShouldBe(new byte[] { 1, 2, 3 });
     }
 
-    private static HttpRequestInterceptorContext CreateContext(long? maxRequestBodySize)
+    private static HttpExchangeInterceptorRequestContext CreateContext(long? maxRequestBodySize)
     {
-        return new HttpRequestInterceptorContext
+        return new HttpExchangeInterceptorRequestContext
         {
             Version = HttpVersion.Http11,
             Method = HttpMethod.Post,
@@ -111,9 +111,9 @@ public class HttpRequestLimitsTests
     /// Sample stream-override interceptor: wraps the request body in a read-only decorator —
     /// the "readonly stream wrapper" scenario the seam exists to enable.
     /// </summary>
-    private sealed class ReadOnlyWrappingInterceptor : IHttpRequestInterceptor
+    private sealed class ReadOnlyWrappingInterceptor : HttpExchangeInterceptor
     {
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             return new ReadOnlyStream(body);
         }
@@ -146,7 +146,7 @@ public class HttpRequestLimitsTests
 
         protected override void Dispose(bool disposing)
         {
-            // A wrapper owns the stream it wraps (see IHttpRequestInterceptor docs).
+            // A wrapper owns the stream it wraps (see IHttpExchangeInterceptor docs).
             if (disposing)
             {
                 _inner.Dispose();

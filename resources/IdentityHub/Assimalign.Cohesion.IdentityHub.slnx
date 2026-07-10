@@ -11,10 +11,18 @@
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
-		<File Path="Assimalign.Cohesion.IdentityHub/docs/Design.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
@@ -22,6 +30,7 @@
 	</Folder>
 	<Folder Name="/IdentityHub/refs/" >
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
 </Solution>

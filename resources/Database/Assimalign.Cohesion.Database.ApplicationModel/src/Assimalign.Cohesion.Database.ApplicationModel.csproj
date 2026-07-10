@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		Manifest-only project (ApplicationModel Layer 3d): declares the database
+		resource for orchestration. References the declarative ApplicationModel
+		plane ONLY - never the database runtime. Orchestrator apps reference this
+		package; the database host never does.
+	-->
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+	</ItemGroup>
+</Project>

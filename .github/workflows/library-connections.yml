@@ -2,9 +2,7 @@ name: Connections
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Connections/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-connections.yml" # When Pipeline File Changes
 permissions:
   contents: read

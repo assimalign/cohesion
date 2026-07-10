@@ -10,15 +10,17 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implementations of this interface are produced by the transport when an incoming
-/// request matches the wire-level conditions for a transition (RFC 9110 §7.8 for
-/// <c>Upgrade</c>, RFC 9110 §9.3.6 + RFC 9112 §3.2.3 for <c>CONNECT</c>). Application
-/// code obtains the feature from <see cref="IHttpContext.Upgrade"/>:
+/// Implementations are produced by this package's interceptor pair
+/// (<see cref="HttpProtocolUpgrade.CreateRequestInterceptor"/> /
+/// <see cref="HttpProtocolUpgrade.CreateResponseInterceptor"/>, registered on the server
+/// transport's listener options) when an incoming request matches the wire-level conditions for
+/// a transition (RFC 9110 §7.8 for <c>Upgrade</c>, RFC 9110 §9.3.6 + RFC 9112 §3.2.3 for
+/// <c>CONNECT</c>). Application code obtains the capability from <c>context.Upgrade</c>:
 /// </para>
 /// <code>
 /// if (context.Upgrade is { Kind: HttpProtocolUpgradeKind.Upgrade } upgrade)
 /// {
-///     Stream tunnel = await upgrade.AcceptAsync(context.RequestAborted);
+///     Stream tunnel = await upgrade.AcceptAsync(context.RequestCancelled);
 ///     // ...use tunnel...
 /// }
 /// </code>
@@ -26,10 +28,10 @@ namespace Assimalign.Cohesion.Http;
 /// Calling <see cref="AcceptAsync"/> writes the appropriate status line
 /// (<c>101 Switching Protocols</c> for an Upgrade, <c>200 OK</c> for a CONNECT) and
 /// any required <c>Connection</c> / <c>Upgrade</c> response headers, then surrenders
-/// the underlying transport stream to the caller. After acceptance, the regular
-/// response pipeline is suppressed — calling
-/// <see cref="IHttpConnectionContext.SendAsync"/> for the same exchange becomes a
-/// no-op so the framework does not double-write the response.
+/// the underlying transport stream to the caller. Acceptance exercises the transport's
+/// exchange control's takeover (<see cref="IHttpExchangeControl.TakeOver"/>), so the regular
+/// response pipeline is suppressed — the transport's send for the same exchange becomes a
+/// no-op and the connection leaves the keep-alive request loop.
 /// </para>
 /// </remarks>
 public interface IHttpProtocolUpgrade
@@ -56,6 +58,8 @@ public interface IHttpProtocolUpgrade
     /// <returns>The duplex transport stream. The caller assumes ownership and is
     /// responsible for closing it when the transition completes.</returns>
     /// <exception cref="System.InvalidOperationException">Thrown when the
-    /// transition has already been accepted on this exchange.</exception>
+    /// transition has already been accepted on this exchange, or when the exchange can no longer
+    /// be taken over — the final response has started or the exchange was aborted
+    /// (<see cref="IHttpExchangeControl.TakeOver"/> guards the claim).</exception>
     ValueTask<Stream> AcceptAsync(CancellationToken cancellationToken = default);
 }

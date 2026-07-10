@@ -2,7 +2,6 @@ name: Media Hub
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "resources/MediaHub/**"
       - ".github/workflows/resource-media-hub.yml" # When Pipeline File Changes
 

@@ -1,6 +1,6 @@
 # Libraries
 
-The foundation libraries (L1) of the Cohesion framework. Everything under this folder is a building block that the services under `resources/` compose; libraries never depend on services. Each library follows the repo-wide project shape defined in `AGENTS.md` — co-located `src/`, `tests/`, and `docs/` (`OVERVIEW.md`, `DESIGN.md`, `docs/Assembly/`) — and every assembly is NativeAOT-compatible.
+The foundation libraries (L1) of the Cohesion framework. Everything under this folder is a building block that the services under `resources/` compose; libraries never depend on services. Each library follows the repo-wide project shape defined in the repo coding rules (`.claude/rules/`) — co-located `src/`, `tests/`, and `docs/` (`OVERVIEW.md`, `DESIGN.md`, `docs/Assembly/`) — and every assembly is NativeAOT-compatible.
 
 | Area | Purpose |
 | --- | --- |

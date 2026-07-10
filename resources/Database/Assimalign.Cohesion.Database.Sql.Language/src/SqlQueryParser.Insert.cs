@@ -14,7 +14,9 @@ public sealed partial class SqlQueryParser
 
         // INTO
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "INTO"))
+        {
             Advance(ref lexer);
+        }
 
         // Table reference
         SqlTableReference? table = null;
@@ -73,7 +75,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+        {
             Advance(ref lexer);
+        }
 
         return columns;
     }
@@ -98,7 +102,9 @@ public sealed partial class SqlQueryParser
         var values = new List<SqlExpression>();
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        {
             Advance(ref lexer);
+        }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
         {
@@ -111,7 +117,9 @@ public sealed partial class SqlQueryParser
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+        {
             Advance(ref lexer);
+        }
 
         return values;
     }

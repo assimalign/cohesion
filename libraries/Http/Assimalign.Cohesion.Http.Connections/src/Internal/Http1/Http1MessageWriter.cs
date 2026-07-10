@@ -26,6 +26,48 @@ internal static class Http1MessageWriter
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Writes an interim (<c>1xx</c>) HTTP/1.1 response — a status line, an optional set of field
+    /// lines, and the blank line terminating the head — then flushes. An interim response carries no
+    /// body, so no <c>Content-Length</c> is synthesized. Used both by the automatic
+    /// <c>Expect: 100-continue</c> handshake (RFC 9110 §10.1.1) and by
+    /// <see cref="Http1InterimResponseFeature"/> (100 Continue on demand, 103 Early Hints with
+    /// <c>Link</c> fields). The connection stays live: interim responses precede the final response
+    /// on the same exchange.
+    /// </summary>
+    /// <param name="stream">The connection stream to write to.</param>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim field lines, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task that completes when the interim response has been flushed.</returns>
+    public static async ValueTask WriteInterimResponseAsync(
+        Stream stream,
+        HttpStatusCode statusCode,
+        IHttpHeaderCollection? headers,
+        CancellationToken cancellationToken)
+    {
+        await WriteAsciiAsync(stream, $"HTTP/1.1 {statusCode}\r\n", cancellationToken).ConfigureAwait(false);
+
+        if (headers is not null)
+        {
+            foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
+            {
+                // Emit one field line per value so a multi-valued field (e.g. several Link relations
+                // in a 103 Early Hints) is expressed without comma-folding — always valid HTTP.
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        await WriteAsciiAsync(stream, $"{header.Key}: {value}\r\n", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
+        await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public static async ValueTask WriteResponseAsync(Stream stream, Http1Context context, CancellationToken cancellationToken)
     {
         byte[] bodyBytes = await ReadBodyAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
@@ -41,7 +83,37 @@ internal static class Http1MessageWriter
             headers[HttpHeaderKey.Connection] = "close";
         }
 
-        await WriteAsciiAsync(stream, $"HTTP/1.1 {context.Response.StatusCode}\r\n", cancellationToken).ConfigureAwait(false);
+        await WriteHeadAsync(stream, context.Response.StatusCode, headers, cancellationToken).ConfigureAwait(false);
+
+        if (context.Request.Method != HttpMethod.Head && bodyBytes.Length > 0)
+        {
+            await stream.WriteAsync(bodyBytes, 0, bodyBytes.Length, cancellationToken).ConfigureAwait(false);
+        }
+
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the response head — the status line, every header field line (with
+    /// RFC 6265 one-line-per-cookie handling for <c>Set-Cookie</c>), and the blank
+    /// line terminating the header section — without a trailing flush and without
+    /// writing any body. Shared by the buffered response path and the incremental
+    /// streaming sink (<see cref="Http1ResponseBodyStream"/>) so both commit
+    /// headers identically.
+    /// </summary>
+    /// <param name="stream">The connection stream to write to.</param>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task that completes when the head bytes have been written to the stream buffer.</returns>
+    public static async ValueTask WriteHeadAsync(Stream stream, HttpStatusCode statusCode, HttpHeaderCollection headers, CancellationToken cancellationToken)
+    {
+        // RFC 9110 §15.2 — a 1xx status is never a valid final response status. The one 1xx that ends
+        // an exchange (101 Switching Protocols) is finalized out-of-band by the protocol-upgrade path,
+        // whose send is suppressed, so it never reaches this shared final-head writer.
+        HttpInterimResponseRules.EnsureFinalStatusCode(statusCode);
+
+        await WriteAsciiAsync(stream, $"HTTP/1.1 {statusCode}\r\n", cancellationToken).ConfigureAwait(false);
 
         foreach (System.Collections.Generic.KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
@@ -65,13 +137,6 @@ internal static class Http1MessageWriter
         }
 
         await WriteAsciiAsync(stream, "\r\n", cancellationToken).ConfigureAwait(false);
-
-        if (context.Request.Method != HttpMethod.Head && bodyBytes.Length > 0)
-        {
-            await stream.WriteAsync(bodyBytes, 0, bodyBytes.Length, cancellationToken).ConfigureAwait(false);
-        }
-
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask<byte[]> ReadBodyAsync(Stream body, CancellationToken cancellationToken)

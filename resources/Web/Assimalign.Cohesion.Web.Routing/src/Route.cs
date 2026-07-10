@@ -10,11 +10,18 @@ using Assimalign.Cohesion.Web.Routing.Policies;
 namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
-/// Represents a concrete route pattern, method, and handler pairing.
+/// Represents a concrete route pattern, the HTTP methods it accepts, its handler, and its endpoint metadata.
 /// </summary>
+/// <remarks>
+/// A route can accept more than one HTTP method. Path matching (<see cref="TryMatchPath"/>) is
+/// separated from method acceptance so a <see cref="Router"/> can distinguish a 404 (no path
+/// matched) from a 405 (a path matched but the method did not).
+/// </remarks>
 public sealed class Route : IRouterRoute
 {
     private static readonly IRouterRouteHandler EmptyHandler = new EmptyRouterRouteHandler();
+
+    private readonly HttpMethod[] _methods;
 
     /// <summary>
     /// Creates a new route from a raw route pattern.
@@ -22,7 +29,7 @@ public sealed class Route : IRouterRoute
     /// <param name="method">The HTTP method accepted by the route.</param>
     /// <param name="pattern">The raw route pattern.</param>
     public Route(HttpMethod method, string pattern)
-        : this(method, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
     {
     }
 
@@ -33,7 +40,19 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The raw route pattern.</param>
     /// <param name="handler">The handler mapped to the route.</param>
     public Route(HttpMethod method, string pattern, IRouterRouteHandler handler)
-        : this(method, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), handler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), handler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from a raw route pattern, mapped handler, and endpoint metadata.
+    /// </summary>
+    /// <param name="method">The HTTP method accepted by the route.</param>
+    /// <param name="pattern">The raw route pattern.</param>
+    /// <param name="handler">The handler mapped to the route.</param>
+    /// <param name="metadata">The endpoint metadata attached to the route.</param>
+    public Route(HttpMethod method, string pattern, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), handler, metadata)
     {
     }
 
@@ -44,7 +63,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The raw route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(HttpMethod method, string pattern, RouteParameterPolicyMap policyMap)
-        : this(method, RoutePatternParser.Parse(pattern), policyMap, EmptyHandler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), policyMap, EmptyHandler)
     {
     }
 
@@ -56,7 +75,7 @@ public sealed class Route : IRouterRoute
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     /// <param name="handler">The handler mapped to the route.</param>
     public Route(HttpMethod method, string pattern, RouteParameterPolicyMap policyMap, IRouterRouteHandler handler)
-        : this(method, RoutePatternParser.Parse(pattern), policyMap, handler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), policyMap, handler)
     {
     }
 
@@ -66,7 +85,7 @@ public sealed class Route : IRouterRoute
     /// <param name="method">The HTTP method accepted by the route.</param>
     /// <param name="pattern">The parsed route pattern.</param>
     public Route(HttpMethod method, RoutePattern pattern)
-        : this(method, pattern, RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(new[] { method }, pattern, RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
     {
     }
 
@@ -77,7 +96,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The parsed route pattern.</param>
     /// <param name="handler">The handler mapped to the route.</param>
     public Route(HttpMethod method, RoutePattern pattern, IRouterRouteHandler handler)
-        : this(method, pattern, RouteParameterPolicyMap.CreateDefault(), handler)
+        : this(new[] { method }, pattern, RouteParameterPolicyMap.CreateDefault(), handler)
     {
     }
 
@@ -88,31 +107,129 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The parsed route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(HttpMethod method, RoutePattern pattern, RouteParameterPolicyMap policyMap)
-        : this(method, pattern, policyMap, EmptyHandler)
+        : this(new[] { method }, pattern, policyMap, EmptyHandler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from a raw route pattern accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The raw route pattern.</param>
+    public Route(IEnumerable<HttpMethod> methods, string pattern)
+        : this(methods, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from a raw route pattern and mapped handler accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The raw route pattern.</param>
+    /// <param name="handler">The handler mapped to the route.</param>
+    public Route(IEnumerable<HttpMethod> methods, string pattern, IRouterRouteHandler handler)
+        : this(methods, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), handler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from a raw route pattern and custom policy map accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The raw route pattern.</param>
+    /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
+    public Route(IEnumerable<HttpMethod> methods, string pattern, RouteParameterPolicyMap policyMap)
+        : this(methods, RoutePatternParser.Parse(pattern), policyMap, EmptyHandler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from a raw route pattern, custom policy map, and mapped handler accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The raw route pattern.</param>
+    /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
+    /// <param name="handler">The handler mapped to the route.</param>
+    public Route(IEnumerable<HttpMethod> methods, string pattern, RouteParameterPolicyMap policyMap, IRouterRouteHandler handler)
+        : this(methods, RoutePatternParser.Parse(pattern), policyMap, handler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from an already parsed route pattern accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The parsed route pattern.</param>
+    public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern)
+        : this(methods, pattern, RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from an already parsed route pattern and mapped handler accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The parsed route pattern.</param>
+    /// <param name="handler">The handler mapped to the route.</param>
+    public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern, IRouterRouteHandler handler)
+        : this(methods, pattern, RouteParameterPolicyMap.CreateDefault(), handler)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new route from an already parsed route pattern and custom policy map accepting multiple HTTP methods.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The parsed route pattern.</param>
+    /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
+    public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern, RouteParameterPolicyMap policyMap)
+        : this(methods, pattern, policyMap, EmptyHandler)
     {
     }
 
     /// <summary>
     /// Creates a new route from an already parsed route pattern, custom policy map, and mapped handler.
     /// </summary>
-    /// <param name="method">The HTTP method accepted by the route.</param>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
     /// <param name="pattern">The parsed route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     /// <param name="handler">The handler mapped to the route.</param>
-    public Route(HttpMethod method, RoutePattern pattern, RouteParameterPolicyMap policyMap, IRouterRouteHandler handler)
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="methods"/>, <paramref name="pattern"/>, <paramref name="policyMap"/>,
+    /// or <paramref name="handler"/> is <see langword="null"/>.
+    /// </exception>
+    public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern, RouteParameterPolicyMap policyMap, IRouterRouteHandler handler)
+        : this(methods, pattern, policyMap, handler, RouterRouteMetadataCollection.Empty)
     {
-        Method = method;
+    }
+
+    /// <summary>
+    /// Creates a new route from an already parsed route pattern, custom policy map, mapped handler, and endpoint metadata.
+    /// </summary>
+    /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
+    /// <param name="pattern">The parsed route pattern.</param>
+    /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
+    /// <param name="handler">The handler mapped to the route.</param>
+    /// <param name="metadata">The endpoint metadata attached to the route.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="methods"/>, <paramref name="pattern"/>, <paramref name="policyMap"/>,
+    /// <paramref name="handler"/>, or <paramref name="metadata"/> is <see langword="null"/>.
+    /// </exception>
+    public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern, RouteParameterPolicyMap policyMap, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
+    {
+        ArgumentNullException.ThrowIfNull(methods);
+
         Pattern = pattern ?? throw new ArgumentNullException(nameof(pattern));
         PolicyMap = policyMap ?? throw new ArgumentNullException(nameof(policyMap));
         Handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        Metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
+        _methods = NormalizeMethods(methods);
 
         ValidatePatternPolicies(Pattern, PolicyMap);
     }
 
-    /// <summary>
-    /// Gets the HTTP method accepted by the route.
-    /// </summary>
-    public HttpMethod Method { get; }
+    /// <inheritdoc />
+    public IReadOnlyCollection<HttpMethod> Methods => _methods;
 
     /// <summary>
     /// Gets the parsed route pattern.
@@ -125,22 +242,67 @@ public sealed class Route : IRouterRoute
     public RouteParameterPolicyMap PolicyMap { get; }
 
     /// <inheritdoc />
+    public decimal InboundPrecedence => Pattern.InboundPrecedence;
+
+    /// <inheritdoc />
     public IRouterRouteHandler Handler { get; }
+
+    /// <inheritdoc />
+    public IRouterRouteMetadataCollection Metadata { get; }
+
+    /// <summary>
+    /// Determines whether the route accepts the supplied HTTP method.
+    /// </summary>
+    /// <param name="method">The HTTP method to test.</param>
+    /// <returns>
+    /// <see langword="true"/> when the route accepts the method, or when the route accepts any method
+    /// (its <see cref="Methods"/> collection is empty); otherwise <see langword="false"/>.
+    /// </returns>
+    public bool AcceptsMethod(HttpMethod method)
+    {
+        if (_methods.Length == 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < _methods.Length; i++)
+        {
+            if (_methods[i] == method)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <inheritdoc />
     public bool TryMatch(IHttpContext httpContext, out RouteValueDictionary values)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        HttpMethod method = httpContext.Request.Method;
-        HttpPath path = httpContext.Request.Path;
-
-        values = new RouteValueDictionary();
-
-        if (Method != method)
+        if (!TryMatchPath(httpContext, out values))
         {
             return false;
         }
+
+        if (AcceptsMethod(httpContext.Request.Method))
+        {
+            return true;
+        }
+
+        values = new RouteValueDictionary();
+        return false;
+    }
+
+    /// <inheritdoc />
+    public bool TryMatchPath(IHttpContext httpContext, out RouteValueDictionary values)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        HttpPath path = httpContext.Request.Path;
+
+        values = new RouteValueDictionary();
 
         string[] requestSegments = SplitPath(path);
         int requestIndex = 0;
@@ -201,6 +363,31 @@ public sealed class Route : IRouterRoute
         }
 
         return true;
+    }
+
+    private static HttpMethod[] NormalizeMethods(IEnumerable<HttpMethod> methods)
+    {
+        List<HttpMethod> normalized = new();
+
+        foreach (HttpMethod method in methods)
+        {
+            bool exists = false;
+            for (int i = 0; i < normalized.Count; i++)
+            {
+                if (normalized[i] == method)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists)
+            {
+                normalized.Add(method);
+            }
+        }
+
+        return normalized.ToArray();
     }
 
     private static bool TryMatchMissingSegment(RoutePatternPathSegment pathSegment, RouteValueDictionary values)

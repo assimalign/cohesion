@@ -40,6 +40,6 @@ body:
     attributes:
       label: Standards and Compliance
       value: |
-        - Follows repo conventions in AGENTS.md.
+        - Follows the repo coding rules (`.claude/rules/`).
     validations:
       required: false

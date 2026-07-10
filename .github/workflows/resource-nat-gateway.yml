@@ -2,7 +2,6 @@ name: NAT Gateway
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "resources/NatGateway/**"
       - ".github/workflows/resource-nat-gateway.yml" # When Pipeline File Changes
 

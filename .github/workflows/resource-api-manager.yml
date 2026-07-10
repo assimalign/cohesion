@@ -1,8 +1,7 @@
 name: API Manager
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'resources/ApiManager/**'
       - '.github/workflows/resource-api-manager.yml'        # When Pipeline File Changes
 
@@ -25,7 +24,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'resources'
           category: 'ApiManager'
           project: ${{ matrix.projects }}

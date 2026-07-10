@@ -15,7 +15,7 @@ or hosting dependencies.
 
 ## Why a concrete data model (not interface-first)
 
-The repo's interface-first rule (`AGENTS.md`) targets *behaviors and services* — things with swappable
+The repo's interface-first rule (`.claude/rules/general-rules.md`) targets *behaviors and services* — things with swappable
 implementations. An OpenAPI document is **data**, not behavior: there is exactly one shape for an `Info`
 Object or a `Schema` Object. Modeling each element as a public concrete class mirrors the repo's
 existing wire/data models (`DnsMessage`, `DnsRecord`, `HttpCookie`) and keeps authoring ergonomic

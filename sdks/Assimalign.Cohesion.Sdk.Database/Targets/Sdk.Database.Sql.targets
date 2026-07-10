@@ -1,0 +1,12 @@
+<Project>
+    <!--
+        SQL-model build tooling: declarative schema sources are .sql files under
+        the schema root (SSDT/DacFx-style database projects). The schema compile
+        validates and models them; migration generation diffs schema models.
+    -->
+    <ItemGroup Condition="'$(CohesionDatabaseProject)' == 'true'">
+        <CohesionDatabaseSchema Include="$(CohesionDatabaseSchemaRoot)**\*.sql" />
+        <!-- Schema sources are build inputs, not content to copy. -->
+        <None Include="@(CohesionDatabaseSchema)" CopyToOutputDirectory="Never" />
+    </ItemGroup>
+</Project>

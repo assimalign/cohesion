@@ -6,23 +6,31 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Binds a single HTTP protocol to the connection listener that will produce its transport
-/// connections. Stream protocols (HTTP/1.1, HTTP/2) bind to an <see cref="IConnectionListener"/>;
-/// HTTP/3 binds to an <see cref="IMultiplexedConnectionListener"/>, the type itself acting as the
-/// shape gate.
+/// connections, and to the factory that turns each accepted transport connection into a
+/// protocol-specific <see cref="HttpConnection"/>. Stream protocols (HTTP/1.1, HTTP/2) bind to an
+/// <see cref="IConnectionListener"/> plus an <see cref="HttpConnectionFactory"/>; HTTP/3 binds to an
+/// <see cref="IMultiplexedConnectionListener"/> plus an <see cref="HttpMultiplexedConnectionFactory"/>,
+/// the multiplexed listener type itself acting as the shape gate.
 /// </summary>
 internal sealed class HttpListenerRegistration
 {
     private readonly Func<IConnectionListener>? _streamListenerFactory;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? _streamConnectionFactoryBuilder;
     private readonly Func<IMultiplexedConnectionListener>? _multiplexedListenerFactory;
+    private readonly Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? _multiplexedConnectionFactoryBuilder;
 
     private HttpListenerRegistration(
         HttpProtocol protocol,
         Func<IConnectionListener>? streamListenerFactory,
-        Func<IMultiplexedConnectionListener>? multiplexedListenerFactory)
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory>? streamConnectionFactoryBuilder,
+        Func<IMultiplexedConnectionListener>? multiplexedListenerFactory,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory>? multiplexedConnectionFactoryBuilder)
     {
         Protocol = protocol;
         _streamListenerFactory = streamListenerFactory;
+        _streamConnectionFactoryBuilder = streamConnectionFactoryBuilder;
         _multiplexedListenerFactory = multiplexedListenerFactory;
+        _multiplexedConnectionFactoryBuilder = multiplexedConnectionFactoryBuilder;
     }
 
     /// <summary>
@@ -35,14 +43,19 @@ internal sealed class HttpListenerRegistration
     /// </summary>
     public bool IsMultiplexed => _multiplexedListenerFactory is not null;
 
-    public static HttpListenerRegistration ForStream(HttpProtocol protocol, Func<IConnectionListener> listenerFactory)
+    public static HttpListenerRegistration ForStream(
+        HttpProtocol protocol,
+        Func<IConnectionListener> listenerFactory,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder)
     {
-        return new HttpListenerRegistration(protocol, listenerFactory, multiplexedListenerFactory: null);
+        return new HttpListenerRegistration(protocol, listenerFactory, connectionFactoryBuilder, multiplexedListenerFactory: null, multiplexedConnectionFactoryBuilder: null);
     }
 
-    public static HttpListenerRegistration ForMultiplexed(Func<IMultiplexedConnectionListener> listenerFactory)
+    public static HttpListenerRegistration ForMultiplexed(
+        Func<IMultiplexedConnectionListener> listenerFactory,
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpMultiplexedConnectionFactory> connectionFactoryBuilder)
     {
-        return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, listenerFactory);
+        return new HttpListenerRegistration(HttpProtocol.Http30, streamListenerFactory: null, streamConnectionFactoryBuilder: null, listenerFactory, connectionFactoryBuilder);
     }
 
     /// <summary>
@@ -60,12 +73,40 @@ internal sealed class HttpListenerRegistration
     }
 
     /// <summary>
+    /// Builds the stream connection factory, binding it to the listener-wide request/response
+    /// interceptors (which are only snapshotted once the listener is constructed); the
+    /// registration's captured per-version options (limits) are already closed over by the
+    /// builder.
+    /// </summary>
+    /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
+    /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <returns>The stream connection factory.</returns>
+    public HttpConnectionFactory CreateStreamConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    {
+        return _streamConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
+    }
+
+    /// <summary>
     /// Materializes the multiplexed listener.
     /// </summary>
     public IMultiplexedConnectionListener CreateMultiplexedListener()
     {
         return _multiplexedListenerFactory!.Invoke()
             ?? throw new InvalidOperationException($"The multiplexed connection listener factory registered for '{Protocol}' returned null.");
+    }
+
+    /// <summary>
+    /// Builds the multiplexed (HTTP/3) connection factory, binding it to the listener-wide
+    /// request/response interceptors (which are only snapshotted once the listener is
+    /// constructed); the registration's captured HTTP/3 options are already closed over by the
+    /// builder.
+    /// </summary>
+    /// <param name="interceptors">The snapshotted request-parse interceptors.</param>
+    /// <param name="responseInterceptors">The snapshotted response interceptors.</param>
+    /// <returns>The multiplexed connection factory.</returns>
+    public HttpMultiplexedConnectionFactory CreateMultiplexedConnectionFactory(IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    {
+        return _multiplexedConnectionFactoryBuilder!.Invoke(interceptors, responseInterceptors);
     }
 
     /// <summary>

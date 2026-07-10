@@ -2,7 +2,6 @@ name: Log Space
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "resources/LogSpace/**"
       - ".github/workflows/resource-log-space.yml" # When Pipeline File Changes
 

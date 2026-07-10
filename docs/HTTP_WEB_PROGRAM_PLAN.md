@@ -15,11 +15,11 @@ The safe unit of work is **one GitHub issue = one session = one branch = one PR*
 **The session protocol (every session follows this):**
 
 1. **Pick an issue that is unblocked.** An issue is workable only if every entry in its *Blocked by* column (§4) is merged. Never start a blocked issue — its prerequisites define types/seams you would otherwise invent and later fight.
-2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) `AGENTS.md` + the area's `docs/DESIGN.md`. Invoke the `cohesion-coding-rules` skill at the start.
+2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) the repo coding rules (`.claude/rules/`, auto-loaded in Claude sessions) + the area's `docs/DESIGN.md`.
 3. **Branch:** `feature/<wbs>-<slug>` naming the issue's WBS (e.g. `feature/L03.01.01.05-problem-details`). The `cohesion-work-items` skill infers scope-creep placement from this branch.
-4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and add a row to §4 here if it changes sequencing.
+4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and call it out in your PR description so the orchestrator can slot it into §4.
 5. **Open a PR** with the `Closes #NNNN` block (use `New-CohesionWorkItem.ps1 -EmitClosesBlock` from the same worktree). Close the parent feature manually only when all its children are done.
-6. **Update this file:** move the issue to Done in the §5 Progress Log with the PR link and date. This is how the *next* session knows it's unblocked. Commit that doc change with the PR.
+6. **Do not edit this plan file.** The orchestrator reconciles the §5 Progress Log from merged PRs — this removes shared-doc merge conflicts when many sessions run in parallel. Just make sure your PR's `Closes #NNNN` block is correct; that is the signal the orchestrator reconciles from.
 
 **Golden rule for parallelism:** issues in different **lanes** (§3) at the same **stage** (§2) can run concurrently in separate sessions with no coordination. Two sessions in the *same* lane touching the same project should be serialized — check the Progress Log for an in-flight sibling before starting.
 
@@ -34,8 +34,9 @@ Work GitHub issue #NNNN in assimalign/cohesion.
 
 Before coding, read docs/HTTP_WEB_PROGRAM_PLAN.md — follow the Session Protocol
 in §1, confirm the issue is unblocked per §4, and honor the lane guardrails in §3.
-Invoke the cohesion-coding-rules skill. Branch, implement to the issue's acceptance
-criteria, open a PR that closes it, and update the Progress Log (§5) in the same PR.
+Follow the repo coding rules (auto-loaded from .claude/rules). Branch, implement to the
+issue's acceptance criteria, and open a PR that closes it. Do not edit the plan file —
+the orchestrator reconciles the §5 Progress Log from merged PRs.
 
 Do not start any work its "Blocked by" prerequisites haven't merged; if it's blocked,
 stop and tell me which prerequisite is outstanding.
@@ -81,7 +82,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **E — Web middleware** | request-pipeline features | `resources/Web/Assimalign.Cohesion.Web.*` feature projects | Each is a thin feature project consuming a Stage-1 primitive + the pipeline. Extensibility via `IHttpFeatureCollection` typed features, not request-time service location. All gate on #762. |
 | **F — Routing & API surface** | endpoints, binding, results | `...Web.Routing`, `...Web.Api`, `...Web.Functions`, `...Web.Results`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. |
 
-Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. `AGENTS.md` is canonical; the `cohesion-coding-rules` skill re-anchors it.
+Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. The path-scoped rules in `.claude/rules/` are canonical and auto-load in Claude sessions.
 
 ---
 
@@ -128,12 +129,14 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #752 | A | 1xx interim responses (100-continue, 103 Early Hints) | — |
 | #749 | A | Graceful GOAWAY drain (h2 window + h3 lifecycle) | #748 (h3 half) |
 | #758 | A | QPACK dynamic table + encoder Huffman | #748 |
+| #847 | A | Emit QPACK Section-Ack / Stream-Cancellation on the decoder stream | #758 ✓ |
 | #753 | A/B | RFC 9218 extensible priorities | #747 |
 | #756 | B | RFC 9530 Digest Fields | #747 |
 | #746 | B | RFC 10008 HTTP QUERY method semantics | #747, #755 |
 | #754 | A | Alt-Svc advertisement (RFC 7838) | — |
+| #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
 | #776 | E | Pipeline exception boundary + RFC 9457 ProblemDetails | #762 |
-| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771 |
+| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771, #864 |
 | #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
 | #779 | E | `Web.Compression` (response + request) | #762, #769, #771 |
 | #780 | E | `Web.HttpsPolicy` (HTTPS redirection + HSTS) | #763 |
@@ -145,7 +148,8 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #793 | E | `Web.Testing` factory over the in-memory driver | #762, #772 |
 | #148 | F | Matcher precedence/405 fixes (existing) | — |
 | #150 | F | Endpoint metadata bag (existing) — **fan-out seam** | — |
-| #149 | F | Result writers + content negotiation (existing) | #771 |
+| #864 | F | **IResult result abstraction** (Web.Results hub) — **fan-out seam** | #776 (merge+refold), #769 |
+| #149 | F | Negotiated ObjectResult/Ok<T> + IResultFormatter registry (re-scoped) | #864, #771 |
 | #789 | F | Typed route values, constraints, per-app router state | #148 |
 
 ### Stage 3 — Composition
@@ -156,6 +160,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #795 | E | `Web.Caching` (server-owned output caching) | #762, #755, #792 |
 | #782 | E | `Web.Rewrite` (URL rewriting/redirects) | #762 + request-mutation seam decision (#24/#25) |
 | #775 | C/E | Health-check framework + `/healthz` endpoint | #762 (endpoint half), host-lifecycle epics |
+| #810 | A | h1 request-body data-rate limits + per-request body-size override | #769 (streaming-body rework) |
 | #786 | F | Route groups (MapGroup) | #148, #150 |
 | #787 | F | Named routes + LinkGenerator | #148 |
 | #788 | F | Host-based route matching (RequireHost) | #150 |
@@ -165,18 +170,25 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
-| #796 | F | Source-generated endpoint binding + validation (AOT) | #150, #149, #771 |
+| #796 | F | Source-generated endpoint binding + validation (AOT) | #150, #864, #771 |
 | #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
-| #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #796 |
+| #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #864, #796 |
+
+### Post-v1 follow-ups (filed, not scheduled)
+Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
 
 ### Deliberately NOT in this program (ADR-gated)
 Real-time hub framework (SignalR-analogue) and gRPC hosting are **decisions, not features** — each needs an ADR first (real-time gates on the #765 WebSocket outcome; gRPC gates on a protobuf-vs-code-first serialization decision). Do not start either without a recorded decision. Skipped entirely: IIS/HTTP.sys, OWIN, SPA dev-proxy, Razor/Blazor UI, request localization.
 
 ---
 
-## 5. Progress Log (update as PRs merge)
+## 5. Progress Log (orchestrator-reconciled from merged PRs)
 
-Move an item here with its PR link + date the moment it merges — this is the signal that its dependents are unblocked.
+The orchestrator maintains this table by reconciling merged PRs from GitHub; sessions do not edit it (that avoids shared-doc merge conflicts when many run in parallel). Each row is a merged item and the dependents it unblocks.
+
+- **Wave 1 (2026-07-03): 13 merged** — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup.
+- **Wave 2 (2026-07-06): 16 merged + #776 in review ([PR #844](https://github.com/assimalign/cohesion/pull/844))** — #763 TLS, #150 endpoint metadata, #148 matcher, #792 range, #770 forwarded, #755 caching, #769 streaming/SSE, #751 upgrade bridge, #749 GOAWAY drain, #758 QPACK dynamic, #819 interceptor h2/h3, #753 priorities, #756 digest, #764 h2 abuse, #750 h2 backpressure, #757 cookies. Scope-creep filed: #847 (QPACK decoder-stream ack). **→ Stage 1 (Foundations) is complete; nearly the entire remaining backlog is now unblocked leaf work — see the frontier note below.**
+- **Frontier after Wave 2:** unblocked and workable — Web middleware #777/#778/#779/#780/#781/#783/#784/#785/#793/#794/#795, #767 (UseHttp3), routing #786/#787/#788/#789 + #149 (result writers, gates #796→#151), #746 (QUERY), #752 (1xx), #754 (Alt-Svc), #810 (h1 data-rate), #847, #790 (auth handlers — all deps now merged), #773 (UDS/pipes), #775 (health). **Still gated on a decision, not a dependency:** #765 (WebSockets ADR — #751/#748 now merged, so it's actionable) and #782 (URL-rewrite request-mutation seam). Blocked only by #149: #796 (source-gen binding) → #151 (controllers).
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
@@ -199,6 +211,6 @@ Move an item here with its PR link + date the moment it merges — this is the s
 ## 6. Fast reference
 
 - **Epics:** Http `#314` (L01.01.11) · Net/Connections `#324` (L01.01.14) · Security `#325` (L01.01.18) · Hosting `#313` (L01.01.10) · Web Platform `#6` → Runtime/Pipeline `#24`/`#25`/`#26`, API/Tooling `#27`, Routing `#28`, Security/Browser `#2`/`#3`/`#30`.
-- **Skills:** `cohesion-coding-rules` (start of every session) · `cohesion-work-items` (file scope-creep, emit PR close blocks).
-- **Canonical rules:** `AGENTS.md` (repo root). **Roadmap context:** `docs/DELIVERY_ROADMAP.md`.
+- **Skills/rules:** coding rules auto-load from `.claude/rules/` · `cohesion-work-items` skill (file scope-creep, emit PR close blocks).
+- **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/DELIVERY_ROADMAP.md`.
 - **This program's north star:** assemble the Web resource by wiring the `libraries/Http` stack into `resources/Web`; once assembled, the next major effort is pulling the new ApplicationModel design together (`libraries/ApplicationModel/DESIGN.md`).

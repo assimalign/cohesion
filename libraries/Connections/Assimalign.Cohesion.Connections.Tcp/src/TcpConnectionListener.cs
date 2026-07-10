@@ -28,6 +28,8 @@ public sealed class TcpConnectionListener : ConnectionListener
 
     private EndPoint _endPoint;
     private Socket? _socket;
+    private ConnectionProtocol _protocol;
+    private string? _socketFilePath;
     private long _index; // long to prevent overflow
     private bool _isDisposed;
 
@@ -51,6 +53,22 @@ public sealed class TcpConnectionListener : ConnectionListener
         _options = options;
         _settings = options.CreateConnectionSettings();
         _endPoint = options.EndPoint;
+
+        // The advertised protocol is known from the configured endpoint before binding; a Unix domain
+        // socket endpoint yields a Unix domain socket listener. The actual bound protocol is re-derived
+        // from the socket's address family at bind time for diagnostics (which also covers a file-handle
+        // endpoint whose family is only known once the descriptor is adopted).
+        _protocol = _endPoint is UnixDomainSocketEndPoint
+            ? ConnectionProtocol.UnixDomainSocket
+            : ConnectionProtocol.Tcp;
+
+        Capabilities = new ConnectionCapabilities(
+            _protocol,
+            ConnectionDelivery.Stream,
+            IsReliable: true,
+            IsOrdered: true,
+            IsMultiplexed: false,
+            ConnectionSecurity.None);
     }
 
     /// <inheritdoc />
@@ -61,13 +79,13 @@ public sealed class TcpConnectionListener : ConnectionListener
     public override EndPoint EndPoint => _endPoint;
 
     /// <inheritdoc />
-    public override ConnectionCapabilities Capabilities { get; } = new ConnectionCapabilities(
-        ConnectionProtocol.Tcp,
-        ConnectionDelivery.Stream,
-        IsReliable: true,
-        IsOrdered: true,
-        IsMultiplexed: false,
-        ConnectionSecurity.None);
+    /// <remarks>
+    /// <see cref="ConnectionCapabilities.Protocol"/> reports
+    /// <see cref="ConnectionProtocol.UnixDomainSocket"/> when the configured endpoint is a
+    /// <see cref="UnixDomainSocketEndPoint"/>, and <see cref="ConnectionProtocol.Tcp"/> otherwise.
+    /// The delivery guarantees (reliable, ordered byte stream) are identical for both.
+    /// </remarks>
+    public override ConnectionCapabilities Capabilities { get; }
 
     /// <inheritdoc />
     public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
@@ -129,6 +147,15 @@ public sealed class TcpConnectionListener : ConnectionListener
         _socket?.Close();
         _socket?.Dispose();
 
+        // Unlink the Unix domain socket file this listener bound so the path is free for the next bind.
+        // Only a filesystem-backed path that this listener created is removed (never an inherited
+        // file-handle socket or an abstract-namespace socket, which have no filesystem entry).
+        if (_socketFilePath is not null)
+        {
+            UnixDomainSocketFile.Unlink(_socketFilePath);
+            _socketFilePath = null;
+        }
+
         // ConcurrentDictionary.Values returns a snapshot, so connections removing themselves
         // from the dictionary as they close do not invalidate the iteration.
         foreach (TcpConnection connection in _connections.Values)
@@ -167,22 +194,57 @@ public sealed class TcpConnectionListener : ConnectionListener
             return;
         }
 
-        Socket socket = _endPoint switch
+        Socket socket = _endPoint is FileHandleEndPoint fileHandle
+            ? AdoptInheritedSocket(fileHandle)
+            : BindNewSocket();
+
+        _protocol = SocketConnectionProtocol.FromAddressFamily(socket.AddressFamily);
+        _endPoint = socket.LocalEndPoint ?? _endPoint;
+        _socket = socket;
+
+        ConnectionEventSource.Log.ListenerInitialized(_protocol, _listenerId);
+    }
+
+    /// <summary>
+    /// Adopts a listening socket handed off by a parent process (systemd <c>.socket</c> activation,
+    /// launchd, or a supervising process). The descriptor is already bound and listening, so it is
+    /// wrapped and accepted on directly — re-binding or re-listening an inherited listening socket
+    /// fails.
+    /// </summary>
+    private static Socket AdoptInheritedSocket(FileHandleEndPoint fileHandle)
+    {
+        /*
+            We're passing "ownsHandle: true" here even though we don't necessarily
+            own the handle because Socket.Dispose will clean-up everything safely.
+            If the handle was already closed or disposed then the socket will
+            be torn down gracefully, and if the caller never cleans up their handle
+            then we'll do it for them.
+        */
+        return new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true));
+    }
+
+    private Socket BindNewSocket()
+    {
+        if (_endPoint is UnixDomainSocketEndPoint)
         {
-            UnixDomainSocketEndPoint => new Socket(
-                _endPoint.AddressFamily,
-                SocketType.Stream,
-                ProtocolType.Unspecified),
-            /*
-                We're passing "ownsHandle: true" here even though we don't necessarily
-                own the handle because Socket.Dispose will clean-up everything safely.
-                If the handle was already closed or disposed then the socket will
-                be torn down gracefully, and if the caller never cleans up their handle
-                then we'll do it for them.
-            */
-            FileHandleEndPoint fileHandle => new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true)),
-            _ => new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-        };
+            // A Unix domain socket bound to a filesystem path leaves a socket file behind. Remove any
+            // stale file left by a prior unclean shutdown so the bind does not fail with
+            // AddressAlreadyInUse (rebind-after-crash), and remember the path so disposal can unlink it.
+            _socketFilePath = UnixDomainSocketFile.ResolvePath(_endPoint);
+
+            if (_socketFilePath is not null)
+            {
+                UnixDomainSocketFile.DeleteStale(_socketFilePath);
+            }
+
+            Socket unixSocket = new(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
+            unixSocket.Bind(_endPoint);
+            unixSocket.Listen(_options.Backlog);
+
+            return unixSocket;
+        }
+
+        Socket socket = new(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
         if (_endPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
         {
@@ -192,9 +254,6 @@ public sealed class TcpConnectionListener : ConnectionListener
         socket.Bind(_endPoint);
         socket.Listen(_options.Backlog);
 
-        _endPoint = socket.LocalEndPoint ?? _endPoint;
-        _socket = socket;
-
-        ConnectionEventSource.Log.ListenerInitialized(ConnectionProtocol.Tcp, _listenerId);
+        return socket;
     }
 }

@@ -2,9 +2,7 @@ name: Core
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Core/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-core.yml" # When Pipeline File Changes
 permissions:
   contents: read

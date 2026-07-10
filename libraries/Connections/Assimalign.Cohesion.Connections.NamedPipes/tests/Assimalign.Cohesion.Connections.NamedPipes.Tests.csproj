@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.NamedPipes" />
+		<!-- Test-only: the HTTP/1.1-over-named-pipe end-to-end test composes the driver listener with
+		     UseHttp1. The driver itself depends only on the Connections contracts (Lane C guardrail);
+		     these Http references are confined to the test project. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+	</ItemGroup>
+</Project>

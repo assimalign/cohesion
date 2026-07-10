@@ -396,7 +396,7 @@ public interface IApplicationGateway
 ```
 
 A base **`abstract class ApplicationGateway : IApplicationGateway`** implements the
-generic algorithm once. Per AGENTS.md's *interface-first-with-guided-base*, the
+generic algorithm once. Per the repo *interface-first-with-guided-base* rule, the
 interface members are implemented **explicitly** and forward to strongly-typed
 `protected abstract` hooks the platform overrides:
 
@@ -464,7 +464,7 @@ public interface IContainerImageArtifact : IResourceArtifact
 
 Consumers request a typed artifact (`context.GetArtifact<IContainerImageArtifact>()`)
 which throws a specific exception on kind mismatch — no enum discriminator, no
-unchecked downcast (interface-first per AGENTS.md). Local's packager returns an
+unchecked downcast (interface-first per the repo coding rules). Local's packager returns an
 `IExecutableArtifact`; container gateways return an `IContainerImageArtifact`
 resolved from `application.images.json` (§7.1) — **gather validates/loads, it does
 not build**.
@@ -818,7 +818,7 @@ Orchestrator references: `ApplicationModel` + one
   digest so tags can never serve stale layers.
 - **Zero reflection.** `UseGateway` is mandatory; `Build()` throws a plain exception
   when unset. Any zero-config default is a compile-time source-generated registration,
-  honoring AGENTS.md's "no runtime type inspection without source generators".
+  honoring the repo rule "no runtime type inspection without source generators".
 - **AOT scoping is honest.** Layer-1 contracts, `LocalGateway`, and `Gateway.Docker`
   are `IsAotCompatible=true` and AOT-gated in CI. **`Gateway.Kubernetes` is a
   documented exception** (`IsAotCompatible` omitted/false): `KubernetesClient`

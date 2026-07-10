@@ -44,7 +44,7 @@ Notes:
 
 `CohesionPackageReference` lets you add a package by name. Package versions and common metadata are centrally managed by the Cohesion build so individual projects do not repeat version numbers.
 
-Versions are declared centrally in [`build/Targets/Build.References.Packages.targets`](../../build/Targets/Build.References.Packages.targets); see the build-system rules in [`AGENTS.md`](../../AGENTS.md) for details.
+Versions are declared centrally in [`build/Targets/Build.References.Packages.targets`](../../build/Targets/Build.References.Packages.targets); see the build-system rules in [`.claude/rules/build-system.md`](../../.claude/rules/build-system.md) for details.
 
 Example: `<CohesionPackageReference Include="{Package Name}"/>`
 

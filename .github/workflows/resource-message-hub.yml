@@ -2,7 +2,6 @@ name: Message Hub
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "resources/MessageHub/**"
       - ".github/workflows/resource-message-hub.yml" # When Pipeline File Changes
 

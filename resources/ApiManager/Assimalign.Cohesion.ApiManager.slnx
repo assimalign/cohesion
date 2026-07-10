@@ -13,7 +13,15 @@
 		<Project Path="Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
 	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.ApiManager.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.ApiManager.Hosting/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/ApiManager/refs/" >
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
 </Solution>

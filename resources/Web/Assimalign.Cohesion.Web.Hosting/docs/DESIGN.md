@@ -211,8 +211,9 @@ a slot frees.
   before cancelling on shutdown (versus cancelling them with the drain token) is
   future work; it needs a two-phase signal ("finish the current exchange, accept
   no new ones on this connection") that this iteration does not implement.
-- **TLS / HTTP/3 registration surface** on the server builder — tracked
-  separately (issues #763, #767).
+- **HTTP/3 registration surface** on the server builder — tracked separately
+  (issue #767). The TLS convenience surface (issue #763) has landed; see "TLS
+  convenience surface" below.
 - **Per-request service resolution.** DI/logging/config are builder-time only;
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
@@ -254,9 +255,18 @@ builder time, giving `appsettings`-style Kestrel-section parity:
 
 The actual binding lives in the internal `HttpServerConfiguration.Bind`, invoked
 from inside the `UseServer((serviceProvider, options) => …)` callback so it runs
-when the `HttpConnectionListener` is composed. Limits land on
-`HttpConnectionListenerOptions.Limits` (`HttpServerLimits`); each endpoint maps
-to a TCP listener via the existing `UseHttp1` / `UseHttp2` convenience overloads.
+when the `HttpConnectionListener` is composed. Limits are per HTTP version on
+the transport, so the single `Limits` section is parsed eagerly (an unparseable
+value fails loudly even with no endpoints) into an
+`Http1ConnectionListenerOptions.Http1Limits` template, and each endpoint the
+section registers copies the bound values into its own per-registration limits
+through the transport's `UseHttp1` / `UseHttp2` configure overloads — HTTP/1.1
+endpoints receive every key; HTTP/2 endpoints receive the shared
+`HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`,
+`RequestHeadersTimeout`), because the HTTP/1.1 wire-format keys have no HTTP/2
+meaning. The HTTP/2 abuse caps (`Http2ConnectionListenerOptions.Http2Limits`)
+are not yet config-bindable — a `Limits:Http2` section is a natural follow-up
+when a deployment needs it.
 
 ### Why explicit, hand-rolled binding
 
@@ -308,17 +318,20 @@ default request-parse interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
 Today that is one interceptor: `Http.RequestLimits`'
 max-request-body-size interceptor, which occupies slot 0 of the interceptor
-order so every HTTP/1.1 request carries the typed
-`IHttpMaxRequestBodySizeFeature` and user-registered interceptors' head hooks
-can observe it. HTTP/1.1 is currently the only protocol whose parse path
-invokes interceptors — HTTP/2 and HTTP/3 exchanges do not carry the feature
-yet (see the transport's protocol-coverage notes); wiring those paths is
-tracked follow-up work.
+order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
+user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
+invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
+feature is attached uniformly regardless of protocol. Cap *enforcement* (the
+413) is still HTTP/1.1-only: h2 bounds body buffering via flow-control
+backpressure and h3 via QUIC flow control, so a lowered cap changes the
+reported feature value but does not reject the body there yet (the hard cap is
+tracked in the transport's protocol-coverage notes and on
+`HttpConnectionListenerLimits.MaxRequestBodySize`).
 
 ### Why default-on, and why here
 
 The transport itself stays lean — with zero interceptors it allocates no
-per-request interception state at all — so the "h1 requests always have the
+per-request interception state at all — so the "every request always has the
 typed feature" guarantee is a *hosting* policy, not a transport one. It lives
 here because this is the composition root: apps that want a leaner pipeline can
 inspect or clear `HttpConnectionListenerOptions.Interceptors` in their own
@@ -369,3 +382,86 @@ terminal can rely on that instead of inferring it.
 verbs live in `Web.Results` and never reference the host. See
 `Assimalign.Cohesion.Web.Results/docs/DESIGN.md` for the boundary/ProblemDetails
 design and the placement rationale.
+
+## TLS convenience surface
+
+### What it is
+
+`HttpConnectionListenerOptions.UseHttp1s(configure, tlsOptions)` and
+`UseHttp2s(configure, tlsOptions)` (extension members in `WebHostingExtensions`)
+are the secure siblings of the plaintext `UseHttp1` / `UseHttp2` callback sugar.
+Each takes the same `Action<TcpConnectionListenerOptions>` used to configure the
+endpoint plus a `TlsServerOptions`, and registers a listener that serves the
+protocol over TLS:
+
+```csharp
+builder.Server.UseServer(options =>
+{
+    options.UseHttp2s(
+        tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, 8443),
+        new TlsServerOptions
+        {
+            AuthenticationOptions = { ServerCertificate = certificate }
+        });
+});
+```
+
+### Why here, and why compose-before-register
+
+TLS is a **pre-composed transport layer**, never an HTTP concern — the
+`Assimalign.Cohesion.Http.Connections` `docs/DESIGN.md` records this boundary
+("TLS is a pre-composed layer, not an HTTP concern"), and its
+`HttpConnectionListenerOptions` deliberately carries no TLS or certificate
+options. The convenience honors that boundary by composing
+`TcpConnectionListener.Create(configure).UseTls(tlsOptions)` **before** handing
+the listener to `UseHttp1` / `UseHttp2`. Composition is deferred inside the same
+factory the plaintext sugar uses, so the TCP listener is not bound until the
+`HttpConnectionListener` materializes the registration.
+
+Because the security layer wraps the listener first, the layered listener reports
+`Capabilities.Security == ConnectionSecurity.Tls`. That capability is the single
+source of truth for the `https` scheme — the HTTP layer reads it once per accept
+loop; there is no registration-time `isSecure` parameter to thread through. A
+request served over a `UseHttp1s` / `UseHttp2s` listener therefore carries
+`HttpScheme.Https` end to end.
+
+This is also the layering reason the surface lives in Web.Hosting rather than in
+the transport: Web.Hosting is where the composition root is allowed to depend on
+both `Http.Connections` (the registration surface) and
+`Connections.Security` (the `UseTls` layer). The transport depends on neither
+direction of that composition.
+
+### ALPN defaulting
+
+The .NET / browser HTTP client selects the HTTP version over TLS via ALPN
+(RFC 7301), so a secured HTTP/2 listener is only reachable as HTTP/2 if it
+advertises the `h2` protocol id. To make the common case work without ceremony,
+`UseHttp2s` defaults `AuthenticationOptions.ApplicationProtocols` to
+`SslApplicationProtocol.Http2` (`h2`) and `UseHttp1s` defaults it to
+`SslApplicationProtocol.Http11` (`http/1.1`) **when the caller left the list
+unset** (null or empty). A caller who supplies an explicit protocol list — for
+example to offer both `h2` and `http/1.1` on one endpoint — has it preserved
+unmodified. The default is written onto the caller's `TlsServerOptions` (an
+intentional mutation) so a later read observes the negotiated protocol.
+
+### Certificates are the caller's concern
+
+The server certificate is supplied by the caller through
+`TlsServerOptions.AuthenticationOptions.ServerCertificate` (or a selection
+callback). Certificate sourcing, storage, and rotation are Security-area concerns
+and are explicit non-goals of the security library's TLS surface, so they are not
+re-modeled on this convenience.
+
+### Scope boundary
+
+`UseHttp1s` / `UseHttp2s` cover the stream protocols. HTTP/3 is out of scope here:
+QUIC's transport security is always-on (TLS is inherent to the protocol) and QUIC
+listeners bind asynchronously, so the HTTP/3 registration surface is tracked
+separately under #767.
+
+### AOT posture
+
+No reflection, no runtime codegen. The composition is plain delegate wiring
+(`TcpConnectionListener.Create(...).UseTls(...)` inside a `Func<IConnectionListener>`),
+and the ALPN default is a list assignment. `IsAotCompatible=true` holds with no
+special handling.

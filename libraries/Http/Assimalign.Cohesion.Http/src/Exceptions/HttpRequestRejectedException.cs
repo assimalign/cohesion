@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Thrown by an <see cref="IHttpRequestInterceptor"/> to reject the request currently being
+/// Thrown by an <see cref="IHttpExchangeInterceptor"/> to reject the request currently being
 /// parsed. The server transport answers the peer with the carried <see cref="StatusCode"/>
 /// (a minimal, bodyless response) and closes the connection.
 /// </summary>

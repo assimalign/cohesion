@@ -136,6 +136,78 @@ Dependency direction is one-way: cookie-aware packages depend on this
 one; this one depends only on the protocol core. The protocol core
 never gains a back-reference.
 
+## Wire-safety hardening (RFC 6265bis) &mdash; the model / policy split
+
+The package owns the RFC 6265 / 6265bis rules that make a cookie
+**well-formed on the wire**. It deliberately does *not* own the rules
+that decide whether a well-formed cookie is **allowed by policy**. The
+dividing line is: *"could this corrupt the header or the store?"* is a
+model concern; *"should this cookie be permitted / rewritten for this
+site?"* is a policy concern. Three model-level guards were added under
+issue [L01.01.11.30]:
+
+1. **Octet-grammar validation at construction (anti header-splitting).**
+   `HttpCookie` validates its `Name` against the RFC 6265 §4.1.1
+   `token` grammar and its `Value` against `*cookie-octet` (optionally a
+   single surrounding DQUOTE pair) in the constructor, throwing
+   `ArgumentException` on a violation. Because `Name`/`Value` are
+   immutable, a constructed cookie can *never* hold a `;`, `,`,
+   whitespace, control character, or CR/LF octet — so `ToString()` can
+   never emit a value that splits or corrupts the `Set-Cookie` line, and
+   the request-side fold (`name=value; …`) is equally safe. This is an
+   argument-validation error (a server bug), not a request rejection, so
+   it surfaces as `ArgumentException` rather than an area `HttpException`
+   with an `HttpErrorCode` (those are reserved for transport-level
+   request rejection). The grammar itself lives in the internal
+   `HttpCookieGrammar` helper as `SearchValues<char>` membership scans —
+   no regex, no allocation, AOT-safe.
+
+2. **Configurable parse-side size limits (`HttpCookieLimits`).**
+   `HttpCookieCollection` parsing enforces RFC 6265bis-aligned defaults:
+   name+value ≤ 4096 octets, per-attribute value ≤ 1024 octets, and a
+   bounded retained-attribute count (default 50, a DoS backstop that
+   keeps a hostile `Set-Cookie` from growing the attribute/extension list
+   without bound). Oversized cookies and attributes are **ignored**
+   (dropped) rather than throwing, matching the RFC's parsing-robustness
+   posture — a malformed inbound header must not crash the server. The
+   limits are a constructor parameter (`HttpCookieLimits.Default` when
+   omitted), so a host can tune or effectively disable a dimension
+   (`int.MaxValue`). The outer bound on total header length stays with
+   the transport's request/response header-size limits; these are the
+   per-cookie inner defense.
+
+3. **Lifetime cap mechanism (`HttpCookie.ClampLifetime`).** The model
+   supplies the RFC 6265bis §5.5 400-day constant
+   (`HttpCookieLimits.DefaultMaxLifetime`) and the *pure* clamping math:
+   `ClampLifetime(referenceTime[, maxLifetime])` returns a cookie whose
+   `Max-Age` is reduced to the cap when longer and whose `Expires` is
+   pulled back to `referenceTime + cap` when further out, while a zero or
+   negative `Max-Age` (a deletion signal, RFC 6265 §5.2.2) and a
+   past/near `Expires` round-trip untouched. Clamping is a pure function
+   with no hidden clock: **deciding when to apply it** — at emission,
+   against the current time — is an emission/policy responsibility, so
+   the mechanism lives here and the "apply the cap to outbound cookies"
+   trigger is left to the emitter / `Web.CookiePolicy`. Keeping the clock
+   out of the model is what makes the cap deterministically testable.
+
+**What stays here vs. what is `Web.CookiePolicy`'s job.** Everything above
+is wire-safety / well-formedness and lives in this model library. The
+following are *policy* and are explicitly **not** implemented here — they
+belong to `Assimalign.Cohesion.Web.CookiePolicy` (see its `docs/DESIGN.md`)
+because they encode a site's decision about acceptable cookies, not the
+wire grammar:
+
+- `__Host-` / `__Secure-` **prefix invariants** (require `Secure`, and for
+  `__Host-` also `Path=/` with no `Domain`).
+- **`SameSite=None` requires `Secure`** pairing (reject or upgrade).
+- **Applying** the 400-day lifetime cap to outbound cookies at emission
+  time (the model provides the mechanism; the middleware decides to run it
+  and supplies "now").
+
+The one-way dependency direction (`Web.CookiePolicy` → `Http.Cookies` →
+`Http` core, never a back-reference) is what lets the policy layer compose
+these model mechanisms without the model ever learning about policy.
+
 ## AOT posture
 
 `<IsAotCompatible>true</IsAotCompatible>` is inherited from the shared
@@ -144,7 +216,9 @@ generation, and no dynamic type loading. The feature lookup uses
 `typeof(IHttpRequestCookieFeature)` / `typeof(IHttpResponseCookieFeature)`
 as JIT-time constant keys into the underlying
 `Dictionary<Type, object>`; trim and AOT roots are unaffected. The
-parser is a string-tokenization loop with no regex.
+parser is a string-tokenization loop with no regex, and the octet-grammar
+guard (`HttpCookieGrammar`) classifies characters with
+`SearchValues<char>` membership scans — again no regex, no reflection.
 
 ## Non-goals
 
@@ -158,10 +232,15 @@ parser is a string-tokenization loop with no regex.
   top of this one. The base package stays focused on the typed model
   and the wire/feature plumbing.
 - **Cookie-policy enforcement.** Middleware that strips, rewrites, or
-  rejects cookies based on policy (Secure-only, SameSite upgrades,
-  prefix enforcement) belongs in a dedicated package
-  (`Assimalign.Cohesion.Web.CookiePolicy`) that's allowed to depend
-  on this one.
+  rejects cookies based on policy (Secure-only, `SameSite=None`+`Secure`
+  pairing, `__Host-`/`__Secure-` prefix enforcement, and *deciding when*
+  to apply the 400-day lifetime cap to outbound cookies) belongs in a
+  dedicated package (`Assimalign.Cohesion.Web.CookiePolicy`) that's
+  allowed to depend on this one. This library provides the wire-safety
+  *mechanisms* (octet-grammar validation, size limits, the
+  `ClampLifetime` math); the policy layer decides *whether and when* to
+  apply the policy-shaped ones. See "Wire-safety hardening" above for the
+  full split.
 - **Direction-specific interfaces.** As discussed above, a future
   refactor may introduce `IRequestCookieCollection` /
   `IResponseCookies` if real call sites prove the unified shape is

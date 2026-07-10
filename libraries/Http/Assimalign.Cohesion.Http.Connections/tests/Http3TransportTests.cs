@@ -5,6 +5,9 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
+using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 using Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 using Shouldly;
@@ -54,6 +57,30 @@ public class Http3TransportTests
         headers["content-type"].ShouldBe("text/plain");
         headers["content-length"].ShouldBe("4");
         Encoding.UTF8.GetString(frames[1].Payload).ShouldBe("quic");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
+    public async Task Http3_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — the QUERY method rides :method like any other token; a DATA frame carries
+        // the query content. Equivalent to the HTTP/1.1 and HTTP/2 QUERY round-trips on the h3 path.
+        const string queryBody = "{\"select\":\"widgets\"}";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp3Request(
+            "QUERY", "/search", "https", "a", body: Encoding.UTF8.GetBytes(queryBody));
+        TestConnection stream = new(payload);
+        TestMultiplexedConnection connection = new(stream);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should yield multiple inbound request streams")]
@@ -282,6 +309,108 @@ public class Http3TransportTests
         (await enumerator.MoveNextAsync()).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit GOAWAY on the control stream before the connection is disposed")]
+    public async Task Http3_OnDispose_ShouldEmitControlStreamGoAwayBeforeClose()
+    {
+        // RFC 9114 §5.2 / §7.2.6 — during connection teardown the server sends
+        // GOAWAY on its control stream (carrying the lowest client-initiated
+        // bidirectional stream id it will not process) before the QUIC
+        // CONNECTION_CLOSE. One request was surfaced (client-bidi stream 0), so
+        // the announced boundary is 4 — stream 0 may complete, streams >= 4 are
+        // rejected.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/g", "https", "a"));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
+
+        // Surface the request so the server opens its control stream (SETTINGS)
+        // and counts one processed request stream.
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+        httpContext.Request.Path.Value.ShouldBe("/g");
+
+        // Dispose the HTTP/3 connection — GOAWAY is written on the control stream
+        // before the underlying multiplexed connection is disposed.
+        await httpConnection.DisposeAsync();
+        connection.IsDisposed.ShouldBeTrue();
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+
+        (long streamType, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream!.ReadOutputAsync());
+
+        streamType.ShouldBe(0x00L); // control stream
+
+        // The control stream carries SETTINGS then GOAWAY (0x07).
+        byte[]? goAwayPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == (long)Http3FrameType.GoAway)
+            {
+                goAwayPayload = payload;
+            }
+        }
+
+        goAwayPayload.ShouldNotBeNull();
+        goAwayPayload!.Length.ShouldBeGreaterThan(0); // RFC 9114 §5.2 varint payload
+
+        int index = 0;
+        long announcedStreamId = QuicVariableLengthInteger.Decode(goAwayPayload, ref index);
+        announcedStreamId.ShouldBe(4L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should announce the processed-stream boundary in the teardown GOAWAY")]
+    public async Task Http3_OnDisposeAfterTwoRequests_GoAwayShouldAnnounceProcessedBoundary()
+    {
+        // RFC 9114 §5.2 — the GOAWAY id marks the boundary of what was processed:
+        // streams below it may have been processed, streams at or above it are
+        // rejected. Two requests surfaced (client-bidi streams 0 and 4), so the
+        // announced boundary is 8: streams 0 and 4 may finish, stream 8+ will not.
+        TestConnection first = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/1", "https", "a"));
+        TestConnection second = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/2", "https", "a"));
+        TestMultiplexedConnection connection = new(first, second);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnection httpConnection = await listener.AcceptOrListenAsync();
+        IHttpConnectionContext httpConnectionContext = await httpConnection.OpenAsync();
+
+        await using (IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator())
+        {
+            (await enumerator.MoveNextAsync()).ShouldBeTrue();
+            enumerator.Current.Request.Path.Value.ShouldBe("/1");
+            (await enumerator.MoveNextAsync()).ShouldBeTrue();
+            enumerator.Current.Request.Path.Value.ShouldBe("/2");
+        }
+
+        await httpConnection.DisposeAsync();
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+
+        (_, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream!.ReadOutputAsync());
+
+        byte[]? goAwayPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == (long)Http3FrameType.GoAway)
+            {
+                goAwayPayload = payload;
+            }
+        }
+
+        goAwayPayload.ShouldNotBeNull();
+        int index = 0;
+        long announcedStreamId = QuicVariableLengthInteger.Decode(goAwayPayload!, ref index);
+        announcedStreamId.ShouldBe(8L);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should decode a Huffman-coded request field section")]
     public async Task Http3_OnHuffmanEncodedRequest_ShouldParseFields()
     {
@@ -429,6 +558,220 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "api.test")));
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Enabling the dynamic table advertises QPACK capacity and blocked streams")]
+    public async Task Http3_OnDynamicTableEnabled_ShouldAdvertiseCapacityAndBlockedStreams()
+    {
+        // RFC 9204 §5 — with the dynamic table enabled the server advertises a
+        // non-zero QPACK_MAX_TABLE_CAPACITY and QPACK_BLOCKED_STREAMS in SETTINGS.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/s", "https", "a"));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
+        {
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 16;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+        httpContext.Request.Path.Value.ShouldBe("/s");
+
+        TestConnection? controlStream = connection.ControlStream;
+        controlStream.ShouldNotBeNull();
+
+        (long streamType, IReadOnlyList<(long FrameType, byte[] Payload)> frames) =
+            HttpProtocolPayloadFactory.ParseHttp3UnidirectionalStream(await controlStream!.ReadOutputAsync());
+
+        streamType.ShouldBe(0x00L);
+        IReadOnlyDictionary<long, long> settings = HttpProtocolPayloadFactory.DecodeHttp3Settings(frames[0].Payload);
+        settings[0x01].ShouldBe(4096L); // QPACK_MAX_TABLE_CAPACITY
+        settings[0x07].ShouldBe(16L);   // QPACK_BLOCKED_STREAMS
+        settings[0x08].ShouldBe(1L);    // SETTINGS_ENABLE_CONNECT_PROTOCOL
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should resolve a dynamic-table reference and acknowledge the insert count")]
+    public async Task Http3_OnDynamicTableRequest_ShouldResolveDynamicEntryAndAckInsertCount()
+    {
+        // RFC 9204 — the peer's encoder stream inserts a dynamic entry; a request
+        // then references it by a dynamic indexed field line. The decoder resolves
+        // it and emits Insert Count Increment on its decoder stream (§4.4.3).
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
+            ConnectionDirection.ReadOnly);
+        TestConnection encoder = new(
+            HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
+                HttpProtocolPayloadFactory.QPackSetCapacity(4096),
+                HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
+            ConnectionDirection.ReadOnly);
+
+        // Encoded RIC 2 → RIC 1; Delta Base 0 → Base 1; dynamic indexed rel 0 → absolute 0.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+            encodedRequiredInsertCount: 2,
+            deltaBaseByte: 0x00,
+            literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
+            0));
+
+        TestMultiplexedConnection connection = new(control, encoder, request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
+        {
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 16;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext httpContext = enumerator.Current;
+        httpContext.Request.Path.Value.ShouldBe("/d");
+        httpContext.Request.Headers[new HttpHeaderKey("x-dyn")].Value.ShouldBe("hello");
+
+        // Drive the loop to completion so teardown awaits the encoder drain.
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        // OpenedStreams: [0] control, [1] decoder. The decoder stream carries its
+        // type prefix (0x03) then Insert Count Increment(1) = 0x01.
+        connection.OpenedStreams.Count.ShouldBeGreaterThanOrEqualTo(2);
+        byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
+        decoderOutput[0].ShouldBe((byte)0x03);
+        decoderOutput.ShouldContain((byte)0x01);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should acknowledge a dynamic-table field section with a Section Acknowledgment keyed on the request stream ID")]
+    public async Task Http3_OnDynamicTableRequest_ShouldEmitSectionAcknowledgmentForStreamId()
+    {
+        // RFC 9204 §4.4.1 — once the decoder resolves a field section that referenced
+        // the dynamic table, it emits a Section Acknowledgment on its decoder stream
+        // keyed on the request stream ID. The ID is derived from QUIC's client-bidi
+        // numbering law (0, 4, 8, … in acceptance order — the same law the GOAWAY
+        // boundary uses): the dynamic request below is the SECOND accepted request
+        // stream, so the acknowledgment must carry stream ID 4 — and no acknowledgment
+        // may appear for the first (static, nothing to acknowledge) stream 0.
+        TestConnection control = new(
+            HttpProtocolPayloadFactory.CreateHttp3ControlStream((0x01, 4096), (0x07, 16)),
+            ConnectionDirection.ReadOnly);
+        TestConnection encoder = new(
+            HttpProtocolPayloadFactory.CreateHttp3QPackEncoderStream(
+                HttpProtocolPayloadFactory.QPackSetCapacity(4096),
+                HttpProtocolPayloadFactory.QPackInsertWithLiteralName("x-dyn", "hello")),
+            ConnectionDirection.ReadOnly);
+
+        // First request stream (wire ID 0): static-only, owes no acknowledgment.
+        TestConnection staticRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/one", "https", "a"));
+
+        // Second request stream (wire ID 4): encoded RIC 2 → RIC 1; Delta Base 0 →
+        // Base 1; dynamic indexed rel 0 → absolute 0.
+        TestConnection dynamicRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+                encodedRequiredInsertCount: 2,
+                deltaBaseByte: 0x00,
+                literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
+                0));
+
+        TestMultiplexedConnection connection = new(control, encoder, staticRequest, dynamicRequest);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
+        {
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 16;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/one");
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Headers[new HttpHeaderKey("x-dyn")].Value.ShouldBe("hello");
+
+        // Drive the loop to completion so teardown awaits the encoder drain.
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        // The decoder stream (OpenedStreams[1]) carries its 0x03 type prefix, the
+        // Insert Count Increment for the applied insertion, and the Section
+        // Acknowledgment keyed on the second request stream's wire ID (4) — not on
+        // the non-referencing first stream (0).
+        byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
+        decoderOutput[0].ShouldBe((byte)0x03);
+        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.SectionAcknowledgment(4));
+        decoderOutput.ShouldNotContain(QPackDecoderInstructionEncoder.SectionAcknowledgment(0)[0]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should emit a Stream Cancellation when a dynamic-table stream is abandoned before acknowledgment")]
+    public async Task Http3_OnDynamicReferenceAbandonedBeforeAck_ShouldEmitStreamCancellation()
+    {
+        // RFC 9204 §2.2.2.2 / §4.4.2 — a request whose field section referenced the
+        // dynamic table but which is abandoned before its Section Acknowledgment (here
+        // the blocked-stream budget is 0, so referencing a not-yet-inserted entry is a
+        // QPACK_DECOMPRESSION_FAILED connection error) owes a Stream Cancellation on
+        // the decoder stream so the peer encoder can reclaim the outstanding
+        // references. The abandoned request is the SECOND accepted request stream, so
+        // the cancellation must carry its derived wire ID 4.
+        TestConnection staticRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/one", "https", "a"));
+        TestConnection dynamicRequest = new(
+            HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+                encodedRequiredInsertCount: 2,
+                deltaBaseByte: 0x00,
+                literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
+                0));
+        TestMultiplexedConnection connection = new(staticRequest, dynamicRequest);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
+        {
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 0;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        // The static request is served; the dynamic one hits the decompression
+        // failure, which terminates the connection without yielding its context.
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        enumerator.Current.Request.Path.Value.ShouldBe("/one");
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+
+        // The decoder stream (OpenedStreams[1]) carries its 0x03 type prefix then the
+        // Stream Cancellation keyed on the abandoned request stream's wire ID (4).
+        byte[] decoderOutput = await connection.OpenedStreams[1].ReadOutputAsync();
+        decoderOutput[0].ShouldBe((byte)0x03);
+        ShouldContainSubsequence(decoderOutput, QPackDecoderInstructionEncoder.StreamCancellation(4));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should terminate when a request blocks beyond QPACK_BLOCKED_STREAMS")]
+    public async Task Http3_OnDynamicReferenceBeyondBlockedStreamLimit_ShouldTerminate()
+    {
+        // RFC 9204 §2.1.2 / §2.2 — the dynamic table is enabled but the
+        // blocked-stream budget is 0, so a request referencing a not-yet-inserted
+        // dynamic entry is a QPACK_DECOMPRESSION_FAILED connection error.
+        TestConnection request = new(HttpProtocolPayloadFactory.CreateHttp3DynamicRequest(
+            encodedRequiredInsertCount: 2,
+            deltaBaseByte: 0x00,
+            literalFields: [(":method", "GET"), (":scheme", "https"), (":path", "/d"), (":authority", "a")],
+            0));
+        TestMultiplexedConnection connection = new(request);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(connection), static o =>
+        {
+            o.QPack.MaxTableCapacity = 4096;
+            o.QPack.MaxBlockedStreams = 0;
+        });
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+    }
+
     private static async Task AssertMalformedRequestIsDroppedAsync(byte[] requestPayload)
     {
         // A per-stream field-section failure drops the offending stream; with
@@ -450,5 +793,29 @@ public class Http3TransportTests
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         return enumerator.Current;
+    }
+
+    private static void ShouldContainSubsequence(byte[] haystack, byte[] needle)
+    {
+        for (int start = 0; start + needle.Length <= haystack.Length; start++)
+        {
+            bool match = true;
+            for (int offset = 0; offset < needle.Length; offset++)
+            {
+                if (haystack[start + offset] != needle[offset])
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                return;
+            }
+        }
+
+        throw new Shouldly.ShouldAssertException(
+            $"Expected the decoder-stream output [{string.Join(", ", haystack)}] to contain the instruction [{string.Join(", ", needle)}].");
     }
 }

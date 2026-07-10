@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 /// <summary>
 /// Raised by the HTTP/1.1 read path when a request violates a configured
-/// <see cref="HttpServerLimits"/> bound (request-line size, header count / total size, or body
+/// <see cref="Http1ConnectionListenerOptions.Http1Limits"/> bound (request-line size, header count / total size, or body
 /// size). Carries the HTTP status code the transport emits to the peer before closing the
 /// connection (414 / 431 / 413).
 /// </summary>

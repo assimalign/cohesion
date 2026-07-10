@@ -2,8 +2,7 @@ name: OpenApi
 
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'libraries/OpenApi/**'
       - '.github/workflows/library-openapi.yml'                 # When Pipeline File Changes
 
@@ -28,7 +27,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'OpenApi'
           project: ${{ matrix.projects }}

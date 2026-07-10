@@ -59,6 +59,29 @@ public class Http2TransportTests
         Encoding.UTF8.GetString(frames[3].Payload).ShouldBe("{\"ok\":true}");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should parse a QUERY :method and deliver its content body (RFC 10008)")]
+    public async Task Http2_OnQueryRequestWithBody_ShouldExposeQueryMethodAndBody()
+    {
+        // RFC 10008 — the QUERY method rides :method like any other token; a DATA frame carries
+        // the query content. Equivalent to the HTTP/1.1 QUERY round-trip on the h2 path.
+        const string queryBody = "{\"select\":\"widgets\"}";
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(
+            1, "QUERY", "/search", "https", "api.test", body: Encoding.UTF8.GetBytes(queryBody));
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Method.ShouldBe(HttpMethod.Query);
+        httpContext.Request.Path.Value.ShouldBe("/search");
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe(queryBody);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should yield multiple streams in sequence")]
     public async Task Http2_OnMultipleStreams_ShouldYieldRequestsInSequence()
     {
@@ -124,6 +147,153 @@ public class Http2TransportTests
         // First 4 octets carry the last-stream-id; we processed stream 1.
         uint lastStreamId = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(goAway.Payload.AsSpan(0, 4));
         lastStreamId.ShouldBe(1u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should drain an in-flight response before completing the connection output")]
+    public async Task Http2_OnGracefulCloseWithInFlightStream_ShouldDrainBeforeCompletingOutput()
+    {
+        // RFC 9113 §6.8 — after GOAWAY, streams already accepted continue to
+        // completion within a bounded drain window before the connection output
+        // is completed. Without the drain, GracefulCloseAsync would complete the
+        // output writer immediately and cut off a response still being written.
+        // The finite input also exercises the pump-exit path: the frame pump
+        // observes end-of-stream during the drain, but the fully-received
+        // request stays answerable (only truncated requests are abandoned), so
+        // the drain keeps holding until the response is sent.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        Http2ConnectionContext http2Context = (Http2ConnectionContext)httpConnectionContext;
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext request = enumerator.Current;
+
+        // Begin the graceful close while the request is dispatched but not yet
+        // answered. It emits GOAWAY, then blocks in the bounded drain window
+        // waiting for this in-flight exchange — it MUST NOT complete the output
+        // and cut the response off.
+        Task closeTask = http2Context.GracefulCloseAsync().AsTask();
+        await Task.Delay(100);
+        closeTask.IsCompleted.ShouldBeFalse();
+
+        // Sending the response completes the exchange, which releases the drain
+        // and lets the graceful close finish (completing the output).
+        request.Response.StatusCode = HttpStatusCode.Ok;
+        request.Response.Body = new MemoryStream(Encoding.UTF8.GetBytes("drained"));
+        await httpConnectionContext.SendAsync(request);
+
+        await closeTask;
+
+        // The wire carries the in-flight response's HEADERS + DATA ("drained")
+        // and a graceful GOAWAY(NO_ERROR); the response was not truncated.
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        bool sawResponseData = false;
+        bool sawGoAway = false;
+        foreach ((long frameType, byte[] framePayload) in frames)
+        {
+            if (frameType == 0 && Encoding.UTF8.GetString(framePayload) == "drained")
+            {
+                sawResponseData = true;
+            }
+
+            if (frameType == 7) // GOAWAY
+            {
+                sawGoAway = true;
+                uint errorCode = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(framePayload.AsSpan(4, 4));
+                errorCode.ShouldBe(0u); // NO_ERROR
+            }
+        }
+
+        sawResponseData.ShouldBeTrue();
+        sawGoAway.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should refuse a new stream after graceful close with RST_STREAM(REFUSED_STREAM)")]
+    public async Task Http2_OnNewStreamAfterGracefulClose_ShouldRefuseWithRstStream()
+    {
+        // RFC 9113 §6.8 — once graceful close has started, a HEADERS frame that
+        // opens a NEW stream is answered with RST_STREAM(REFUSED_STREAM) while
+        // the connection survives to finish draining the streams already
+        // accepted. The client may safely retry the refused request on a fresh
+        // connection (RFC §8.1.4). The input stays live (completeInput: false)
+        // so the frame pump — which deliberately keeps running through the
+        // drain window — processes a stream opened AFTER the close began.
+        byte[] first = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/one", "https", "api.test");
+        TestConnection connection = new(first, completeInput: false);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        Http2ConnectionContext http2Context = (Http2ConnectionContext)httpConnectionContext;
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        IHttpContext firstRequest = enumerator.Current;
+        firstRequest.Request.Path.Value.ShouldBe("/one");
+
+        // Start the graceful close (the _gracefulCloseStarted flag is set
+        // synchronously before the first await). Stream 1 is still in flight, so
+        // the drain holds the pump and output open — the connection stays alive
+        // to refuse new streams on the wire.
+        Task closeTask = http2Context.GracefulCloseAsync().AsTask();
+
+        // The peer now opens stream 3 — a NEW stream after graceful close began.
+        // The still-running pump must answer it with RST_STREAM(REFUSED_STREAM).
+        byte[] second = HttpProtocolPayloadFactory.CreateHttp2Request(3, "GET", "/two", "https", "api.test");
+        byte[] secondWithoutPreface = new byte[second.Length - 24];
+        Array.Copy(second, 24, secondWithoutPreface, 0, secondWithoutPreface.Length);
+        await connection.WriteInputAsync(secondWithoutPreface);
+
+        // Accumulate wire output until the refusal appears (each read blocks
+        // until the holder writes more; a partial trailing frame just means
+        // "keep reading"). Bound the wait so a missing refusal fails the test
+        // rather than hanging it.
+        List<byte> accumulated = new();
+        bool sawRefusedStream = false;
+        while (!sawRefusedStream)
+        {
+            Task<byte[]> readTask = connection.ReadOutputAsync();
+            Task completedTask = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(10)));
+            completedTask.ShouldBe(readTask); // expected RST_STREAM(REFUSED_STREAM) on the wire
+            accumulated.AddRange(await readTask);
+
+            try
+            {
+                foreach ((long frameType, byte[] framePayload) in HttpProtocolPayloadFactory.ParseHttp2Frames(accumulated.ToArray()))
+                {
+                    if (frameType == 3 // RST_STREAM
+                        && framePayload.Length == 4
+                        && System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(framePayload) == (uint)Http2ErrorCode.RefusedStream)
+                    {
+                        sawRefusedStream = true;
+                    }
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // A frame is split across reads; accumulate more bytes.
+            }
+        }
+
+        // The refusal happened while the close was still draining — the
+        // connection survived the refused stream to keep serving stream 1.
+        closeTask.IsCompleted.ShouldBeFalse();
+
+        // Answer stream 1 to release the drain and let the close finish.
+        firstRequest.Response.StatusCode = HttpStatusCode.Ok;
+        await httpConnectionContext.SendAsync(firstRequest);
+        await closeTask;
+
+        connection.CompleteInput();
+        sawRefusedStream.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should serialize concurrent SendAsync writes without frame interleaving")]
@@ -569,11 +739,11 @@ public class Http2TransportTests
     /// the wire then yields nothing — by contract a malformed peer must never
     /// crash the listener, so the enumerable completes without throwing.
     /// </summary>
-    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode)
+    private static async Task AssertGoAwayAsync(byte[] payload, Http2ErrorCode expectedErrorCode, Action<Http2ConnectionListenerOptions.Http2Limits>? configureLimits = null)
     {
         TestConnection connection = new(payload);
         HttpConnectionListenerOptions options = new();
-        options.UseHttp2(new TestConnectionListener(connection));
+        options.UseHttp2(new TestConnectionListener(connection), http2 => configureLimits?.Invoke(http2.Limits));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -1146,6 +1316,471 @@ public class Http2TransportTests
         Http2FlowControlWindow large = new(int.MaxValue - 5);
         large.TryAdjustInitialWindow(10).ShouldBeFalse();
         large.Available.ShouldBe((long)int.MaxValue - 5);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should advertise SETTINGS_NO_RFC7540_PRIORITIES = 1")]
+    public async Task Http2_OnConnect_ShouldAdvertiseNoRfc7540Priorities()
+    {
+        // RFC 9218 §2.1 — a server using the extensible-priorities scheme
+        // advertises SETTINGS_NO_RFC7540_PRIORITIES = 1 so peers do not fall back
+        // to the deprecated RFC 7540 stream-priority tree.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+
+        TestConnection connection = new(Combine(preface, settings));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+        }
+
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(await connection.ReadOutputAsync());
+        byte[]? settingsPayload = null;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 0x4 && payload.Length > 0)
+            {
+                settingsPayload = payload;
+                break;
+            }
+        }
+
+        settingsPayload.ShouldNotBeNull();
+        Dictionary<Http2TestSettings.Parameter, uint> serverSettings = Http2TestSettings.ReadSettings(settingsPayload!);
+        serverSettings.ContainsKey(Http2TestSettings.Parameter.NoRfc7540Priorities).ShouldBeTrue();
+        serverSettings[Http2TestSettings.Parameter.NoRfc7540Priorities].ShouldBe(1u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should apply a PRIORITY_UPDATE received before HEADERS to the stream")]
+    public async Task Http2_OnPriorityUpdateBeforeHeaders_ShouldApplyToStream()
+    {
+        // RFC 9218 §7.1 — a PRIORITY_UPDATE may arrive before the referenced
+        // request stream is opened; the signal is retained and applied when
+        // HEADERS opens the stream, and is observable on the yielded context.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "u=1, i"));
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, priorityUpdate, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(1, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should initialize stream priority from the Priority request header")]
+    public async Task Http2_OnPriorityHeader_ShouldInitializeStreamPriority()
+    {
+        // RFC 9218 §4 — an absent PRIORITY_UPDATE leaves the Priority header as the
+        // effective priority for the stream.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"),
+            ("priority", "u=6, i"));
+
+        TestConnection connection = new(Combine(preface, settings, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(6, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should let a later PRIORITY_UPDATE override the Priority header")]
+    public async Task Http2_OnPriorityUpdateAfterHeader_ShouldOverrideHeaderPriority()
+    {
+        // RFC 9218 §8 — a PRIORITY_UPDATE takes precedence over the Priority
+        // header for the same stream, regardless of arrival order.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"),
+            ("priority", "u=5"));
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "u=1, i"));
+
+        TestConnection connection = new(Combine(preface, settings, headers, priorityUpdate));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await using IAsyncEnumerator<IHttpContext> enumerator = httpConnectionContext.ReceiveAsync().GetAsyncEnumerator();
+        (await enumerator.MoveNextAsync()).ShouldBeTrue();
+        Http2Context http2Context = enumerator.Current.ShouldBeOfType<Http2Context>();
+
+        // The background frame pump processes frames independently of consumption,
+        // so the intermediate header-derived value (u=5) is not deterministically
+        // observable here. Drain the enumerable — the pump has then consumed the
+        // trailing PRIORITY_UPDATE, which must have overridden the header value.
+        // (The reverse pinning — a PRIORITY_UPDATE holding against a later header
+        // parse — is covered deterministically by OnPriorityUpdateBeforeHeaders.)
+        (await enumerator.MoveNextAsync()).ShouldBeFalse();
+        http2Context.Stream.EffectivePriority.ShouldBe(new HttpPriority(1, incremental: true));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject PRIORITY_UPDATE on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPriorityUpdateOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9218 §7.1 — PRIORITY_UPDATE MUST be sent on stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdateOnStream1 = Http2TestSettings.RawFrame(0x10, 0, 1, PriorityUpdatePayload(1, "u=1"));
+        await AssertGoAwayAsync(Combine(preface, settings, priorityUpdateOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject PRIORITY_UPDATE for an even prioritized stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPriorityUpdateForEvenStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9218 §7.1 — the Prioritized Stream ID must identify a stream the
+        // client can open: non-zero and odd. An even id is a connection error.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(2, "u=1"));
+        await AssertGoAwayAsync(Combine(preface, settings, priorityUpdate), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should ignore a PRIORITY_UPDATE with an unparseable field value")]
+    public async Task Http2_OnPriorityUpdateWithMalformedFieldValue_ShouldIgnoreWithoutError()
+    {
+        // RFC 9218 §7.1 — a Priority Field Value that cannot be parsed leaves the
+        // frame without effect (no stream or connection error); the connection
+        // keeps serving and the stream keeps its default priority.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] priorityUpdate = Http2TestSettings.RawFrame(0x10, 0, 0, PriorityUpdatePayload(1, "U=bad\""));
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, priorityUpdate, headers));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        Http2Context http2Context = httpContext.ShouldBeOfType<Http2Context>();
+        http2Context.Request.Path.Value.ShouldBe("/");
+        http2Context.Stream.EffectivePriority.ShouldBe(HttpPriority.Default);
+    }
+
+    /// <summary>
+    /// Builds an RFC 9218 §7.1 HTTP/2 PRIORITY_UPDATE frame payload: the 4-octet
+    /// Prioritized Stream ID (high bit reserved) followed by the ASCII Priority
+    /// Field Value.
+    /// </summary>
+    private static byte[] PriorityUpdatePayload(int prioritizedStreamId, string priorityFieldValue)
+    {
+        byte[] ascii = Encoding.ASCII.GetBytes(priorityFieldValue);
+        byte[] payload = new byte[4 + ascii.Length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(payload, (uint)prioritizedStreamId);
+        ascii.CopyTo(payload, 4);
+        return payload;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on rapid stream reset")]
+    public async Task Http2_OnRapidStreamReset_ShouldGoAwayEnhanceYourCalm()
+    {
+        // CVE-2023-44487 (HTTP/2 Rapid Reset) — a client that opens a stream and immediately
+        // resets it churns server work for near-zero cost. Once the create-then-reset count
+        // exceeds the per-window budget the connection is torn down with
+        // GOAWAY(ENHANCE_YOUR_CALM), mirroring Kestrel's escalation.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+
+        // Six create-then-reset cycles trip a limit of five (the sixth reset is the (max+1)-th
+        // event in the window). Each HEADERS carries END_HEADERS but NOT END_STREAM, so the
+        // stream opens (and its head dispatches) while the following RST_STREAM closes it.
+        for (int cycle = 0; cycle < 6; cycle++)
+        {
+            int streamId = 1 + (cycle * 2);
+            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4 /* END_HEADERS */, streamId, Array.Empty<byte>()));
+            parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 } /* CANCEL */));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxResetStreamsPerWindow = 5);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should tolerate stream resets up to the rapid-reset limit")]
+    public async Task Http2_OnStreamResetsWithinLimit_ShouldNotGoAwayEnhanceYourCalm()
+    {
+        // Legitimate cancellation (e.g. a client aborting a fetch) MUST NOT be penalised: resets
+        // at or below the per-window budget leave the connection alive. Exactly five resets with a
+        // limit of five stay under the (max+1) trip threshold.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+
+        for (int cycle = 0; cycle < 5; cycle++)
+        {
+            int streamId = 1 + (cycle * 2);
+            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4, streamId, Array.Empty<byte>()));
+            parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 }));
+        }
+
+        TestConnection connection = new(Combine(parts.ToArray()));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxResetStreamsPerWindow = 5);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        // The pump dispatches each opened head before its reset arrives; drain them all.
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+        }
+
+        // No ENHANCE_YOUR_CALM GOAWAY was emitted — the connection drained cleanly.
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 7 /* GOAWAY */ && payload.Length >= 8)
+            {
+                uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4, 4));
+                code.ShouldNotBe((uint)Http2ErrorCode.EnhanceYourCalm);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a CONTINUATION flood")]
+    public async Task Http2_OnContinuationFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // A HEADERS frame without END_HEADERS followed by an endless run of CONTINUATION frames
+        // grows the header-block buffer without bound. The accumulated raw bytes are capped at the
+        // advertised MAX_HEADER_LIST_SIZE; exceeding it is a connection-level ENHANCE_YOUR_CALM
+        // (trips before decode, so no oversized block is ever materialised).
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Leading HEADERS opens the block (no END_HEADERS), then one oversized CONTINUATION.
+        byte[] headers = Http2TestSettings.RawFrame(0x1, 0x0, 1, new byte[16]);
+        byte[] continuation = Http2TestSettings.RawFrame(0x9 /* CONTINUATION */, 0x0, 1, new byte[2048]);
+
+        await AssertGoAwayAsync(
+            Combine(preface, settings, headers, continuation),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxRequestHeaderListSize = 1024);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) when the decoded header list exceeds MAX_HEADER_LIST_SIZE")]
+    public async Task Http2_OnHeaderListSizeExceeded_ShouldGoAwayEnhanceYourCalm()
+    {
+        // RFC 9113 §10.5.1 — the decoded header list is bounded by the advertised
+        // MAX_HEADER_LIST_SIZE, counting name + value + 32 per field. This is enforced on the
+        // *decoded* size, independent of the raw-byte cap: two fully-indexed references to a
+        // static entry (content-length, index 28) are 2 octets on the wire but account for
+        // 2 × (14 + 0 + 32) = 92 octets of header list, tripping an 80-octet limit.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] amplified = { 0x9C, 0x9C }; // 0x80 | 28 — indexed 'content-length', twice
+        byte[] headers = Http2TestSettings.RawFrame(0x1, 0x4 | 0x1 /* END_HEADERS + END_STREAM */, 1, amplified);
+
+        await AssertGoAwayAsync(
+            Combine(preface, settings, headers),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxRequestHeaderListSize = 80);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept a request whose decoded header list is within MAX_HEADER_LIST_SIZE")]
+    public async Task Http2_OnHeaderListWithinLimit_ShouldYieldRequest()
+    {
+        // RFC 9113 §10.5.1 — a request whose decoded header list stays within the advertised
+        // MAX_HEADER_LIST_SIZE decodes normally. A standard GET's field list is 174 octets
+        // (:method+GET+32=42, :path+/+32=38, :scheme+https+32=44, :authority+api.test+32=50),
+        // comfortably under a 200-octet cap — the "just under succeeds" companion to the
+        // over-the-limit rejection above.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
+        TestConnection connection = new(payload);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxRequestHeaderListSize = 200);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
+
+        httpContext.Request.Path.Value.ShouldBe("/");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a SETTINGS flood")]
+    public async Task Http2_OnSettingsFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // A peer that streams SETTINGS frames forces repeated re-parsing and ACK emission. Beyond
+        // the per-window budget the connection is closed with ENHANCE_YOUR_CALM.
+        byte[] preface = Http2TestSettings.Preface();
+        List<byte[]> parts = new() { preface };
+        for (int i = 0; i < 5; i++)
+        {
+            parts.Add(Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>()));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxSettingsFramesPerWindow = 3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should GOAWAY(ENHANCE_YOUR_CALM) on a PING flood")]
+    public async Task Http2_OnPingFlood_ShouldGoAwayEnhanceYourCalm()
+    {
+        // Each inbound PING forces the server to emit a PING acknowledgement, so an unbounded PING
+        // stream is an amplification vector. Beyond the per-window budget → ENHANCE_YOUR_CALM.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        List<byte[]> parts = new() { preface, settings };
+        for (int i = 0; i < 5; i++)
+        {
+            parts.Add(Http2TestSettings.RawFrame(0x6 /* PING */, 0, 0, new byte[8]));
+        }
+
+        await AssertGoAwayAsync(
+            Combine(parts.ToArray()),
+            Http2ErrorCode.EnhanceYourCalm,
+            limits => limits.MaxPingFramesPerWindow = 3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a PING with a payload length other than 8 with FRAME_SIZE_ERROR")]
+    public async Task Http2_OnPingWrongPayloadLength_ShouldGoAwayFrameSizeError()
+    {
+        // RFC 9113 §6.7 — a PING frame MUST carry exactly 8 octets of opaque data; any other
+        // length is a connection-level FRAME_SIZE_ERROR.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] shortPing = Http2TestSettings.RawFrame(0x6, 0, 0, new byte[7]);
+        await AssertGoAwayAsync(Combine(preface, settings, shortPing), Http2ErrorCode.FrameSizeError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a PING on a non-zero stream with PROTOCOL_ERROR")]
+    public async Task Http2_OnPingOnNonZeroStream_ShouldGoAwayProtocolError()
+    {
+        // RFC 9113 §6.7 — PING is a connection-control frame and MUST use stream 0.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        byte[] pingOnStream1 = Http2TestSettings.RawFrame(0x6, 0, 1, new byte[8]);
+        await AssertGoAwayAsync(Combine(preface, settings, pingOnStream1), Http2ErrorCode.ProtocolError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should refuse a stream beyond MAX_CONCURRENT_STREAMS with REFUSED_STREAM")]
+    public async Task Http2_OnStreamBeyondConcurrencyLimit_ShouldEmitRefusedStream()
+    {
+        // RFC 9113 §5.1.2 — a stream opened beyond SETTINGS_MAX_CONCURRENT_STREAMS is refused with
+        // RST_STREAM(REFUSED_STREAM); the connection survives so the client can retry the refused
+        // stream elsewhere. With the concurrency cap set to one, an already-open stream 1 (HEADERS
+        // without END_STREAM keeps it active) makes a concurrent stream 3 exceed the cap.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
+        // Stream 1: END_HEADERS but NOT END_STREAM — stays open (in the active map) awaiting a body.
+        byte[] openStream = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4,
+            (":method", "POST"),
+            (":scheme", "https"),
+            (":path", "/upload"),
+            (":authority", "api.test"));
+        // Stream 3: a second concurrent stream that exceeds the cap of one.
+        byte[] refusedStream = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            3,
+            0x4 | 0x1,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+
+        TestConnection connection = new(Combine(preface, settings, openStream, refusedStream));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp2(new TestConnectionListener(connection), http2 => http2.Limits.MaxStreamsPerConnection = 1);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+
+        await foreach (IHttpContext _ in httpConnectionContext.ReceiveAsync())
+        {
+            // Stream 1's head dispatches (its body never completes); stream 3 is refused. The
+            // loop drains at end-of-input.
+        }
+
+        byte[] output = await connection.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+
+        bool foundRefusedStream = false;
+        foreach ((long frameType, byte[] payload) in frames)
+        {
+            if (frameType == 3 /* RST_STREAM */)
+            {
+                foundRefusedStream = true;
+                payload.Length.ShouldBe(4);
+                uint code = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload);
+                code.ShouldBe((uint)Http2ErrorCode.RefusedStream);
+            }
+        }
+
+        foundRefusedStream.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2SlidingWindowCounter should trip when the in-window count exceeds the maximum")]
+    public void Http2_SlidingWindowCounter_TripsWhenInWindowCountExceedsMaximum()
+    {
+        // The (max+1)-th event within the window trips; the events up to the maximum do not.
+        Http2SlidingWindowCounter counter = new(maxEventsPerWindow: 3, windowMilliseconds: 1000);
+
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 1
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 2
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // 3
+        counter.RecordAndCheckExceeded(100).ShouldBeTrue();  // 4 > 3
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Http2SlidingWindowCounter should evict events older than the window")]
+    public void Http2_SlidingWindowCounter_EvictsEventsOutsideWindow()
+    {
+        // Events that age out of the trailing window are evicted before the count is compared, so
+        // a slow trickle never trips even though the cumulative count exceeds the maximum.
+        Http2SlidingWindowCounter counter = new(maxEventsPerWindow: 3, windowMilliseconds: 1000);
+
+        counter.RecordAndCheckExceeded(0).ShouldBeFalse();   // {0}
+        counter.RecordAndCheckExceeded(100).ShouldBeFalse(); // {0,100}
+        counter.RecordAndCheckExceeded(200).ShouldBeFalse(); // {0,100,200}
+        // At t=1500 the cutoff is 500, so the first three events age out; only {1500} remains.
+        counter.RecordAndCheckExceeded(1500).ShouldBeFalse();
     }
 
     private static byte[] Combine(params byte[][] buffers)

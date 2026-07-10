@@ -69,4 +69,37 @@ public class HttpHeaderKeyTests
         pair.Key.Value.ShouldBe("Sec-WebSocket-Protocol");
         pair.Value.Value.ShouldBe("chat");
     }
+
+    [Theory(DisplayName = "Cohesion Test [Http] - HeaderKey: Should expose the forwarding header names")]
+    [InlineData("Forwarded")]
+    [InlineData("X-Forwarded-For")]
+    [InlineData("X-Forwarded-Host")]
+    [InlineData("X-Forwarded-Proto")]
+    public void ForwardingKeys_ShouldMapToCanonicalNames(string expected)
+    {
+        // Arrange
+        var keysByName = new Dictionary<string, HttpHeaderKey>
+        {
+            ["Forwarded"] = HttpHeaderKey.Forwarded,
+            ["X-Forwarded-For"] = HttpHeaderKey.XForwardedFor,
+            ["X-Forwarded-Host"] = HttpHeaderKey.XForwardedHost,
+            ["X-Forwarded-Proto"] = HttpHeaderKey.XForwardedProto,
+        };
+
+        // Act & Assert
+        keysByName[expected].Value.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HeaderKey: Should round-trip Forwarded through IHttpHeaderCollection")]
+    public void Forwarded_RoundTripThroughHeaderCollection_ShouldMatchCaseInsensitively()
+    {
+        // Arrange
+        IHttpHeaderCollection headers = new HttpHeaderCollection();
+        headers.Add(HttpHeaderKey.Forwarded, "for=192.0.2.43;proto=https");
+
+        // Act & Assert
+        headers.ContainsKey("forwarded").ShouldBeTrue();
+        headers.TryGetValue(HttpHeaderKey.Forwarded, out HttpHeaderValue value).ShouldBeTrue();
+        value.Value.ShouldBe("for=192.0.2.43;proto=https");
+    }
 }

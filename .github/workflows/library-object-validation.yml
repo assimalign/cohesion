@@ -2,9 +2,7 @@ name: ObjectValidation
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/ObjectValidation/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-object-validation.yml" # When Pipeline File Changes
 permissions:
   contents: read

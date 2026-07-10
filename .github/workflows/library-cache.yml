@@ -2,9 +2,7 @@ name: Cache
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/Cache/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-cache.yml" # When Pipeline File Changes
 permissions:
   contents: read

@@ -9,12 +9,21 @@ internal sealed class HPackDecoder
 {
     public const int DefaultHeaderTableSize = 4096;
 
-    private readonly int _maxDynamicTableSize;
-    private readonly HPackDynamicTable _dynamicTable;
+    /// <summary>
+    /// RFC 9113 §10.5.1 — each decoded field contributes its name length plus its value length plus
+    /// 32 octets of overhead to the header-list size accounting.
+    /// </summary>
+    private const int HeaderListFieldOverhead = 32;
 
-    public HPackDecoder(int maxDynamicTableSize = DefaultHeaderTableSize)
+    private readonly int _maxDynamicTableSize;
+    private readonly long _maxHeaderListSize;
+    private readonly HPackDynamicTable _dynamicTable;
+    private long _currentHeaderListSize;
+
+    public HPackDecoder(int maxDynamicTableSize = DefaultHeaderTableSize, long maxHeaderListSize = long.MaxValue)
     {
         _maxDynamicTableSize = maxDynamicTableSize;
+        _maxHeaderListSize = maxHeaderListSize;
         _dynamicTable = new HPackDynamicTable(maxDynamicTableSize);
     }
 
@@ -22,6 +31,11 @@ internal sealed class HPackDecoder
     {
         HPackDecodedHeaders decodedHeaders = new();
         int index = 0;
+
+        // RFC 9113 §10.5.1 — the header-list size is accounted per field section, so reset the
+        // running total for every decode. The dynamic-table state is intentionally connection-wide
+        // and is NOT reset here.
+        _currentHeaderListSize = 0;
 
         while (index < headerBlock.Length)
         {
@@ -31,7 +45,7 @@ internal sealed class HPackDecoder
             {
                 int headerIndex = DecodeInteger(headerBlock, ref index, 7);
                 ref readonly HPackHeaderField headerField = ref GetHeaderField(headerIndex);
-                decodedHeaders.Add(ToAsciiString(headerField.Name), ToAsciiString(headerField.Value));
+                AccountAndAdd(decodedHeaders, ToAsciiString(headerField.Name), ToAsciiString(headerField.Value));
                 continue;
             }
 
@@ -82,7 +96,7 @@ internal sealed class HPackDecoder
         byte[] valueBytesBuffer = DecodeStringBytes(headerBlock, ref index);
         ReadOnlySpan<byte> valueBytes = valueBytesBuffer;
         string value = ToAsciiString(valueBytes);
-        decodedHeaders.Add(name, value);
+        AccountAndAdd(decodedHeaders, name, value);
 
         if (!indexHeader)
         {
@@ -97,6 +111,24 @@ internal sealed class HPackDecoder
         {
             _dynamicTable.Insert(nameIndex == 0 ? nameBytesBuffer : GetHeaderField(nameIndex).Name, valueBytes);
         }
+    }
+
+    private void AccountAndAdd(HPackDecodedHeaders decodedHeaders, string name, string value)
+    {
+        // RFC 9113 §10.5.1 — bound the decoded header list by the advertised
+        // SETTINGS_MAX_HEADER_LIST_SIZE. Accounting each field as name + value + 32 octets and
+        // aborting the moment the running total exceeds the cap stops HPACK amplification (a small
+        // encoded block of indexed references that expands into a huge decoded list) before the
+        // large list is ever materialised.
+        _currentHeaderListSize += (long)name.Length + value.Length + HeaderListFieldOverhead;
+
+        if (_currentHeaderListSize > _maxHeaderListSize)
+        {
+            throw new HPackHeaderListSizeExceededException(
+                $"The decoded HTTP/2 header list exceeded the advertised SETTINGS_MAX_HEADER_LIST_SIZE of {_maxHeaderListSize} octets.");
+        }
+
+        decodedHeaders.Add(name, value);
     }
 
     private ref readonly HPackHeaderField GetHeaderField(int index)

@@ -69,4 +69,15 @@ public sealed class RouteParameterPolicyContext
     {
         return Values.TryGetValue(ParameterName, out value);
     }
+
+    /// <summary>
+    /// Replaces the current parameter's captured route value with <paramref name="value"/>. Typed
+    /// policies (see <see cref="TypedRouteParameterPolicy"/>) call this to surface a strongly-typed
+    /// value in place of the raw string once it has been parsed.
+    /// </summary>
+    /// <param name="value">The converted value to store for the current parameter.</param>
+    public void SetParameterValue(object? value)
+    {
+        Values[ParameterName] = value;
+    }
 }

@@ -1,8 +1,7 @@
 name: Content
 on:
   push:
-    paths: 
-      - '**/Directory.Build.props'                        # When the Global Props File Changes
+    paths:
       - 'libraries/Content/**'
       - '.github/workflows/library-content.yml'                 # When Pipeline File Changes
 
@@ -25,7 +24,7 @@ jobs:
 
       - uses: ./.github/actions/build
         name: "Running Build & Tests: ${{ matrix.projects }}"
-        with: 
+        with:
           area: 'libraries'
           category: 'Content'
           project: ${{ matrix.projects }}

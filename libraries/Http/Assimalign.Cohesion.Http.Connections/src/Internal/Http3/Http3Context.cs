@@ -23,4 +23,12 @@ internal sealed class Http3Context : TransportHttpContext
     /// back to its output.
     /// </summary>
     public IConnection StreamConnection { get; }
+
+    /// <summary>
+    /// The effective RFC 9218 priority derived from this request's <c>Priority</c>
+    /// header (urgency 3, non-incremental by default). HTTP/3 delegates cross-stream
+    /// response ordering to the QUIC transport, so this is observable engine state
+    /// rather than an input to an explicit scheduler (see docs/DESIGN.md).
+    /// </summary>
+    public HttpPriority EffectivePriority { get; set; } = HttpPriority.Default;
 }

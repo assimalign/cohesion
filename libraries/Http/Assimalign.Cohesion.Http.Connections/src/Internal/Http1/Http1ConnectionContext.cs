@@ -12,14 +12,21 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 
 internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
 {
-    private readonly HttpServerLimits _limits;
-    private readonly IHttpRequestInterceptor[] _interceptors;
+    // The monotonic clock the request-body / response data-rate enforcement measures against.
+    // TimeProvider.System in production; a plain field so a future test/composition seam can inject.
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
+    private readonly Http1ConnectionListenerOptions.Http1Limits _limits;
+    private readonly IHttpExchangeInterceptor[] _interceptors;
+    private readonly IHttpExchangeInterceptor[] _responseInterceptors;
+    private readonly string? _altSvcHeaderValue;
 
-    public Http1ConnectionContext(IConnection connection, bool isSecure, HttpServerLimits limits, IHttpRequestInterceptor[] interceptors)
+    public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _limits = limits;
         _interceptors = interceptors;
+        _responseInterceptors = responseInterceptors;
+        _altSvcHeaderValue = altSvcHeaderValue;
     }
 
     /// <summary>
@@ -50,40 +57,122 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 yield break;
             }
 
+            // Expose the raw chunked response body sink and the exchange control to registered
+            // response interceptors so feature packages (streaming / SSE, protocol upgrade / CONNECT
+            // tunnelling, interim responses) can wrap them and install typed response features —
+            // without this transport depending on any of those packages. Zero interceptors → buffered
+            // fast path. An HTTP/1.1 exchange owns its whole connection, so its control offers the
+            // full surface: interim (1xx) writes, the raw-stream takeover, and the exchange abort.
+            if (_responseInterceptors.Length > 0)
+            {
+                context.RunResponseInterceptors(
+                    _responseInterceptors,
+                    new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
+                    new Http1ExchangeControl(context, Stream));
+            }
+
             yield return context;
 
             if (!context.KeepAlive)
             {
                 yield break;
             }
+
+            // The body is streamed lazily and dispatched at head, so the application may have left
+            // part (or all) of the request body unread. Consume it before reading the next request
+            // so the connection realigns on the next request's framing; a drain that cannot complete
+            // cleanly (slow trickle, over-cap, malformed body, wire failure) means the connection can
+            // no longer be safely reused for keep-alive.
+            if (!await context.DrainRequestBodyAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield break;
+            }
         }
     }
 
-    public override ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         if (context is not Http1Context http1Context)
         {
             throw new InvalidOperationException("The supplied context does not belong to an HTTP/1.1 connection.");
         }
 
-        // NOTE: the suppress-response-on-upgrade behaviour previously gated by
-        // http1Context.ResponseFinalized is being moved to the
-        // Assimalign.Cohesion.Http.ProtocolUpgrade package and needs a transport
-        // <-> ProtocolUpgrade bridge to re-attach. Until that bridge lands, the
-        // transport always writes the response normally. CONNECT body framing is
-        // still honoured at request-parse time so request decoding stays correct.
-        return Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken);
+        // The connection was taken over (accepted protocol upgrade / CONNECT tunnel — the
+        // exchange's directive is TakeOver): the transition response went straight to the
+        // surrendered raw stream and the connection no longer speaks HTTP. Checked before the
+        // sink branch so a misused streaming feature can never finalize chunked framing into the
+        // tunnel (RFC 9110 §7.8 / §9.3.6).
+        if (http1Context.ResponseFinalized)
+        {
+            return;
+        }
+
+        // The exchange was aborted (IHttpExchangeControl.Abort / IHttpContext.Cancel — the
+        // directive is Abort). HTTP/1.1 has no per-exchange reset finer than the connection, so
+        // no response is written and the keep-alive loop ends after this exchange.
+        if (http1Context.CancelRequested)
+        {
+            http1Context.KeepAlive = false;
+            return;
+        }
+
+        // If a response feature streamed to the raw sink, the head and body are already on the
+        // wire (the BeforeResponseHead hooks fired at the sink's head commit, which also injected
+        // the Alt-Svc advertisement); finalize (emit the terminating zero-length chunk) rather
+        // than writing a second, buffered response.
+        if (http1Context.ResponseBodySink is { HasStarted: true } sink)
+        {
+            await sink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // The final response head is about to be committed on the buffered path — the last
+        // mutation point. Fire the BeforeResponseHead lifecycle hooks, then re-read the directive
+        // so a hook that aborted or took over the exchange is honored instead of writing the head.
+        await http1Context.InvokeBeforeResponseHeadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (http1Context.ResponseFinalized)
+        {
+            return;
+        }
+
+        if (http1Context.CancelRequested)
+        {
+            http1Context.KeepAlive = false;
+            return;
+        }
+
+        // A hook may itself have started the response through the raw sink (its head is then
+        // already on the wire) — finalize that response rather than writing a second one.
+        if (http1Context.ResponseBodySink is { HasStarted: true } hookStartedSink)
+        {
+            await hookStartedSink.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Advertise the HTTP/3 endpoint on this buffered response unless the application (or a
+        // lifecycle hook — they have all run by now) set its own Alt-Svc (RFC 7838 — the server
+        // never overwrites an application value).
+        HttpAltServiceInjector.Inject(http1Context.Response.Headers, _altSvcHeaderValue);
+
+        // Commit point: from here the final response is on the wire, so the exchange control's
+        // probes must report the response as started (no more interim writes or takeover).
+        http1Context.MarkFinalResponseStarted();
+        await Http1MessageWriter.WriteResponseAsync(Stream, http1Context, cancellationToken).ConfigureAwait(false);
+        await http1Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Attempts to read the next request from the wire. Returns
-    /// <see langword="null"/> for a clean end-of-stream (the peer closed
-    /// gracefully between requests), a wire-level failure (truncated line,
-    /// malformed header, socket error), a configured-limit rejection
-    /// (414 / 431 / 413, after emitting the status response), and a
-    /// read-timeout (idle keep-alive or slow-header Slowloris, after
-    /// emitting a 408 when mid-headers). The receive enumerable treats
-    /// them all the same way: the connection is done.
+    /// Attempts to read the next request head from the wire and dispatch it (its body is read
+    /// lazily). Returns <see langword="null"/> for a clean end-of-stream (the peer closed gracefully
+    /// between requests), a wire-level failure (truncated line, malformed header, malformed body
+    /// framing, socket error), a head-limit rejection (414 / 431, after emitting the status
+    /// response), and a read-timeout (idle keep-alive or slow-header Slowloris, after emitting a 408
+    /// when mid-headers). The receive enumerable treats them all the same way: the connection is
+    /// done. Body-size (413) and data-rate (408) violations surface after dispatch, on the streamed
+    /// body read.
     /// </summary>
     private async Task<Http1Context?> TryReadRequestAsync(CancellationToken cancellationToken)
     {
@@ -97,6 +186,7 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 GetScheme(),
                 _limits,
                 _interceptors,
+                _timeProvider,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);
 
@@ -104,9 +194,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
         }
         catch (Http1LimitExceededException rejection)
         {
-            // RFC 9110 §15.5 — a request that violates a configured limit gets the matching
-            // status response (414 / 431 / 413) before the connection is closed, rather than a
-            // silent drop, so a conformant client learns why.
+            // RFC 9110 §15.5 — a request whose head violates a configured limit gets the matching
+            // status response (414 / 431) before the connection is closed, rather than a silent
+            // drop, so a conformant client learns why. Body-size (413) and data-rate (408)
+            // violations surface after dispatch on the streamed body read, not here.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
             return null;
         }

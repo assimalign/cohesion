@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 public class Http1InterceptorTests
 {
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook should attach a feature visible on the dispatched context")]
-    public async Task OnRequestHead_ShouldAttachFeatureVisibleOnContext()
+    public async Task AfterRequestHead_ShouldAttachFeatureVisibleOnContext()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
@@ -36,39 +36,40 @@ public class Http1InterceptorTests
         feature!.ObservedHost.ShouldBe("api.test");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook lowering the cap should reject the body with 413")]
-    public async Task OnRequestHead_LoweringCap_ShouldRejectBodyWith413()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook lowering the cap should reject the body with 413 on the body read")]
+    public async Task AfterRequestHead_LoweringCap_ShouldRejectBodyWith413()
     {
         // The listener-wide default (~28.6 MB) would accept this 64-octet body; the hook lowers
-        // the per-request cap below it, so the transport must reject with 413.
+        // the per-request cap below it, so the streamed body read must reject with 413.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             $"POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 64\r\n\r\n{new string('x', 64)}");
         HttpConnectionListenerOptions options = new();
         options.Interceptors.Add(new CapSettingInterceptor(16));
 
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hook raising the cap should admit a body over the listener limit")]
-    public async Task OnRequestHead_RaisingCap_ShouldAdmitLargerBody()
+    public async Task AfterRequestHead_RaisingCap_ShouldAdmitLargerBody()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 2; // would reject the 5-octet body
         options.Interceptors.Add(new CapSettingInterceptor(1024));
 
-        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(
+            payload,
+            options,
+            http1 => http1.Limits.MaxRequestBodySize = 2); // would reject the 5-octet body
 
         using StreamReader reader = new(httpContext.Request.Body);
         (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Body hooks should wrap the request stream, last registered outermost")]
-    public async Task OnRequestBody_ShouldWrapStreamInRegistrationOrder()
+    public async Task AfterRequestBody_ShouldWrapStreamInRegistrationOrder()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
@@ -88,7 +89,7 @@ public class Http1InterceptorTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: A rejecting head hook should answer with its status and drop the connection")]
-    public async Task OnRequestHead_Rejecting_ShouldAnswerStatusAndDrop()
+    public async Task AfterRequestHead_Rejecting_ShouldAnswerStatusAndDrop()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET /forbidden HTTP/1.1\r\nHost: api.test\r\n\r\n");
@@ -102,25 +103,57 @@ public class Http1InterceptorTests
         response.ShouldContain("Connection: close", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: The body-size knob should freeze once the body is consumed")]
-    public async Task Knob_ShouldFreezeAfterHeadHooks()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: The body-size knob should stay writable until the body is read, then freeze")]
+    public async Task Knob_ShouldRemainWritableUntilBodyRead()
     {
+        // #810: the request is dispatched at head with a streamed body, so the per-request cap can be
+        // adjusted (by an endpoint / middleware) after dispatch — right up until the body is read,
+        // at which point it freezes.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
         HttpConnectionListenerOptions options = new();
         ContextCapturingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
 
-        await ReceiveFirstContextAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
 
         interceptor.Captured.ShouldNotBeNull();
         interceptor.WasWritableDuringHeadHook.ShouldBeTrue();
-        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
+
+        // Dispatched at head, body not yet read: still writable, so a post-dispatch adjustment sticks.
+        interceptor.Captured!.IsMaxRequestBodySizeReadOnly.ShouldBeFalse();
+        interceptor.Captured.MaxRequestBodySize = 1024;
+
+        // Reading the body starts consuming it, freezing the knob.
+        await ReadBodyToEndAsync(httpContext.Request.Body);
+
+        interceptor.Captured.IsMaxRequestBodySizeReadOnly.ShouldBeTrue();
         Should.Throw<InvalidOperationException>(() => interceptor.Captured.MaxRequestBodySize = 1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: A post-dispatch cap lowered before the body is read should be enforced")]
+    public async Task PostDispatchCapLowering_ShouldBeEnforcedOnBodyRead()
+    {
+        // #810: an endpoint / middleware lowers the per-request cap after dispatch, before reading the
+        // body. The transport enforces whatever the cap is when the body read begins — here 4 octets,
+        // below the 5-octet body — so the read is rejected with 413.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 5\r\n\r\nhello");
+        HttpConnectionListenerOptions options = new();
+        ContextCapturingInterceptor interceptor = new();
+        options.Interceptors.Add(interceptor);
+
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options);
+
+        // Stand in for middleware running after dispatch and before the body is read.
+        interceptor.Captured.ShouldNotBeNull();
+        interceptor.Captured!.MaxRequestBodySize = 4;
+
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Head hooks should observe read-only headers")]
-    public async Task OnRequestHead_Headers_ShouldBeReadOnly()
+    public async Task AfterRequestHead_Headers_ShouldBeReadOnly()
     {
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "GET / HTTP/1.1\r\nHost: api.test\r\nContent-Type: text/plain\r\n\r\n");
@@ -166,23 +199,24 @@ public class Http1InterceptorTests
         interceptor.BodyInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Hook-attached disposable features should be disposed when the request is rejected pre-dispatch")]
-    public async Task LimitRejection_ShouldDisposeHookAttachedFeatures()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Interceptors: Hook-attached disposable features should be disposed with the exchange after a body-read rejection")]
+    public async Task HookAttachedFeature_ShouldBeDisposedOnExchangeDispose()
     {
-        // The head hook attaches a disposable feature, then the oversized Content-Length
-        // declaration is rejected (413) before any context exists. The parser must honor the
-        // disposal contract itself — the feature must not leak.
+        // The head hook attaches a disposable feature; the oversized Content-Length body is rejected
+        // (413) on the streamed read, after dispatch. The exchange now owns the disposal walk, so
+        // disposing it disposes the hook-attached feature — it must not leak.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
             "POST /upload HTTP/1.1\r\nHost: api.test\r\nContent-Length: 4096\r\n\r\n");
         HttpConnectionListenerOptions options = new();
-        options.Limits.MaxRequestBodySize = 16;
         DisposableFeatureAttachingInterceptor interceptor = new();
         options.Interceptors.Add(interceptor);
 
-        (bool yielded, string response) = await DriveAsync(payload, options);
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload, options, http1 => http1.Limits.MaxRequestBodySize = 16);
 
-        yielded.ShouldBeFalse();
-        response.ShouldContain("413", Case.Sensitive);
+        await Should.ThrowAsync<IOException>(async () => await ReadBodyToEndAsync(httpContext.Request.Body));
+
+        await httpContext.DisposeAsync();
+
         interceptor.Feature.ShouldNotBeNull();
         interceptor.Feature!.DisposeCount.ShouldBe(1);
     }
@@ -235,10 +269,10 @@ public class Http1InterceptorTests
 
     // ------------------------------------------------------------------ helpers
 
-    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task<IHttpContext> ReceiveFirstContextAsync(byte[] payload, HttpConnectionListenerOptions options, Action<Http1ConnectionListenerOptions>? configure = null)
     {
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -252,10 +286,18 @@ public class Http1InterceptorTests
         return enumerator.Current;
     }
 
-    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options)
+    private static async Task ReadBodyToEndAsync(Stream body)
+    {
+        byte[] buffer = new byte[8192];
+        while (await body.ReadAsync(buffer) > 0)
+        {
+        }
+    }
+
+    private static async Task<(bool Yielded, string Response)> DriveAsync(byte[] payload, HttpConnectionListenerOptions options, Action<Http1ConnectionListenerOptions>? configure = null)
     {
         TestConnection connection = new(payload);
-        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp1(new TestConnectionListener(connection), configure ?? (static _ => { }));
 
         await using HttpConnectionListener listener = new(options);
         IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
@@ -279,15 +321,15 @@ public class Http1InterceptorTests
         public string? ObservedHost { get; init; }
     }
 
-    private sealed class FeatureAttachingInterceptor : IHttpRequestInterceptor
+    private sealed class FeatureAttachingInterceptor : HttpExchangeInterceptor
     {
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.Features.Set(new TestFeature { ObservedHost = context.Host.Value });
         }
     }
 
-    private sealed class CapSettingInterceptor : IHttpRequestInterceptor
+    private sealed class CapSettingInterceptor : HttpExchangeInterceptor
     {
         private readonly long? _cap;
 
@@ -296,13 +338,13 @@ public class Http1InterceptorTests
             _cap = cap;
         }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             context.MaxRequestBodySize = _cap;
         }
     }
 
-    private sealed class WrappingInterceptor : IHttpRequestInterceptor
+    private sealed class WrappingInterceptor : HttpExchangeInterceptor
     {
         private readonly string _tag;
 
@@ -313,7 +355,7 @@ public class Http1InterceptorTests
 
         public TaggedStream? Created { get; private set; }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             Created = new TaggedStream(body, _tag);
             return Created;
@@ -332,18 +374,18 @@ public class Http1InterceptorTests
         }
     }
 
-    private sealed class DisposableFeatureAttachingInterceptor : IHttpRequestInterceptor
+    private sealed class DisposableFeatureAttachingInterceptor : HttpExchangeInterceptor
     {
         public DisposableTestFeature? Feature { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Feature = new DisposableTestFeature();
             context.Features.Set(Feature);
         }
     }
 
-    private sealed class BodyRejectingInterceptor : IHttpRequestInterceptor
+    private sealed class BodyRejectingInterceptor : HttpExchangeInterceptor
     {
         private readonly HttpStatusCode _statusCode;
 
@@ -352,13 +394,13 @@ public class Http1InterceptorTests
             _statusCode = statusCode;
         }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
     }
 
-    private sealed class RejectingInterceptor : IHttpRequestInterceptor
+    private sealed class RejectingInterceptor : HttpExchangeInterceptor
     {
         private readonly HttpStatusCode _statusCode;
 
@@ -367,26 +409,26 @@ public class Http1InterceptorTests
             _statusCode = statusCode;
         }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             throw new HttpRequestRejectedException(_statusCode);
         }
     }
 
-    private sealed class ContextCapturingInterceptor : IHttpRequestInterceptor
+    private sealed class ContextCapturingInterceptor : HttpExchangeInterceptor
     {
-        public HttpRequestInterceptorContext? Captured { get; private set; }
+        public HttpExchangeInterceptorRequestContext? Captured { get; private set; }
 
         public bool WasWritableDuringHeadHook { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             Captured = context;
             WasWritableDuringHeadHook = !context.IsMaxRequestBodySizeReadOnly;
         }
     }
 
-    private sealed class HeaderProbingInterceptor : IHttpRequestInterceptor
+    private sealed class HeaderProbingInterceptor : HttpExchangeInterceptor
     {
         public bool HeadersWereReadOnly { get; private set; }
 
@@ -394,7 +436,7 @@ public class Http1InterceptorTests
 
         public string? ObservedContentType { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadersWereReadOnly = context.Headers.IsReadOnly;
             ObservedContentType = context.Headers[HttpHeaderKey.ContentType].Value;
@@ -410,18 +452,18 @@ public class Http1InterceptorTests
         }
     }
 
-    private sealed class InvocationRecordingInterceptor : IHttpRequestInterceptor
+    private sealed class InvocationRecordingInterceptor : HttpExchangeInterceptor
     {
         public int HeadInvocations { get; private set; }
 
         public int BodyInvocations { get; private set; }
 
-        public void OnRequestHead(HttpRequestInterceptorContext context)
+        public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
         {
             HeadInvocations++;
         }
 
-        public Stream OnRequestBody(HttpRequestInterceptorContext context, Stream body)
+        public override Stream AfterRequestBody(HttpExchangeInterceptorRequestContext context, Stream body)
         {
             BodyInvocations++;
             return body;

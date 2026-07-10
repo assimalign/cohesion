@@ -1,6 +1,6 @@
 # Overview
 
-Repository-level documentation for the Cohesion mono repository. Coding standards and agent rules live in [`AGENTS.md`](../AGENTS.md) at the repo root.
+Repository-level documentation for the Cohesion mono repository. Coding standards and agent rules live in [`.claude/rules/`](../.claude/rules/) (auto-loaded by Claude Code; entry point [`.claude/CLAUDE.md`](../.claude/CLAUDE.md)).
 
 **Go To**
 

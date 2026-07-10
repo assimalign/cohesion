@@ -2,9 +2,7 @@ name: DependencyInjection
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "libraries/DependencyInjection/**"
-      - ".github/actions/build/**" # When Shared Build Action Changes
       - ".github/workflows/library-DependencyInjection.yml" # When Pipeline File Changes
 permissions:
   contents: read

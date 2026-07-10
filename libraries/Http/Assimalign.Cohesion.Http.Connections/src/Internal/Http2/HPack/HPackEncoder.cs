@@ -17,6 +17,21 @@ internal static partial class HPackEncoder
             headers[HttpHeaderKey.ContentLength] = bodyLength.ToString(CultureInfo.InvariantCulture);
         }
 
+        return EncodeResponseHeaders(statusCode, headers);
+    }
+
+    /// <summary>
+    /// Encodes the response field section for an <em>incrementally streamed</em>
+    /// response: the <c>:status</c> pseudo-header followed by the supplied headers
+    /// verbatim, with <b>no</b> <c>Content-Length</c> synthesized. A streaming
+    /// response has no known body length up front — HTTP/2 delimits the body with
+    /// <c>END_STREAM</c> — so injecting a length here would be wrong.
+    /// </summary>
+    /// <param name="statusCode">The response status code.</param>
+    /// <param name="headers">The response headers to emit as-is.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
+    {
         using MemoryStream buffer = new();
         WriteStatusHeader(buffer, (int)statusCode);
 
@@ -38,6 +53,38 @@ internal static partial class HPackEncoder
             else
             {
                 WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), header.Value.Value);
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
+    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). The resulting
+    /// HEADERS frame is written without <c>END_STREAM</c> so the final response can follow on the same
+    /// stream (RFC 9113 §8.1).
+    /// </summary>
+    /// <param name="statusCode">The interim status code (validated by the caller to be 1xx, not 101).</param>
+    /// <param name="headers">The interim response fields, or <see langword="null"/> for none.</param>
+    /// <returns>The HPACK-encoded field section.</returns>
+    public static byte[] EncodeInterimResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection? headers)
+    {
+        using MemoryStream buffer = new();
+        WriteStatusHeader(buffer, (int)statusCode);
+
+        if (headers is not null)
+        {
+            foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
+            {
+                foreach (string? value in header.Value)
+                {
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        WriteHeader(buffer, header.Key.Value.ToLowerInvariant(), value);
+                    }
+                }
             }
         }
 
@@ -195,39 +242,54 @@ internal static partial class HPackEncoder
             return false;
         }
 
-        destination[0] = 0;
-        int encodedStringLength = valueEncoding is null || ReferenceEquals(valueEncoding, Encoding.Latin1)
-            ? value.Length
-            : valueEncoding.GetByteCount(value);
+        byte[] octets;
 
-        if (!IntegerEncoder.Encode(encodedStringLength, 7, destination, out int integerLength))
+        if (valueEncoding is null || ReferenceEquals(valueEncoding, Encoding.Latin1))
         {
-            bytesWritten = 0;
-            return false;
-        }
+            octets = new byte[value.Length];
 
-        destination = destination.Slice(integerLength);
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = value[index];
 
-        if (encodedStringLength > destination.Length)
-        {
-            bytesWritten = 0;
-            return false;
-        }
+                // The null-encoding path preserves the historical ASCII-only
+                // guard; Latin1 accepts the full 0-255 octet range.
+                if (valueEncoding is null && (character & 0xFF80) != 0)
+                {
+                    throw new InvalidOperationException("Only ASCII HPACK literals are currently supported.");
+                }
 
-        if (valueEncoding is null)
-        {
-            EncodeValueStringPart(value, destination);
+                octets[index] = (byte)character;
+            }
         }
         else
         {
-            valueEncoding.GetBytes(value, destination);
+            octets = valueEncoding.GetBytes(value);
         }
 
-        bytesWritten = integerLength + encodedStringLength;
-        return true;
+        return EncodeStringLiteralShortest(octets, destination, out bytesWritten);
     }
 
     private static bool EncodeLiteralHeaderName(string value, Span<byte> destination, out int bytesWritten)
+    {
+        byte[] octets = new byte[value.Length];
+
+        for (int index = 0; index < value.Length; index++)
+        {
+            char character = value[index];
+            octets[index] = (byte)((uint)(character - 'A') <= ('Z' - 'A') ? character | 0x20 : character);
+        }
+
+        return EncodeStringLiteralShortest(octets, destination, out bytesWritten);
+    }
+
+    /// <summary>
+    /// Writes an HPACK string literal (RFC 7541 §5.2) choosing the shorter of
+    /// the raw and Huffman (RFC 7541 Appendix B) forms. The Huffman flag (H) is
+    /// set only when the Huffman encoding is strictly shorter than the raw
+    /// octets; both forms decode through <see cref="HPackHuffmanDecoder"/>.
+    /// </summary>
+    private static bool EncodeStringLiteralShortest(ReadOnlySpan<byte> octets, Span<byte> destination, out int bytesWritten)
     {
         if (destination.IsEmpty)
         {
@@ -235,45 +297,50 @@ internal static partial class HPackEncoder
             return false;
         }
 
-        destination[0] = 0;
+        int huffmanLength = HPackHuffmanEncoder.GetEncodedLength(octets);
 
-        if (!IntegerEncoder.Encode(value.Length, 7, destination, out int integerLength))
+        if (huffmanLength < octets.Length)
         {
-            bytesWritten = 0;
-            return false;
-        }
+            destination[0] = 0x80; // H = 1
 
-        destination = destination.Slice(integerLength);
-
-        if (value.Length > destination.Length)
-        {
-            bytesWritten = 0;
-            return false;
-        }
-
-        for (int index = 0; index < value.Length; index++)
-        {
-            char character = value[index];
-            destination[index] = (byte)((uint)(character - 'A') <= ('Z' - 'A') ? character | 0x20 : character);
-        }
-
-        bytesWritten = integerLength + value.Length;
-        return true;
-    }
-
-    private static void EncodeValueStringPart(string value, Span<byte> destination)
-    {
-        for (int index = 0; index < value.Length; index++)
-        {
-            char character = value[index];
-
-            if ((character & 0xFF80) != 0)
+            if (!IntegerEncoder.Encode(huffmanLength, 7, destination, out int prefixLength))
             {
-                throw new InvalidOperationException("Only ASCII HPACK literals are currently supported.");
+                bytesWritten = 0;
+                return false;
             }
 
-            destination[index] = (byte)character;
+            Span<byte> tail = destination.Slice(prefixLength);
+
+            if (huffmanLength > tail.Length)
+            {
+                bytesWritten = 0;
+                return false;
+            }
+
+            HPackHuffmanEncoder.Encode(octets, tail);
+            bytesWritten = prefixLength + huffmanLength;
+            return true;
         }
+
+        destination[0] = 0; // H = 0
+
+        if (!IntegerEncoder.Encode(octets.Length, 7, destination, out int rawPrefixLength))
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        Span<byte> rawTail = destination.Slice(rawPrefixLength);
+
+        if (octets.Length > rawTail.Length)
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        octets.CopyTo(rawTail);
+        bytesWritten = rawPrefixLength + octets.Length;
+        return true;
     }
 
     private static void WriteStatusHeader(Stream stream, int statusCode)

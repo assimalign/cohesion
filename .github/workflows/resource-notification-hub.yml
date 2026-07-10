@@ -2,7 +2,6 @@ name: Notification Hub
 on:
   push:
     paths:
-      - "**/Directory.Build.props" # When the Global Props File Changes
       - "resources/NotificationHub/**"
       - ".github/workflows/resource-notification-hub.yml" # When Pipeline File Changes
 

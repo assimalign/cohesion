@@ -11,5 +11,10 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<!-- Test-only: the HTTP/1.1-over-Unix-domain-socket end-to-end test composes the driver listener
+		     with UseHttp1. The driver itself depends only on the Connections contracts (Lane C guardrail);
+		     these Http references are confined to the test project. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 	</ItemGroup>
 </Project>

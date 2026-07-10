@@ -79,6 +79,32 @@ public class HttpConnectionListenerOptionsTests
         Should.Throw<ArgumentNullException>(() => options.UseHttp3((Func<IMultiplexedConnectionListener>)null!));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp3 should reject a null configure callback")]
+    public void UseHttp3_OnNullConfigure_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+        TestMultiplexedConnectionListener listener = new();
+
+        // Act + Assert
+        Should.Throw<ArgumentNullException>(() => options.UseHttp3(listener, null!));
+        Should.Throw<ArgumentNullException>(() => options.UseHttp3(() => listener, null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp3 with configure should register the HTTP/3 protocol")]
+    public async System.Threading.Tasks.Task UseHttp3_WithConfigure_ShouldRegisterHttp3()
+    {
+        // Arrange
+        HttpConnectionListenerOptions options = new();
+
+        // Act
+        options.UseHttp3(new TestMultiplexedConnectionListener(), static o => o.QPack.MaxTableCapacity = 4096);
+
+        // Assert — the registration builds a listener with the HTTP/3 protocol.
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http30);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListenerOptions: UseHttp1 should reject a datagram-delivery listener")]
     public void UseHttp1_OnDatagramDeliveryListener_ShouldThrowArgumentException()
     {
