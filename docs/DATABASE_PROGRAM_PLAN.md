@@ -15,7 +15,7 @@ The safe unit of work is **one GitHub issue = one session = one branch = one PR*
 **The session protocol (every session follows this):**
 
 1. **Pick an issue that is unblocked.** An issue is workable only if every entry in its *Blocked by* column (§4) is merged. Never start a blocked issue — its prerequisites define types/seams you would otherwise invent and later fight.
-2. **Read four things before coding:** (a) the issue body and acceptance criteria; (b) this plan's row for the issue and the lane guardrails in §3; (c) `resources/Database/DESIGN.md` (the architecture) plus the touched project's `docs/DESIGN.md`; (d) `AGENTS.md`. Invoke the `cohesion-coding-rules` skill at the start.
+2. **Read four things before coding:** (a) the issue body and acceptance criteria; (b) this plan's row for the issue and the lane guardrails in §3; (c) `resources/Database/DESIGN.md` (the architecture) plus the touched project's `docs/DESIGN.md`; (d) the repo coding rules (`.claude/rules/`, auto-loaded in Claude sessions).
 3. **Branch:** `feature/<wbs>-<slug>` naming the issue's WBS (e.g. `feature/L03.02.01.03-mvcc-substrate`). The `cohesion-work-items` skill infers scope-creep placement from this branch.
 4. **Implement to the acceptance criteria.** File out-of-scope discoveries with the `cohesion-work-items` skill (don't expand the current issue) and call them out in the PR description so the orchestrator can slot them into §4.
 5. **Open a PR** with one `Closes #NNNN` per line (use `New-CohesionWorkItem.ps1 -EmitClosesBlock` from the same worktree).
@@ -30,8 +30,8 @@ Work GitHub issue #NNNN in assimalign/cohesion.
 
 Before coding, read docs/DATABASE_PROGRAM_PLAN.md — follow the Session Protocol in §1,
 confirm the issue is unblocked per §4, and honor the lane guardrails in §3. Read
-resources/Database/DESIGN.md for the architecture. Invoke the cohesion-coding-rules
-skill. Branch, implement to the issue's acceptance criteria, and open a PR that closes it.
+resources/Database/DESIGN.md for the architecture and follow the repo coding
+rules (.claude/rules). Branch, implement to the issue's acceptance criteria, and open a PR that closes it.
 
 If the issue is blocked per §4, stop and tell me which prerequisite is outstanding.
 ```
@@ -71,7 +71,7 @@ A stage is a gate, not a calendar. Everything in a stage may proceed once the pr
 | **H — Hosting & ops** | host, governance, health, orchestration | `Database.Hosting`, `Database.Governance`, `Database.ApplicationModel` | WAL flush / page writer = `DedicatedThreadService`; endpoint = `BackgroundService` (Hosting DESIGN.md menu). `*.Hosting` is the ONLY DI/Config/Logging seam. The manifest project never references the runtime. |
 | **D — Developer tooling** | SDK build tasks, migrations | `sdks/Assimalign.Cohesion.Sdk.Database` | Build-time work in MSBuild tasks; transactional apply in the engine catalog. Static per-model imports — no runtime plugin loading. |
 
-Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; update the touched project's `docs/DESIGN.md` in the same change. `AGENTS.md` is canonical.
+Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; update the touched project's `docs/DESIGN.md` in the same change. The rules in `.claude/rules/` are canonical.
 
 ---
 

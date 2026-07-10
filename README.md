@@ -13,7 +13,7 @@ Cohesion is a code-first, multi-service application framework for .NET. It provi
 # Sdk
 ![SDK](https://github.com/assimalign/cohesion/actions/workflows/framework.yml/badge.svg?branch=main)
 
-Cohesion ships as a family of MSBuild SDKs (`Assimalign.Cohesion.Sdk`, `Assimalign.Cohesion.Sdk.<Domain>`) paired with NuGet-distributed shared frameworks (`Assimalign.Cohesion.App[.<Domain>]`), modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App`. A consumer project picks the SDK for its domain and automatically receives every Cohesion library that belongs to the matching framework — no installer required. See [sdks/README.md](sdks/README.md) for consumption details and [AGENTS.md](AGENTS.md) for the full architecture.
+Cohesion ships as a family of MSBuild SDKs (`Assimalign.Cohesion.Sdk`, `Assimalign.Cohesion.Sdk.<Domain>`) paired with NuGet-distributed shared frameworks (`Assimalign.Cohesion.App[.<Domain>]`), modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App`. A consumer project picks the SDK for its domain and automatically receives every Cohesion library that belongs to the matching framework — no installer required. See [sdks/README.md](sdks/README.md) for consumption details and [.claude/rules/build-system.md](.claude/rules/build-system.md) for the full architecture.
 
 ## Libraries
 ![amqp](https://github.com/assimalign/cohesion/actions/workflows/library-amqp.yml/badge.svg?branch=main)

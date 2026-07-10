@@ -26,7 +26,7 @@ builder.AddDatabase(options =>
 ```
 
 The resource consumes this package as a **private implementation detail**, exactly the
-`Database`-privately-uses-`Web` pattern in `AGENTS.md`:
+`Database`-privately-uses-`Web` cross-resource pattern (`.claude/rules/build-system.md`):
 
 - `CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Health"` in the resource
   csproj — compiled against + CopyLocal'd, but **not** a `<dependency>` in the resource's

@@ -15,7 +15,7 @@ The safe unit of work is **one GitHub issue = one session = one branch = one PR*
 **The session protocol (every session follows this):**
 
 1. **Pick an issue that is unblocked.** An issue is workable only if every entry in its *Blocked by* column (§4) is merged. Never start a blocked issue — its prerequisites define types/seams you would otherwise invent and later fight.
-2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) `AGENTS.md` + the area's `docs/DESIGN.md`. Invoke the `cohesion-coding-rules` skill at the start.
+2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) the repo coding rules (`.claude/rules/`, auto-loaded in Claude sessions) + the area's `docs/DESIGN.md`.
 3. **Branch:** `feature/<wbs>-<slug>` naming the issue's WBS (e.g. `feature/L03.01.01.05-problem-details`). The `cohesion-work-items` skill infers scope-creep placement from this branch.
 4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and call it out in your PR description so the orchestrator can slot it into §4.
 5. **Open a PR** with the `Closes #NNNN` block (use `New-CohesionWorkItem.ps1 -EmitClosesBlock` from the same worktree). Close the parent feature manually only when all its children are done.
@@ -34,8 +34,9 @@ Work GitHub issue #NNNN in assimalign/cohesion.
 
 Before coding, read docs/HTTP_WEB_PROGRAM_PLAN.md — follow the Session Protocol
 in §1, confirm the issue is unblocked per §4, and honor the lane guardrails in §3.
-Invoke the cohesion-coding-rules skill. Branch, implement to the issue's acceptance
-criteria, open a PR that closes it, and update the Progress Log (§5) in the same PR.
+Follow the repo coding rules (auto-loaded from .claude/rules). Branch, implement to the
+issue's acceptance criteria, and open a PR that closes it. Do not edit the plan file —
+the orchestrator reconciles the §5 Progress Log from merged PRs.
 
 Do not start any work its "Blocked by" prerequisites haven't merged; if it's blocked,
 stop and tell me which prerequisite is outstanding.
@@ -81,7 +82,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **E — Web middleware** | request-pipeline features | `resources/Web/Assimalign.Cohesion.Web.*` feature projects | Each is a thin feature project consuming a Stage-1 primitive + the pipeline. Extensibility via `IHttpFeatureCollection` typed features, not request-time service location. All gate on #762. |
 | **F — Routing & API surface** | endpoints, binding, results | `...Web.Routing`, `...Web.Api`, `...Web.Functions`, `...Web.Results`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. |
 
-Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. `AGENTS.md` is canonical; the `cohesion-coding-rules` skill re-anchors it.
+Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. The path-scoped rules in `.claude/rules/` are canonical and auto-load in Claude sessions.
 
 ---
 
@@ -210,6 +211,6 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 ## 6. Fast reference
 
 - **Epics:** Http `#314` (L01.01.11) · Net/Connections `#324` (L01.01.14) · Security `#325` (L01.01.18) · Hosting `#313` (L01.01.10) · Web Platform `#6` → Runtime/Pipeline `#24`/`#25`/`#26`, API/Tooling `#27`, Routing `#28`, Security/Browser `#2`/`#3`/`#30`.
-- **Skills:** `cohesion-coding-rules` (start of every session) · `cohesion-work-items` (file scope-creep, emit PR close blocks).
-- **Canonical rules:** `AGENTS.md` (repo root). **Roadmap context:** `docs/DELIVERY_ROADMAP.md`.
+- **Skills/rules:** coding rules auto-load from `.claude/rules/` · `cohesion-work-items` skill (file scope-creep, emit PR close blocks).
+- **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/DELIVERY_ROADMAP.md`.
 - **This program's north star:** assemble the Web resource by wiring the `libraries/Http` stack into `resources/Web`; once assembled, the next major effort is pulling the new ApplicationModel design together (`libraries/ApplicationModel/DESIGN.md`).

@@ -1,6 +1,12 @@
+---
+paths:
+  - "**/*.cs"
+  - "**/*.csproj"
+---
+
 # General Rules
 
-Full required/forbidden patterns from `AGENTS.md`, reorganized for fast lookup.
+Required/forbidden C# patterns for this repo. The files in `.claude/rules/` are the canonical coding standard.
 
 ## Required patterns
 
@@ -28,6 +34,7 @@ Version goes in `build/Targets/Build.References.Packages.targets` first.
 
 ### Target framework
 - Libraries target `net10.0` — but the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`, so per-project overrides are normally not needed.
+- Sanctioned exception: `analyzers/` projects (Roslyn analyzers/codefixes/generators) target `netstandard2.0` with `IsAotCompatible=false` via `analyzers/Directory.Build.props`, because Roslyn components load inside the compiler.
 
 ### Preview language features
 ```xml
@@ -41,10 +48,11 @@ These are also centrally managed. Don't duplicate per project unless the project
 ### Markdown files use UPPERCASE
 - ✅ `README.md`, `CONTRIBUTING.md`, `LICENSE`
 - ❌ `readme.md`, `contributing.md`
-- Exception: API reference files under `docs/Assembly/` mirror namespace and type names directly (e.g., `docs/Assembly/System.IO/Glob.md`).
+- Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`).
+- API reference needs no exception: **folders** under `docs/Assembly/` mirror CLR namespace/type names, and each type's page is `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md`.
 
 ### Direct throws or .NET 10 extension type methods, not `ThrowHelper`
-- Use direct `throw` statements when the logic is local.
+- Use direct `throw` statements or framework guard APIs (e.g., `ArgumentNullException.ThrowIfNull`) when the logic is local.
 - If reusable throw behavior is needed, implement as a .NET 10 extension type method in `Extensions/`.
 
 ### `.NET 10 extension(...)` syntax for extension members
@@ -214,6 +222,36 @@ namespace Assimalign.Cohesion.Database;
    ```
 3. **Extension containers:** always `public static`, with members inside `extension(...)`.
 4. **Nested types:** match outer type visibility unless explicitly different.
+5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
+
+## Interface-first with a guided abstract base
+
+Public APIs stay interface-first — the interface is the contract consumers depend on. Where implementers benefit from guidance, also ship a **public `abstract` base class that explicitly implements the interface** and forwards each member to a strongly-typed `abstract`/`virtual` member:
+
+```csharp
+public interface IConnectionListener
+{
+    ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default);
+}
+
+public abstract class ConnectionListener : IConnectionListener
+{
+    // Richer concrete-typed member guides the implementer; declared public so
+    // holders of the concrete type get the better signature without casting.
+    public abstract ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default);
+
+    async ValueTask<IConnection> IConnectionListener.AcceptAsync(CancellationToken cancellationToken)
+        => await AcceptAsync(cancellationToken).ConfigureAwait(false);
+}
+
+internal sealed class TcpConnectionListener : ConnectionListener { /* ... */ }
+```
+
+The interface remains the canonical public surface; concrete types derive from the base and stay `internal` where possible. Use the explicit-implementation forwarding only where the base can offer a richer, concrete-typed member; members without a richer counterpart are declared `public`/`protected abstract` directly.
+
+## Service composition
+
+Nested host composition is intentional in this repo. Use the hosting abstractions rather than ad hoc orchestration when touching service composition. Preserve the L1/L2/L3 layering model and the service-root dependency style already established in the repo (L1 = foundation libraries and SDK/tooling, L2 = application runtime and composition, L3 = service platforms; see `docs/DELIVERY_ROADMAP.md`).
 
 ## Async / await
 
@@ -237,3 +275,12 @@ namespace Assimalign.Cohesion.Database;
 1. Prefer `ValueTask<T>` in hot async paths.
 2. Use `Span<T>` and `Memory<T>` for buffer operations.
 3. Avoid allocations in hot paths.
+
+## AOT compatibility
+
+`<IsAotCompatible>true</IsAotCompatible>` is a hard repo-wide requirement (sanctioned exception: `analyzers/`). Preserve NativeAOT and trimming compatibility in code **and tests**. Avoid:
+
+- Reflection-based serialization
+- Dynamic code generation at runtime
+- `Assembly.LoadFrom()`
+- Runtime type inspection without source generators — source generators are the sanctioned path

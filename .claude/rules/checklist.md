@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/*.cs"
+  - "**/*.csproj"
+  - "**/*.props"
+  - "**/*.targets"
+---
+
 # Pre-Completion Checklist
 
 Run through this before declaring any non-trivial change complete. The checklist is the structural safeguard against drift — small changes are the most common drift source because they feel too minor to verify.
@@ -13,7 +21,8 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No new references to any `Microsoft.Extensions.*` package
 - [ ] No per-project `<Version>` overrides — `$(CohesionVersion)` chain intact
 - [ ] No hardcoded versions on `<Import Sdk>` elements
-- [ ] `<IsAotCompatible>true</IsAotCompatible>` not removed or weakened
+- [ ] `<IsAotCompatible>true</IsAotCompatible>` not removed or weakened (`analyzers/` is the sanctioned exception)
+- [ ] No new reflection-based serialization, runtime code generation, or `Assembly.LoadFrom()`; runtime type inspection goes through source generators
 - [ ] If a new SDK or framework was added, the manifest in `frameworks/Assimalign.Cohesion.App.props` and the `KnownFrameworkReference` registration in the base SDK were both updated
 - [ ] `FrameworkList.xml` / `RuntimeList.xml` were not hand-edited
 
@@ -22,11 +31,12 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] All new files use file-scoped namespaces
 - [ ] Namespace matches assembly name exactly
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
-- [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see SKILL.md exception protocol)
+- [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`)
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`
 - [ ] No global usings or `<Using Include="..." />` items in csproj files
 - [ ] Using directives ordered: System, third-party, Cohesion, blank line before code
+- [ ] Code follows the existing patterns established in its category/area
 
 ## Extension members
 
@@ -59,16 +69,16 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 
 ## Documentation
 
-- [ ] Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`) — except `docs/Assembly/` API reference files
+- [ ] Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`) — except tool-fixed names (`.github/pull_request_template.md`, files under `.claude/**`); `docs/Assembly/` complies via folder-per-type (`<Type>/OVERVIEW.md`)
 - [ ] If a new project was added, `docs/OVERVIEW.md` and `docs/DESIGN.md` were created
 - [ ] If a new area was added, an area `README.md` was created
 - [ ] Every library touched has a `docs/DESIGN.md` — if one was missing, it was created in this change (canonical example: `libraries/Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md`)
 - [ ] If this change altered or extended a design decision (lifecycle, error model, contract shape, family layout, AOT posture, non-goals), `docs/DESIGN.md` was updated in the same commit
-- [ ] Public API additions are reflected in `docs/Assembly/<Namespace>/<Type>.md` if that file exists for the type
+- [ ] Public API additions are reflected in `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md` if that page exists for the type
 
 ## Deviations from rules
 
-- [ ] Any user-directed deviation from a rule is documented with a `// Deviates from AGENTS.md ...` comment at the relevant entry point
+- [ ] Any user-directed deviation from a rule is documented with a `// Deviates from the repo <rule> rule ...` comment at the relevant entry point (see `deviations.md`)
 - [ ] The deviation is scoped to the specific area requested, not generalized
 - [ ] The deviation is mentioned in the change summary
 

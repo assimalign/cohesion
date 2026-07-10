@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/tests/**"
+---
+
 # Testing
 
 ## Test naming
@@ -61,6 +66,12 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 ├── Shared/         # Shared test code across multiple test files
 └── {Feature}Tests.cs
 ```
+
+## Coverage expectations
+
+- Add or update tests for behavior changes.
+- Spec-driven services (protocol implementations, RFC-backed features) need unit tests **plus** compliance or interoperability tests.
+- Preserve NativeAOT and trimming compatibility in code and tests.
 
 ## Cancellation in async tests
 

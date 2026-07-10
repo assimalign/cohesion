@@ -336,7 +336,7 @@ function New-BodyTemplate {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('### Standards and Compliance')
     if ($Std) { foreach ($s in $Std) { [void]$sb.AppendLine("- $s") } }
-    else { [void]$sb.AppendLine('- Follows repo conventions in AGENTS.md (interface-first, file-scoped namespaces, area-scoped exceptions).') }
+    else { [void]$sb.AppendLine('- Follows the repo coding rules in `.claude/rules/` (interface-first, file-scoped namespaces, area-scoped exceptions).') }
     return $sb.ToString()
 }
 

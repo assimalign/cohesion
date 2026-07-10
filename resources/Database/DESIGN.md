@@ -124,7 +124,7 @@ Crash/recovery test suites (kill the process mid-commit, replay, verify) are the
 
 Other Cohesion resources consume this area in one of two ways:
 
-- **Embedded (the default for platform resources):** reference the model engine packages + `Database.Embedded`, compose engines with `EmbeddedDatabase.Create(...)`, and operate on `IDatabaseEngine`/`IDatabase` directly. Same engines, same ACID, no server process. A resource that hides its data layer from its own consumers pairs the reference with `CohesionPrivateProjectReference` and a `CohesionFrameworkPrivateAssembly` entry (the AGENTS.md cross-resource pattern).
+- **Embedded (the default for platform resources):** reference the model engine packages + `Database.Embedded`, compose engines with `EmbeddedDatabase.Create(...)`, and operate on `IDatabaseEngine`/`IDatabase` directly. Same engines, same ACID, no server process. A resource that hides its data layer from its own consumers pairs the reference with `CohesionPrivateProjectReference` and a `CohesionFrameworkPrivateAssembly` entry (the repo cross-resource pattern — `.claude/rules/build-system.md`).
 - **Hosted (shared database service):** depend on a `DatabaseResource` in the application graph (`AddDatabase(...).DependsOn(...)`) and connect through `Database.Client` over the wire protocol. Right when several resources share one database service or the data outlives any single resource.
 
 Because embedded and hosted use the same engine surfaces, a resource can start embedded and move to the hosted service without rewriting its data access. Feature #862 enforces the self-sufficiency invariant and lands a reference adoption (ConfigurationStore or SecretStore) as the pattern-setter.

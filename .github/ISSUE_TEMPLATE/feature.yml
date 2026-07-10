@@ -40,6 +40,6 @@ body:
     attributes:
       label: Standards and Compliance
       value: |
-        - Follows repo conventions in AGENTS.md (interface-first, file-scoped namespaces, area-scoped exceptions).
+        - Follows the repo coding rules in `.claude/rules/` (interface-first, file-scoped namespaces, area-scoped exceptions).
     validations:
       required: false

@@ -1,4 +1,14 @@
+---
+paths:
+  - "**/*.md"
+  - "**/docs/**"
+---
+
 # Documentation
+
+## Markdown file naming
+
+Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`). Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`). API reference under `docs/Assembly/` needs no exception — its **folders** mirror CLR namespace/type names, while every file is `OVERVIEW.md` (see "Assembly documentation layout" below).
 
 ## Three layers of documentation
 
@@ -52,8 +62,9 @@ A `DESIGN.md` that lags the code actively misleads — worse than not having one
 ### Assembly documentation layout
 
 - Namespace folders under `docs/Assembly/` mirror the documented namespace (e.g., `docs/Assembly/System.IO/`)
-- Type documentation files inside those folders mirror the type name (e.g., `docs/Assembly/System.IO/Glob.md`)
-- **Assembly API docs are the exception to the uppercase-markdown naming rule** because they intentionally mirror CLR namespace and type names
+- Each documented type gets a **folder** named for the type, containing an `OVERVIEW.md` (e.g., `docs/Assembly/System.IO/Glob/OVERVIEW.md`). The folder leaves room for additional per-member or design pages beside the overview later.
+- A namespace folder may also carry its own `OVERVIEW.md` introducing the assembly/namespace (the IdentityModel family uses this while its per-type reference is pending).
+- Folder names mirror CLR namespace and type names exactly; the markdown files themselves stay UPPERCASE (`OVERVIEW.md`), so API reference needs no naming exception.
 - API reference docs should outline: public surface area, constructor or factory behavior, methods, properties, exceptions, usage notes
 
 ## Area-level `README.md`
@@ -111,34 +122,4 @@ Common drift modes worth checking before completion:
 - A new exception thrown from a method without a matching `<exception>`
 - A `<returns>` left over from a refactor that now describes the wrong shape
 
-## Commit message conventions
-
-Conventional commits format:
-
-```
-type(scope): subject
-
-body
-
-footer
-```
-
-**Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
-
-**Examples:**
-```
-feat(database): add connection pooling support
-fix(cache): resolve memory leak in expiration logic
-docs(readme): update build instructions
-refactor(config): simplify provider registration
-test(hosting): add lifecycle event tests
-chore(build): update to .NET 10.0.101
-```
-
-## Branch naming
-
-- `main` — production-ready code
-- `development` — integration branch
-- `feature/{name}` — new features
-- `fix/{name}` — bug fixes
-- `docs/{name}` — documentation updates
+Commit-message and branch-naming conventions live in `workflow.md` (always loaded).

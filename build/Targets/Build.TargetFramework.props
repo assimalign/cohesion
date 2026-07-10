@@ -19,7 +19,7 @@
         <LangVersion>Preview</LangVersion>
         <!--
             Repo-wide opt-in to runtime preview APIs (emits [assembly: RequiresPreviewFeatures]).
-            This is the documented default (see AGENTS.md). It must live here because the attribute
+            This is the documented default (see .claude/rules/general-rules.md). It must live here because the attribute
             is viral: any assembly that requires preview features forces every consumer to opt in,
             so a single central switch is the only coherent place for it. Projects that must target
             the stable surface (source generators, build tasks) override this with <EnablePreviewFeatures>false</EnablePreviewFeatures>.

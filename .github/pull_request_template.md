@@ -48,7 +48,7 @@ Closes #
 ## Checklist
 
 - [ ] Each resolved work item (the parent feature **and** its sub-issues) has its own `Closes #` line; deferred/backlog items are linked without a closing keyword.
-- [ ] Follows `AGENTS.md`: file-scoped namespaces; `CohesionProjectReference` / `CohesionPackageReference` (no raw references, no `Microsoft.Extensions.*`); interface-first with `internal` implementations; `extension(...)` members; area-scoped exception roots.
+- [ ] Follows the repo coding rules (`.claude/rules/`): file-scoped namespaces; `CohesionProjectReference` / `CohesionPackageReference` (no raw references, no `Microsoft.Extensions.*`); interface-first with `internal` implementations; `extension(...)` members; area-scoped exception roots.
 - [ ] Public APIs have XML docs; new libraries include `docs/OVERVIEW.md` and `docs/DESIGN.md`.
 - [ ] Remains NativeAOT- and trimming-safe (`IsAotCompatible`).
 - [ ] Tests added/updated and passing; any new project is wired into its area `.slnx` and a CI workflow.

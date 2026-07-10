@@ -26,7 +26,7 @@ it. FileSystem integration belongs in an adapter at the edge, not in the anchor 
 | `ContentException` / `ContentFormatException` | Area exception root and the malformed-input error every format reader reports through |
 
 Concrete implementations are `internal` (`MemoryContent`, `StreamContent`, `CompositeContent`),
-created through the public `ContentFactory` — interface-first per `AGENTS.md`.
+created through the public `ContentFactory` — interface-first per the repo coding rules.
 
 ## Stream ownership (the load-bearing decision)
 

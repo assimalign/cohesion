@@ -1,3 +1,17 @@
+---
+paths:
+  - "**/*.csproj"
+  - "**/*.props"
+  - "**/*.targets"
+  - "**/*.slnx"
+  - "global.json"
+  - "build/**"
+  - "frameworks/**"
+  - "sdks/**"
+  - "installer/**"
+  - ".github/workflows/**"
+---
+
 # Build System
 
 Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `frameworks/`, `installer/scripts/`, `.github/workflows/framework.yml`, or any `*.props` / `*.targets` file in `build/`.
@@ -17,6 +31,8 @@ Concrete rules:
 - Package versions live in `build/Targets/Build.References.Packages.targets`. Add the version there, then use `CohesionPackageReference` in the consuming csproj.
 
 When in doubt: search for the property name in `build/Targets/` first. If it's already there, extend the central definition; don't override locally.
+
+When editing project files, prefer Cohesion-specific MSBuild items over stock items wherever one exists — not just the ones enumerated here.
 
 ## The consumer experience
 
@@ -87,6 +103,24 @@ A one-line edit to `App.props`:
 
 The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly.
 
+## Cross-resource dependencies (private implementation details)
+
+A library sometimes needs another library as an internal implementation detail without exposing that dependency to its consumers (canonical example: `Assimalign.Cohesion.Database` uses `Assimalign.Cohesion.Web` for HTTP transport, but `Sdk.Database` consumers should see database types only). Two coordinated items make this work:
+
+- **`CohesionPrivateProjectReference`** (in the library csproj) — resolves by name like `CohesionProjectReference`, but emits `PrivateAssets="all"`: compiles in and CopyLocals, yet never appears as a `<dependency>` in the library's `.nupkg`.
+- **`CohesionFrameworkPrivateAssembly`** (in `frameworks/Assimalign.Cohesion.App.props`) — the framework's Runtime pack ships the DLL (listed in `RuntimeList.xml`), but the Ref pack omits it, so consumers never see the types in IntelliSense while the host resolves them at run time.
+
+```xml
+<!-- library csproj -->
+<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+<!-- frameworks/Assimalign.Cohesion.App.props, in the owning framework's ItemGroup -->
+<CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+```
+
+Privacy is enforced at the package boundary, not the type system — keep cross-library uses of the private dep `internal`, and expose proxy types publicly if hosts need to configure the underlying piece. Forgetting the `Private` variants either leaks the dep into the `.nupkg` (used `CohesionProjectReference`) or crashes the host at run time (missing `CohesionFrameworkPrivateAssembly`). A leak surfaces downstream as a `CS0012` for the consumer, because the private assembly isn't in their reference graph.
+
+Also available: `CohesionCodeGenValueType` for generating strongly typed value objects.
+
 ## Adding a new framework + SDK domain
 
 ```powershell
@@ -119,7 +153,7 @@ The scaffold script is idempotent: re-running skips anything already on disk.
 
 ## Dev loop: `Install-Local.ps1`
 
-Packs all SDKs + framework families (Ref + per-RID Runtime each) into the in-tree feed at `_out/packages/`. The repo's `nuget.config` maps `Assimalign.Cohesion.*` to that feed, so any consumer csproj under the repo (or under a sibling repo whose `nuget.config` points back) restores from the local build.
+Packs all SDKs + framework families (Ref + per-RID Runtime each) into the in-tree feed at `_out/packages/`. Consumers restore from that feed via a `nuget.config` mapping `Assimalign.Cohesion.*` to it — the repo does not currently check one in, so add the mapping in the consumer (or a local repo-root `nuget.config`) when smoke-testing.
 
 Flags worth knowing:
 - `-Configuration Release` — Release pack (default Debug)
@@ -147,6 +181,8 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 3. **Publish** (`needs: [pack, smoke-test]`, only on `main`) — pushes every `.nupkg` to GitHub Packages.
 
 GitHub Packages is treated as a QA/UAT staging registry: each push to `main` on the same `$(CohesionVersion)` deletes and replaces the previous publish, so `--skip-duplicate` is deliberately omitted (a failed replacement turns CI red instead of silently leaving the old version on the feed).
+
+The library/resource workflows (`library-*.yml`, `resource-*.yml`) follow the same publish pattern via the shared composite action at `.github/actions/build/action.yml`. Each declares `permissions: packages: write` so the workflow's `GITHUB_TOKEN` can both push and delete on the feed.
 
 ## File layout reference
 

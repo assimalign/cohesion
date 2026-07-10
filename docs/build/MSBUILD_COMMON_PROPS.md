@@ -1,6 +1,6 @@
 # Common MSBuild Properties
 
-This document describes where common MSBuild properties are defined in the Cohesion build and which values individual projects inherit. The rule from `AGENTS.md` applies throughout: **shared build logic lives in `.props`/`.targets` files, never duplicated per project.** If a project genuinely needs to deviate, override the property locally with a comment explaining why — otherwise project files stay free of build configuration.
+This document describes where common MSBuild properties are defined in the Cohesion build and which values individual projects inherit. The repo build-system rule (`.claude/rules/build-system.md`) applies throughout: **shared build logic lives in `.props`/`.targets` files, never duplicated per project.** If a project genuinely needs to deviate, override the property locally with a comment explaining why — otherwise project files stay free of build configuration.
 
 ## Import chain
 

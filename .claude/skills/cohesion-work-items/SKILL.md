@@ -143,5 +143,5 @@ Closing a parent feature does not close its sub-issues and vice-versa, so list e
 - **Don't create duplicates** — search first (Step 1).
 - **Confirm before creating** when the parent or classification is uncertain; prefer `-DryRun` to preview.
 - **Set Status.** Use `In progress` if you're starting the work now, else `Backlog`/`Ready`.
-- This skill is intake/tracking only — it does not change code. Follow `AGENTS.md` and the
-  `cohesion-coding-rules` skill for the actual implementation.
+- This skill is intake/tracking only — it does not change code. Follow the auto-loaded
+  repo coding rules (`.claude/rules/`) for the actual implementation.
