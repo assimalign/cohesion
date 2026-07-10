@@ -193,6 +193,27 @@ The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 context disposal is a `switch` type test, not a reflection probe. No runtime code
 generation, no `Assembly.LoadFrom`, no reflection-based serialization.
 
+## Application feature seeding
+
+`IWebApplicationBuilder.AddFeature` registers `IHttpFeature` singletons (routing's
+per-application `IRouterFeature` is the canonical example), but a feature is only
+useful once it is present on each exchange's `IHttpContext.Features` collection.
+That bridging happens when the pipeline is built: `WebApplication`'s pipeline
+`Build()` resolves the registered features **once** and, when any exist, wraps the
+composed pipeline in a seeding middleware that stamps each feature onto every
+exchange before any user middleware runs.
+
+Two deliberate properties:
+
+- **Builder-time snapshot, not request-time service location.** The feature set is
+  materialized at pipeline build (which happens when the server is resolved). Per
+  the hosting philosophy, nothing resolves services per request — the per-exchange
+  work is a plain array walk. Features registered after the pipeline is built are
+  not observed, the same snapshot rule the middleware list follows.
+- **Application-registered features are per-application.** Each application seeds
+  only its own DI-registered features, which is half of the process-wide isolation
+  story (#789's per-application router state is the other half).
+
 ## Testing
 
 Behaviour is verified in `tests/` with xUnit + Shouldly against instrumented
@@ -204,6 +225,16 @@ keep-alive non-starvation, single-connection fault isolation with continued
 service, connection+context disposal on every exit path, graceful `StopAsync`
 drain + listener disposal, and the concurrency cap holding connections back until
 a slot frees.
+
+The same properties are additionally pinned **end to end** by the full-pipeline
+integration suite (`WebApplicationPipelineIntegrationTests`,
+`WebApplicationServerIntegrationTests`), which drives the real server over the
+in-memory transport through `Assimalign.Cohesion.Web.Testing`'s
+`WebApplicationTestFactory` — a real `HttpClient`, real HTTP/1.1 exchanges, no
+sockets. It covers middleware onion ordering and short-circuiting, per-connection
+dispatch (a parked connection does not starve others), application-fault isolation
+with continued service, and graceful shutdown draining (in-flight unwind, idle
+keep-alive unblock, post-stop connection refusal).
 
 ## Non-goals
 

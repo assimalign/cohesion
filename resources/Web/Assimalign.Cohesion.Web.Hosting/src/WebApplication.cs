@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,21 +29,6 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
     }
 
-
-    // TODO: Need to create an API that allows feature registration on HttpContext creation from the transport layer
-    private void Init()
-    {
-        Use((context, next) =>
-        {
-            var features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
-            foreach (var feature in features)
-            {
-                context.Features.Set(feature);
-            }
-            return next.Invoke(context);
-        });
-    }
-
     public override WebApplicationContext Context => _context;
 
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
@@ -68,6 +54,28 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
             middleware = _middleware[i].Invoke(middleware);
+        }
+
+        // Seed every application-registered feature (IWebApplicationBuilder.AddFeature, e.g.
+        // routing's per-application IRouterFeature) onto each exchange before any user
+        // middleware runs. The feature set is snapshotted once here, at pipeline build — per
+        // the hosting philosophy, DI integration is builder-time only, so no service is
+        // resolved per request.
+        IHttpFeature[] features = Context.ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>().ToArray();
+
+        if (features.Length > 0)
+        {
+            WebApplicationMiddleware pipeline = middleware;
+
+            middleware = new WebApplicationMiddleware(context =>
+            {
+                foreach (IHttpFeature feature in features)
+                {
+                    context.Features.Set(feature);
+                }
+
+                return pipeline.Invoke(context);
+            });
         }
 
         return new WebApplicationPipeline(middleware);

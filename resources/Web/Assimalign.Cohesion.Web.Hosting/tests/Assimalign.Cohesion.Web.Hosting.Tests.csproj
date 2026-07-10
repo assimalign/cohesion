@@ -5,6 +5,7 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
