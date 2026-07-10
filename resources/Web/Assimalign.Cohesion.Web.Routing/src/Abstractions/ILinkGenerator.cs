@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Metadata;
 
 namespace Assimalign.Cohesion.Web.Routing;
 
@@ -12,8 +13,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <remarks>
 /// <para>
 /// Generation is the outbound half of routing. A route is addressed either <em>by name</em>
-/// (registered through <see cref="IRouteNameMetadata"/>; unique per router, compared
-/// case-insensitively) or <em>by values</em>, where every route whose parameters, required values,
+/// (registered through the sealed <see cref="RouteNameMetadata"/> carrier; unique per router,
+/// compared case-insensitively) or <em>by values</em>, where every route whose parameters, required values,
 /// and parameter policies are satisfiable by the supplied values is a candidate and the most
 /// specific one wins: candidates are ordered by descending
 /// <see cref="Patterns.RoutePattern.OutboundPrecedence"/>, with registration order breaking ties so

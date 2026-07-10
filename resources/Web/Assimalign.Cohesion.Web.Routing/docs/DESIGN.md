@@ -275,7 +275,7 @@ one interface per concept, attributes implementing them) for three reasons:
 Type-keyed lookup is unaffected: `GetMetadata<RouteHostMetadata>()` is the same `is`-test scan,
 and last-wins layering works identically. **Family rule:** new built-in metadata concepts ship as
 one sealed carrier; an interface is introduced only when a second implementation demonstrably
-needs to exist (applies equally to the named-route metadata from #787).
+needs to exist. The named-route carrier `RouteNameMetadata` (#787) follows the same rule.
 
 ### Metadata lives on the route
 
@@ -501,9 +501,8 @@ since the pattern model landed, finally has a consumer.
 
 ### Names are metadata, not a route property
 
-A route is named by adding a `RouteNameMetadata` item (contract: `IRouteNameMetadata`) to its
-endpoint metadata — not by a constructor parameter or a mutable `Name` property. The alternatives
-were rejected deliberately:
+A route is named by adding a `RouteNameMetadata` item to its endpoint metadata — not by a
+constructor parameter or a mutable `Name` property. The alternatives were rejected deliberately:
 
 - A constructor parameter would multiply the already-wide `Route` constructor surface and would
   not compose: a route group (#786) could not contribute or override a name after the fact.
@@ -511,8 +510,11 @@ were rejected deliberately:
   `GetMetadata<T>()` is last-wins, so an endpoint-level name overrides a group-level one with no
   additional machinery. Naming rides the same #150 seam every other per-endpoint policy rides.
 
-`RouteNameMetadata` is a public concrete type for the same reason `RouterRouteMetadataCollection`
-is: metadata items must be constructible by producers in other assemblies.
+`RouteNameMetadata` follows the family rule for bag items ("Metadata items are sealed carriers,
+not interface-per-concept" above): it is **one sealed concrete carrier in `Metadata/`, and the
+sealed type is the contract** — there is deliberately no `IRouteNameMetadata` interface. The link
+generator keys `GetMetadata<RouteNameMetadata>()` on the carrier directly, and the sealed type
+guarantees the validated, immutable name its build-time index snapshots.
 
 ### Uniqueness fails at build time
 

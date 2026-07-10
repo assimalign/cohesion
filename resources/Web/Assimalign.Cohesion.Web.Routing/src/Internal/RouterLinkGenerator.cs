@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 using Assimalign.Cohesion.Web.Routing.Policies;
 
@@ -35,7 +36,7 @@ internal sealed class RouterLinkGenerator : ILinkGenerator
         {
             IRouterRoute route = routes[index];
             RoutePattern? pattern = route.Pattern;
-            string? name = route.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName;
+            string? name = route.Metadata.GetMetadata<RouteNameMetadata>()?.RouteName;
 
             if (pattern is null)
             {
