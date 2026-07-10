@@ -1,5 +1,6 @@
 using System;
 
+using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 
 using Shouldly;
