@@ -607,6 +607,14 @@ public sealed class Route : IRouterRoute
     {
         foreach (RoutePatternParameterSegment parameter in route.Pattern.Parameters)
         {
+            if (!values.ContainsKey(parameter.Name))
+            {
+                // An omitted optional (or catch-all) parameter captured no value: its policies
+                // constrain the value when one is present, they do not make the value required
+                // (e.g. '{id:int?}' still matches when the id segment is absent).
+                continue;
+            }
+
             foreach (RoutePatternParameterPolicyReference policyReference in parameter.ParameterPolicies)
             {
                 if (!route.PolicyMap.TryResolve(policyReference, out RouteParameterPolicy? policy) || policy is null)
