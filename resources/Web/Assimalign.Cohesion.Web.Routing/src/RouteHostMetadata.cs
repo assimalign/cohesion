@@ -6,16 +6,28 @@ using Assimalign.Cohesion.Web.Routing.Exceptions;
 namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
-/// Default immutable <see cref="IRouteHostMetadata"/> implementation. Attach an instance to a
-/// route's <see cref="IRouterRouteMetadataCollection"/> to constrain the route to specific hosts.
+/// Endpoint metadata declaring the hosts a route accepts. Attach an instance to a route's
+/// <see cref="IRouterRouteMetadataCollection"/> to constrain the route to specific hosts;
+/// the router consults it during candidate selection, and a request whose host satisfies
+/// none of the constraints skips the route entirely, falling through to other candidates.
 /// </summary>
 /// <remarks>
-/// Like <see cref="RouterRouteMetadataCollection"/>, this is a public concrete companion to its
-/// interface because producers in other assemblies (route mapping, route groups, source
-/// generators) must construct it. Host patterns are parsed once at construction and reused for
-/// every request, so a malformed pattern fails at the producer rather than at match time.
+/// <para>
+/// The router resolves this metadata with last-wins semantics
+/// (<see cref="IRouterRouteMetadataCollection.GetMetadata{TMetadata}"/>), so an endpoint-level
+/// declaration overrides a broader (e.g. group-level) one rather than combining with it. An
+/// empty <see cref="Hosts"/> list declares no constraint — the route accepts any host and
+/// ranks as host-unconstrained.
+/// </para>
+/// <para>
+/// This sealed carrier <em>is</em> the metadata contract — there is deliberately no
+/// <c>IRouteHostMetadata</c> interface. Metadata items in the bag are immutable data
+/// carriers, and the sealed type guarantees the parse-once, immutable host list the router
+/// snapshots at construction. Host patterns are parsed once here and reused for every
+/// request, so a malformed pattern fails at the producer rather than at match time.
+/// </para>
 /// </remarks>
-public sealed class RouteHostMetadata : IRouteHostMetadata
+public sealed class RouteHostMetadata
 {
     private readonly RouteHostConstraint[] _hosts;
 
@@ -67,7 +79,10 @@ public sealed class RouteHostMetadata : IRouteHostMetadata
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the parsed host constraints the request host is tested against. A request
+    /// satisfies the metadata when it matches <em>any</em> constraint in the list.
+    /// </summary>
     public IReadOnlyList<RouteHostConstraint> Hosts => _hosts;
 
     /// <summary>

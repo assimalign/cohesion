@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 /// <remarks>
 /// Candidates are evaluated in ascending <see cref="IRouterRoute.InboundPrecedence"/> order (more specific
-/// routes first); within equal precedence, host-constrained routes (declaring <see cref="IRouteHostMetadata"/>)
+/// routes first); within equal precedence, host-constrained routes (declaring <see cref="RouteHostMetadata"/>)
 /// are evaluated ahead of unconstrained ones, and registration order breaks the remaining ties. This means a
 /// literal segment always wins over a parameter segment regardless of the order the routes were registered.
 /// A candidate whose host constraints the request host does not satisfy is skipped entirely — it neither
@@ -297,7 +297,7 @@ public sealed class Router : IRouter
             // Resolve host metadata once at construction (last-wins, so an endpoint-level
             // declaration overrides a group-level one). An empty host list declares no
             // constraint and ranks as unconstrained.
-            IReadOnlyList<RouteHostConstraint>? hosts = routes[i].Metadata.GetMetadata<IRouteHostMetadata>()?.Hosts;
+            IReadOnlyList<RouteHostConstraint>? hosts = routes[i].Metadata.GetMetadata<RouteHostMetadata>()?.Hosts;
             if (hosts is { Count: 0 })
             {
                 hosts = null;

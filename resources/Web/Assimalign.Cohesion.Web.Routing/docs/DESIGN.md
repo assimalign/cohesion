@@ -21,7 +21,7 @@ Scope of this library:
   and HTTP method semantics.
 - An **endpoint metadata bag** (`IRouterRouteMetadataCollection`) and a **route-match feature**
   (`IRouteMatchFeature`) — the reflection-free seam auth, docs, and observability consume (#150).
-- **Host-constrained matching** (`RouteHostConstraint` + `IRouteHostMetadata`/`RouteHostMetadata`),
+- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`),
   evaluated during candidate selection off the metadata bag (#788).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
@@ -159,7 +159,7 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
 
 ### Selection semantics (selects, never validates)
 
-The router resolves each route's `IRouteHostMetadata` **once at construction** — last-wins via
+The router resolves each route's `RouteHostMetadata` **once at construction** — last-wins via
 `GetMetadata<T>()`, so an endpoint-level declaration overrides a group-level one rather than
 combining with it — and evaluates the constraints at the top of candidate selection, before path
 matching:
@@ -244,6 +244,29 @@ to `IHttpFeatureCollection`). `RouterRouteMetadataCollection` follows the same p
 generators — some in *other* assemblies) use to build the bag. It rejects `null` items, copies its
 source array defensively, and exposes a value-type `Enumerator` for allocation-free `foreach`,
 mirroring `RouteValueDictionary.Enumerator` in this same library.
+
+### Metadata items are sealed carriers, not interface-per-concept
+
+The bag's *item* types (e.g. `RouteHostMetadata`) are **sealed concrete data carriers, and the
+sealed type is the contract** — there is deliberately no `IRouteHostMetadata`-style interface per
+metadata concept. This rejects the ASP.NET convention (`IHostMetadata`, `IHttpMethodMetadata`, …
+one interface per concept, attributes implementing them) for three reasons:
+
+- **A data carrier has no behavioral variance to abstract.** Each metadata item is an immutable
+  record of declared policy with exactly one plausible implementation; an interface pair per
+  concept doubles the public surface without enabling anything.
+- **The sealed type guarantees invariants consumers snapshot.** `Router` resolves host constraints
+  once at construction; a sealed carrier guarantees the parse-once, immutable list that snapshot
+  relies on, where an interface would admit implementations whose contents drift after resolution.
+- **The attribute scenario is served better by translation.** Under AOT, the decorator/binding
+  layer (#151/#796) translates attributes into carrier construction at map time (the source
+  generator emits `new RouteHostMetadata(...)`); attributes implementing metadata interfaces —
+  ASP.NET's reason for the convention — would push parsing into attribute property getters.
+
+Type-keyed lookup is unaffected: `GetMetadata<RouteHostMetadata>()` is the same `is`-test scan,
+and last-wins layering works identically. **Family rule:** new built-in metadata concepts ship as
+one sealed carrier; an interface is introduced only when a second implementation demonstrably
+needs to exist (applies equally to the named-route metadata from #787).
 
 ### Metadata lives on the route
 
@@ -424,7 +447,7 @@ The endpoint-metadata seam (#150) is consumed by:
   model and per-application router state sections above. The additive routing items #786/#787/#788
   build on the route model and match feature here and were intentionally held until #789 merged.
 - **#788 Host-based route matching** — see the host-constrained matching section above:
-  `RouteHostConstraint` (parsed value object), `IRouteHostMetadata`/`RouteHostMetadata` (the
+  `RouteHostConstraint` (parsed value object), `RouteHostMetadata` (the sealed
   endpoint-metadata carrier), and the router's host-aware candidate selection and ordering.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)

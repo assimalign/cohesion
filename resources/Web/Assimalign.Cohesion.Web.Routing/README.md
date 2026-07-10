@@ -42,7 +42,7 @@ controllers, metadata, results).
 | `RouteParameterPolicyMap` | Resolves inline policy names (`int`, `guid`, `length(n)`, `min(n)`, `range(a,b)`, …) to executable policies; `CreateDefault()` registers the built-ins. |
 | `IRouterRouteMetadataCollection` / `RouterRouteMetadataCollection` | Immutable, ordered, reflection-free endpoint-metadata bag (`GetMetadata<T>` is last-wins). |
 | `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
-| `IRouteHostMetadata` / `RouteHostMetadata` | Endpoint metadata declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
+| `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
 | `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata. |
 | `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) over that feature. |
 | `RoutingExtensions.UseRouting` | Pipeline integration (dispatch / 405 / fall-through). |
