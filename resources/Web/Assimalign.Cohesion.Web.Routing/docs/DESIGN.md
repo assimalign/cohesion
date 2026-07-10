@@ -7,7 +7,7 @@ given an inbound `IHttpContext`, which handler (if any) should run, and — when
 should — whether that is a *no route* (404) or a *wrong method* (405) situation. It also
 carries the **endpoint metadata** each route declares and surfaces the **route-match
 result** to the rest of the pipeline as a typed feature. It is a foundation primitive: the
-API, function, controller, and metadata programming models (issues #149, #151, #786–#788,
+API, function, controller, and metadata programming models (issues #149, #151, #787, #788,
 #796) all build on the matcher, the typed route values, and the metadata seam defined here, so
 their behavior must be predictable, standards-aware, and reflection-free before those layers are added.
 
@@ -27,6 +27,8 @@ Scope of this library:
   with the other routing interfaces.
 - **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
   evaluated during candidate selection off the metadata bag (#788).
+- **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
+  prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
 
@@ -323,6 +325,78 @@ no shared string constants across assemblies and no reflection — `Get<TFeature
 When nothing has matched, the `GetEndpointMetadata*` accessors degrade to `Empty`/`null` rather than
 throwing — metadata queries are safe to make unconditionally.
 
+## Route groups (#786)
+
+### Registration-time composition — the group disappears before the router exists
+
+`IRouterBuilder.MapGroup(prefix)` (an `extension(...)` member in `RouterBuilderExtensions`)
+returns an `IRouterGroupBuilder` — the `MapGroup` equivalent. A group composes three things onto
+its children: a **path prefix**, **shared parameter policies**, and **shared endpoint metadata**.
+The defining property is *when* composition happens: at **child registration**. Each
+`group.Map(...)` joins the group's prefix and the child template as **raw text**, re-parses the
+composed template through `RoutePatternParser`, and maps one ordinary fully-composed `Route` into
+the underlying `IRouterBuilder`. The router never sees a group; there is no per-request prefix
+matching, no group node in the match path, and a grouped route costs exactly what a
+directly-mapped route costs at request time.
+
+**Why raw-text re-parse, not segment-list splicing.** The alternative — parsing prefix and child
+separately and concatenating their `RoutePatternPathSegment` lists via `RoutePatternFactory` —
+would bypass the parser's cross-segment validation (duplicate parameter names, catch-all-must-be-
+last, separator rules), forcing the group to re-implement those rules and inevitably drift from
+the parser. Re-parsing the joined text makes the parser's existing semantics *the* conflict rules
+for composition: a parameter name duplicated between prefix and child (`{id}` + `{id:int}`), a
+catch-all prefix followed by child segments (`files/{*path}` + `download`), or malformed syntax
+all throw `RoutePatternException` exactly as they would for a hand-written template. The cost is
+one extra parse per registered child — builder-time only, and negligible.
+
+Prefixes are templates, not strings-with-slashes: `{tenant}/api` is a valid group prefix and its
+parameters capture route values like any other. Inputs are normalized (leading `~/` or `/` and
+trailing `/` trimmed) so `MapGroup("/api/")` + `Map(GET, "/orders/")` composes cleanly to
+`api/orders`. An **empty child template** maps the prefix itself (`GET /api/v1`); an **empty
+prefix** creates a pure configuration group that only shares policies/metadata.
+
+### Precedence falls out of composition
+
+Because the prefix segments are part of the composed `RoutePattern`,
+`RoutePrecedence.ComputeInbound` scores the full path — a literal contributed through a group
+outranks a parameter at the same depth regardless of which was registered first or whether either
+came from a group. No group-aware code exists in `Router` or `RoutePrecedence`.
+
+### Deterministic sharing: snapshot at creation, freeze at first child
+
+A group's shared state is a **snapshot**: a nested group copies its parent's policy map
+(`RouteParameterPolicyMap`'s copy constructor) and metadata list at creation, so siblings and
+parents stay isolated. A root group starts from `RouteParameterPolicyMap.CreateDefault()`.
+
+Shared configuration is declared first, children second — enforced, not conventional: once a
+group registers its first child route **or** nested group, its shared configuration **freezes**
+and later `WithMetadata`/`WithParameterPolicy` calls throw `InvalidOperationException`. This is
+the deliberate divergence from ASP.NET's `RouteGroupBuilder`, which defers convention application
+to endpoint-build time so late-added conventions still reach earlier children. Deferral needs a
+build-time flush hook and mutable pending state on the builder; the freeze rule gets the same
+guarantee — *shared values apply to every child* — with immediate composition, immutable routes,
+and an order-independent result. The failure mode it prevents is silent: without it, metadata
+added after the third of five children would apply to only the last two.
+
+### Override rules (child over group, always)
+
+- **Metadata:** each child's `IRouterRouteMetadataCollection` is built by concatenation — outer
+  group items, then inner group items, then route-level items. The bag's last-wins
+  `GetMetadata<T>` therefore resolves the most specific declaration, and `GetOrderedMetadata<T>`
+  exposes the full broad-to-narrow layering (this is precisely the composition the #150 design
+  anticipated). Routes with no metadata at any level share `RouterRouteMetadataCollection.Empty`.
+  Groups add no metadata types of their own: shared items are the same **sealed concrete
+  carriers** the bag always holds (see "Metadata items are sealed carriers"), so built-ins compose
+  through groups with their documented semantics — e.g. a group-level
+  `RouteHostMetadata` host-constrains every child, and a child-level `RouteHostMetadata`
+  *replaces* (never merges with) the group's, because the router resolves that carrier last-wins.
+- **Parameter policies:** `WithParameterPolicy` registers by inline name into the group's map;
+  registering a name again (a built-in's, or an outer group's) replaces it for this group's
+  children — dictionary-assignment semantics, deterministic. A single route can override the
+  group by passing a configure action to the full `Map` overload, which acts on a *copy* of the
+  group map scoped to that route only. Unknown policy references in a composed template still
+  fail at `Route` construction (builder time), never at request time.
+
 ## Pipeline integration (`UseRouting`)
 
 The `UseRouting` middleware resolves the `IRouterFeature`, calls `router.Match(context)` once,
@@ -436,8 +510,9 @@ without re-parsing (`ConversionType.IsInstanceOfType`), so conversion is genuine
 
 The endpoint-metadata seam (#150) is consumed by:
 
-- **#786 Route groups (`MapGroup`)** — compose group metadata into each child route by concatenating
-  into a new `RouterRouteMetadataCollection` (last-wins makes endpoint-level override group-level).
+- **Route groups (`MapGroup`, delivered here — #786)** — compose group metadata into each child route
+  by concatenating into a new `RouterRouteMetadataCollection` (last-wins makes endpoint-level
+  override group-level). See the route-groups section above.
 - **#788 Host-based matching** — delivered here: `RouteHostMetadata` rides the bag and the matcher
   consults it during candidate selection (see the host-constrained matching section).
 - **#790 Auth scheme model / handlers** — read authorization metadata off the matched endpoint via
@@ -450,13 +525,14 @@ The endpoint-metadata seam (#150) is consumed by:
 - **#789 Typed route values, expanded constraints, per-application router state** — see the constraint
   model and per-application router state sections above. The additive routing items #786/#787/#788
   build on the route model and match feature here and were intentionally held until #789 merged.
+- **#786 Route groups (`MapGroup`)** — builder-time prefix/policy/metadata composition; see the
+  route-groups section above.
 - **#788 Host-based route matching** — see the host-constrained matching section above:
   `RouteHostConstraint` (parsed value object), `RouteHostMetadata` (the sealed
   endpoint-metadata carrier), and the router's host-aware candidate selection and ordering.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 
-- **Route groups (`MapGroup`)** — #786.
 - **Named routes + link generation (outbound URL building)** — #787. `OutboundPrecedence` is
   computed and preserved for this future work but is not consumed by the matcher.
 - **Request-host validation (allowlist → 400)** — the host-filtering middleware, #781. Host
