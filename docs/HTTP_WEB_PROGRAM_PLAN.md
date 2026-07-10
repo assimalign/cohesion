@@ -135,7 +135,8 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #746 | B | RFC 10008 HTTP QUERY method semantics | #747, #755 |
 | #754 | A | Alt-Svc advertisement (RFC 7838) | — |
 | #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
-| #776 | E | Pipeline exception boundary + RFC 9457 ProblemDetails | #762 |
+| ~~#776~~ | E | ~~Pipeline exception boundary~~ — **superseded by #881** (PR #844 abandoned unmerged; branch kept as salvage reference) | — |
+| #881 | E | Exception boundary, status-code pages, 404 terminal **over IResult** (supersedes #776) | #864 |
 | #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771, #864 |
 | #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
 | #779 | E | `Web.Compression` (response + request) | #762, #769, #771 |
@@ -148,7 +149,7 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #793 | E | `Web.Testing` factory over the in-memory driver | #762, #772 |
 | #148 | F | Matcher precedence/405 fixes (existing) | — |
 | #150 | F | Endpoint metadata bag (existing) — **fan-out seam** | — |
-| #864 | F | **IResult result abstraction** (Web.Results hub) — **fan-out seam** | #776 (merge+refold), #769 |
+| #864 | F | **IResult result abstraction** (Web.Results hub, now incl. the ProblemDetails payload/writer) — **fan-out seam** | #769 ✓ — **unblocked** |
 | #149 | F | Negotiated ObjectResult/Ok<T> + IResultFormatter registry (re-scoped) | #864, #771 |
 | #789 | F | Typed route values, constraints, per-app router state | #148 |
 
@@ -189,6 +190,9 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Wave 1 (2026-07-03): 13 merged** — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup.
 - **Wave 2 (2026-07-06): 16 merged + #776 in review ([PR #844](https://github.com/assimalign/cohesion/pull/844))** — #763 TLS, #150 endpoint metadata, #148 matcher, #792 range, #770 forwarded, #755 caching, #769 streaming/SSE, #751 upgrade bridge, #749 GOAWAY drain, #758 QPACK dynamic, #819 interceptor h2/h3, #753 priorities, #756 digest, #764 h2 abuse, #750 h2 backpressure, #757 cookies. Scope-creep filed: #847 (QPACK decoder-stream ack). **→ Stage 1 (Foundations) is complete; nearly the entire remaining backlog is now unblocked leaf work — see the frontier note below.**
 - **Frontier after Wave 2:** unblocked and workable — Web middleware #777/#778/#779/#780/#781/#783/#784/#785/#793/#794/#795, #767 (UseHttp3), routing #786/#787/#788/#789 + #149 (result writers, gates #796→#151), #746 (QUERY), #752 (1xx), #754 (Alt-Svc), #810 (h1 data-rate), #847, #790 (auth handlers — all deps now merged), #773 (UDS/pipes), #775 (health). **Still gated on a decision, not a dependency:** #765 (WebSockets ADR — #751/#748 now merged, so it's actionable) and #782 (URL-rewrite request-mutation seam). Blocked only by #149: #796 (source-gen binding) → #151 (controllers).
+- **Wave 3a (2026-07-06): 9 merged** — #790 auth scheme+Cookie/Bearer handlers, #746 QUERY (RFC 10008), #789 typed constraints + per-app router, #775 health checks + /healthz, #773 UDS/named pipes, #752 1xx interim, #754 Alt-Svc, #810 h1 data-rate, #847 QPACK decoder acks.
+- **#776 → #881 supersession (2026-07-06):** PR #844 deliberately abandoned unmerged (would have been immediately refactored onto #864); #776 closed as superseded. **#864** now owns the ProblemDetails payload/writer (`Problem` built-in; salvage reference = the closed #844 branch `feature/L03.01.01.05-problem-details`) and is **fully unblocked**; **#881** rebuilds the exception boundary / status-code pages / 404 terminal as an IResult consumer, blocked by #864. The Web-middleware cluster (#781/#783/#784/#785/#794) now takes its boundary/registration pattern from #881.
+- **Wave 3b dispatched:** #864 (lead, fan-out), #786 route groups, #787 LinkGenerator, #788 host matching, #793 Web.Testing factory. Next after 3b: #881 + #149 + the middleware cluster (3c), then #796 → #151 (3d).
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|
