@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Web.Routing.Metadata;
 using Shouldly;
 using Xunit;
 

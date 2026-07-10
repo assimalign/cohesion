@@ -5,7 +5,7 @@ using System.Globalization;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Routing.Exceptions;
 
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Metadata;
 
 /// <summary>
 /// Represents a single parsed host constraint declared by a route: an exact host

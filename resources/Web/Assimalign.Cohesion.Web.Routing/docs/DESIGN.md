@@ -21,7 +21,10 @@ Scope of this library:
   and HTTP method semantics.
 - An **endpoint metadata bag** (`IRouterRouteMetadataCollection`) and a **route-match feature**
   (`IRouteMatchFeature`) — the reflection-free seam auth, docs, and observability consume (#150).
-  Metadata objects (the bag and the built-in carriers) live under `Metadata/`.
+  Metadata objects (the bag and the built-in carriers) live under `Metadata/` in the
+  `Assimalign.Cohesion.Web.Routing.Metadata` namespace, mirroring the `Patterns`/`Policies` areas.
+  The read contract `IRouterRouteMetadataCollection` stays in `Abstractions/` at the root namespace
+  with the other routing interfaces.
 - **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
   evaluated during candidate selection off the metadata bag (#788).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through

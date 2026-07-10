@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Web.Routing.Exceptions;
 
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Metadata;
 
 /// <summary>
 /// Endpoint metadata declaring the hosts a route accepts. Attach an instance to a route's

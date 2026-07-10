@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 using Assimalign.Cohesion.Web.Routing.Policies;
 
