@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Web.Routing.Metadata;
+
 namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
