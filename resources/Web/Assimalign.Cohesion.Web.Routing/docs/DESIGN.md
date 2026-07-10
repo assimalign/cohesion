@@ -21,6 +21,12 @@ Scope of this library:
   and HTTP method semantics.
 - An **endpoint metadata bag** (`IRouterRouteMetadataCollection`) and a **route-match feature**
   (`IRouteMatchFeature`) — the reflection-free seam auth, docs, and observability consume (#150).
+  Metadata objects (the bag and the built-in carriers) live under `Metadata/` in the
+  `Assimalign.Cohesion.Web.Routing.Metadata` namespace, mirroring the `Patterns`/`Policies` areas.
+  The read contract `IRouterRouteMetadataCollection` stays in `Abstractions/` at the root namespace
+  with the other routing interfaces.
+- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
+  evaluated during candidate selection off the metadata bag (#788).
 - **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
   prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
@@ -78,9 +84,11 @@ specific and must be evaluated first.**
 The original `Router` computed precedence but never used it — it matched routes in **insertion
 order** and returned the first hit. That meant registering `/api/{id}` before `/api/status`
 shadowed the literal: a request for `/api/status` matched the parameter route. `Router` now
-sorts its candidates **once at construction** by ascending `InboundPrecedence`, breaking ties by
-**registration order** (a stable, deterministic total order via the `PrecedenceKey` comparer).
-`Routes` still enumerates in registration order; only the internal evaluation list is reordered.
+sorts its candidates **once at construction** by ascending `InboundPrecedence`, breaking ties
+first by **host rank** (host-constrained routes ahead of unconstrained ones — see the
+host-constrained matching section) and then by **registration order** (a stable, deterministic
+total order via the `PrecedenceKey` comparer). `Routes` still enumerates in registration order;
+only the internal evaluation list is reordered.
 
 Method acceptance can still override raw precedence: the router walks candidates in precedence
 order and returns the first whose path **and** method both match. A higher-precedence route that
@@ -122,6 +130,77 @@ The fallback lives in `Router`, not in `Route`. `Route.TryMatch`/`AcceptsMethod`
 membership so the route's declared surface stays honest; the router layers the RFC synthesis on
 top. This keeps `Methods` a truthful description of what was registered while still serving HEAD
 correctly end-to-end.
+
+## Host-constrained matching (#788)
+
+Routes can constrain the hosts they serve (multi-tenant hosts, admin-on-internal-host patterns)
+by attaching `RouteHostMetadata` to their endpoint metadata (#150):
+
+```csharp
+new Route(HttpMethod.Get, "/dashboard", handler,
+    new RouterRouteMetadataCollection(
+        new RouteHostMetadata("admin.example.com", "*.internal.example.com:8443")));
+```
+
+### Constraint grammar (`RouteHostConstraint`)
+
+Each pattern is `host[:port]`, where `host` takes one of four forms:
+
+| Form | Example | Matches |
+|---|---|---|
+| Exact host | `api.example.com` | that host only |
+| Wildcard subdomain | `*.example.com` | `api.example.com`, `a.b.example.com` — **not** the apex `example.com` |
+| Any host | `*` | every host (useful combined with a port: `*:5000`) |
+| IPv6 literal | `[::1]`, `[2001:db8::1]:443` | brackets are the canonical form; comparison strips them, so `::1` denotes the same constraint |
+
+- Host comparison is **case-insensitive** (RFC 9110 §4.2.3 / RFC 3986 §3.2.2); ports compare exactly.
+- A port constraint requires the port to be **explicit** in the request's `Host` value. A request
+  whose host omits the port (an implied scheme default) does not satisfy a port-constrained route —
+  the matcher compares against the Host header as sent, mirroring ASP.NET `RequireHost`.
+- The constraints in one `RouteHostMetadata` are **OR-combined**: the request host must satisfy any
+  one of them.
+- Patterns are parsed **once, at metadata construction** (`RouteHostConstraint.Parse`/`TryParse`);
+  a malformed pattern throws `RoutePatternException` at the producer, never at match time. The
+  parser and matcher are span-based `IndexOf`/`EndsWith` scans — no regex, no reflection, AOT-safe.
+
+### Selection semantics (selects, never validates)
+
+The router resolves each route's `RouteHostMetadata` **once at construction** — last-wins via
+`GetMetadata<T>()`, so an endpoint-level declaration overrides a group-level one rather than
+combining with it — and evaluates the constraints at the top of candidate selection, before path
+matching:
+
+- A candidate whose constraints the request host does not satisfy is **skipped entirely**: it
+  cannot match, and it does **not** contribute its methods to a 405 `Allow` set. A request from a
+  non-matching host falls through to the remaining candidates and, when nothing else matches,
+  yields a plain `NoMatch` (404) — never a 405 advertising methods the host cannot reach.
+- A candidate whose host matches proceeds through the normal path → method phases, so a matching
+  host with the wrong method still produces a correct 405 with `Allow`.
+- An **empty** host list (`new RouteHostMetadata()`) declares no constraint: the route matches any
+  host and ranks as unconstrained.
+
+Host evaluation lives in `Router`, not in `Route.TryMatch`/`TryMatchPath` — the same division as
+the HEAD-falls-back-to-GET synthesis: the route's two matching phases stay an honest description of
+path and method, and candidate-selection concerns layer on top in the router.
+
+**Composition with #781 (host-filtering middleware).** This feature *selects* among routes by
+host; it never rejects a request. Validating the request host against an allowlist (→ 400) is the
+separate host-filtering middleware's job (#781). The two compose: the middleware guards the edge,
+and whatever it admits is routed — possibly onto host-constrained endpoints — by this matcher.
+Neither duplicates the other.
+
+### Ordering (the documented tie-break)
+
+Candidate order is, in priority: **path precedence** (ascending `InboundPrecedence`), then
+**host rank** (host-constrained ahead of unconstrained), then **registration order**. Concretely:
+
+- Host rank only breaks *ties* in path precedence: a literal route still beats a host-constrained
+  parameter route for the path the literal names.
+- Two routes with the same pattern, one host-constrained: the constrained one is evaluated first
+  for every request; requests from other hosts fall through to the open one.
+- Two host-constrained ties (e.g. exact `api.example.com` vs wildcard `*.example.com`) keep
+  registration order — exactness deliberately adds no further rank, matching ASP.NET's host
+  matcher, which likewise only distinguishes "declares hosts" from "does not".
 
 ## Endpoint metadata (#150)
 
@@ -171,6 +250,29 @@ to `IHttpFeatureCollection`). `RouterRouteMetadataCollection` follows the same p
 generators — some in *other* assemblies) use to build the bag. It rejects `null` items, copies its
 source array defensively, and exposes a value-type `Enumerator` for allocation-free `foreach`,
 mirroring `RouteValueDictionary.Enumerator` in this same library.
+
+### Metadata items are sealed carriers, not interface-per-concept
+
+The bag's *item* types (e.g. `RouteHostMetadata`) are **sealed concrete data carriers, and the
+sealed type is the contract** — there is deliberately no `IRouteHostMetadata`-style interface per
+metadata concept. This rejects the ASP.NET convention (`IHostMetadata`, `IHttpMethodMetadata`, …
+one interface per concept, attributes implementing them) for three reasons:
+
+- **A data carrier has no behavioral variance to abstract.** Each metadata item is an immutable
+  record of declared policy with exactly one plausible implementation; an interface pair per
+  concept doubles the public surface without enabling anything.
+- **The sealed type guarantees invariants consumers snapshot.** `Router` resolves host constraints
+  once at construction; a sealed carrier guarantees the parse-once, immutable list that snapshot
+  relies on, where an interface would admit implementations whose contents drift after resolution.
+- **The attribute scenario is served better by translation.** Under AOT, the decorator/binding
+  layer (#151/#796) translates attributes into carrier construction at map time (the source
+  generator emits `new RouteHostMetadata(...)`); attributes implementing metadata interfaces —
+  ASP.NET's reason for the convention — would push parsing into attribute property getters.
+
+Type-keyed lookup is unaffected: `GetMetadata<RouteHostMetadata>()` is the same `is`-test scan,
+and last-wins layering works identically. **Family rule:** new built-in metadata concepts ship as
+one sealed carrier; an interface is introduced only when a second implementation demonstrably
+needs to exist (applies equally to the named-route metadata from #787).
 
 ### Metadata lives on the route
 
@@ -283,6 +385,11 @@ added after the third of five children would apply to only the last two.
   `GetMetadata<T>` therefore resolves the most specific declaration, and `GetOrderedMetadata<T>`
   exposes the full broad-to-narrow layering (this is precisely the composition the #150 design
   anticipated). Routes with no metadata at any level share `RouterRouteMetadataCollection.Empty`.
+  Groups add no metadata types of their own: shared items are the same **sealed concrete
+  carriers** the bag always holds (see "Metadata items are sealed carriers"), so built-ins compose
+  through groups with their documented semantics — e.g. a group-level
+  `RouteHostMetadata` host-constrains every child, and a child-level `RouteHostMetadata`
+  *replaces* (never merges with) the group's, because the router resolves that carrier last-wins.
 - **Parameter policies:** `WithParameterPolicy` registers by inline name into the group's map;
   registering a name again (a built-in's, or an outer group's) replaces it for this group's
   children — dictionary-assignment semantics, deterministic. A single route can override the
@@ -406,7 +513,8 @@ The endpoint-metadata seam (#150) is consumed by:
 - **Route groups (`MapGroup`, delivered here — #786)** — compose group metadata into each child route
   by concatenating into a new `RouterRouteMetadataCollection` (last-wins makes endpoint-level
   override group-level). See the route-groups section above.
-- **#788 Host-based matching (`RequireHost`)** — contributes host metadata the matcher consults.
+- **#788 Host-based matching** — delivered here: `RouteHostMetadata` rides the bag and the matcher
+  consults it during candidate selection (see the host-constrained matching section).
 - **#790 Auth scheme model / handlers** — read authorization metadata off the matched endpoint via
   `GetEndpointMetadata<T>()`.
 - **#796 Source-generated binding** — emits metadata objects at build time instead of reflecting over
@@ -419,12 +527,16 @@ The endpoint-metadata seam (#150) is consumed by:
   build on the route model and match feature here and were intentionally held until #789 merged.
 - **#786 Route groups (`MapGroup`)** — builder-time prefix/policy/metadata composition; see the
   route-groups section above.
+- **#788 Host-based route matching** — see the host-constrained matching section above:
+  `RouteHostConstraint` (parsed value object), `RouteHostMetadata` (the sealed
+  endpoint-metadata carrier), and the router's host-aware candidate selection and ordering.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 
 - **Named routes + link generation (outbound URL building)** — #787. `OutboundPrecedence` is
   computed and preserved for this future work but is not consumed by the matcher.
-- **Host-based matching (`RequireHost`)** — #788.
+- **Request-host validation (allowlist → 400)** — the host-filtering middleware, #781. Host
+  constraints here *select* routes; they never reject a request.
 - **Source-generated binding + validation** — #796.
 - **Result writers / content negotiation** — #149.
 - **A separate `IEndpoint`/`Endpoint` type** — the matched route is the endpoint. A dedicated endpoint
@@ -432,6 +544,7 @@ The endpoint-metadata seam (#150) is consumed by:
 
 ## Standards
 
-- **RFC 3986** — URI path syntax (segment splitting, percent-encoding expectations).
-- **RFC 9110** — HTTP semantics: §9.3.2 (HEAD as GET), §15.5.6 (405 + `Allow`), method
-  case-sensitivity.
+- **RFC 3986** — URI path syntax (segment splitting, percent-encoding expectations); §3.2.2
+  host case-insensitivity and bracketed IPv6 literal form.
+- **RFC 9110** — HTTP semantics: §9.3.2 (HEAD as GET), §15.5.6 (405 + `Allow`), §4.2.3
+  (case-insensitive host comparison), method case-sensitivity.

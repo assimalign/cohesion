@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Routing.Exceptions;
+using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Policies;
 using Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
 
@@ -19,6 +21,13 @@ public class RouterGroupTests
         public TestMetadata(string value) => Value = value;
 
         public string Value { get; }
+    }
+
+    private static TestHttpContext CreateContext(HttpMethod method, string path, string host)
+    {
+        TestHttpContext context = TestHttpContext.Create(method, path);
+        context.Request.Host = new HttpHost(host);
+        return context;
     }
 
     private sealed class ExactValueRouteParameterPolicy : RouteParameterPolicy
@@ -395,6 +404,54 @@ public class RouterGroupTests
         // Assert
         match.Status.ShouldBe(RouteMatchStatus.Matched);
         match.Route.ShouldBeOfType<Route>().Pattern.RawText.ShouldBe("api/orders");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Group-level host metadata constrains child routes")]
+    public void WithMetadata_GroupHostMetadata_ShouldConstrainChildRoutes()
+    {
+        // Arrange — the sealed RouteHostMetadata carrier rides the group's shared metadata like
+        // any other item; the router consults it on the composed child route.
+        RouterBuilder builder = new();
+
+        builder.MapGroup("api")
+            .WithMetadata(new RouteHostMetadata("api.example.com"))
+            .Map(HttpMethod.Get, "data", new RecordingRouterRouteHandler());
+
+        IRouter router = builder.Build();
+
+        // Act
+        RouteMatch matchingHost = router.Match(CreateContext(HttpMethod.Get, "/api/data", "api.example.com"));
+        RouteMatch otherHost = router.Match(CreateContext(HttpMethod.Get, "/api/data", "www.example.com"));
+
+        // Assert
+        matchingHost.Status.ShouldBe(RouteMatchStatus.Matched);
+        otherHost.Status.ShouldBe(RouteMatchStatus.NoMatch);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Route-level host metadata replaces the group's, not merges")]
+    public void WithMetadata_ChildHostMetadata_ShouldReplaceGroupHostMetadata()
+    {
+        // Arrange — the router resolves RouteHostMetadata last-wins, so a route-level declaration
+        // overrides the group's rather than OR-combining with it.
+        RouterBuilder builder = new();
+
+        builder.MapGroup("api")
+            .WithMetadata(new RouteHostMetadata("group.example.com"))
+            .Map(
+                HttpMethod.Get,
+                "data",
+                new RecordingRouterRouteHandler(),
+                new RouterRouteMetadataCollection(new RouteHostMetadata("endpoint.example.com")));
+
+        IRouter router = builder.Build();
+
+        // Act
+        RouteMatch endpointHost = router.Match(CreateContext(HttpMethod.Get, "/api/data", "endpoint.example.com"));
+        RouteMatch groupHost = router.Match(CreateContext(HttpMethod.Get, "/api/data", "group.example.com"));
+
+        // Assert
+        endpointHost.Status.ShouldBe(RouteMatchStatus.Matched);
+        groupHost.Status.ShouldBe(RouteMatchStatus.NoMatch);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - MapGroup: Sibling groups do not share configuration")]
