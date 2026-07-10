@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Socketless integration testing for Cohesion web applications. WebApplicationTestFactory composes a WebApplication against the in-memory connection driver (no sockets, no ports), manages its lifecycle per test, and hands out System.Net.Http.HttpClient instances wired through SocketsHttpHandler.ConnectCallback so requests flow the full pipeline (middleware, routing, features) end to end. Supports HTTP/1.1 and prior-knowledge HTTP/2; AOT-safe, zero reflection.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+	</ItemGroup>
+</Project>
