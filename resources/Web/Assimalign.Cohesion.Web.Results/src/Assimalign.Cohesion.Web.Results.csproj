@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>The general HTTP result abstraction for the Cohesion Web pipeline: the IResult contract, the built-in result set (status, no-content, text, JSON via source-generated JsonTypeInfo, files, redirects, RFC 9457 ProblemDetails, push streaming), and the plain-static Results/TypedResults factories. JSON serialization is NativeAOT- and trimming-safe by construction: open DTOs go through caller-supplied source-gen metadata and the fixed problem+json payload uses a hand-rolled Utf8JsonWriter writer.</Description>
+	</PropertyGroup>
 	<ItemGroup>
-		
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 </Project>
