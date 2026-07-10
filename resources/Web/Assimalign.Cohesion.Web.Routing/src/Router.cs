@@ -35,12 +35,17 @@ public sealed class Router : IRouter
     /// </summary>
     /// <param name="routes">The routes to evaluate.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="routes"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when two routes register the same route name (route names are unique per router,
+    /// compared case-insensitively), or when a named route exposes no route pattern.
+    /// </exception>
     public Router(IEnumerable<IRouterRoute> routes)
     {
         ArgumentNullException.ThrowIfNull(routes);
 
         _routes = routes.ToImmutableList();
         _ordered = BuildCandidates(_routes);
+        LinkGenerator = new RouterLinkGenerator(_routes);
     }
 
     /// <summary>
@@ -100,6 +105,9 @@ public sealed class Router : IRouter
     public IReadOnlyList<IRouterRoute> Routes => _routes;
 
     IEnumerable<IRouterRoute> IRouter.Routes => Routes;
+
+    /// <inheritdoc />
+    public ILinkGenerator LinkGenerator { get; }
 
     /// <inheritdoc />
     public RouteMatch Match(IHttpContext context)

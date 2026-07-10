@@ -106,5 +106,26 @@ public static class HttpContextRoutingExtensions
 
             return context.Features.Get<IRouteMatchFeature>()?.Metadata.GetMetadata<TMetadata>();
         }
+
+        /// <summary>
+        /// Gets the link generator for the application the current request belongs to, used to
+        /// generate outbound URLs from named routes and route values.
+        /// </summary>
+        /// <returns>The application's <see cref="ILinkGenerator"/>.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Routing has not been registered on the application (call <c>AddRouting</c> on the web
+        /// application builder).
+        /// </exception>
+        public ILinkGenerator GetLinkGenerator()
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            IRouterFeature feature = context.Features.Get<IRouterFeature>()
+                ?? throw new InvalidOperationException(
+                    "Routing has not been registered. Call AddRouting() on the web application builder before generating links.");
+
+            return feature.Router.LinkGenerator;
+        }
     }
 }
