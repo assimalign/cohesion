@@ -32,6 +32,11 @@ controllers, metadata, results).
   unconstrained ties.
 - Keeps routing state **per application** (no process-wide shared builder), so multiple web
   applications hosted in one process have fully isolated route tables.
+- Generates **outbound URLs** (`ILinkGenerator`): routes register a unique, case-insensitive
+  **name** via metadata (duplicates fail at build time), and paths or absolute URIs are generated
+  from a name — or from route values alone, resolved by outbound precedence — honoring defaults,
+  collapsing omitted optionals/catch-alls, re-validating constraints, escaping per path segment,
+  and appending surplus values as a query string.
 
 ## Key types
 
@@ -49,7 +54,9 @@ controllers, metadata, results).
 | `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
 | `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
 | `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata. |
-| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) over that feature. |
+| `RouteNameMetadata` | Sealed endpoint-metadata carrier naming a route for URL generation; unique per router, checked at build time. |
+| `ILinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
+| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `GetLinkGenerator` over the routing features. |
 | `RoutingExtensions.UseRouting` | Pipeline integration (dispatch / 405 / fall-through). |
 
 ## Usage
@@ -81,6 +88,26 @@ switch (match.Status)
 
 Within a web application pipeline, prefer `builder.UseRouting()`, which performs this dispatch
 (invoke handler / emit 405 + `Allow` / fall through to the next middleware) for you.
+
+Outbound, a route named through its metadata generates URLs back out of the same table:
+
+```csharp
+var route = new Route(
+    new[] { HttpMethod.Get }, RoutePatternParser.Parse("/users/{id:int}"),
+    RouteParameterPolicyMap.CreateDefault(), userHandler,
+    new RouterRouteMetadataCollection(new RouteNameMetadata("user")));
+var router = new Router(new IRouterRoute[] { route });   // duplicate names throw here
+
+string path = router.LinkGenerator.GetPathByName(
+    "user", new RouteValueDictionary { ["id"] = 42, ["expand"] = "orders" });
+// => /users/42?expand=orders   (constraints re-validate; surplus values become the query)
+
+string uri = router.LinkGenerator.GetUriByName(
+    "user", HttpScheme.Https, new HttpHost("example.com"), new RouteValueDictionary { ["id"] = 42 });
+// => https://example.com/users/42
+```
+
+In request handlers, resolve the application's generator with `context.GetLinkGenerator()`.
 
 ## Design
 

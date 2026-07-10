@@ -29,6 +29,9 @@ Scope of this library:
   evaluated during candidate selection off the metadata bag (#788).
 - **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
   prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
+- **Named routes and outbound URL generation** (`RouteNameMetadata` in `Metadata/`,
+  `ILinkGenerator`) — the inverse direction: from a route name (or route values) back to a path
+  or absolute URI (#787).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
 
@@ -272,7 +275,7 @@ one interface per concept, attributes implementing them) for three reasons:
 Type-keyed lookup is unaffected: `GetMetadata<RouteHostMetadata>()` is the same `is`-test scan,
 and last-wins layering works identically. **Family rule:** new built-in metadata concepts ship as
 one sealed carrier; an interface is introduced only when a second implementation demonstrably
-needs to exist (applies equally to the named-route metadata from #787).
+needs to exist. The named-route carrier `RouteNameMetadata` (#787) follows the same rule.
 
 ### Metadata lives on the route
 
@@ -442,6 +445,12 @@ constraint means the path did not match *for that route*, so a more general rout
 the request up (e.g. `/api/{id:int}` rejects `/api/abc`, which then falls through to
 `/api/{id}`). Unknown policy references fail fast at `Route` construction, not at request time.
 
+Policies constrain a value **when one is present** — they do not make the value required. An
+omitted optional (or catch-all) parameter captures no value, so its policies are skipped:
+`/api/items/{id:int?}` matches `/api/items` (no `id` captured) and `/api/items/7` (typed `int`),
+but still rejects `/api/items/abc`. This mirrors the outbound direction, where the link generator
+skips policy validation for parameters whose segments collapse.
+
 ### The constraint model: validators vs. typed conversions (#789)
 
 `RouteParameterPolicy` is the public extension point. The concrete built-ins are `internal sealed`
@@ -480,6 +489,104 @@ reflection or `TypeConverter` is involved, keeping the path AOT-safe.
 Values that are already the target type (a typed default, or a re-evaluated candidate) are accepted
 without re-parsing (`ConversionType.IsInstanceOfType`), so conversion is genuinely once-per-value.
 
+## Named routes and outbound URL generation (#787)
+
+### Intent
+
+Link generation is the inverse of matching: from a route (addressed by name or by values) and a
+set of route values back to a URL. Without it, `Location` headers, HATEOAS links, and redirect
+targets are hand-built strings that silently drift from the route table. The generator makes the
+route table the single source of truth in **both** directions — and `OutboundPrecedence`, computed
+since the pattern model landed, finally has a consumer.
+
+### Names are metadata, not a route property
+
+A route is named by adding a `RouteNameMetadata` item to its endpoint metadata — not by a
+constructor parameter or a mutable `Name` property. The alternatives were rejected deliberately:
+
+- A constructor parameter would multiply the already-wide `Route` constructor surface and would
+  not compose: a route group (#786) could not contribute or override a name after the fact.
+- Metadata composes for free. Groups concatenate metadata into a new collection, and
+  `GetMetadata<T>()` is last-wins, so an endpoint-level name overrides a group-level one with no
+  additional machinery. Naming rides the same #150 seam every other per-endpoint policy rides.
+
+`RouteNameMetadata` follows the family rule for bag items ("Metadata items are sealed carriers,
+not interface-per-concept" above): it is **one sealed concrete carrier in `Metadata/`, and the
+sealed type is the contract** — there is deliberately no `IRouteNameMetadata` interface. The link
+generator keys `GetMetadata<RouteNameMetadata>()` on the carrier directly, and the sealed type
+guarantees the validated, immutable name its build-time index snapshots.
+
+### Uniqueness fails at build time
+
+Route names are **unique per router, compared case-insensitively**. The name index is built inside
+`RouterLinkGenerator`, which the `Router` constructor creates eagerly — so a duplicate name (or a
+named route that exposes no pattern) throws `InvalidOperationException` when the route table is
+built (`RouterBuilder.Build()` / `Router` construction), never at request time. Per-application
+isolation (#789) scopes uniqueness naturally: two applications in one process can both have a
+route named `user`.
+
+### The `ILinkGenerator` surface
+
+`ILinkGenerator` is exposed as `IRouter.LinkGenerator` (the router owns the route table; the
+generator is its outbound view) and, at request time, through
+`HttpContextRoutingExtensions.GetLinkGenerator()`, which resolves the per-application
+`IRouterFeature`. Two addressing modes:
+
+- **By name** (`TryGetPathByName` / `GetPathByName` / `…UriByName`) — the name resolves exactly one
+  route; generation succeeds or fails on that route alone.
+- **By values** (`TryGetPathByValues` / `TryGetUriByValues`) — every pattern-based route whose
+  parameters, required values, and policies the supplied values can satisfy is a candidate.
+  Candidates are evaluated in **descending `OutboundPrecedence`** order (for generation, *higher*
+  is more specific: literals 5 … unconstrained catch-all 1 — the mirror image of the inbound
+  table), with **registration order breaking ties** so selection is a deterministic total order.
+  The first candidate that generates wins; a candidate that fails (missing parameter, violated
+  constraint) falls through to the next.
+
+Absolute URIs are composed from an explicit `HttpScheme` (`Http`/`Https` only) and `HttpHost` —
+the generator never guesses an authority from ambient state.
+
+### Generation semantics
+
+For a chosen pattern, each parameter resolves to the **supplied value first, the pattern default
+second**; a parameter with neither must be optional or a catch-all, and its segment **collapses**.
+A collapsed segment must only be followed by collapsed segments — a hole in the middle of a path
+fails generation rather than producing a wrong URL. Inside a multi-part segment, a trailing
+optional with no value drops together with its preceding separator (`{name}.{ext?}` → `report`),
+which mirrors how the matcher treats the omitted form.
+
+Two symmetry rules make generated URLs canonical and round-trippable:
+
+- **Trailing defaults trim.** A trailing run of segments whose values equal their defaults is
+  removed (`{controller=Home}/{action=Index}` with `{controller=Store}` → `/Store`; all-default →
+  `/`). Matching re-applies the defaults, so generate→match restores the same values.
+- **Policies re-validate on generation** (with a null `HttpContext`, which the policy contract
+  explicitly permits — validators and typed conversions never touch it). A URL is only generated
+  from a route it would inbound-match; `/api/{id:int}` refuses to generate for `id=abc`, and in
+  by-values mode the failure falls through to a less specific candidate such as `/api/{id}`.
+
+### Encoding (path vs query)
+
+Parameter values are percent-encoded **per path segment** (`Uri.EscapeDataString`); literals are
+authored template text and pass through untouched. Catch-alls follow the two-form rule: `{*path}`
+treats the whole value as one segment and encodes `/` as `%2F`; `{**path}` keeps `/` as segment
+separators and encodes each piece. The transports deliberately never decode `%2F`
+(`UrlDecoder` skips it, as Kestrel does, so an encoded slash cannot fabricate a segment
+boundary) — which means `{**path}` is the identity-round-trip form for slash-containing values,
+while `{*path}` keeps an embedded slash opaque end-to-end.
+
+Supplied values that are not template parameters append as a **query string** in supplied order
+(the `RouteValueDictionary` preserves insertion order), with both keys and values query-encoded.
+Null surplus values are skipped.
+
+### `IRouterRoute.Pattern`
+
+Outbound generation needs the parsed pattern, so `IRouterRoute` now exposes `RoutePattern? Pattern`.
+It is nullable by design: a fully custom matcher without a pattern is legal, is skipped by the
+generator, and cannot carry a route name (addressing a route that cannot be generated is a
+configuration error and throws at build time). This was chosen over type-testing for the concrete
+`Route` inside the generator, which would have silently dropped wrapped/decorated routes (the shape
+#786 groups may produce) out of link generation.
+
 ## AOT posture
 
 - No reflection, no runtime code generation, no dynamic activation anywhere in the match path or the
@@ -491,6 +598,9 @@ without re-parsing (`ConversionType.IsInstanceOfType`), so conversion is genuine
 - Typed conversion (`{id:int}` → boxed `int`) is done by parsing built-in BCL `TryParse` methods
   under the invariant culture — no reflection, no `TypeConverter`, no runtime code generation — so it
   is AOT/trim-safe. Custom conversions plug in the same way (`TypedRouteParameterPolicy`).
+- Link generation is equally reflection-free: values are stringified with
+  `Convert.ToString(…, InvariantCulture)`, encoded with `Uri.EscapeDataString`, and policies are
+  re-validated through the same explicit policy objects the matcher resolves by name.
 - Source-generated endpoint **binding** (turning a matched route into typed handler arguments) is
   intentionally out of scope here and is delivered by the analyzer work in #796; the matcher produces a
   `RouteValueDictionary` whose type-constrained values are already typed and lets that layer bind the rest.
@@ -530,17 +640,23 @@ The endpoint-metadata seam (#150) is consumed by:
 - **#788 Host-based route matching** — see the host-constrained matching section above:
   `RouteHostConstraint` (parsed value object), `RouteHostMetadata` (the sealed
   endpoint-metadata carrier), and the router's host-aware candidate selection and ordering.
+- **#787 Named routes + link generation** — see the outbound URL generation section above.
+  `OutboundPrecedence` is live code now; route names ride the #150 metadata seam and duplicate
+  names fail when the route table is built.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 
-- **Named routes + link generation (outbound URL building)** — #787. `OutboundPrecedence` is
-  computed and preserved for this future work but is not consumed by the matcher.
 - **Request-host validation (allowlist → 400)** — the host-filtering middleware, #781. Host
   constraints here *select* routes; they never reject a request.
 - **Source-generated binding + validation** — #796.
 - **Result writers / content negotiation** — #149.
-- **A separate `IEndpoint`/`Endpoint` type** — the matched route is the endpoint. A dedicated endpoint
-  abstraction can be layered later if named routes (#787) require it; it is not introduced speculatively.
+- **A separate `IEndpoint`/`Endpoint` type** — the matched route is the endpoint. Named routes
+  (#787) did not require one — a name is metadata, and the generator addresses routes directly —
+  so it remains un-introduced.
+- **Ambient-value link generation** — the generator takes explicit values only; it does not reach
+  into the current request's matched values to fill gaps. Explicitness keeps generation
+  deterministic and testable; a request-aware convenience can layer on top later if the API
+  programming models need it.
 
 ## Standards
 
