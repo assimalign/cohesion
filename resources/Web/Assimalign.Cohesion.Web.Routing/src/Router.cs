@@ -15,16 +15,19 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </summary>
 /// <remarks>
 /// Candidates are evaluated in ascending <see cref="IRouterRoute.InboundPrecedence"/> order (more specific
-/// routes first), with registration order breaking ties. This means a literal segment always wins over a
-/// parameter segment regardless of the order the routes were registered. Method handling follows RFC 9110:
-/// a path that matches with an unacceptable method yields <see cref="RouteMatchStatus.MethodNotAllowed"/>
-/// (405) with the acceptable methods, and a <c>HEAD</c> request is served by a matching <c>GET</c> route
-/// when <c>HEAD</c> is not explicitly mapped.
+/// routes first); within equal precedence, host-constrained routes (declaring <see cref="IRouteHostMetadata"/>)
+/// are evaluated ahead of unconstrained ones, and registration order breaks the remaining ties. This means a
+/// literal segment always wins over a parameter segment regardless of the order the routes were registered.
+/// A candidate whose host constraints the request host does not satisfy is skipped entirely — it neither
+/// matches nor contributes to a 405 — so the request falls through to other candidates. Method handling
+/// follows RFC 9110: a path that matches with an unacceptable method yields
+/// <see cref="RouteMatchStatus.MethodNotAllowed"/> (405) with the acceptable methods, and a <c>HEAD</c>
+/// request is served by a matching <c>GET</c> route when <c>HEAD</c> is not explicitly mapped.
 /// </remarks>
 public sealed class Router : IRouter
 {
     private readonly IReadOnlyList<IRouterRoute> _routes;
-    private readonly IRouterRoute[] _ordered;
+    private readonly Candidate[] _ordered;
 
     /// <summary>
     /// Creates a new router from the supplied route collection.
@@ -36,7 +39,7 @@ public sealed class Router : IRouter
         ArgumentNullException.ThrowIfNull(routes);
 
         _routes = routes.ToImmutableList();
-        _ordered = OrderByPrecedence(_routes);
+        _ordered = BuildCandidates(_routes);
     }
 
     /// <summary>
@@ -103,26 +106,35 @@ public sealed class Router : IRouter
         ArgumentNullException.ThrowIfNull(context);
 
         HttpMethod method = context.Request.Method;
+        HttpHost host = context.Request.Host;
         List<HttpMethod>? allowed = null;
 
         for (int i = 0; i < _ordered.Length; i++)
         {
-            IRouterRoute candidate = _ordered[i];
+            Candidate candidate = _ordered[i];
 
-            if (!candidate.TryMatchPath(context, out RouteValueDictionary values))
+            // A host-constrained candidate the request host does not satisfy is not a candidate
+            // for this request at all: it must not match and must not contribute to the Allow
+            // set, so the request falls through to the remaining candidates.
+            if (!MatchesHost(candidate.Hosts, host))
             {
                 continue;
             }
 
-            if (AcceptsMethod(candidate, method))
+            if (!candidate.Route.TryMatchPath(context, out RouteValueDictionary values))
             {
-                return RouteMatch.Matched(candidate, values);
+                continue;
+            }
+
+            if (AcceptsMethod(candidate.Route, method))
+            {
+                return RouteMatch.Matched(candidate.Route, values);
             }
 
             // Path matched but the method did not — remember the acceptable methods in case no
             // higher- or lower-precedence candidate ends up matching the method (a 405, not a 404).
             allowed ??= new List<HttpMethod>();
-            AccumulateAllowedMethods(candidate, allowed);
+            AccumulateAllowedMethods(candidate.Route, allowed);
         }
 
         if (allowed is not null)
@@ -256,39 +268,91 @@ public sealed class Router : IRouter
         return false;
     }
 
-    private static IRouterRoute[] OrderByPrecedence(IReadOnlyList<IRouterRoute> routes)
+    private static bool MatchesHost(IReadOnlyList<RouteHostConstraint>? hosts, HttpHost host)
+    {
+        if (hosts is null)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < hosts.Count; i++)
+        {
+            if (hosts[i].IsMatch(host))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Candidate[] BuildCandidates(IReadOnlyList<IRouterRoute> routes)
     {
         int count = routes.Count;
-        var ordered = new IRouterRoute[count];
+        var ordered = new Candidate[count];
         var keys = new PrecedenceKey[count];
 
         for (int i = 0; i < count; i++)
         {
-            ordered[i] = routes[i];
-            keys[i] = new PrecedenceKey(routes[i].InboundPrecedence, i);
+            // Resolve host metadata once at construction (last-wins, so an endpoint-level
+            // declaration overrides a group-level one). An empty host list declares no
+            // constraint and ranks as unconstrained.
+            IReadOnlyList<RouteHostConstraint>? hosts = routes[i].Metadata.GetMetadata<IRouteHostMetadata>()?.Hosts;
+            if (hosts is { Count: 0 })
+            {
+                hosts = null;
+            }
+
+            ordered[i] = new Candidate(routes[i], hosts);
+            keys[i] = new PrecedenceKey(routes[i].InboundPrecedence, hosts is null ? 1 : 0, i);
         }
 
-        // Sort by precedence ascending (more specific first), registration index breaking ties so the
-        // ordering is deterministic and stable.
+        // Sort by precedence ascending (more specific first), host-constrained candidates ahead of
+        // unconstrained ones within equal precedence, registration index breaking the remaining
+        // ties so the ordering is deterministic and stable.
         Array.Sort(keys, ordered);
         return ordered;
     }
 
+    private readonly struct Candidate
+    {
+        public Candidate(IRouterRoute route, IReadOnlyList<RouteHostConstraint>? hosts)
+        {
+            Route = route;
+            Hosts = hosts;
+        }
+
+        public IRouterRoute Route { get; }
+
+        // Host constraints resolved from the route's metadata, or null when the route is
+        // host-unconstrained.
+        public IReadOnlyList<RouteHostConstraint>? Hosts { get; }
+    }
+
     private readonly struct PrecedenceKey : IComparable<PrecedenceKey>
     {
-        public PrecedenceKey(decimal precedence, int index)
+        public PrecedenceKey(decimal precedence, int hostRank, int index)
         {
             Precedence = precedence;
+            HostRank = hostRank;
             Index = index;
         }
 
         public decimal Precedence { get; }
+
+        public int HostRank { get; }
 
         public int Index { get; }
 
         public int CompareTo(PrecedenceKey other)
         {
             int result = Precedence.CompareTo(other.Precedence);
+            if (result != 0)
+            {
+                return result;
+            }
+
+            result = HostRank.CompareTo(other.HostRank);
             return result != 0 ? result : Index.CompareTo(other.Index);
         }
     }
