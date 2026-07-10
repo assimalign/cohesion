@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Metadata;
 
 /// <summary>
 /// Default immutable <see cref="IRouterRouteMetadataCollection"/> implementation

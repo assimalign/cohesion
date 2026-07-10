@@ -170,6 +170,19 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Sessions/tests/Assimalign.Cohesion.Web.Sessions.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Testing/">
+		<File Path="Assimalign.Cohesion.Web.Testing/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Testing/docs/">
+		<File Path="Assimalign.Cohesion.Web.Testing/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Testing/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Testing/src/">
+		<Project Path="Assimalign.Cohesion.Web.Testing/src/Assimalign.Cohesion.Web.Testing.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Testing/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Testing/tests/Assimalign.Cohesion.Web.Testing.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/refs/" >
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
