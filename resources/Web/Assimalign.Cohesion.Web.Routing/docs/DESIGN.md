@@ -21,7 +21,8 @@ Scope of this library:
   and HTTP method semantics.
 - An **endpoint metadata bag** (`IRouterRouteMetadataCollection`) and a **route-match feature**
   (`IRouteMatchFeature`) — the reflection-free seam auth, docs, and observability consume (#150).
-- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`),
+  Metadata objects (the bag and the built-in carriers) live under `Metadata/`.
+- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
   evaluated during candidate selection off the metadata bag (#788).
 - Minimal **pipeline integration** (`UseRouting`) so a web application can dispatch through
   the router.
