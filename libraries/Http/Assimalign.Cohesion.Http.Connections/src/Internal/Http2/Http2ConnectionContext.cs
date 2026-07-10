@@ -124,11 +124,16 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private readonly Http2ConnectionListenerOptions.Http2Limits _http2Limits;
     private readonly Http2FloodGuard _floodGuard;
 
-    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors)
+    // The precomputed RFC 7838 Alt-Svc value injected on every response head (unless the application
+    // set its own), advertising the listener's HTTP/3 endpoint. Null when advertisement is off.
+    private readonly string? _altSvcHeaderValue;
+
+    public Http2ConnectionContext(IConnection connection, bool isSecure, Http2ConnectionListenerOptions.Http2Limits limits, IHttpExchangeInterceptor[] requestInterceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
         _http2Limits = limits;
         _floodGuard = new Http2FloodGuard(limits);
+        _altSvcHeaderValue = altSvcHeaderValue;
         // RFC 9113 §10.5.1 — the decoder enforces the advertised MAX_HEADER_LIST_SIZE on the
         // decoded field list; the stream's header-block accumulator enforces the raw-byte cap.
         _headerDecoder = new HPackDecoder(maxHeaderListSize: limits.MaxRequestHeaderListSize);
@@ -536,6 +541,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         http2Context.MarkFinalResponseStarted();
 
         byte[] bodyBytes = await ReadBodyAsync(http2Context.Response.Body, cancellationToken).ConfigureAwait(false);
+
+        // Advertise the HTTP/3 endpoint on this buffered response unless the application set its own
+        // Alt-Svc (RFC 7838 — the server never overwrites an application value).
+        HttpAltServiceInjector.Inject(http2Context.Response.Headers, _altSvcHeaderValue);
+
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
 
         // RFC 9113 §4.1 — frames from concurrent senders MUST NOT interleave.
@@ -1727,6 +1737,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     {
         // RFC 9110 §15.2 — the final (streamed) response head must not carry a 1xx status.
         HttpInterimResponseRules.EnsureFinalStatusCode(context.Response.StatusCode);
+
+        // Advertise the HTTP/3 endpoint on this streamed response unless the application set its own
+        // Alt-Svc (RFC 7838 — the server never overwrites an application value).
+        HttpAltServiceInjector.Inject(context.Response.Headers, _altSvcHeaderValue);
 
         byte[] headerBlock = HPackEncoder.EncodeResponseHeaders(context.Response.StatusCode, context.Response.Headers);
 

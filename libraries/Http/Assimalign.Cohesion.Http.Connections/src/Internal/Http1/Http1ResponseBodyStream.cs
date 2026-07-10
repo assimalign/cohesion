@@ -30,20 +30,26 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
     private readonly Stream _stream;
     private readonly Http1Context _context;
     private readonly MinDataRateGate? _gate;
+    private readonly string? _altSvcHeaderValue;
     private bool _chunked;
     private bool _suppressBody;
 
-    public Http1ResponseBodyStream(Stream stream, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider)
+    public Http1ResponseBodyStream(Stream stream, Http1Context context, HttpMinDataRate? minResponseDataRate, TimeProvider timeProvider, string? altSvcHeaderValue)
         : base(context)
     {
         _stream = stream;
         _context = context;
         _gate = minResponseDataRate is not null ? new MinDataRateGate(minResponseDataRate, timeProvider) : null;
+        _altSvcHeaderValue = altSvcHeaderValue;
     }
 
     protected override async ValueTask CommitHeadersAsync(CancellationToken cancellationToken)
     {
         HttpHeaderCollection headers = _context.Response.Headers;
+
+        // Advertise the HTTP/3 endpoint on this streamed response unless the application set its own
+        // Alt-Svc (RFC 7838 — the server never overwrites an application value).
+        HttpAltServiceInjector.Inject(headers, _altSvcHeaderValue);
 
         // RFC 9110 §9.3.2 — a HEAD response carries the same header section a GET would but never a
         // body, so suppress every body write and the terminator.
