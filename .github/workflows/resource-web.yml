@@ -28,11 +28,13 @@ jobs:
             'Assimalign.Cohesion.Web.Authorization',
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',
+            'Assimalign.Cohesion.Web.ErrorHandling',
             'Assimalign.Cohesion.Web.Forms',
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.Hosting',
             'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Routing',
+            'Assimalign.Cohesion.Web.Serialization',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.Testing'
         ]

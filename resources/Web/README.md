@@ -69,7 +69,9 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, builder-time DI/config/logging composition |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping sugar (`Map`/`MapGet`) over the router — the fluent `.Use(...)` / `IWebApplicationMiddleware` composition model |
+| `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |
 | `Assimalign.Cohesion.Web.ProblemDetails` | The RFC 9457 problem+json payload (model + AOT-safe writer + `WriteProblemDetailsAsync`) |
+| `Assimalign.Cohesion.Web.ErrorHandling` | The `OnError` fault seam: `AddErrorHandling().OnError(...)` handler chain + the terminal problem+json default (faults only — protocol outcomes stay in their features) |
 | `Assimalign.Cohesion.Web.Authentication` / `.Cookie` / `.Bearer` | Scheme model + builder surface, and the handler packages that graft their scheme verbs onto it |
 | `Assimalign.Cohesion.Web.Authorization` | Authorization contracts (in design) |
 | `Assimalign.Cohesion.Web.CookiePolicy` / `.Cors` / `.Forms` / `.Sessions` / `.Health` | Request-pipeline feature libraries over their `Http.*` counterparts |

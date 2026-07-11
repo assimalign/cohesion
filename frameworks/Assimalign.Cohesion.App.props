@@ -160,11 +160,13 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authorization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ErrorHandling" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Serialization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
 
         <!-- Supporting libraries the Web family closes over that the base App

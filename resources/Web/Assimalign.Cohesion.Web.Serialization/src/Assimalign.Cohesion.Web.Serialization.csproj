@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>The content-serialization registry for the Cohesion Web pipeline: media-type-keyed request-deserialization and response-serialization halves (IHttpContentReader / IHttpContentWriter), a builder-time registration surface (AddJsonSerialization over a source-generated JsonTypeInfo resolver — zero reflection under NativeAOT), and the ReadContentAsync / WriteContentAsync call-site extensions. Content negotiation composes over this registry; error surfacing composes over the Web.ErrorHandling OnError hook.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+	</ItemGroup>
+</Project>
