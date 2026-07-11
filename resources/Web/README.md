@@ -31,6 +31,34 @@ Why the rule exists:
   compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
   seams.
 
+**The rule is build-enforced, in two layers.** `resources/Web/Directory.Build.targets` fails the
+build of a library project that references `Web.Hosting` (`COHWEB001`), or a `Web.Hosting` that
+references any Web feature library (`COHWEB002`). Layer 1 checks the project-reference graph —
+`CohesionProjectReference` / `CohesionPrivateProjectReference` (both convert to `ProjectReference`
+at evaluation time) and any raw `ProjectReference`, including transitive ones. Layer 2 checks the
+fully resolved assembly closure after `ResolveAssemblyReferences`, which also catches a raw
+`<Reference>` with a `HintPath` at a Web.Hosting DLL or a package-delivered copy. Test and example
+projects are exempt — the rule constrains shipped libraries, not harnesses — and every Web project
+builds in CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
+
+## Adding a new Web feature library
+
+A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these are updated
+(the working checklist also lives in `.claude/rules/web-area.md`):
+
+1. **csproj** — references per the dependency rule; builder verbs (`Add<Feature>`/`Use<Feature>`)
+   ship in the package itself, composing against the root `IWebApplicationBuilder` /
+   `IWebApplicationPipelineBuilder` seams with dependency-free registration (typed features and
+   values — no DI, no configuration binding).
+2. **Framework manifest** — `frameworks/Assimalign.Cohesion.App.props`, `App.Web` group, plus any
+   new outside-area transitive dependencies. Validate by packing
+   `frameworks/Assimalign.Cohesion.App.Web.Runtime` (hard-fails on unresolvable assemblies).
+3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx` and the root
+   `Assimalign.Cohesion.slnx`.
+4. **CI** — the matrix in `.github/workflows/resource-web.yml`.
+5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
+   stabilizes), and a row in the project map below.
+
 ## Project map
 
 | Project | Role |
@@ -47,8 +75,11 @@ Why the rule exists:
 | `Assimalign.Cohesion.Web.ApplicationModel` | Placeholder awaiting the ApplicationModel Phase-4 rebuild |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
-`libraries/Connections`, `libraries/Security`) and, in the hosting module only, the L2
-runtime/composition libraries (`libraries/Hosting`, `libraries/DependencyInjection`,
-`libraries/Configuration`, `libraries/Logging`).
+`libraries/Connections`, `libraries/Security`). The L2 runtime/composition libraries
+(`libraries/Hosting`, `libraries/DependencyInjection`, `libraries/Configuration`,
+`libraries/Logging`) are consumed by the hosting module and by the `Web.Testing` harness (which
+drives the runtime and resolves the server from its service provider) — never by the feature
+libraries. (`Web.ApplicationModel`'s placeholder csproj still lists L2 references pending its
+Phase-4 rebuild.)
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.

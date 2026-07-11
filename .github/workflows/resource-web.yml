@@ -15,12 +15,29 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        # Every buildable Web project is listed so the area's dependency-rule guard
+        # (resources/Web/Directory.Build.targets, COHWEB001/COHWEB002) executes in CI for
+        # each of them - most importantly Web.Hosting, which nothing else pulls in
+        # transitively. Web.ApplicationModel is excluded (source-less placeholder).
         projects: [
             'Assimalign.Cohesion.Web',
+            'Assimalign.Cohesion.Web.Api',
+            'Assimalign.Cohesion.Web.Api.Controllers',
+            'Assimalign.Cohesion.Web.Authentication',
+            'Assimalign.Cohesion.Web.Authentication.Bearer',
+            'Assimalign.Cohesion.Web.Authentication.Cookie',
+            'Assimalign.Cohesion.Web.Authorization',
+            'Assimalign.Cohesion.Web.CookiePolicy',
+            'Assimalign.Cohesion.Web.Cors',
+            'Assimalign.Cohesion.Web.Forms',
+            'Assimalign.Cohesion.Web.Functions',
             'Assimalign.Cohesion.Web.Health',
+            'Assimalign.Cohesion.Web.Hosting',
             'Assimalign.Cohesion.Web.Results',
             'Assimalign.Cohesion.Web.Results.ServerSentEvents',
-            'Assimalign.Cohesion.Web.Routing'
+            'Assimalign.Cohesion.Web.Routing',
+            'Assimalign.Cohesion.Web.Sessions',
+            'Assimalign.Cohesion.Web.Testing'
         ]
     steps:
       - uses: actions/checkout@v4

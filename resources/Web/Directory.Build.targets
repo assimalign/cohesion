@@ -1,3 +1,79 @@
 <Project>
 	<Import Project="..\Directory.Build.targets" />
+
+	<!--
+	    Web-area dependency rule (resources/Web/README.md, .claude/rules/web-area.md):
+
+	      * No Web-area library may reference Assimalign.Cohesion.Web.Hosting - the runtime
+	        module composes DI/configuration/logging, and a feature library that referenced it
+	        would drag that surface into every consumer.
+	      * Web.Hosting may reference no Web-area library except the root
+	        Assimalign.Cohesion.Web - the App.Web shared framework delivers the family to
+	        applications, so the runtime needs no compile-time knowledge of its features.
+	      * Sole sanctioned exception: Assimalign.Cohesion.Web.Testing (the test factory drives
+	        the concrete runtime).
+
+	    Enforced at build time in two layers so a violating reference fails immediately instead
+	    of surviving until review. Library projects are checked; test and example projects are
+	    exempt - the rule constrains shipped libraries, not harnesses.
+
+	    Layer 1 inspects @(ProjectReference) by filename. build/Targets/
+	    Build.References.Projects.targets converts CohesionProjectReference /
+	    CohesionPrivateProjectReference into ProjectReference at EVALUATION time (and removes
+	    the originals), so every project-reference flavor - including a raw ProjectReference
+	    added against the repo rules, and transitive project references - is caught here.
+
+	    Layer 2 inspects the fully resolved assembly closure @(ReferencePath) after
+	    ResolveAssemblyReferences, which additionally catches routes that never surface as a
+	    ProjectReference: a raw <Reference> with a HintPath at a Web.Hosting DLL, or a
+	    package-delivered copy of a Web assembly.
+	-->
+
+	<PropertyGroup>
+		<!-- Library projects only: everything under resources/Web except tests/ and examples/
+		     trees. Deliberately NOT keyed on the folder being named 'src', so a project
+		     scaffolded with a nonstandard layout is guarded rather than silently exempt. -->
+		<_WebAreaRuleApplies>false</_WebAreaRuleApplies>
+		<_WebAreaRuleApplies Condition="'$([System.IO.Path]::GetFileName($(MSBuildProjectDirectory)))' != 'tests' AND !$(MSBuildProjectDirectory.Contains('examples'))">true</_WebAreaRuleApplies>
+	</PropertyGroup>
+
+	<Target Name="ValidateWebAreaDependencyRule"
+	        BeforeTargets="ResolveProjectReferences;CoreCompile"
+	        Condition="'$(_WebAreaRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_WebAreaHostingReference Include="@(ProjectReference)"
+			                          Condition="'%(Filename)' == 'Assimalign.Cohesion.Web.Hosting'" />
+			<_WebAreaFeatureReference Include="@(ProjectReference)"
+			                          Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.web.'))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_WebAreaHostingReference)' != '' AND '$(MSBuildProjectName)' != 'Assimalign.Cohesion.Web.Testing'"
+		       Code="COHWEB001"
+		       Text="Web-area dependency rule: '$(MSBuildProjectName)' references 'Assimalign.Cohesion.Web.Hosting'. No Web-area library may depend on the hosting/runtime module (sole exception: Web.Testing). Compose against the root Assimalign.Cohesion.Web abstractions instead. See resources/Web/README.md." />
+
+		<Error Condition="'@(_WebAreaFeatureReference)' != '' AND '$(MSBuildProjectName)' == 'Assimalign.Cohesion.Web.Hosting'"
+		       Code="COHWEB002"
+		       Text="Web-area dependency rule: 'Assimalign.Cohesion.Web.Hosting' references Web feature librar(ies) '@(_WebAreaFeatureReference->'%(Filename)')'. The hosting module may reference only the root Assimalign.Cohesion.Web - the App.Web shared framework delivers the feature family to applications. Ship builder verbs with their feature package instead. See resources/Web/README.md." />
+	</Target>
+
+	<Target Name="ValidateWebAreaResolvedReferences"
+	        AfterTargets="ResolveAssemblyReferences"
+	        Condition="'$(_WebAreaRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_WebAreaResolvedHostingReference Include="@(ReferencePath)"
+			                                  Condition="'%(Filename)' == 'Assimalign.Cohesion.Web.Hosting'" />
+			<_WebAreaResolvedFeatureReference Include="@(ReferencePath)"
+			                                  Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.web.'))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_WebAreaResolvedHostingReference)' != '' AND '$(MSBuildProjectName)' != 'Assimalign.Cohesion.Web.Testing'"
+		       Code="COHWEB001"
+		       Text="Web-area dependency rule: '$(MSBuildProjectName)' resolves the assembly 'Assimalign.Cohesion.Web.Hosting' into its reference closure (via a direct or transitive reference, a HintPath, or a package). No Web-area library may depend on the hosting/runtime module (sole exception: Web.Testing). See resources/Web/README.md." />
+
+		<Error Condition="'@(_WebAreaResolvedFeatureReference)' != '' AND '$(MSBuildProjectName)' == 'Assimalign.Cohesion.Web.Hosting'"
+		       Code="COHWEB002"
+		       Text="Web-area dependency rule: 'Assimalign.Cohesion.Web.Hosting' resolves Web feature assembl(ies) '@(_WebAreaResolvedFeatureReference->'%(Filename)')' into its reference closure. The hosting module may reference only the root Assimalign.Cohesion.Web - the App.Web shared framework delivers the feature family to applications. See resources/Web/README.md." />
+	</Target>
 </Project>
