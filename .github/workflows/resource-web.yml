@@ -19,7 +19,8 @@ jobs:
             'Assimalign.Cohesion.Web',
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.Results',
-            'Assimalign.Cohesion.Web.Results.ServerSentEvents'
+            'Assimalign.Cohesion.Web.Results.ServerSentEvents',
+            'Assimalign.Cohesion.Web.Routing'
         ]
     steps:
       - uses: actions/checkout@v4

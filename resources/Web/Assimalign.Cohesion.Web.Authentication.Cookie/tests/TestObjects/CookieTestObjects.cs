@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Routing;
+using Assimalign.Cohesion.Web.Routing.Metadata;
 
 namespace Assimalign.Cohesion.Web.Authentication.Cookie.Tests.TestObjects;
 

@@ -17,6 +17,16 @@ public interface IRouter
     IEnumerable<IRouterRoute> Routes { get; }
 
     /// <summary>
+    /// Gets the link generator that builds outbound URLs (paths and absolute URIs) from the
+    /// router's routes.
+    /// </summary>
+    /// <remarks>
+    /// The generator is built together with the router, so route-name registration errors
+    /// (duplicate names) surface when the route table is built, not at request time.
+    /// </remarks>
+    ILinkGenerator LinkGenerator { get; }
+
+    /// <summary>
     /// Evaluates the request against the configured routes without invoking a handler or mutating the response.
     /// </summary>
     /// <param name="context">The HTTP context to evaluate.</param>

@@ -19,11 +19,24 @@ controllers, metadata, results).
   `decimal`, `double`, `float`, `bool`, `guid`, `datetime`), **convert** the value to its CLR type —
   parsed once, invariant culture — plus text/value validators (`length`, `minlength`, `maxlength`,
   `min`, `max`, `range`, `regex`, `alpha`, `when`).
+- Composes **route groups** (`MapGroup`) at builder time: a prefix (which may itself contain
+  parameters, e.g. `{tenant}/api`), shared parameter policies, and shared endpoint metadata are
+  merged onto each child route **at registration**, so grouped routes match at exactly the cost
+  of directly-mapped ones and participate normally in precedence.
 - Carries an immutable, typed **endpoint-metadata bag** on each route and surfaces the
   **route-match result** (route + typed values + metadata) as a strongly-typed HTTP feature — the
   reflection-free seam that auth, docs, and observability consume.
+- Supports **host-constrained routes** (exact hosts, `*.wildcard` subdomains, `host:port`,
+  IPv6 literals) declared as endpoint metadata and evaluated during candidate selection:
+  non-matching hosts fall through to other candidates, and host-constrained routes outrank
+  unconstrained ties.
 - Keeps routing state **per application** (no process-wide shared builder), so multiple web
   applications hosted in one process have fully isolated route tables.
+- Generates **outbound URLs** (`ILinkGenerator`): routes register a unique, case-insensitive
+  **name** via metadata (duplicates fail at build time), and paths or absolute URIs are generated
+  from a name — or from route values alone, resolved by outbound precedence — honoring defaults,
+  collapsing omitted optionals/catch-alls, re-validating constraints, escaping per path segment,
+  and appending surplus values as a query string.
 
 ## Key types
 
@@ -37,8 +50,13 @@ controllers, metadata, results).
 | `RouteParameterPolicy` / `TypedRouteParameterPolicy` | Inline constraint base types. `TypedRouteParameterPolicy` validates **and** converts (parse-once); the public extension point for custom typed constraints. |
 | `RouteParameterPolicyMap` | Resolves inline policy names (`int`, `guid`, `length(n)`, `min(n)`, `range(a,b)`, …) to executable policies; `CreateDefault()` registers the built-ins. |
 | `IRouterRouteMetadataCollection` / `RouterRouteMetadataCollection` | Immutable, ordered, reflection-free endpoint-metadata bag (`GetMetadata<T>` is last-wins). |
+| `IRouterGroupBuilder` / `RouterBuilderExtensions.MapGroup` | Builder-time route groups: prefix + shared policies + shared metadata composed onto children at registration; nestable; child-over-group overrides. |
+| `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
+| `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
 | `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata. |
-| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) over that feature. |
+| `RouteNameMetadata` | Sealed endpoint-metadata carrier naming a route for URL generation; unique per router, checked at build time. |
+| `ILinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
+| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `GetLinkGenerator` over the routing features. |
 | `RoutingExtensions.UseRouting` | Pipeline integration (dispatch / 405 / fall-through). |
 
 ## Usage
@@ -51,6 +69,14 @@ var router = new Router(new IRouterRoute[]
     new Route(new[] { HttpMethod.Get, HttpMethod.Post }, "/items", itemsHandler),
 });
 
+// Or compose grouped endpoints on a builder — shared config first, children second.
+// Shared metadata items are the ordinary sealed carriers (here the #788 host constraint):
+var builder = new RouterBuilder();
+builder.MapGroup("api/v1")
+    .WithMetadata(new RouteHostMetadata("api.example.com")) // applies to every child
+    .Map(HttpMethod.Get, "orders/{id:int}", getOrder)       // matches /api/v1/orders/{id:int}
+    .Map(HttpMethod.Get, "", index);                        // matches /api/v1
+
 RouteMatch match = router.Match(context);
 switch (match.Status)
 {
@@ -62,6 +88,26 @@ switch (match.Status)
 
 Within a web application pipeline, prefer `builder.UseRouting()`, which performs this dispatch
 (invoke handler / emit 405 + `Allow` / fall through to the next middleware) for you.
+
+Outbound, a route named through its metadata generates URLs back out of the same table:
+
+```csharp
+var route = new Route(
+    new[] { HttpMethod.Get }, RoutePatternParser.Parse("/users/{id:int}"),
+    RouteParameterPolicyMap.CreateDefault(), userHandler,
+    new RouterRouteMetadataCollection(new RouteNameMetadata("user")));
+var router = new Router(new IRouterRoute[] { route });   // duplicate names throw here
+
+string path = router.LinkGenerator.GetPathByName(
+    "user", new RouteValueDictionary { ["id"] = 42, ["expand"] = "orders" });
+// => /users/42?expand=orders   (constraints re-validate; surplus values become the query)
+
+string uri = router.LinkGenerator.GetUriByName(
+    "user", HttpScheme.Https, new HttpHost("example.com"), new RouteValueDictionary { ["id"] = 42 });
+// => https://example.com/users/42
+```
+
+In request handlers, resolve the application's generator with `context.GetLinkGenerator()`.
 
 ## Design
 

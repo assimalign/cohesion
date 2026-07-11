@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Metadata;
+using Assimalign.Cohesion.Web.Routing.Patterns;
 
 namespace Assimalign.Cohesion.Web.Routing;
 
@@ -28,6 +30,16 @@ public interface IRouterRoute
     /// An empty collection indicates the route accepts any HTTP method.
     /// </remarks>
     IReadOnlyCollection<HttpMethod> Methods { get; }
+
+    /// <summary>
+    /// Gets the parsed route pattern the route matches against, when the route is pattern-based.
+    /// </summary>
+    /// <remarks>
+    /// May be <see langword="null"/> for fully custom implementations that match without a
+    /// <see cref="RoutePattern"/>. Pattern-less routes are skipped by outbound URL generation
+    /// (<see cref="ILinkGenerator"/>) and cannot carry a route name.
+    /// </remarks>
+    RoutePattern? Pattern { get; }
 
     /// <summary>
     /// Gets the inbound (request-matching) precedence of the route.
