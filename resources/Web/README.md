@@ -72,6 +72,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.ProblemDetails` | The RFC 9457 problem+json payload (model + AOT-safe writer + `WriteProblemDetailsAsync`) |
 | `Assimalign.Cohesion.Web.Query` | RFC 10008 QUERY server rules: request Content-Type validation / Accept-Query negotiation (400/415/406), method-preserving redirect helpers (307/308, 303), conditional QUERY (304/412) |
 | `Assimalign.Cohesion.Web.HostFiltering` | Allowed-hosts enforcement (`UseHostFiltering`, register first): 400s requests whose transport-resolved host misses the allowlist |
+| `Assimalign.Cohesion.Web.RequestTimeouts` | Request-timeout policies over the per-exchange abort primitive: global default + per-endpoint metadata, expiry → cancellation + configurable 504 |
 | `Assimalign.Cohesion.Web.Authentication` / `.Cookie` / `.Bearer` | Scheme model + builder surface, and the handler packages that graft their scheme verbs onto it |
 | `Assimalign.Cohesion.Web.Authorization` | Authorization contracts (in design) |
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | First-position forwarded-headers middleware (`UseForwardedHeaders`): proxy trust model over the core `Http` parsing primitives, publishing the `Http.Forwarded` effective-identity feature |
