@@ -20,24 +20,16 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   through the `App.Web` shared framework (via `Sdk.Web`), so the runtime needs no compile-time
   knowledge of the features it hosts.
 - Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory
-  drives the concrete runtime). Do not add others without the deviation protocol
-  (`deviations.md`) and an update to the enforcement target.
+  drives the concrete runtime), declared via `CohesionHostingIsolationExemptions` in its own
+  csproj. Do not add others without the deviation protocol (`deviations.md`) — see
+  `resource-areas.md` for the opt-out mechanism.
 
-**Enforcement:** the rule is the Web instance of the repo-wide **resource hosting-isolation
-rule**, enforced centrally by `build/Targets/Build.Rules.targets` for every `resources/<Area>/`
-(each area ships an `Assimalign.Cohesion.<Area>.Hosting`). Violations fail the build:
-`COHRES001` (a library referencing its area's hosting module) is checked in two layers — the
-project-reference graph (every flavor: `CohesionProjectReference`,
-`CohesionPrivateProjectReference`, raw `ProjectReference`, transitive) and the resolved assembly
-closure after `ResolveAssemblyReferences` (which also catches `<Reference>`+`HintPath` and
-package-delivered DLLs). `COHRES002` (the hosting module referencing a same-area library)
-constrains direct references only, because same-area assemblies legitimately arrive in the
-closure through the sanctioned area-root reference. Test/example/sample projects are exempt —
-the rule constrains shipped libraries, not harnesses; everything else is guarded regardless of
-folder layout. Every Web project is in the `.github/workflows/resource-web.yml` matrix so the
-guard executes in CI. If a legitimate architectural change requires relaxing the rule, change
-`build/Targets/Build.Rules.targets` and the area README in the same commit, with the user's
-explicit confirmation.
+**Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
+see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002` build errors, the
+two-layer check semantics, and the per-project `CohesionHostingIsolationExemptions` opt-out
+(deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
+csproj). Every Web project is in the `.github/workflows/resource-web.yml` matrix so the guard
+executes in CI.
 
 ## Builder verbs ship with their feature
 

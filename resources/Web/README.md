@@ -33,16 +33,15 @@ Why the rule exists:
 
 **The rule is build-enforced — centrally, for every resource area.** The Web rule is the local
 instance of the repo-wide *resource hosting-isolation rule* in
-`build/Targets/Build.Rules.targets`: each `resources/<Area>/` ships one
-`Assimalign.Cohesion.<Area>.Hosting`, no library in the area may reference it (`COHRES001`), and
-the hosting module may reference no same-area library except the area root (`COHRES002`).
-`COHRES001` is checked in two layers — the project-reference graph (every flavor, including raw
-and transitive `ProjectReference`) and the resolved assembly closure after
-`ResolveAssemblyReferences` (which also catches a `<Reference>`+`HintPath` or a package-delivered
-copy). `COHRES002` constrains direct references only: same-area assemblies legitimately arrive in
-the hosting closure through the sanctioned area-root reference. Test, example, and sample
-projects are exempt — the rule constrains shipped libraries, not harnesses — and every Web
-project builds in CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
+`build/Targets/Build.Rules.targets` (prose: `.claude/rules/resource-areas.md`): each
+`resources/<Area>/` ships one `Assimalign.Cohesion.<Area>.Hosting`, no library in the area may
+reference it (`COHRES001`, checked against both the project-reference graph and the resolved
+assembly closure), and the hosting module may directly reference no same-area library except the
+area root (`COHRES002`). A project with a sanctioned, user-approved exception opts out
+per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
+`Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
+exempt — the rule constrains shipped libraries, not harnesses — and every Web project builds in
+CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
 
 ## Adding a new Web feature library
 
