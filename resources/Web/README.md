@@ -65,7 +65,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 
 | Project | Role |
 | --- | --- |
-| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against |
+| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against, plus the first-position forwarded-headers middleware (`UseForwardedHeaders`, proxy trust model) |
 | `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, builder-time DI/config/logging composition |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping sugar (`Map`/`MapGet`) over the router — the fluent `.Use(...)` / `IWebApplicationMiddleware` composition model |

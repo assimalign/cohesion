@@ -1963,6 +1963,10 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 	</Folder>

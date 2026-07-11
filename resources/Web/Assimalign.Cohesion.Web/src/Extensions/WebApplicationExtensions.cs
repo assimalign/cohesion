@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
 
-public static class WebApplicationExtensions
+public static partial class WebApplicationExtensions
 {
     extension(IWebApplicationPipelineBuilder builder) 
     {

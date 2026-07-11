@@ -966,14 +966,32 @@ proxy's IP and `http://` scheme instead of the client's.
 This library is deliberately the **protocol half only**: it turns raw header
 text into typed, validated value objects and back. It contains **no trust
 model**. Deciding *which* forwarded hops to believe — `KnownProxies`,
-`KnownNetworks`, `ForwardLimit`, and the actual overwrite of
-`connection.RemoteIp` / `request.Scheme` — lives in the forwarded-headers
-middleware (issue #778) in the Web runtime, because that is a policy decision
-that depends on the deployment topology, not on the wire grammar. Keeping the
-split here means the security-sensitive code has one job (apply policy to
-already-parsed, already-validated data) and the parser has one job (be a correct,
-total function over hostile input). This mirrors the established seam/feature
-taxonomy: protocol value objects in core, policy in the layer that composes them.
+`KnownNetworks`, `ForwardLimit`, header selection — lives in the
+forwarded-headers middleware (#778) in `Assimalign.Cohesion.Web`, because that
+is a policy decision that depends on the deployment topology, not on the wire
+grammar. Keeping the split here means the security-sensitive code has one job
+(apply policy to already-parsed, already-validated data) and the parser has one
+job (be a correct, total function over hostile input). This mirrors the
+established seam/feature taxonomy: protocol value objects in core, policy in
+the layer that composes them.
+
+### The effective-identity contract and read convention
+
+The *output* contract of that trust evaluation does live here:
+`IHttpForwardedFeature` (effective scheme/host/remote endpoint, the original
+wire values, and the accepted-hop count) plus the feature-first read convention
+in `HttpContextForwardedExtensions` — `context.EffectiveScheme`,
+`EffectiveHost`, `EffectiveRemoteIp`, `EffectiveRemoteEndPoint`, each falling
+back to the wire value when no feature is attached. Placement is deliberate:
+consumers *below* the Web area (session partitioning in `Http.Sessions`,
+rate-limit keys, access logging) can reference the Http core but must never
+reference an L3 resource, so the contract's home is the core even though its
+producer is the Web middleware. The wire surfaces stay get-only and unmutated
+by design — `IHttpRequest.Scheme`/`Host` and `IHttpContext.ConnectionInfo`
+always report what the transport saw, and proxy-aware code opts into the
+effective view through the feature. A producer attaches the feature on every
+exchange it processes (zero hops when nothing resolved), so `Effective*` reads
+are uniform behind it; without a producer they are exactly the wire values.
 
 ### The surface
 
@@ -1064,7 +1082,10 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
 ### Non-goals
 
 - **The trust model.** `KnownProxies`/`KnownNetworks`/`ForwardLimit` and the
-  mutation of connection/request state belong to the #778 middleware, not here.
+  walk that applies them belong to the #778 middleware in
+  `Assimalign.Cohesion.Web`, not here — this library defines the
+  `IHttpForwardedFeature` contract that middleware fulfills, and nothing ever
+  mutates the wire-level request/connection state.
 - **Interpreting `X-Forwarded-For` entries as addresses.** `HttpForwardedValues`
   is a faithful ordered list; turning an entry into an `IPAddress` (and deciding
   whether to trust it) is the consumer's call via `HttpForwardedNode`.
