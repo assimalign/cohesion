@@ -4,30 +4,36 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Web;
-using Assimalign.Cohesion.Web.Authentication;
 
-namespace Assimalign.Cohesion.Web.Hosting;
+namespace Assimalign.Cohesion.Web.Authentication;
 
 /// <summary>
-/// Composition-root extensions that register authentication at builder time and install the
-/// authentication middleware in the request pipeline. This is the only place authentication is
-/// wired: per the framework's layering, DI/configuration/crypto composition lives in
-/// <c>*.Hosting</c>, while the scheme model and handlers stay request-path and dependency-free.
+/// Builder-time registration and pipeline installation for authentication. Registration is
+/// dependency-free: the service is attached to the application as a typed feature and schemes are
+/// registered as values — no service container, configuration binding, or hosting reference is
+/// involved, so any composition surface that implements <see cref="IWebApplicationBuilder"/> can
+/// wire authentication.
 /// </summary>
-public static class AuthenticationHostingExtensions
+/// <remarks>
+/// These verbs moved here from <c>Assimalign.Cohesion.Web.Hosting</c> when the Web area adopted the
+/// rule that the hosting/runtime module neither references nor is referenced by the feature
+/// libraries; the scheme verbs themselves (<c>AddCookie</c>, <c>AddJwtBearer</c>) ship with their
+/// handler packages and graft onto <see cref="AuthenticationBuilder"/>.
+/// </remarks>
+public static class AuthenticationWebApplicationExtensions
 {
-    extension(WebApplicationBuilder builder)
+    extension(IWebApplicationBuilder builder)
     {
         /// <summary>
         /// Adds the authentication services and returns a builder for registering schemes.
         /// </summary>
         /// <param name="configure">An optional callback to configure default-scheme selection.</param>
         /// <param name="dataProtectionProvider">
-        /// An optional data-protection provider used to seal cookie tickets. When omitted, a
-        /// file-system-backed rotating key ring rooted under the host content root is created on
-        /// first use.
+        /// An optional data-protection provider used to seal authentication tickets. When omitted, a
+        /// file-system-backed rotating key ring under <see cref="AppContext.BaseDirectory"/> is
+        /// created on first use.
         /// </param>
-        /// <returns>An <see cref="AuthenticationBuilder"/> for chaining <c>AddCookie</c>/<c>AddJwtBearer</c>.</returns>
+        /// <returns>An <see cref="AuthenticationBuilder"/> for chaining scheme registrations.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         public AuthenticationBuilder AddAuthentication(
             Action<AuthenticationOptions>? configure = null,
@@ -39,12 +45,12 @@ public static class AuthenticationHostingExtensions
             configure?.Invoke(options);
 
             // Register the service (an IHttpFeature) as a builder-time singleton. It reads the
-            // options live, so schemes registered by the chained AddCookie/AddJwtBearer calls that
-            // run after this are still resolved at request time.
+            // options live, so schemes registered by chained verbs that run after this call are
+            // still resolved at request time.
             IAuthenticationService service = AuthenticationService.Create(options);
-            ((IWebApplicationBuilder)builder).AddFeature(service);
+            builder.AddFeature(service);
 
-            return new AuthenticationBuilder(options, builder.Environment, dataProtectionProvider);
+            return new AuthenticationBuilder(options, dataProtectionProvider);
         }
 
         /// <summary>
@@ -53,7 +59,7 @@ public static class AuthenticationHostingExtensions
         /// </summary>
         /// <param name="defaultScheme">The default scheme applied to every verb that does not set its own default.</param>
         /// <param name="configure">An optional callback to further configure default-scheme selection.</param>
-        /// <returns>An <see cref="AuthenticationBuilder"/> for chaining <c>AddCookie</c>/<c>AddJwtBearer</c>.</returns>
+        /// <returns>An <see cref="AuthenticationBuilder"/> for chaining scheme registrations.</returns>
         /// <exception cref="ArgumentException"><paramref name="defaultScheme"/> is <see langword="null"/> or whitespace.</exception>
         public AuthenticationBuilder AddAuthentication(string defaultScheme, Action<AuthenticationOptions>? configure = null)
         {

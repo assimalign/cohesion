@@ -11,5 +11,9 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<!-- The composition tests drive the handler packages' grafted AddCookie/AddJwtBearer
+		     verbs end-to-end, so the test project (not the library) references them. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
 	</ItemGroup>
 </Project>

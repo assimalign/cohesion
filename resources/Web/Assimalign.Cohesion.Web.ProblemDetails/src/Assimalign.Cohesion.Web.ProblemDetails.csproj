@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>The RFC 9457 Problem Details payload for the Cohesion Web pipeline: the ProblemDetails model, an AOT-safe application/problem+json writer built directly on Utf8JsonWriter (no reflection), and the WriteProblemDetailsAsync response extension. The payload library for error responses - how errors are surfaced (the OnError hook) is composed by the application.</Description>
+		<!-- Deviates from the repo namespace-matches-assembly rule per design decision:
+		     the payload surfaces in Assimalign.Cohesion.Web so the ProblemDetails model
+		     avoids a namespace/type collision (Assimalign.Cohesion.Web.ProblemDetails.ProblemDetails)
+		     and WriteProblemDetailsAsync is discoverable with the pipeline's using
+		     (matches the Assimalign.Cohesion.Http feature-package precedent). -->
+		<RootNamespace>Assimalign.Cohesion.Web</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

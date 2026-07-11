@@ -6,27 +6,34 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Security.DataProtection;
-using Assimalign.Cohesion.Web;
-using Assimalign.Cohesion.Web.Authentication;
-using Assimalign.Cohesion.Web.Authentication.Bearer;
-using Assimalign.Cohesion.Web.Authentication.Cookie;
-
 using Shouldly;
 
 using Xunit;
 
-namespace Assimalign.Cohesion.Web.Hosting.Tests;
+using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Security.DataProtection;
+using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Authentication.Bearer;
+using Assimalign.Cohesion.Web.Authentication.Cookie;
+using Assimalign.Cohesion.Web.Authentication.Tests.TestObjects;
 
-public sealed class AuthenticationHostingExtensionsTests : IDisposable
+namespace Assimalign.Cohesion.Web.Authentication.Tests;
+
+/// <summary>
+/// Covers the builder-time composition chain now homed with the scheme model:
+/// <c>AddAuthentication</c> on <see cref="IWebApplicationBuilder"/>, the handler packages'
+/// grafted <c>AddCookie</c>/<c>AddJwtBearer</c> verbs, and the <c>UseAuthentication</c>
+/// middleware. Moved from the Web.Hosting tests when the verbs left the hosting module
+/// (Web-area dependency rule: hosting neither references nor is referenced by feature libraries).
+/// </summary>
+public sealed class AuthenticationCompositionTests : IDisposable
 {
     private readonly string _keysDirectory;
     private readonly IDataProtectionProvider _dataProtection;
 
-    public AuthenticationHostingExtensionsTests()
+    public AuthenticationCompositionTests()
     {
-        _keysDirectory = Path.Combine(Path.GetTempPath(), "cohesion-hosting-auth-tests", Guid.NewGuid().ToString("N"));
+        _keysDirectory = Path.Combine(Path.GetTempPath(), "cohesion-web-auth-tests", Guid.NewGuid().ToString("N"));
         _dataProtection = DataProtectionProvider.Create(KeyRepository.CreateFileSystem(_keysDirectory));
     }
 
@@ -41,11 +48,11 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - AddAuthentication registers cookie and bearer schemes")]
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddAuthentication registers cookie and bearer schemes")]
     public void AddAuthentication_RegistersCookieAndBearerSchemes()
     {
         // Arrange
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        StubWebApplicationBuilder builder = new();
 
         // Act
         AuthenticationBuilder auth = builder
@@ -58,13 +65,14 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
         auth.Options.GetScheme(CookieAuthenticationDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.ResolveDefaultChallengeScheme().ShouldBe(CookieAuthenticationDefaults.AuthenticationScheme);
+        builder.Features.ShouldContain(feature => feature is IAuthenticationService);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - AddCookie wires a working ticket protector from the provider")]
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddCookie wires a working ticket protector from the provider")]
     public async Task AddCookie_WiresTicketProtector()
     {
         // Arrange
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        StubWebApplicationBuilder builder = new();
         AuthenticationBuilder auth = builder
             .AddAuthentication(options => options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme, _dataProtection)
             .AddCookie();
@@ -84,7 +92,7 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
         context.Response.Headers.ContainsKey(HttpHeaderKey.SetCookie).ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseAuthentication populates context.User from the default scheme")]
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseAuthentication populates context.User from the default scheme")]
     public async Task UseAuthentication_PopulatesUser()
     {
         // Arrange
@@ -107,7 +115,7 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
         context.User.ShouldBeSameAs(principal);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseAuthentication is a pass-through with no default authenticate scheme")]
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - UseAuthentication is a pass-through with no default authenticate scheme")]
     public async Task UseAuthentication_NoDefaultScheme_PassesThrough()
     {
         // Arrange — a service with no default authenticate scheme.
@@ -146,6 +154,33 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
     }
 
     /// <summary>
+    /// A minimal <see cref="IWebApplicationBuilder"/> that records registered features — the only
+    /// builder capability <c>AddAuthentication</c> composes against.
+    /// </summary>
+    private sealed class StubWebApplicationBuilder : IWebApplicationBuilder
+    {
+        public List<IHttpFeature> Features { get; } = new();
+
+        public IWebApplicationContext Context => throw new NotSupportedException();
+
+        public IWebApplicationBuilder AddFeature(IHttpFeature feature)
+        {
+            Features.Add(feature);
+            return this;
+        }
+
+        public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
+
+        public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
+
+        public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => this;
+
+        public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => this;
+
+        public IWebApplication Build() => throw new NotSupportedException();
+    }
+
+    /// <summary>
     /// Captures the single middleware registered by <c>UseAuthentication</c> and runs it against a
     /// terminal no-op so the middleware's effect on the context can be observed.
     /// </summary>
@@ -178,68 +213,5 @@ public sealed class AuthenticationHostingExtensionsTests : IDisposable
             WebApplicationMiddleware chain = _component!(terminal);
             return chain(context);
         }
-    }
-
-    private sealed class TestHttpRequest : HttpRequest
-    {
-        private HttpContext? _httpContext;
-
-        public override HttpHost Host { get; set; } = HttpHost.Empty;
-        public override HttpPath Path { get; set; } = HttpPath.Root;
-        public override HttpMethod Method { get; set; } = HttpMethod.Get;
-        public override HttpScheme Scheme { get; set; } = HttpScheme.Http;
-        public override HttpQueryCollection Query { get; } = new HttpQueryCollection();
-        public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public override Stream Body { get; set; } = Stream.Null;
-
-        public override HttpContext HttpContext => _httpContext
-            ?? throw new InvalidOperationException("Context not attached.");
-
-        internal void AttachContext(HttpContext context) => _httpContext ??= context;
-    }
-
-    private sealed class TestHttpResponse : HttpResponse
-    {
-        private HttpContext? _httpContext;
-
-        public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
-        public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public override Stream Body { get; set; } = new MemoryStream();
-
-        public override HttpContext HttpContext => _httpContext
-            ?? throw new InvalidOperationException("Context not attached.");
-
-        internal void AttachContext(HttpContext context) => _httpContext ??= context;
-    }
-
-    private sealed class TestHttpContext : HttpContext
-    {
-        private TestHttpContext(TestHttpRequest request, TestHttpResponse response)
-        {
-            Version = HttpVersion.Http11;
-            Request = request;
-            Response = response;
-            ConnectionInfo = HttpConnectionInfo.Empty;
-            Features = new HttpFeatureCollection();
-            Items = new Dictionary<string, object?>(StringComparer.Ordinal);
-            RequestCancelled = CancellationToken.None;
-
-            request.AttachContext(this);
-            response.AttachContext(this);
-        }
-
-        public override HttpVersion Version { get; }
-        public override TestHttpRequest Request { get; }
-        public override TestHttpResponse Response { get; }
-        public override HttpConnectionInfo ConnectionInfo { get; }
-        public override HttpFeatureCollection Features { get; }
-        public override IDictionary<string, object?> Items { get; }
-        public override CancellationToken RequestCancelled { get; }
-
-        public override void Cancel() { }
-        public override Task CancelAsync() => Task.CompletedTask;
-        public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-        public static TestHttpContext Create() => new(new TestHttpRequest(), new TestHttpResponse());
     }
 }

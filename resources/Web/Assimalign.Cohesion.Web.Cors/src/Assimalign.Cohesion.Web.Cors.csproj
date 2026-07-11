@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
 </Project>

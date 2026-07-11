@@ -1,4 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Web-area dependency rule: the hosting/runtime module references only the root
+	     Assimalign.Cohesion.Web project and non-Web-area libraries. Feature libraries
+	     (authentication, routing, results, ...) are NEVER referenced here - the App.Web
+	     shared framework delivers them to applications, and their builder verbs ship in
+	     their own packages. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
@@ -11,9 +16,5 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
 	</ItemGroup>
 </Project>

@@ -80,7 +80,7 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **C — Cross-area foundations** | drivers & security & hosting | `libraries/Connections/*`, `libraries/Security/*`, `libraries/Hosting`, new `libraries/Health` | Peer-driver placement (`Connections.InMemory` beside Tcp/Udp/Quic). Security crypto is BCL-only, key material never hand-rolled again. |
 | **D — Web runtime** | the composition root & server | `resources/Web/Assimalign.Cohesion.Web`, `...Web.Hosting` | **#762 first.** DI/Logging/Config integration happens **only** here (builder-time). No ASP.NET-style per-concern micro-packages. |
 | **E — Web middleware** | request-pipeline features | `resources/Web/Assimalign.Cohesion.Web.*` feature projects | Each is a thin feature project consuming a Stage-1 primitive + the pipeline. Extensibility via `IHttpFeatureCollection` typed features, not request-time service location. All gate on #762. |
-| **F — Routing & API surface** | endpoints, binding, results | `...Web.Routing`, `...Web.Api`, `...Web.Functions`, `...Web.Results`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. |
+| **F — Routing & API surface** | endpoints, binding, formatting | `...Web.Routing`, `...Web.Api`, `...Web.ProblemDetails`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. **Direction (2026-07-10): middleware-first** — fluent `.Use(...)` / `IWebApplicationMiddleware` composition over a return-value result model; IResult withdrawn pre-merge, controllers/functions set aside (`Web.Api.Controllers` + `Web.Functions` removed). |
 
 Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. The path-scoped rules in `.claude/rules/` are canonical and auto-load in Claude sessions.
 
@@ -136,8 +136,8 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #754 | A | Alt-Svc advertisement (RFC 7838) | — |
 | #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
 | ~~#776~~ | E | ~~Pipeline exception boundary~~ — **superseded by #881** (PR #844 abandoned unmerged; branch kept as salvage reference) | — |
-| #881 | E | Exception boundary, status-code pages, 404 terminal **over IResult** (supersedes #776) | #864 |
-| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771, #864 |
+| #881 | E | Exception boundary, status-code pages, 404 terminal **via the #864 `OnError` hook** (was: over IResult; supersedes #776) | #864 |
+| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771 (the #864 edge dropped with IResult) |
 | #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
 | #779 | E | `Web.Compression` (response + request) | #762, #769, #771 |
 | #780 | E | `Web.HttpsPolicy` (HTTPS redirection + HSTS) | #763 |
@@ -149,8 +149,8 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #793 | E | `Web.Testing` factory over the in-memory driver | #762, #772 |
 | #148 | F | Matcher precedence/405 fixes (existing) | — |
 | #150 | F | Endpoint metadata bag (existing) — **fan-out seam** | — |
-| #864 | F | **IResult result abstraction** (Web.Results hub, now incl. the ProblemDetails payload/writer) — **fan-out seam** | #769 ✓ — **unblocked** |
-| #149 | F | Negotiated ObjectResult/Ok<T> + IResultFormatter registry (re-scoped) | #864, #771 |
+| #864 | F | **Content-serialization registry + `OnError` hook design** (re-scoped 2026-07-10; IResult withdrawn pre-merge — the ProblemDetails payload shipped separately as `Web.ProblemDetails` on PR #887) — **fan-out seam** | #769 ✓, #771 ✓ — design item, **unblocked** |
+| #149 | F | Content negotiation over the #864 serializer registry (re-scoped; was ObjectResult/Ok<T> + IResultFormatter) | #864, #771 |
 | #789 | F | Typed route values, constraints, per-app router state | #148 |
 
 ### Stage 3 — Composition
@@ -171,9 +171,9 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
-| #796 | F | Source-generated endpoint binding + validation (AOT) | #150, #864, #771 |
+| #796 | F | Source-generated middleware/handler binding + validation (AOT) — middleware-first, no IResult | #150, #864, #771 |
 | #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
-| #151 | F | Controller/action + function endpoint binding (existing) | routing primitives, #864, #796 |
+| ~~#151~~ | F | ~~Controller/action + function endpoint binding~~ — **set aside 2026-07-10** (niceties; middleware-first direction; `Web.Api.Controllers` + `Web.Functions` projects removed; closed not-planned) | — |
 
 ### Post-v1 follow-ups (filed, not scheduled)
 Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
@@ -193,6 +193,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Wave 3a (2026-07-06): 9 merged** — #790 auth scheme+Cookie/Bearer handlers, #746 QUERY (RFC 10008), #789 typed constraints + per-app router, #775 health checks + /healthz, #773 UDS/named pipes, #752 1xx interim, #754 Alt-Svc, #810 h1 data-rate, #847 QPACK decoder acks.
 - **#776 → #881 supersession (2026-07-06):** PR #844 deliberately abandoned unmerged (would have been immediately refactored onto #864); #776 closed as superseded. **#864** now owns the ProblemDetails payload/writer (`Problem` built-in; salvage reference = the closed #844 branch `feature/L03.01.01.05-problem-details`) and is **fully unblocked**; **#881** rebuilds the exception boundary / status-code pages / 404 terminal as an IResult consumer, blocked by #864. The Web-middleware cluster (#781/#783/#784/#785/#794) now takes its boundary/registration pattern from #881.
 - **Wave 3b dispatched:** #864 (lead, fan-out), #786 route groups, #787 LinkGenerator, #788 host matching, #793 Web.Testing factory. Next after 3b: #881 + #149 + the middleware cluster (3c), then #796 → #151 (3d).
+- **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
 |---|---|---|---|

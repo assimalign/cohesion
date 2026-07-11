@@ -1,3 +1,7 @@
 <Project>
 	<Import Project="..\Directory.Build.targets" />
+
+	<!-- The Web-area dependency rule (resources/Web/README.md) is enforced centrally for
+	     every resource area by build/Targets/Build.Rules.targets (COHRES001/COHRES002:
+	     hosting-isolation). Nothing area-specific remains here. -->
 </Project>

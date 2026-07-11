@@ -1,6 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<Description>Socketless integration testing for Cohesion web applications. WebApplicationTestFactory composes a WebApplication against the in-memory connection driver (no sockets, no ports), manages its lifecycle per test, and hands out System.Net.Http.HttpClient instances wired through SocketsHttpHandler.ConnectCallback so requests flow the full pipeline (middleware, routing, features) end to end. Supports HTTP/1.1 and prior-knowledge HTTP/2; AOT-safe, zero reflection.</Description>
+		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
+		     .claude/rules/resource-areas.md): the test factory drives the concrete runtime
+		     (WebApplication/WebApplicationBuilder), which cannot be done through the
+		     abstractions alone - the standing convention for every area's Testing package. -->
+		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Web.Hosting</CohesionHostingIsolationExemptions>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />

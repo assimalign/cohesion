@@ -156,5 +156,9 @@ composition is explicit on the factory's `Builder`/`Application`.
   factory manages; its `docs/DESIGN.md` owns the dispatch and stop semantics the factory's
   drain relies on. Web.Hosting's integration test suite consumes this package for its
   middleware-ordering, per-connection-concurrency, and graceful-shutdown coverage.
+  This reference is the **sanctioned exception** to the Web-area dependency rule
+  (`resources/Web/README.md`): no other Web library may reference the hosting module, but the
+  test factory exists precisely to drive the concrete runtime
+  (`WebApplication`/`WebApplicationBuilder`), which cannot be done through abstractions alone.
 - **`Assimalign.Cohesion.Web.Routing`** — per-application router state (#789) is what makes
   the parallel-isolation guarantee hold; the isolation regression tests live here.

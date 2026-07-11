@@ -27,9 +27,11 @@ This mirrors the precedent set when `Http.Antiforgery` was rewired onto a
 pluggable protector seam (#774): key material and its lifecycle live in the
 composition root, and the request-path component consumes a protector. The
 protector is supplied on `CookieAuthenticationOptions.TicketProtector` by
-`Web.Hosting`'s `AddCookie`, which derives it from the application key ring
-scoped to a per-scheme purpose chain (`…Cookie` / scheme name / `v1`), so
-two cookie schemes cannot read each other's tickets.
+this package's grafted `AddCookie` verb (an `extension(AuthenticationBuilder)`
+member — moved here from `Web.Hosting` under the Web-area dependency rule),
+which derives it from the builder's key ring scoped to a per-scheme purpose
+chain (`…Cookie` / scheme name / `v1`), so two cookie schemes cannot read
+each other's tickets.
 
 `Unprotect` throws `DataProtectionException` for a tampered, foreign, or
 aged-out payload; the handler catches it and returns
@@ -123,4 +125,6 @@ metadata resolution is an `is`-test scan.
 - **Cookie policy (consent, same-site overrides).** Cross-cutting cookie
   policy is `Web.CookiePolicy`'s concern.
 - **Key management.** The rotating key ring and its persistence live in
-  `Security.DataProtection`, composed at builder time in `Web.Hosting`.
+  `Security.DataProtection`, carried at builder time by
+  `AuthenticationBuilder.DataProtectionProvider` (the default key ring, or
+  a provider the application passes to `AddAuthentication`).
