@@ -23,16 +23,21 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   drives the concrete runtime). Do not add others without the deviation protocol
   (`deviations.md`) and an update to the enforcement target.
 
-**Enforcement:** `resources/Web/Directory.Build.targets` fails the build of any library project
-that violates the rule (`COHWEB001`/`COHWEB002`), in two layers: the project-reference graph
-(every flavor — `CohesionProjectReference`, `CohesionPrivateProjectReference`, raw
-`ProjectReference`, transitive) and the resolved assembly closure after
-`ResolveAssemblyReferences` (which also catches `<Reference>`+`HintPath` and package-delivered
-DLLs). Test and example projects are exempt — the rule constrains shipped libraries, not
-harnesses; everything else under `resources/Web` is guarded regardless of folder layout. Every
-Web project is in the `.github/workflows/resource-web.yml` matrix so the guard executes in CI.
-If a legitimate architectural change requires relaxing the rule, change the target and
-`resources/Web/README.md` in the same commit, with the user's explicit confirmation.
+**Enforcement:** the rule is the Web instance of the repo-wide **resource hosting-isolation
+rule**, enforced centrally by `build/Targets/Build.Rules.targets` for every `resources/<Area>/`
+(each area ships an `Assimalign.Cohesion.<Area>.Hosting`). Violations fail the build:
+`COHRES001` (a library referencing its area's hosting module) is checked in two layers — the
+project-reference graph (every flavor: `CohesionProjectReference`,
+`CohesionPrivateProjectReference`, raw `ProjectReference`, transitive) and the resolved assembly
+closure after `ResolveAssemblyReferences` (which also catches `<Reference>`+`HintPath` and
+package-delivered DLLs). `COHRES002` (the hosting module referencing a same-area library)
+constrains direct references only, because same-area assemblies legitimately arrive in the
+closure through the sanctioned area-root reference. Test/example/sample projects are exempt —
+the rule constrains shipped libraries, not harnesses; everything else is guarded regardless of
+folder layout. Every Web project is in the `.github/workflows/resource-web.yml` matrix so the
+guard executes in CI. If a legitimate architectural change requires relaxing the rule, change
+`build/Targets/Build.Rules.targets` and the area README in the same commit, with the user's
+explicit confirmation.
 
 ## Builder verbs ship with their feature
 

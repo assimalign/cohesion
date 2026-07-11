@@ -31,15 +31,18 @@ Why the rule exists:
   compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
   seams.
 
-**The rule is build-enforced, in two layers.** `resources/Web/Directory.Build.targets` fails the
-build of a library project that references `Web.Hosting` (`COHWEB001`), or a `Web.Hosting` that
-references any Web feature library (`COHWEB002`). Layer 1 checks the project-reference graph —
-`CohesionProjectReference` / `CohesionPrivateProjectReference` (both convert to `ProjectReference`
-at evaluation time) and any raw `ProjectReference`, including transitive ones. Layer 2 checks the
-fully resolved assembly closure after `ResolveAssemblyReferences`, which also catches a raw
-`<Reference>` with a `HintPath` at a Web.Hosting DLL or a package-delivered copy. Test and example
-projects are exempt — the rule constrains shipped libraries, not harnesses — and every Web project
-builds in CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
+**The rule is build-enforced — centrally, for every resource area.** The Web rule is the local
+instance of the repo-wide *resource hosting-isolation rule* in
+`build/Targets/Build.Rules.targets`: each `resources/<Area>/` ships one
+`Assimalign.Cohesion.<Area>.Hosting`, no library in the area may reference it (`COHRES001`), and
+the hosting module may reference no same-area library except the area root (`COHRES002`).
+`COHRES001` is checked in two layers — the project-reference graph (every flavor, including raw
+and transitive `ProjectReference`) and the resolved assembly closure after
+`ResolveAssemblyReferences` (which also catches a `<Reference>`+`HintPath` or a package-delivered
+copy). `COHRES002` constrains direct references only: same-area assemblies legitimately arrive in
+the hosting closure through the sanctioned area-root reference. Test, example, and sample
+projects are exempt — the rule constrains shipped libraries, not harnesses — and every Web
+project builds in CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
 
 ## Adding a new Web feature library
 

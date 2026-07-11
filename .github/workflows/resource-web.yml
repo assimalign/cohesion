@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Every buildable Web project is listed so the area's dependency-rule guard
-        # (resources/Web/Directory.Build.targets, COHWEB001/COHWEB002) executes in CI for
+        # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Web.Hosting, which nothing else pulls in
         # transitively. Web.ApplicationModel is excluded (source-less placeholder).
         projects: [
