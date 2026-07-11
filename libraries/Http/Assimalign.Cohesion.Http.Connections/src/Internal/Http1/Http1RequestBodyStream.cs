@@ -123,7 +123,11 @@ internal sealed class Http1RequestBodyStream : Stream
         _timeProvider = timeProvider;
         _connectionToken = connectionToken;
         _trailers = trailers;
-        _completed = framing.Mode == Http1RequestBodyMode.None;
+        // A `Content-Length: 0` body is born fully read: without this, the first read would issue
+        // a zero-length wire read that blocks for octets the peer never sends, until the data-rate
+        // gate reclaims the exchange (408) — for a request that is perfectly healthy.
+        _completed = framing.Mode == Http1RequestBodyMode.None
+            || (framing.Mode == Http1RequestBodyMode.ContentLength && framing.ContentLength == 0);
     }
 
     /// <summary>

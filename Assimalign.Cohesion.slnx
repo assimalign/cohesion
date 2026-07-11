@@ -2072,6 +2072,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/Assimalign.Cohesion.Web.ProblemDetails.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Query/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Query/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Query/src/Assimalign.Cohesion.Web.Query.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Query/tests/Assimalign.Cohesion.Web.Query.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/README.md" />
 	</Folder>

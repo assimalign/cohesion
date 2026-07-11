@@ -17,8 +17,9 @@ namespace Assimalign.Cohesion.Http;
 public readonly struct HttpConditionalRequestContext
 {
     /// <summary>
-    /// Gets the request method. <c>GET</c> and <c>HEAD</c> are the read methods for which a failed
-    /// <c>If-None-Match</c> / <c>If-Modified-Since</c> yields <c>304</c> rather than <c>412</c>.
+    /// Gets the request method. <c>GET</c>, <c>HEAD</c>, and <c>QUERY</c> (RFC 10008 &#167; 2.6) are
+    /// the read methods for which a failed <c>If-None-Match</c> / <c>If-Modified-Since</c> yields
+    /// <c>304</c> rather than <c>412</c>.
     /// </summary>
     public required HttpMethod Method { get; init; }
 

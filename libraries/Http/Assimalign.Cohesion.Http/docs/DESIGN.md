@@ -673,8 +673,12 @@ beside `Http.Sessions`/`Http.Forms`:
   then `If-Modified-Since` only when `If-None-Match` is absent and the method is
   a read). This encodes the two rules the feature calls out: `If-None-Match`
   takes precedence over `If-Modified-Since`, and a failed read precondition is
-  `304` for GET/HEAD but `412` otherwise. Resource existence (for the `*`
-  wildcard) is inferred from a supplied validator, with an explicit
+  `304` for the read methods but `412` otherwise. The read methods are GET and
+  HEAD plus QUERY: RFC 10008 §2.6 requires a conditional QUERY to be evaluated
+  exactly as the equivalent conditional GET (same selected representation, `304`
+  where a GET would produce one), so the method classification lives here in the
+  evaluator rather than being re-derived by each consumer. Resource existence
+  (for the `*` wildcard) is inferred from a supplied validator, with an explicit
   `HasCurrentRepresentation` escape hatch for the rare validator-less resource.
 
 ### Why value objects and static helpers, not interfaces

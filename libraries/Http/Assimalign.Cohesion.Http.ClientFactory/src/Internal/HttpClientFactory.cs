@@ -193,7 +193,17 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
         {
             var sockets = new SocketsHttpHandler();
             clientOptions.ConfigureHandler?.Invoke(sockets);
+
+            // Redirect policy is owned by the factory's redirect layer (RFC 10008 §2.5 method
+            // semantics), switched via NamedHttpClientOptions.AllowAutoRedirect — the inner
+            // handler must never double-follow, so its own following is always off.
+            sockets.AllowAutoRedirect = false;
             handler = sockets;
+        }
+
+        if (clientOptions.AllowAutoRedirect)
+        {
+            handler = new RedirectHttpMessageHandler(handler, clientOptions.MaxAutomaticRedirections);
         }
 
         return new ActiveHandlerEntry(handler, now + lifetime);

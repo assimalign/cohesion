@@ -248,4 +248,76 @@ public class HttpConditionalRequestTests
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
     }
+
+    // ============================================================================
+    // Conditional QUERY behaves like conditional GET (RFC 10008 §2.6)
+    // ============================================================================
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpConditionalRequest: If-None-Match match on QUERY is 304 (RFC 10008 §2.6)")]
+    public void Evaluate_IfNoneMatchMatchesOnQuery_ShouldBeNotModified()
+    {
+        // QUERY is a read method: a matching If-None-Match yields 304 exactly as it would for the
+        // equivalent GET — not the 412 a non-read method receives.
+        var context = new HttpConditionalRequestContext
+        {
+            Method = HttpMethod.Query,
+            ETag = CurrentTag,
+            IfNoneMatch = HttpEntityTagCondition.Parse("\"v2\""),
+        };
+
+        HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.NotModified);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpConditionalRequest: If-Modified-Since not modified on QUERY is 304 (RFC 10008 §2.6)")]
+    public void Evaluate_IfModifiedSinceNotModifiedOnQuery_ShouldBeNotModified()
+    {
+        // Step 4 applies to read methods only; QUERY qualifies per RFC 10008 §2.6.
+        var context = new HttpConditionalRequestContext
+        {
+            Method = HttpMethod.Query,
+            LastModified = LastModified,
+            IfModifiedSince = LastModified,
+        };
+
+        HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.NotModified);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpConditionalRequest: If-Match no match on QUERY is 412")]
+    public void Evaluate_IfMatchNoMatchOnQuery_ShouldBePreconditionFailed()
+    {
+        var context = new HttpConditionalRequestContext
+        {
+            Method = HttpMethod.Query,
+            ETag = CurrentTag,
+            IfMatch = HttpEntityTagCondition.Parse("\"v1\""),
+        };
+
+        HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.PreconditionFailed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpConditionalRequest: If-Unmodified-Since modified on QUERY is 412")]
+    public void Evaluate_IfUnmodifiedSinceModifiedOnQuery_ShouldBePreconditionFailed()
+    {
+        var context = new HttpConditionalRequestContext
+        {
+            Method = HttpMethod.Query,
+            LastModified = LastModified,
+            IfUnmodifiedSince = LastModified.AddSeconds(-60),
+        };
+
+        HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.PreconditionFailed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpConditionalRequest: QUERY no-match If-None-Match proceeds")]
+    public void Evaluate_IfNoneMatchNoMatchOnQuery_ShouldProceed()
+    {
+        var context = new HttpConditionalRequestContext
+        {
+            Method = HttpMethod.Query,
+            ETag = CurrentTag,
+            IfNoneMatch = HttpEntityTagCondition.Parse("\"v1\""),
+        };
+
+        HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
+    }
 }
