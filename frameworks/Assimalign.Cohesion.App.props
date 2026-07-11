@@ -136,27 +136,65 @@
 
     <!-- ================================================================
          Assimalign.Cohesion.App.Web: HTTP / web extension. Added on top
-         of App by Sdk.Web. Starts with just the umbrella; categorize
-         web-specific libraries here as they come online.
+         of App by Sdk.Web.
+
+         The framework is what delivers the Web family to applications:
+         the hosting/runtime module (Assimalign.Cohesion.Web.Hosting)
+         deliberately has NO project references to the feature libraries,
+         and the feature libraries never reference the hosting module -
+         apps see the whole family because Sdk.Web pulls this framework
+         (Web-area dependency rule: resources/Web/README.md).
+
+         Exclusions: Web.Testing (test harness, not runtime) and
+         Web.ApplicationModel (awaiting its Phase-4 rebuild; no sources).
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
 
-        <!-- Move from App when ready:
+        <!-- The Web family. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api.Controllers" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authorization" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Forms" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Functions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Results" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Results.ServerSentEvents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
+
+        <!-- Supporting libraries the Web family closes over that the base App
+             framework does not carry (computed transitive closure). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.DataProtection" />
+
+        <!-- Candidates as they come online:
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenApi" />
-        ...resources/Web/* projects belong here too once they build...
         -->
     </ItemGroup>
 

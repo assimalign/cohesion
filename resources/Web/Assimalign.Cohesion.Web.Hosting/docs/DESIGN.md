@@ -7,6 +7,18 @@ pipeline invocations. It is the **only** Web layer where DI, logging, and
 configuration are integrated, and that integration is strictly builder-time —
 nothing resolves services per request.
 
+**The hosting module is dependency-isolated within the Web area** (rule adopted
+2026-07-10, recorded in `resources/Web/README.md`): no Web feature library
+references this package — a feature that did would drag the DI/configuration
+composition surface into every consumer — and this package references **no**
+Web feature library, only the root `Assimalign.Cohesion.Web` abstractions and
+non-Web infrastructure. Applications still see the whole Web family because the
+`App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
+verbs ship with their features (`AddAuthentication` moved to
+`Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
+compose against the root `IWebApplicationBuilder` seam. The one sanctioned
+exception is `Web.Testing`, the harness that drives this concrete runtime.
+
 This document focuses on the piece with the most load-bearing runtime behaviour:
 `WebApplicationServer`, the default `IWebApplicationServer`. Its dispatch model
 and stop semantics are the contract the rest of the Web middleware stack builds

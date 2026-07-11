@@ -4,6 +4,9 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- Sanctioned exception to the Web-area dependency rule (resources/Web/README.md):
+		     the test factory drives the concrete runtime (WebApplication/WebApplicationBuilder),
+		     so this test-harness package alone may reference the hosting module. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />

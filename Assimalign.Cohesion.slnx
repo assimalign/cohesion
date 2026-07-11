@@ -1958,6 +1958,7 @@
 	<Folder Name="/cohesion/resources/Web/">
 		<File Path="resources/Web/Directory.Build.props" />
 		<File Path="resources/Web/Directory.Build.targets" />
+		<File Path="resources/Web/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />

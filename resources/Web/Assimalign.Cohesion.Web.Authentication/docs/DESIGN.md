@@ -193,30 +193,43 @@ by `Web.Routing`. The marker is defined here (an empty interface) but read
 only by the cookie handler; the bearer handler is always an API scheme and
 needs no check.
 
-**Builder-time registration lives in `*.Hosting`.** Per the framework's
-layering, this package defines the model and the request-time service but
-does *not* wire schemes — `AddAuthentication`/`AddCookie`/`AddJwtBearer`
-(which construct the data-protection key ring and read configuration) live
-in `Assimalign.Cohesion.Web.Hosting`, the only place DI/config/crypto
-composition is sanctioned. `AuthenticationService.Create` and the public
+**Builder-time registration lives with the model, not in `*.Hosting`.**
+(Revised 2026-07-10 with the Web-area dependency rule — the original #790
+design placed the verbs in `Web.Hosting`.) The hosting/runtime module
+neither references nor is referenced by the feature libraries, so
+`AddAuthentication` (on the root `IWebApplicationBuilder`), the
+`AuthenticationBuilder` scheme surface, and `UseAuthentication` live in
+*this* package, and each handler package grafts its own scheme verb onto
+`AuthenticationBuilder` via `extension(...)` (`AddCookie` in the Cookie
+package, `AddJwtBearer` in the Bearer package). Composition stays
+dependency-free — the service is attached as a typed feature
+(`builder.AddFeature`), schemes are registered as values, and no service
+container or configuration binding is involved, so moving the verbs out
+of Hosting does not violate the "DI/config composition only in
+`*.Hosting`" philosophy. The ticket-crypto seam travels with the builder:
+`AuthenticationBuilder.DataProtectionProvider` defaults to a
+file-system-backed rotating key ring under `AppContext.BaseDirectory`
+when no provider is supplied to `AddAuthentication` (the host-content-root
+default that Hosting used to supply is gone — pass a provider explicitly
+to control key placement). `AuthenticationService.Create` and the public
 handler factories (`CookieAuthentication.CreateHandler`,
-`JwtBearerAuthentication.CreateHandler`) are the seams Hosting uses to
-build the model while the concrete handler and service implementations
-stay `internal`.
+`JwtBearerAuthentication.CreateHandler`) remain the seams the verbs use
+while the concrete handler and service implementations stay `internal`.
 
 ## Family map
 
 | Package | Role | Dependencies |
 |---------|------|---------------|
-| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) | `Assimalign.Cohesion.Http` |
-| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
-| `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) | This package, `IdentityModel.Token.JsonWebToken` |
-| `&hellip;Web.Hosting` | Builder-time registration (`AddAuthentication`/`AddCookie`/`AddJwtBearer`, `UseAuthentication`) + key-ring composition | The three above + `Security.DataProtection` |
+| `Assimalign.Cohesion.Web.Authentication` | Principal feature + scheme model (handler contract, scheme registry, dispatch service, result types) + builder-time registration (`AddAuthentication`, `AuthenticationBuilder`, `UseAuthentication`) | `Assimalign.Cohesion.Http`, `Assimalign.Cohesion.Web`, `Security.DataProtection` |
+| `&hellip;Web.Authentication.Cookie` | Cookie-scheme handler (protected ticket, sliding expiration, login/logout) + the grafted `AddCookie` verb | This package, `Http.Cookies`, `Web.Routing`, `Security.DataProtection` |
+| `&hellip;Web.Authentication.Bearer` | Bearer-token scheme handler (JWT validation + signature seam) + the grafted `AddJwtBearer` verb | This package, `IdentityModel.Token.JsonWebToken` |
 
 Dependency direction is one-way: scheme handlers depend on this
-package; this package depends on the protocol core. The protocol core
-never gains a back-reference. Only `*.Hosting` depends on the handler
-packages, because only the composition root wires them.
+package; this package depends on the protocol core and the root Web
+composition abstractions. The protocol core never gains a
+back-reference, and `Web.Hosting` references none of these packages —
+the `App.Web` shared framework delivers the family to applications
+(see `resources/Web/README.md`).
 
 ## AOT posture
 
@@ -236,9 +249,10 @@ serialization or runtime-policy surface is consumed by this package.
   Cookie and Bearer handlers live in dedicated packages, and any other
   scheme (API key, mutual-TLS) is a further package or a custom
   `IAuthenticationHandler`. This package ships no handler.
-- **Builder-time wiring.** `AddAuthentication`/`AddCookie`/`AddJwtBearer`
-  and `UseAuthentication` live in `Web.Hosting`; this package is
-  request-path only and free of DI/config/crypto dependencies.
+- **Concrete scheme verbs.** `AddCookie`/`AddJwtBearer` ship with their
+  handler packages as `extension(AuthenticationBuilder)` members; this
+  package exposes only the scheme-agnostic surface (`AddAuthentication`,
+  `AddScheme`, `UseAuthentication`).
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.

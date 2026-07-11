@@ -7,6 +7,7 @@
 	<Folder Name="/Web/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web/">
 		<File Path="Assimalign.Cohesion.Web/README.md" />
