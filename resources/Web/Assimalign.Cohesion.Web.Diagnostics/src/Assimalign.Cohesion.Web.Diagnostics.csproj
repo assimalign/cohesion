@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Diagnostics</RootNamespace>
+		<Description>HTTP request/response logging and W3C access logs for Cohesion web applications. Owns the UseHttpLogging middleware (builder-time field flags, allowlist-based header redaction with Authorization/Cookie/Set-Cookie never logged by default, bounded opt-in body capture, duration and status capture, traceparent correlation) and a W3C extended / NCSA common+combined access-log file writer built as an Assimalign.Cohesion.Logging provider — emission rides the repo's own logging pipeline (providers/enrichers/filters), not a parallel one. AOT-safe span formatting, zero reflection.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+	</ItemGroup>
+</Project>
