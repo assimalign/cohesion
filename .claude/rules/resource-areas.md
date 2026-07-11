@@ -68,10 +68,20 @@ semicolon-delimited, in its own csproj:
 
 ## What every area is expected to provide
 
-- `Assimalign.Cohesion.<Area>` — the area root: the abstractions and composition seams every
-  feature library builds against.
+- `Assimalign.Cohesion.<Area>` — the area root: the base abstractions and composition seams
+  every feature library builds against. **The root does not absorb feature abstractions** — a
+  feature's model, builder surface, and contracts live in the feature package and compose
+  against the root's seams (precedent: the Web auth model and `AuthenticationBuilder` live in
+  `Web.Authentication`, not in `Web`). A large area may compose its root from **child roots** —
+  packages of generic base abstractions and default implementations pulled into the parent root
+  for maintainability, testability, and separation of concerns (precedent:
+  `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Language`/`Execution`). The
+  breakdown signal for either shape is the root (or a child root) pulling in anything feature-
+  or model-specific.
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
-  non-area infrastructure.
+  non-area infrastructure. **If the hosting module ever appears to need a same-area dependency
+  beyond the root, that is an architecture revisit — surface it to the user — not a case for
+  the exemption property or for pushing the dependency's types into the root.**
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
   hosting.
 - Framework delivery: shippable area assemblies (and their outside-area transitive closure)
