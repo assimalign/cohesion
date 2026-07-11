@@ -78,6 +78,24 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             });
         }
 
+        // Host filtering owns the pipeline's first position when an allowlist is configured:
+        // it wraps outside feature seeding and every user middleware, so nothing downstream
+        // ever observes a request whose effective host failed validation, and a rejected
+        // request costs no feature work. The allowlist compiles to a matcher exactly once,
+        // here at build — invalid patterns fail the build call, never a request.
+        HostFilteringOptions hostFiltering = _options.HostFiltering;
+
+        if (hostFiltering.AllowedHosts.Count > 0)
+        {
+            HostFilteringMiddleware hostFilter = new(
+                HttpHostMatcher.Create(hostFiltering.AllowedHosts),
+                hostFiltering.AllowEmptyHost);
+
+            WebApplicationMiddleware guarded = middleware;
+
+            middleware = new WebApplicationMiddleware(context => hostFilter.InvokeAsync(context, guarded));
+        }
+
         return new WebApplicationPipeline(middleware);
     }
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
