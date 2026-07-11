@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+		<!-- Deviates from the repo namespace-matches-assembly rule per design decision:
+		     a namespace segment named 'ProblemDetails' would conflict (CS0434) with the
+		     ProblemDetails type the library surfaces in Assimalign.Cohesion.Web, so the
+		     test namespace flattens the segment. -->
+		<RootNamespace>Assimalign.Cohesion.Web.ProblemDetailsTests</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+	</ItemGroup>
+</Project>

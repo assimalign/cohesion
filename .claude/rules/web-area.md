@@ -43,7 +43,13 @@ Composition verbs live in the package that owns the feature — never in `Web.Ho
   verbs simply must not need DI.
 - A sub-family that extends another feature's builder surface grafts onto it with C# 14
   `extension(...)` members in its own package (precedent: `AddCookie`/`AddJwtBearer` on
-  `AuthenticationBuilder`; `Results.ServerSentEvents(...)` on the `Results` factories).
+  `AuthenticationBuilder`). Static extension members on the target's static classes work too,
+  when a package needs to extend a plain-static surface.
+- **Composition model (2026-07-10 direction):** the Web area is middleware-first — fluent
+  `.Use(...)` and `IWebApplicationMiddleware` over a return-value result model. The IResult
+  abstraction was withdrawn before merge; request/response formatting and error handling are
+  the re-scoped #864 design (content-serialization registry + `OnError` hook). Controller and
+  function binding surfaces are set aside entirely.
 
 ## Adding a new Web feature library — required wiring
 

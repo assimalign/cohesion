@@ -154,7 +154,6 @@
         <!-- The Web family. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api.Controllers" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
@@ -162,11 +161,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Forms" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Functions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Results" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Results.ServerSentEvents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
 
@@ -177,9 +174,14 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+
+        <!-- App-facing HTTP capabilities delivered deliberately even though no Web
+             assembly references them: incremental response streaming and the
+             Server-Sent Events primitives ride the transport interceptor seam and
+             are consumed directly by application handlers. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

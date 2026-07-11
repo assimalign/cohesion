@@ -22,7 +22,6 @@ jobs:
         projects: [
             'Assimalign.Cohesion.Web',
             'Assimalign.Cohesion.Web.Api',
-            'Assimalign.Cohesion.Web.Api.Controllers',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',
             'Assimalign.Cohesion.Web.Authentication.Cookie',
@@ -30,11 +29,9 @@ jobs:
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',
             'Assimalign.Cohesion.Web.Forms',
-            'Assimalign.Cohesion.Web.Functions',
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.Hosting',
-            'Assimalign.Cohesion.Web.Results',
-            'Assimalign.Cohesion.Web.Results.ServerSentEvents',
+            'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.Testing'
