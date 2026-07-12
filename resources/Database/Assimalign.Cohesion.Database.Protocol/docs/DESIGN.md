@@ -23,8 +23,8 @@ Every frame is `u32 payload-length (big-endian) + u8 message-type + payload`. De
 
 ## Non-goals
 
-- No transport here (TLS, sockets, pipes belong to `libraries/Connections` + `Database.Server`).
-- No payload schema definitions yet — they land message-by-message with the server/client build-out, kept span-based and AOT-safe.
+- No transport here (TLS, sockets, pipes belong to `libraries/Connections` + `Database.Server`); `ProtocolFraming` gives stream-based reader/writer implementations any transport can wrap.
+- Payload schemas land message-by-message; today: `Startup`, `Error`, `Execute` (statement + named parameters as shared tuple-codec components), `ResultHeader` (column names + shared type identity bytes), `ResultComplete` (affected count). `ResultRow` payloads are raw tuple-codec bytes — one typed component per column — so rows need no wrapper type. Authenticate/Transaction payloads arrive with the server build-out.
 - No compression negotiation in 1.0.
 
 ## AOT posture
