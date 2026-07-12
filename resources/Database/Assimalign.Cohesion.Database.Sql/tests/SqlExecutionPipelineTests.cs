@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
-using Assimalign.Cohesion.Database.Language.Sql;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 public class SqlExecutionPipelineTests : IDisposable
 {

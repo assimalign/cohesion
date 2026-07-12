@@ -1,11 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <Folder Include="Expressions\" />
-  </ItemGroup>
-
-  <ItemGroup>
-	  <CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
-  </ItemGroup>
-
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+	</ItemGroup>
 </Project>

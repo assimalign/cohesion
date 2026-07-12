@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language.Sql;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
 /// Represents a SQL query request that wraps a parsed SQL statement.

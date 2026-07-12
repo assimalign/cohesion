@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language.Sql;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
