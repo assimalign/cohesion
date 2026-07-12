@@ -54,8 +54,23 @@ pinned, dirty pages are written back (checksum-stamped) before eviction, and han
 release their pin on dispose. Contrast with a `Memory<byte>`-pooling design: pages are
 *pinned* GC handles exposing raw pointers because the slotted-page and header structs
 are `unsafe` overlays — the pool guarantees pointer stability for the handle's lifetime.
-Eviction policy is the buffer-pool build-out story (#158); the contract deliberately
-does not promise an ordering, only pin-safety.
+
+- **Eviction is least-recently-used** over unpinned entries: pins and cache hits move a
+  page to the MRU end; capacity overflow evicts from the LRU end, skipping pinned
+  pages, and fails loudly (`StorageIOException`) when every resident page is pinned —
+  the pool never silently exceeds its memory budget. LRU (not clock/2Q) because the
+  pool is fully lock-serialized anyway, so the precise policy costs nothing extra and
+  is trivially testable.
+- **Buffers are reused**: evicted entries return their pinned 8 KiB buffers (GC handle
+  and all) to a recycle stack, so steady-state page churn performs zero allocations —
+  fresh pages are zeroed on reuse so recycled buffers never leak prior content.
+- **Failed loads never poison the cache**: a page that fails checksum verification is
+  not cached; its buffer goes straight back to the recycle stack and the exception
+  propagates.
+- **One lock.** All pool state is guarded by a single monitor. Page *content* access is
+  the caller's concern (a handle hands out a raw pointer); the transaction layer above
+  provides content-level isolation. Sharding the lock is a measured-need optimization,
+  not a default.
 
 ## The record layer
 

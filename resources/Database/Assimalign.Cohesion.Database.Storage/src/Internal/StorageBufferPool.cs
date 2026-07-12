@@ -9,21 +9,41 @@ using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// An in-memory page cache that pins page buffers to prevent garbage collection
-/// and supports pin-counted eviction.
+/// and supports pin-counted, least-recently-used eviction with buffer reuse.
 /// </summary>
 /// <remarks>
+/// <para>
+/// Eviction policy: when the pool is at capacity, the least recently used page whose
+/// pin count is zero is evicted (written back first when dirty). Pinned pages are never
+/// evicted; if every resident page is pinned the pool refuses the new page loudly
+/// rather than silently exceeding its budget.
+/// </para>
+/// <para>
+/// Buffer reuse: evicted entries return their pinned 8 KiB buffers to a recycle stack,
+/// so a pool under steady load reaches its capacity in GC-pinned allocations and stays
+/// there — page churn does not allocate.
+/// </para>
+/// <para>
 /// Integrity: every page loaded from the storage stream is verified against its
 /// header checksum, and every write-back stamps a fresh checksum, so corruption is
 /// detected on the read path rather than propagating silently.
+/// </para>
 /// </remarks>
 internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 {
     private readonly Dictionary<long, BufferEntry> _entries = new();
+    private readonly LinkedList<long> _accessOrder = new(); // head = least recently used
+    private readonly Stack<BufferEntry> _recycled = new();
     private readonly object _syncRoot = new();
     private readonly int _capacity;
 
     internal StorageBufferPool(int capacity)
     {
+        if (capacity < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity), "Buffer pool capacity must be at least one page.");
+        }
+
         _capacity = capacity;
     }
 
@@ -52,6 +72,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             if (_entries.TryGetValue(id, out var entry))
             {
                 entry.PinCount++;
+                Touch(entry);
                 return new StoragePageHandle(pageId, entry, this);
             }
 
@@ -60,17 +81,30 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
                 EvictOneLocked(stream);
             }
 
-            var buffer = new byte[Page.Size];
+            entry = TakeEntryLocked();
 
             if (id * Page.Size < stream.Length)
             {
-                stream.ReadPage(pageId, buffer);
-                PageChecksum.Verify(buffer, pageId);
+                try
+                {
+                    stream.ReadPage(pageId, entry.Buffer);
+                    PageChecksum.Verify(entry.Buffer, pageId);
+                }
+                catch
+                {
+                    // Do not cache a page that failed to load or verify.
+                    RecycleLocked(entry);
+                    throw;
+                }
+            }
+            else
+            {
+                Array.Clear(entry.Buffer);
             }
 
-            entry = new BufferEntry(buffer);
             entry.PinCount = 1;
             _entries[id] = entry;
+            entry.Node = _accessOrder.AddLast(id);
 
             return new StoragePageHandle(pageId, entry, this);
         }
@@ -96,6 +130,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             if (_entries.TryGetValue((long)pageId, out var entry))
             {
                 entry.PinCount++;
+                Touch(entry);
                 handle = new StoragePageHandle(pageId, entry, this);
                 return true;
             }
@@ -127,8 +162,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
                 WriteBack(stream, pageId, entry);
             }
 
-            entry.Release();
-            _entries.Remove(id);
+            RemoveLocked(id, entry);
         }
     }
 
@@ -176,36 +210,89 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             }
 
             _entries.Clear();
+            _accessOrder.Clear();
+
+            while (_recycled.Count > 0)
+            {
+                _recycled.Pop().Release();
+            }
         }
     }
 
+    /// <summary>
+    /// Moves the entry to the most-recently-used position.
+    /// </summary>
+    private void Touch(BufferEntry entry)
+    {
+        if (entry.Node is not null)
+        {
+            _accessOrder.Remove(entry.Node);
+            _accessOrder.AddLast(entry.Node);
+        }
+    }
+
+    /// <summary>
+    /// Evicts the least recently used unpinned page, writing it back first when dirty.
+    /// </summary>
     private void EvictOneLocked(StorageStream stream)
     {
-        long evictKey = -1;
-        BufferEntry? evictEntry = null;
-
-        foreach (var kvp in _entries)
+        for (var node = _accessOrder.First; node is not null; node = node.Next)
         {
-            if (kvp.Value.PinCount == 0)
+            var entry = _entries[node.Value];
+
+            if (entry.PinCount > 0)
             {
-                evictKey = kvp.Key;
-                evictEntry = kvp.Value;
-                break;
+                continue;
             }
+
+            if (entry.IsDirty)
+            {
+                WriteBack(stream, (PageId)node.Value, entry);
+            }
+
+            RemoveLocked(node.Value, entry);
+            return;
         }
 
-        if (evictEntry == null)
+        throw new StorageIOException("Buffer pool is full and all pages are pinned.");
+    }
+
+    /// <summary>
+    /// Takes a recycled entry when one is available, otherwise allocates a fresh
+    /// pinned buffer.
+    /// </summary>
+    private BufferEntry TakeEntryLocked()
+    {
+        if (_recycled.Count > 0)
         {
-            throw new StorageIOException("Buffer pool is full and all pages are pinned.");
+            var recycledEntry = _recycled.Pop();
+            recycledEntry.IsDirty = false;
+            recycledEntry.PinCount = 0;
+            recycledEntry.Node = null;
+            return recycledEntry;
         }
 
-        if (evictEntry.IsDirty)
+        return new BufferEntry(new byte[Page.Size]);
+    }
+
+    private void RemoveLocked(long id, BufferEntry entry)
+    {
+        if (entry.Node is not null)
         {
-            WriteBack(stream, (PageId)evictKey, evictEntry);
+            _accessOrder.Remove(entry.Node);
+            entry.Node = null;
         }
 
-        evictEntry.Release();
-        _entries.Remove(evictKey);
+        _entries.Remove(id);
+        RecycleLocked(entry);
+    }
+
+    private void RecycleLocked(BufferEntry entry)
+    {
+        entry.IsDirty = false;
+        entry.PinCount = 0;
+        entry.Node = null;
+        _recycled.Push(entry);
     }
 
     /// <summary>
@@ -228,6 +315,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         public Page Page;
         public int PinCount;
         public bool IsDirty;
+        public LinkedListNode<long>? Node;
 
         public BufferEntry(byte[] buffer)
         {
