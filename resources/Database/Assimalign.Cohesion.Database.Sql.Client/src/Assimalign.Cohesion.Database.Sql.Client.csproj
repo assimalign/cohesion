@@ -1,1 +1,14 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		The typed SQL client: a thin relational surface (commands, typed result
+		sets, errors, telemetry) over the shared Database.Client core. It sends
+		statement text + parameters and materializes typed rows; it never parses
+		SQL (the server owns that), so it does NOT reference Sql.Language.
+	-->
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+</Project>

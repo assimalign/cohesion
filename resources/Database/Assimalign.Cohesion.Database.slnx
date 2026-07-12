@@ -377,8 +377,15 @@
 		<Project Path="Assimalign.Cohesion.Database.Sql.Catalog/src/Assimalign.Cohesion.Database.Sql.Catalog.csproj" />
 	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Client/" />
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Client/docs/">
+		<File Path="Assimalign.Cohesion.Database.Sql.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Sql.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Client/src/">
 		<Project Path="Assimalign.Cohesion.Database.Sql.Client/src/Assimalign.Cohesion.Database.Sql.Client.csproj" />
+	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Client/tests/">
+		<Project Path="Assimalign.Cohesion.Database.Sql.Client/tests/Assimalign.Cohesion.Database.Sql.Client.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Language/" />
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Language/src/">
