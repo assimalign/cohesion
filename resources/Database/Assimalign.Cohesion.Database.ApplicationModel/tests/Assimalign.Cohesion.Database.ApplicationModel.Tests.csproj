@@ -9,5 +9,8 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
+		<!-- Integration acceptance: drive the manifest through the generic gateway
+		     realization algorithm (dependency order, teardown, Failed blocking). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 	</ItemGroup>
 </Project>
