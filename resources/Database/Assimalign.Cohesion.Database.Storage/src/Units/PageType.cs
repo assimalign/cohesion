@@ -1,15 +1,20 @@
-﻿namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// Identifies the purpose and layout of a page within a storage file.
 /// </summary>
-[System.Flags]
+/// <remarks>
+/// The page type is persisted in the page header, so values are append-only and never
+/// renumbered. <see cref="Free"/> is deliberately zero: a zero-initialized page reads
+/// as free, and freed pages are re-stamped with this value so the free-space map can
+/// be reconstructed by scanning page headers when a storage file is reopened.
+/// </remarks>
 public enum PageType : byte
 {
     /// <summary>
-    /// A catalog (system metadata) page.
+    /// An unallocated (free) page available for reuse.
     /// </summary>
-    Catalog = 0,
+    Free = 0,
 
     /// <summary>
     /// A data page containing user records.
@@ -22,28 +27,33 @@ public enum PageType : byte
     Index = 2,
 
     /// <summary>
+    /// A catalog (system metadata) page.
+    /// </summary>
+    Catalog = 3,
+
+    /// <summary>
     /// A partition metadata page.
     /// </summary>
-    Partition = 3,
+    Partition = 4,
 
     /// <summary>
     /// An overflow continuation page for records larger than a single page.
     /// </summary>
-    Overflow = 4,
+    Overflow = 5,
 
     /// <summary>
     /// A page storing large objects (text, ntext, image, nvarchar(max), varchar(max),
     /// varbinary(max), and xml data).
     /// </summary>
-    LargeObject = 5,
+    LargeObject = 6,
 
     /// <summary>
     /// The storage file header page (page 0).
     /// </summary>
-    FileHeader = 6,
+    FileHeader = 7,
 
     /// <summary>
     /// A free space map (allocation bitmap) page.
     /// </summary>
-    FreeSpaceMap = 7,
+    FreeSpaceMap = 8,
 }

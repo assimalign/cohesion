@@ -4,12 +4,18 @@ using System.Runtime.InteropServices;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// An in-memory page cache that pins page buffers to prevent garbage collection
 /// and supports pin-counted eviction.
 /// </summary>
+/// <remarks>
+/// Integrity: every page loaded from the storage stream is verified against its
+/// header checksum, and every write-back stamps a fresh checksum, so corruption is
+/// detected on the read path rather than propagating silently.
+/// </remarks>
 internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 {
     private readonly Dictionary<long, BufferEntry> _entries = new();
@@ -59,6 +65,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             if (id * Page.Size < stream.Length)
             {
                 stream.ReadPage(pageId, buffer);
+                PageChecksum.Verify(buffer, pageId);
             }
 
             entry = new BufferEntry(buffer);
@@ -117,7 +124,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
             if (entry.IsDirty)
             {
-                stream.WritePage(pageId, entry.Buffer);
+                WriteBack(stream, pageId, entry);
             }
 
             entry.Release();
@@ -134,8 +141,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             {
                 if (kvp.Value.IsDirty)
                 {
-                    stream.WritePage((PageId)kvp.Key, kvp.Value.Buffer);
-                    kvp.Value.IsDirty = false;
+                    WriteBack(stream, (PageId)kvp.Key, kvp.Value);
                 }
             }
 
@@ -154,8 +160,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         {
             if (_entries.TryGetValue((long)pageId, out var entry) && entry.IsDirty)
             {
-                stream.WritePage(pageId, entry.Buffer);
-                entry.IsDirty = false;
+                WriteBack(stream, pageId, entry);
             }
         }
     }
@@ -196,11 +201,21 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
         if (evictEntry.IsDirty)
         {
-            stream.WritePage((PageId)evictKey, evictEntry.Buffer);
+            WriteBack(stream, (PageId)evictKey, evictEntry);
         }
 
         evictEntry.Release();
         _entries.Remove(evictKey);
+    }
+
+    /// <summary>
+    /// Stamps the page checksum and writes the buffer to the stream, clearing the dirty flag.
+    /// </summary>
+    private static void WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
+    {
+        PageChecksum.Stamp(entry.Buffer);
+        stream.WritePage(pageId, entry.Buffer);
+        entry.IsDirty = false;
     }
 
     /// <summary>

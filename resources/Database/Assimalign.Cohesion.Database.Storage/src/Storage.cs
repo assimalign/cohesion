@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
@@ -25,7 +26,7 @@ public abstract class Storage : IStorage
     private StreamJournalLogger? _journalLogger;
     private StorageId _id;
     private Name _name;
-    private PageId _currentWritePageId;
+    private PageId? _currentWritePageId;
     private bool _disposed;
 
     /// <summary>
@@ -102,7 +103,8 @@ public abstract class Storage : IStorage
         // Initialize the journal logger from the journal stream
         _journalLogger = new StreamJournalLogger(Journal, leaveOpen: true);
 
-        // Allocate and write file header (page 0)
+        // Allocate and write file header (page 0). The file metadata lives in the
+        // page body so the page header (id, LSN, checksum) stays intact.
         using (var headerHandle = _pageManager.AllocatePage(PageType.FileHeader))
         {
             WriteFileHeader(headerHandle);
@@ -122,16 +124,20 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Opens an existing storage file set by reading the file header and reconstructing
-    /// the internal state.
+    /// the internal state (free-space map and current write position) from a single
+    /// pass over the on-disk page headers.
     /// </summary>
+    /// <exception cref="StorageCorruptionException">The file header page fails checksum verification.</exception>
+    /// <exception cref="StorageIOException">The file header is not a valid Cohesion storage header.</exception>
     protected unsafe void OpenExisting()
     {
         var headerBuffer = new byte[Page.Size];
         Data.ReadPage((PageId)0L, headerBuffer);
+        PageChecksum.Verify(headerBuffer, (PageId)0L);
 
         fixed (byte* ptr = headerBuffer)
         {
-            var header = (StorageFileHeader*)ptr;
+            var header = (StorageFileHeader*)(ptr + Page.HeaderSize);
 
             if (!header->IsValid())
             {
@@ -159,11 +165,40 @@ public abstract class Storage : IStorage
             _name = nameLen > 0
                 ? (Name)Encoding.UTF8.GetString(nameBytes, 0, nameLen)
                 : (Name)"";
+        }
 
-            long totalPages = header->TotalPageCount;
-            for (long i = 0; i < totalPages; i++)
+        // Rebuild the free-space map and locate the last data page in one pass over
+        // the on-disk page headers. The stream length is the source of truth for the
+        // page count (the file header trails it if the process stopped between an
+        // allocation and the next header update).
+        _freeSpaceMap.MarkAllocated((PageId)0L);
+
+        long pageCount = Data.Length / Page.Size;
+        var pageHeader = new byte[Page.HeaderSize];
+        PageId? lastDataPage = null;
+
+        for (long i = 1; i < pageCount; i++)
+        {
+            Data.ReadPageHeader((PageId)i, pageHeader);
+
+            PageType type;
+            fixed (byte* headerPtr = pageHeader)
+            {
+                type = ((Page.Header*)headerPtr)->Type;
+            }
+
+            if (type == PageType.Free)
+            {
+                _freeSpaceMap.MarkFree((PageId)i);
+            }
+            else
             {
                 _freeSpaceMap.MarkAllocated((PageId)i);
+
+                if (type == PageType.Data)
+                {
+                    lastDataPage = (PageId)i;
+                }
             }
         }
 
@@ -172,7 +207,7 @@ public abstract class Storage : IStorage
         // Initialize the journal logger from the journal stream
         _journalLogger = new StreamJournalLogger(Journal, leaveOpen: true);
 
-        _currentWritePageId = FindLastDataPage();
+        _currentWritePageId = lastDataPage;
     }
 
     /// <summary>
@@ -181,19 +216,33 @@ public abstract class Storage : IStorage
     /// </summary>
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
+    /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
     protected unsafe (PageId PageId, int SlotIndex) InsertRecord(ReadOnlySpan<byte> data)
     {
-        var handle = _pageManager!.GetPage(_currentWritePageId);
-        var slotted = new SlottedPage(handle.Page);
-
-        if (!slotted.CanFit(data.Length))
+        if (data.Length > SlottedPage.MaxRecordSize)
         {
-            handle.Dispose();
+            throw new SlottedPageException(
+                $"Record of {data.Length} bytes exceeds the maximum record size of {SlottedPage.MaxRecordSize} bytes.");
+        }
 
-            handle = _pageManager.AllocatePage(PageType.Data);
+        IStoragePageHandle handle;
+        SlottedPage slotted;
+
+        // The current write page may have been freed since the last insert.
+        if (_currentWritePageId is null || !_freeSpaceMap.IsAllocated(_currentWritePageId.Value))
+        {
+            handle = AllocateDataPage(out slotted);
+        }
+        else
+        {
+            handle = _pageManager!.GetPage(_currentWritePageId.Value);
             slotted = new SlottedPage(handle.Page);
-            slotted.Initialize();
-            _currentWritePageId = handle.Id;
+
+            if (!slotted.CanFit(data.Length))
+            {
+                handle.Dispose();
+                handle = AllocateDataPage(out slotted);
+            }
         }
 
         int slotIndex = slotted.InsertSlot(data);
@@ -203,6 +252,15 @@ public abstract class Storage : IStorage
         handle.Dispose();
 
         return (pageId, slotIndex);
+    }
+
+    private IStoragePageHandle AllocateDataPage(out SlottedPage slotted)
+    {
+        var handle = _pageManager!.AllocatePage(PageType.Data);
+        slotted = new SlottedPage(handle.Page);
+        slotted.Initialize();
+        _currentWritePageId = handle.Id;
+        return handle;
     }
 
     /// <summary>
@@ -295,7 +353,7 @@ public abstract class Storage : IStorage
     /// <inheritdoc />
     public IStorageUnitIterator GetUnitIterator()
     {
-        return new StorageUnitIterator(_pageManager!);
+        return new StorageUnitIterator(_pageManager!, _freeSpaceMap);
     }
 
     /// <inheritdoc />
@@ -366,7 +424,7 @@ public abstract class Storage : IStorage
 
     private unsafe void WriteFileHeader(IStoragePageHandle handle)
     {
-        var header = (StorageFileHeader*)handle.Page.Pointer;
+        var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
         header->Magic = StorageFileHeader.ExpectedMagic;
         header->FormatVersion = StorageFileHeader.CurrentFormatVersion;
         header->PageSize = Page.Size;
@@ -404,27 +462,10 @@ public abstract class Storage : IStorage
         }
 
         using var handle = _pageManager.GetPage((PageId)0L);
-        var header = (StorageFileHeader*)handle.Page.Pointer;
+        var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
         header->TotalPageCount = _pageManager.PageCount;
         header->FreePageCount = _pageManager.FreePageCount;
         header->ModifiedAtUtcTicks = DateTime.UtcNow.Ticks;
         handle.MarkDirty();
-    }
-
-    private PageId FindLastDataPage()
-    {
-        long pageCount = _pageManager!.PageCount;
-        PageId lastDataPage = (PageId)1L;
-
-        for (long i = 1; i < pageCount; i++)
-        {
-            using var handle = _pageManager.GetPage((PageId)i);
-            if (handle.Page.Type == PageType.Data)
-            {
-                lastDataPage = (PageId)i;
-            }
-        }
-
-        return lastDataPage;
     }
 }

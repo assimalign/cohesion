@@ -18,9 +18,9 @@ This is the same design center as FoundationDB tuples and MySQL/InnoDB memcmp-ab
 
 The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping.
 
-## Relationship to `IStorageIndexManager`
+## Relationship to `Database.Storage`
 
-`Database.Storage` retains its `IStorageIndexManager` seam as the *physical* allocation hook (index page sets live in the same storage files). This project is the *logical* layer: structures, keys, cursors, uniqueness. The B+Tree implementation binds the two.
+`Database.Storage` provides the *physical* substrate through `IStoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's `IIndexManager` at the wrong layer with no design behind it.)
 
 ## Non-goals
 

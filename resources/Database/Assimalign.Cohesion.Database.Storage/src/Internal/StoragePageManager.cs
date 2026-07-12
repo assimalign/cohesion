@@ -56,8 +56,19 @@ internal sealed class StoragePageManager : IStoragePageManager
     }
 
     /// <inheritdoc />
-    public void FreePage(PageId pageId)
+    public unsafe void FreePage(PageId pageId)
     {
+        // Stamp the page as free on disk so the free-space map can be rebuilt from
+        // page headers when the file is reopened, then return it to the map.
+        using (var handle = _bufferPool.Pin(pageId, _stream))
+        {
+            var page = handle.Page;
+            page.AsSpan().Clear();
+            page.Id = (long)pageId;
+            page.Type = PageType.Free;
+            handle.MarkDirty();
+        }
+
         _bufferPool.Evict(pageId, _stream);
         _freeSpaceMap.Free(pageId);
     }
@@ -65,6 +76,11 @@ internal sealed class StoragePageManager : IStoragePageManager
     /// <inheritdoc />
     public IStoragePageHandle GetPage(PageId pageId)
     {
+        if (!_freeSpaceMap.IsAllocated(pageId))
+        {
+            throw new StorageIOException($"Page {(long)pageId} is not allocated.");
+        }
+
         return _bufferPool.Pin(pageId, _stream);
     }
 

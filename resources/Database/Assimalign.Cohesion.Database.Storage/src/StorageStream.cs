@@ -135,6 +135,30 @@ public class StorageStream : Stream
     }
 
     /// <summary>
+    /// Reads only the page header from the stream at the byte position calculated from
+    /// the page identifier. Used to reconstruct storage state without loading full pages.
+    /// </summary>
+    /// <param name="pageId">The zero-based page identifier.</param>
+    /// <param name="buffer">A buffer of at least <see cref="Page.HeaderSize"/> bytes to read into.</param>
+    /// <exception cref="StorageIOException">The stream returned fewer bytes than a full page header.</exception>
+    public void ReadPageHeader(PageId pageId, Span<byte> buffer)
+    {
+        long offset = (long)pageId * Page.Size;
+        _inner.Seek(offset, SeekOrigin.Begin);
+
+        int totalRead = 0;
+        while (totalRead < Page.HeaderSize)
+        {
+            int bytesRead = _inner.Read(buffer[totalRead..Page.HeaderSize]);
+            if (bytesRead == 0)
+            {
+                throw new StorageIOException($"Unexpected end of stream reading the header of page {(long)pageId}.");
+            }
+            totalRead += bytesRead;
+        }
+    }
+
+    /// <summary>
     /// Reads a full page from the stream asynchronously.
     /// </summary>
     /// <param name="pageId">The zero-based page identifier.</param>
