@@ -6,9 +6,44 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 
 ## Byte-comparable keys
 
-`IndexKey` compares by unsigned lexicographic byte order — the single comparison rule every structure (and every future on-disk page compare) uses. Type order is preserved at *encoding* time: integers are big-endian with the sign bit flipped (`FromInt64`), so numeric order and byte order coincide; composite keys concatenate component encodings. String collation encoding is deliberately **not** defined here — it belongs to the shared type system (`Database.Types`), which owns collation identity; this project stays agnostic to what the bytes mean.
+`IndexKey` compares by unsigned lexicographic byte order — the single comparison rule every structure (and every future on-disk page compare) uses. Type order is preserved at *encoding* time: integers are big-endian with the sign bit flipped (`FromInt64`), so numeric order and byte order coincide; composite keys concatenate component encodings. String collation encoding is deliberately **not** defined here — it belongs to the shared type system (`Database.Types`), which owns collation identity; `IndexKey.From(DatabaseKeyWriter)` is the bridge for typed and composite keys.
 
 This is the same design center as FoundationDB tuples and MySQL/InnoDB memcmp-able keys: one dumb, fast comparator at the bottom, all type intelligence pushed to encoding.
+
+## The B+Tree implementation
+
+`BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
+one node per page, a sorted offset directory with entry data growing from the body
+end, key capacity capped (`MaxKeyLength` = 1 KiB) so a node always holds several
+entries and splits stay correct.
+
+- **Every page mutation rides the owning storage transaction** through the storage
+  layer's `OpenPageForWrite`/`AllocatePageForWrite` — before-images at first touch,
+  after-images at commit. That is the whole crash story: a crash mid-split reverts
+  to the consistent pre-transaction tree; committed splits replay from the journal
+  (the crash suites prove both). `IStorageTransactionSource` is how the engine
+  pairs logical transaction contexts with their storage transactions.
+- **MVCC entries, tombstone deletes.** Leaf entries carry writer and deleter
+  sequence stamps; reads filter through the caller's snapshot (writer visible,
+  deleter absent-or-invisible). Deletes stamp — never remove — so old snapshots
+  keep seeing the entry; an aborted deleter's stamp reverts physically with its
+  page image. Physical reclamation and node merges belong to vacuum, which follows
+  version pruning (post-MVP).
+- **Uniqueness checks the LATEST state, not the snapshot.** Two transactions that
+  began before each other's commits would both pass a snapshot-visibility check
+  (write skew). Instead: unique inserts *and deletes* first take an exclusive
+  key lock (hashed key) in the shared lock manager; once held, a live entry
+  (deleter stamp zero) can only be committed or our own — uncommitted others are
+  excluded by the lock, and aborted writers' entries were physically reverted.
+- **Concurrency (MVP): a tree-level reader/writer latch.** Writers exclusive;
+  cursors materialize their range's visible entries under the read latch, so no
+  latch is held across awaits and readers never see a torn structure. Lock
+  coupling / latch-per-node is a measured-need follow-up.
+- **Directory persistence belongs to the catalog.** The manager keeps an in-memory
+  directory and exports `BTreeIndexRegistration`s (`IIndexRegistry`); the model
+  catalog persists them and re-attaches on open (`ExistingIndexes`). Root splits
+  change the root page id — catalogs re-export at their persistence points.
+  Dropping an index is a directory operation; its pages await vacuum.
 
 ## Transactional binding
 

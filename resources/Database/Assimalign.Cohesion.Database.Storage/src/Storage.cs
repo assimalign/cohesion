@@ -258,6 +258,31 @@ public abstract class Storage : IStorage
     }
 
     /// <inheritdoc />
+    public IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId)
+    {
+        var owner = ValidateTransaction(transaction);
+        return TouchPage(owner, pageId);
+    }
+
+    /// <inheritdoc />
+    public IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type)
+    {
+        var owner = ValidateTransaction(transaction);
+        var handle = _pageManager!.AllocatePage(type);
+
+        try
+        {
+            RegisterTouch(owner, handle);
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     public void Checkpoint()
     {
         lock (_transactionLock)

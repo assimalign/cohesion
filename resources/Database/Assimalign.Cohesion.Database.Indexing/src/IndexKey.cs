@@ -1,6 +1,8 @@
 using System;
 using System.Buffers.Binary;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Indexing;
 
 /// <summary>
@@ -60,6 +62,19 @@ public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
         var buffer = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64BigEndian(buffer, value);
         return new IndexKey(buffer);
+    }
+
+    /// <summary>
+    /// Creates a key from the shared type system's composite key writer — the path
+    /// for typed and composite keys (strings under an explicit collation, decimals,
+    /// temporal types, multi-column keys).
+    /// </summary>
+    /// <param name="writer">The writer holding the encoded components.</param>
+    /// <returns>A key over the writer's order-preserving encoding.</returns>
+    public static IndexKey From(DatabaseKeyWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        return new IndexKey(writer.ToArray());
     }
 
     /// <inheritdoc />

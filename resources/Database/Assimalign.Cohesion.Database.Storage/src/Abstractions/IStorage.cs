@@ -89,6 +89,29 @@ public interface IStorage : IAsyncDisposable, IDisposable
     IStorageTransaction BeginTransaction();
 
     /// <summary>
+    /// Pins a page for modification inside a transaction: acquires the page's write
+    /// lock for the transaction and captures its before image on first touch, so the
+    /// mutation is covered by the write-ahead log like any record operation. Used by
+    /// subsystems that own their page layout (index structures, catalogs).
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page to modify.</param>
+    /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId);
+
+    /// <summary>
+    /// Allocates a fresh page inside a transaction, covered by the write-ahead log.
+    /// If the transaction rolls back, the page content reverts to its freshly
+    /// allocated (empty) image; the allocation itself is not undone — a safe leak.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="type">The type of page to allocate.</param>
+    /// <returns>A handle to the new pinned page.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type);
+
+    /// <summary>
     /// Checkpoints the storage: durably flushes all page state to the data stream and
     /// truncates the journal, so the next open recovers instantly.
     /// </summary>
