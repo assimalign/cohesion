@@ -20,8 +20,11 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The ordering encodes two rules the acceptance criteria call out: <c>If-None-Match</c> takes
 /// precedence over <c>If-Modified-Since</c> (a present <c>If-None-Match</c> suppresses the
-/// <c>If-Modified-Since</c> check), and a failed read precondition yields <c>304</c> for
-/// <c>GET</c>/<c>HEAD</c> but <c>412</c> for any other method.
+/// <c>If-Modified-Since</c> check), and a failed read precondition yields <c>304</c> for the read
+/// methods but <c>412</c> for any other method. The read methods are <c>GET</c> and <c>HEAD</c>
+/// (RFC 9110 &#167; 13.1.2) plus <c>QUERY</c> — RFC 10008 &#167; 2.6 requires a conditional QUERY to
+/// be evaluated exactly as the equivalent conditional GET, selecting the same representation and
+/// producing <c>304</c> where a GET would.
 /// </para>
 /// </remarks>
 public static class HttpConditionalRequest
@@ -84,5 +87,5 @@ public static class HttpConditionalRequest
     }
 
     private static bool IsReadMethod(HttpMethod method)
-        => method == HttpMethod.Get || method == HttpMethod.Head;
+        => method == HttpMethod.Get || method == HttpMethod.Head || method == HttpMethod.Query;
 }

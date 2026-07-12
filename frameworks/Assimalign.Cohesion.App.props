@@ -164,6 +164,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
 

@@ -80,6 +80,28 @@ public class Http1RequestBodyDataRateTests
         (await reader.ReadToEndAsync()).ShouldBe("hello");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1 DataRate: A Content-Length of zero should read as an already-empty body")]
+    public async Task Http1_WithZeroContentLength_ShouldReadAsEmptyBody()
+    {
+        // A `Content-Length: 0` body is born fully read. Before the fix, the first read issued a
+        // zero-length wire read that blocked for octets the peer never sends until the data-rate
+        // gate reclaimed the exchange — with an aggressive rate configured, this read must still
+        // complete immediately and empty.
+        byte[] head = Encoding.ASCII.GetBytes(
+            "QUERY /search HTTP/1.1\r\nHost: api.test\r\nContent-Length: 0\r\n\r\n");
+        HttpConnectionListenerOptions options = new();
+        TestConnection connection = new(head, completeInput: false);
+        options.UseHttp1(new TestConnectionListener(connection), http1 =>
+            http1.Limits.MinRequestBodyDataRate = new HttpMinDataRate(bytesPerSecond: 1000, gracePeriod: TimeSpan.FromMilliseconds(100)));
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext context = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext httpContext = await ReadSingleContextAsync(context);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10))).ShouldBe(string.Empty);
+    }
+
     private static async Task<IHttpContext> ReadSingleContextAsync(IHttpConnectionContext context)
     {
         await using IAsyncEnumerator<IHttpContext> enumerator = context.ReceiveAsync().GetAsyncEnumerator();
