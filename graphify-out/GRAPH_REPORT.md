@@ -1,16 +1,16 @@
 # Graph Report - confident-lederberg-3df082  (2026-07-11)
 
 ## Corpus Check
-- 4075 files · ~1,200,711 words
+- 4079 files · ~1,206,096 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 562 nodes · 1029 edges · 34 communities (17 shown, 17 thin omitted)
-- Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 106 edges (avg confidence: 0.8)
+- 1116 nodes · 2018 edges · 50 communities (29 shown, 21 thin omitted)
+- Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 132 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f3b01e1c`
+- Built from commit: `739f0a53`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -49,18 +49,33 @@
 - SeekOrigin
 - StorageId
 - StreamJournalLogger
+- Assimalign.Cohesion.Resources.slnx
+- Assimalign.Cohesion.Database.slnx
+- DatabaseKeyReader
+- DatabaseKeyWriter
+- DatabaseKeyEncodingTests
+- StorageBufferPool
+- Fact
+- Assimalign.Cohesion.Database.Types — Design
+- BufferEntry
+- .DisposeAsync
+- StorageCorruptionException
+- StorageFileHeader
+- Assimalign.Cohesion.Database.Sql.Internal
+- Assimalign.Cohesion.Database.Types
+- Assimalign.Cohesion.Database.Types.Tests
 
 ## God Nodes (most connected - your core abstractions)
 1. `Storage` - 47 edges
 2. `StorageStream` - 32 edges
 3. `Journal` - 29 edges
-4. `Assimalign.Cohesion.Database.Storage` - 27 edges
-5. `StorageBufferPool` - 23 edges
-6. `IStorageTransaction` - 19 edges
-7. `StorageTransaction` - 19 edges
-8. `IJournal` - 15 edges
-9. `StorageBufferPoolTests` - 15 edges
-10. `IStorage` - 14 edges
+4. `DatabaseKeyWriter` - 28 edges
+5. `Assimalign.Cohesion.Database.Storage` - 27 edges
+6. `DatabaseKeyReader` - 24 edges
+7. `StorageBufferPool` - 23 edges
+8. `IStorageTransaction` - 19 edges
+9. `StorageTransaction` - 19 edges
+10. `DatabaseKeyEncodingTests` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `SqlDatabaseInstance` --references--> `SqlStorage`  [EXTRACTED]
@@ -77,15 +92,15 @@
 ## Import Cycles
 - None detected.
 
-## Communities (34 total, 17 thin omitted)
+## Communities (50 total, 21 thin omitted)
 
 ### Community 0 - "Storage"
 Cohesion: 0.06
-Nodes (40): IQueryExecutor, IReadOnlyDictionary, SqlQueryExecutor, CancellationToken, QueryRequest, QueryResult, SqlQueryRequest, Task (+32 more)
+Nodes (39): IQueryExecutor, IReadOnlyDictionary, SqlQueryExecutor, CancellationToken, QueryRequest, QueryResult, SqlQueryRequest, Task (+31 more)
 
 ### Community 1 - "StorageModelAlignmentTests"
-Cohesion: 0.18
-Nodes (8): StorageModelAlignmentTests, TestStorage, PageId, ReadOnlyMemory, SlotIndex, StorageModel, Stream, TestStorage
+Cohesion: 0.01
+Nodes (225): Assimalign.Cohesion.SourceGeneration, Assimalign.Cohesion.Build.Tasks, Assimalign.Cohesion.ProjectTemplates, Assimalign.Cohesion, Assimalign.Cohesion.App.ApiManager.Refs, Assimalign.Cohesion.App.ApiManager.Runtime, Assimalign.Cohesion.App.ConfigurationStore.Refs, Assimalign.Cohesion.App.ConfigurationStore.Runtime (+217 more)
 
 ### Community 2 - "SlottedPage"
 Cohesion: 0.11
@@ -96,20 +111,20 @@ Cohesion: 0.11
 Nodes (17): Assimalign.Cohesion.Database.Storage.Tests.TestObjects, HarnessStorage, MemoryStream, CrashRecoveryTests, HarnessStorage, Fact, IStorageTransaction, PageId (+9 more)
 
 ### Community 4 - "Assimalign.Cohesion.Database.Storage"
-Cohesion: 0.05
-Nodes (24): Assimalign.Cohesion.Database.Sql.Internal, Assimalign.Cohesion.Database.Storage, Assimalign.Cohesion.Database.Storage.Units, Assimalign.Cohesion.Database.Sql.Storage, Assimalign.Cohesion.Database.Storage.Tests, GCHandle, LinkedListNode, Page (+16 more)
+Cohesion: 0.12
+Nodes (5): Assimalign.Cohesion.Database.Storage, Assimalign.Cohesion.Database.Storage.Units, Assimalign.Cohesion.Database.Storage.Tests, StorageRecovery, PageFlags
 
 ### Community 5 - "StorageBufferPool"
-Cohesion: 0.06
-Nodes (26): Action, BufferEntry, Fact, IStorageBufferPool, LinkedList, Memory, StorageBufferPool, Dictionary (+18 more)
+Cohesion: 0.12
+Nodes (11): Memory, Stream, StorageStream, CancellationToken, PageId, ReadOnlyMemory, ReadOnlySpan, SeekOrigin (+3 more)
 
 ### Community 6 - "BufferEntry"
-Cohesion: 0.22
+Cohesion: 0.23
 Nodes (10): PageFlags, Header, Page, byte, int, long, PageType, Span (+2 more)
 
 ### Community 7 - "StoragePageManager"
-Cohesion: 0.10
-Nodes (13): HashSet, IStorageFreeSpaceMap, IStoragePageManager, Queue, StorageFreeSpaceMap, long, PageId, StoragePageManager (+5 more)
+Cohesion: 0.07
+Nodes (21): HashSet, IStorageFreeSpaceMap, IStoragePageManager, Queue, StorageFreeSpaceMap, long, PageId, StoragePageManager (+13 more)
 
 ### Community 8 - "Crc32"
 Cohesion: 0.16
@@ -147,25 +162,69 @@ Nodes (6): StreamJournal, bool, IEnumerable, ReadOnlyMemory, ReadOnlySpan, Strea
 Cohesion: 0.20
 Nodes (8): DatabaseName, IDatabaseEngine, ISqlDatabase, SqlDatabaseInstance, bool, CancellationToken, IDatabaseSession, ValueTask
 
+### Community 34 - "Assimalign.Cohesion.Resources.slnx"
+Cohesion: 0.02
+Nodes (96): Assimalign.Cohesion.Configuration, Assimalign.Cohesion.Connections.Quic, Assimalign.Cohesion.Connections.Security, Assimalign.Cohesion.Connections.Tcp, Assimalign.Cohesion.DependencyInjection, Assimalign.Cohesion.FileSystem, Assimalign.Cohesion.Http.Connections, Assimalign.Cohesion.Http.Cookies (+88 more)
+
+### Community 35 - "Assimalign.Cohesion.Database.slnx"
+Cohesion: 0.02
+Nodes (94): Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.Connections, Assimalign.Cohesion.Core, Assimalign.Cohesion.Hosting, Assimalign.Cohesion.Database.ApplicationModel, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Catalog.Tests, Assimalign.Cohesion.Database.Blob.Client (+86 more)
+
+### Community 36 - "DatabaseKeyReader"
+Cohesion: 0.09
+Nodes (15): CompareInfo, Assimalign.Cohesion.Database.Types, DatabaseType, Exception, Collation, DatabaseKeyReader, DateOnly, DateTime (+7 more)
+
+### Community 37 - "DatabaseKeyWriter"
+Cohesion: 0.09
+Nodes (16): Digits, Exponent, DatabaseKeyWriter, byte, DateOnly, DateTime, DateTimeOffset, Guid (+8 more)
+
+### Community 38 - "DatabaseKeyEncodingTests"
+Cohesion: 0.16
+Nodes (8): Assimalign.Cohesion.Database.Types.Tests, Func, IReadOnlyList, CollationTests, Fact, DatabaseKeyEncodingTests, DatabaseKeyWriter, Fact
+
+### Community 39 - "StorageBufferPool"
+Cohesion: 0.19
+Nodes (9): Action, BufferEntry, IStorageBufferPool, LinkedList, StorageBufferPool, Dictionary, object, PageId (+1 more)
+
+### Community 40 - "Fact"
+Cohesion: 0.25
+Nodes (5): Fact, IStoragePageHandle, StorageBufferPoolTests, StorageStream, Task
+
+### Community 41 - "Assimalign.Cohesion.Database.Types — Design"
+Cohesion: 0.17
+Nodes (10): AOT posture, Assimalign.Cohesion.Database.Types — Design, Design intent, Error model, Non-goals, Why-this-not-that decisions, Assimalign.Cohesion.Database.Types — Overview, Dependencies (+2 more)
+
+### Community 42 - "BufferEntry"
+Cohesion: 0.22
+Nodes (7): GCHandle, LinkedListNode, Page, BufferEntry, bool, byte, int
+
+### Community 44 - "StorageCorruptionException"
+Cohesion: 0.25
+Nodes (5): JournalException, StorageCorruptionException, PageId, StorageTransactionException, StorageException
+
+### Community 45 - "StorageFileHeader"
+Cohesion: 0.25
+Nodes (6): StorageFileHeader, byte, int, long, MethodImpl, StorageModel
+
 ## Knowledge Gaps
-- **34 isolated node(s):** `1. How to run this across multiple sessions (read first)`, `2. Stages (dependency gates)`, `3. Lanes (what can run in parallel) + per-lane guardrails`, `Stage 1 — Kernel`, `Stage 2 — Kernel build-out + languages (all language items are parallel-safe from day one)` (+29 more)
+- **273 isolated node(s):** `Assimalign.Cohesion.SourceGeneration`, `Assimalign.Cohesion.Build.Tasks`, `Assimalign.Cohesion.ProjectTemplates`, `Assimalign.Cohesion`, `Assimalign.Cohesion.App.ApiManager.Refs` (+268 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **17 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Storage` connect `Storage` to `StorageModelAlignmentTests`, `Assimalign.Cohesion.Database.Storage`, `StorageBufferPool`, `StorageFileHeader`, `IStoragePageHandle`?**
-  _High betweenness centrality (0.277) - this node is a cross-community bridge._
-- **Why does `Assimalign.Cohesion.Database.Storage` connect `Assimalign.Cohesion.Database.Storage` to `StorageBufferPool`, `StoragePageManager`, `StorageFileHeader`, `byte`, `IStoragePageHandle`?**
-  _High betweenness centrality (0.220) - this node is a cross-community bridge._
-- **Why does `StorageStream` connect `StorageBufferPool` to `Storage`, `StorageStream`, `Assimalign.Cohesion.Database.Storage`, `StoragePageManager`, `StorageFileHeader`?**
-  _High betweenness centrality (0.160) - this node is a cross-community bridge._
-- **What connects `1. How to run this across multiple sessions (read first)`, `2. Stages (dependency gates)`, `3. Lanes (what can run in parallel) + per-lane guardrails` to the rest of the system?**
-  _34 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `StorageBufferPool` connect `StorageBufferPool` to `Storage`, `StoragePageManager`, `Fact`, `BufferEntry`, `.FlushAll`?**
+  _High betweenness centrality (0.126) - this node is a cross-community bridge._
+- **Why does `Storage` connect `Storage` to `Assimalign.Cohesion.Database.Storage`, `StorageBufferPool`, `StorageBufferPool`, `StoragePageManager`, `.DisposeAsync`, `StorageFileHeader`, `IStoragePageHandle`?**
+  _High betweenness centrality (0.117) - this node is a cross-community bridge._
+- **Why does `Assimalign.Cohesion.Database.Storage` connect `Assimalign.Cohesion.Database.Storage` to `StoragePageManager`, `BufferEntry`, `StorageCorruptionException`, `StorageFileHeader`, `StorageFileHeader`, `Assimalign.Cohesion.Database.Sql.Internal`, `byte`, `IStoragePageHandle`?**
+  _High betweenness centrality (0.065) - this node is a cross-community bridge._
+- **What connects `Assimalign.Cohesion.SourceGeneration`, `Assimalign.Cohesion.Build.Tasks`, `Assimalign.Cohesion.ProjectTemplates` to the rest of the system?**
+  _273 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Storage` be split into smaller, more focused modules?**
-  _Cohesion score 0.05536568694463431 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.058496853017400964 - nodes in this community are weakly interconnected._
+- **Should `StorageModelAlignmentTests` be split into smaller, more focused modules?**
+  _Cohesion score 0.008849557522123894 - nodes in this community are weakly interconnected._
 - **Should `SlottedPage` be split into smaller, more focused modules?**
   _Cohesion score 0.10582010582010581 - nodes in this community are weakly interconnected._
-- **Should `StorageStream` be split into smaller, more focused modules?**
-  _Cohesion score 0.113107822410148 - nodes in this community are weakly interconnected._
