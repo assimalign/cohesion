@@ -13,15 +13,17 @@ using Assimalign.Cohesion.Database.Storage.Units;
 internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
 {
     private readonly IStoragePageManager _pageManager;
+    private readonly IStorageFreeSpaceMap _freeSpaceMap;
     private readonly long _pageCount;
     private long _currentPageId;
     private int _currentSlotIndex;
     private IStorageUnit? _current;
     private IStoragePageHandle? _currentHandle;
 
-    internal StorageUnitIterator(IStoragePageManager pageManager)
+    internal StorageUnitIterator(IStoragePageManager pageManager, IStorageFreeSpaceMap freeSpaceMap)
     {
         _pageManager = pageManager;
+        _freeSpaceMap = freeSpaceMap;
         _pageCount = pageManager.PageCount;
         _currentPageId = 1; // Start after header (page 0)
         _currentSlotIndex = -1;
@@ -51,6 +53,13 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
     {
         while (_currentPageId < _pageCount)
         {
+            if (!_freeSpaceMap.IsAllocated((PageId)_currentPageId))
+            {
+                _currentPageId++;
+                _currentSlotIndex = -1;
+                continue;
+            }
+
             if (_currentHandle == null)
             {
                 _currentHandle = _pageManager.GetPage((PageId)_currentPageId);

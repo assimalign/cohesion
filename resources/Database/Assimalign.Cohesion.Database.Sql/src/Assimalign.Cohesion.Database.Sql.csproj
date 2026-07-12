@@ -3,5 +3,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

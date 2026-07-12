@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Database.Storage.Units;
 /// This is the fundamental unit of storage I/O shared by all database models.
 /// </summary>
 /// <remarks>
-/// The page is an unsafe struct that provides direct pointer access to the underlying 
-/// buffer. The caller is responsible for ensuring the buffer remains valid for the 
+/// The page is an unsafe struct that provides direct pointer access to the underlying
+/// buffer. The caller is responsible for ensuring the buffer remains valid for the
 /// lifetime of this struct.
 /// </remarks>
 public readonly unsafe struct Page
@@ -35,6 +35,12 @@ public readonly unsafe struct Page
     public const int HeaderSize = 96;
 
     /// <summary>
+    /// The byte offset of the page checksum field within the header. The checksum
+    /// covers the entire page with these four bytes treated as zero.
+    /// </summary>
+    public const int ChecksumFieldOffset = 16;
+
+    /// <summary>
     /// A pointer to the start of the page buffer.
     /// </summary>
     public readonly byte* Pointer;
@@ -50,6 +56,41 @@ public readonly unsafe struct Page
         get => ((Header*)Pointer)->PageId;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         set => ((Header*)Pointer)->PageId = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the log sequence number (LSN) of the most recent journal record
+    /// that modified this page.
+    /// </summary>
+    /// <remarks>
+    /// The LSN enforces the write-ahead rule: a page may only be written to the data
+    /// stream once every journal record up to and including this LSN is durable. During
+    /// recovery, a journal record is applied to the page only when the record's LSN is
+    /// newer than the LSN persisted here, making replay idempotent.
+    /// </remarks>
+    public long Lsn
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ((Header*)Pointer)->Lsn;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => ((Header*)Pointer)->Lsn = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the CRC-32 integrity checksum for this page.
+    /// </summary>
+    /// <remarks>
+    /// The checksum is computed over the full page with the checksum field itself
+    /// treated as zero. It is stamped by the buffer pool on every write-back and
+    /// verified on every load from the storage stream. A stored value of zero means
+    /// the page has never been stamped (a freshly allocated page) and is not verified.
+    /// </remarks>
+    public uint Checksum
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ((Header*)Pointer)->Checksum;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => ((Header*)Pointer)->Checksum = value;
     }
 
     /// <summary>
@@ -130,60 +171,67 @@ public readonly unsafe struct Page
         public long PageId;
 
         /// <summary>
-        /// Overflow size in bytes beyond the standard page (4 bytes).
+        /// Log sequence number of the most recent journal record that modified
+        /// this page (8 bytes). Drives the write-ahead rule and idempotent replay.
         /// </summary>
         [FieldOffset(8)]
-        public int OverflowSize;
+        public long Lsn;
+
+        /// <summary>
+        /// CRC-32 integrity checksum over the full page with this field zeroed (4 bytes).
+        /// Zero means the page has never been stamped.
+        /// </summary>
+        [FieldOffset(16)]
+        public uint Checksum;
 
         /// <summary>
         /// Page state flags (1 byte).
         /// </summary>
-        [FieldOffset(12)]
+        [FieldOffset(20)]
         public PageFlags Flags;
 
         /// <summary>
         /// Page type discriminator (1 byte).
         /// </summary>
-        [FieldOffset(13)]
+        [FieldOffset(21)]
         public PageType Type;
 
         /// <summary>
         /// Number of record slots in the page (2 bytes).
         /// Used by slotted page operations.
         /// </summary>
-        [FieldOffset(14)]
+        [FieldOffset(22)]
         public ushort SlotCount;
 
         /// <summary>
         /// Byte offset (from page start) where record data ends and free space begins (2 bytes).
         /// Used by slotted page operations.
         /// </summary>
-        [FieldOffset(16)]
+        [FieldOffset(24)]
         public ushort FreeDataEnd;
 
         /// <summary>
-        /// Reserved for future use (12 bytes).
+        /// Overflow size in bytes beyond the standard page (4 bytes).
         /// </summary>
-        [FieldOffset(18)]
-        public fixed byte Reserved[14];
+        [FieldOffset(28)]
+        public int OverflowSize;
 
         /// <summary>
-        /// Non-cryptographic integrity checksum (2 bytes).
-        /// Overlaps bytes 4-5 of PageId as a union—used only when crypto is disabled.
-        /// </summary>
-        [FieldOffset(4)]
-        public short Checksum;
-
-        /// <summary>
-        /// Cryptographic nonce for authenticated pages (16 bytes).
+        /// Cryptographic nonce reserved for authenticated (encrypted-at-rest) pages (16 bytes).
         /// </summary>
         [FieldOffset(32)]
         public fixed byte Nonce[16];
 
         /// <summary>
-        /// Message authentication code for authenticated pages (16 bytes).
+        /// Message authentication code reserved for authenticated (encrypted-at-rest) pages (16 bytes).
         /// </summary>
         [FieldOffset(48)]
         public fixed byte Mac[16];
+
+        /// <summary>
+        /// Reserved for future use (32 bytes).
+        /// </summary>
+        [FieldOffset(64)]
+        public fixed byte Reserved[32];
     }
 }

@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
 /// Classifies the operator used in a unary expression.

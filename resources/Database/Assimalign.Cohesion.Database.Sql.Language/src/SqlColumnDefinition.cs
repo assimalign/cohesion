@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
 /// Represents a column definition in a CREATE TABLE statement.

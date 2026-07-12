@@ -6,18 +6,45 @@ internal static class Crc32
 {
     private static readonly uint[] Table = CreateTable();
 
+    private const uint initialState = 0xFFFFFFFFu;
+
     internal static uint Compute(ReadOnlySpan<byte> data)
     {
-        uint crc = 0xFFFFFFFFu;
+        return Finalize(Append(initialState, data));
+    }
 
+    /// <summary>
+    /// Begins an incremental CRC computation. Feed segments with <see cref="Append"/>
+    /// and complete with <see cref="Finalize"/>.
+    /// </summary>
+    internal static uint Begin() => initialState;
+
+    internal static uint Append(uint state, ReadOnlySpan<byte> data)
+    {
         for (int i = 0; i < data.Length; i++)
         {
-            byte index = (byte)(crc ^ data[i]);
-            crc = Table[index] ^ (crc >> 8);
+            byte index = (byte)(state ^ data[i]);
+            state = Table[index] ^ (state >> 8);
         }
 
-        return ~crc;
+        return state;
     }
+
+    /// <summary>
+    /// Appends <paramref name="count"/> zero bytes to an incremental CRC computation.
+    /// </summary>
+    internal static uint AppendZeros(uint state, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            byte index = (byte)state;
+            state = Table[index] ^ (state >> 8);
+        }
+
+        return state;
+    }
+
+    internal static uint Finalize(uint state) => ~state;
 
     private static uint[] CreateTable()
     {

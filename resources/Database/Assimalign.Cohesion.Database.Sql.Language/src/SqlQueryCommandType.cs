@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
 /// Represents the top-level SQL command category parsed from a statement.

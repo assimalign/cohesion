@@ -4,23 +4,26 @@ using System.Runtime.InteropServices;
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Defines the binary layout of the first page (page 0) in a storage file.
+/// Defines the binary layout of the file metadata stored in the body of page 0.
 /// The file header contains metadata that identifies the storage resource and
 /// describes its configuration.
 /// </summary>
 /// <remarks>
-/// Every storage file, regardless of database model, begins with a file header page.
-/// The header occupies the first <see cref="Units.Page.Size"/> bytes of the file.
+/// Every storage file, regardless of database model, begins with a file header page
+/// (<see cref="PageType.FileHeader"/>). Page 0 carries a normal page header (identifier,
+/// LSN, checksum) in its first <see cref="Units.Page.HeaderSize"/> bytes, so it is
+/// integrity-checked like every other page; this struct lives in the page body
+/// immediately after it.
 /// <code>
 /// File Layout:
 /// ┌─────────────────────────────────┐  Page 0
-/// │ StorageFileHeader               │
-/// ├─────────────────────────────────┤  Page 1
-/// │ Free Space Map page(s)          │
-/// ├─────────────────────────────────┤  Page N
-/// │ Data / Index / Segment pages    │
+/// │ Page header │ StorageFileHeader │
+/// ├─────────────────────────────────┤  Page 1..N
+/// │ Data / Index / Catalog pages    │
 /// └─────────────────────────────────┘
 /// </code>
+/// Free pages are stamped <see cref="PageType.Free"/> in their page headers; the
+/// free-space map is reconstructed by scanning page headers when the file is opened.
 /// </remarks>
 [StructLayout(LayoutKind.Explicit, Size = 256, Pack = 1)]
 public unsafe struct StorageFileHeader
@@ -102,10 +105,17 @@ public unsafe struct StorageFileHeader
     public fixed byte Name[128];
 
     /// <summary>
-    /// Reserved bytes for future use.
+    /// The log sequence number of the most recent completed checkpoint, or zero when
+    /// no checkpoint has been taken. Recovery replays the journal from this point.
     /// </summary>
     [FieldOffset(208)]
-    public fixed byte Reserved[48];
+    public long LastCheckpointLsn;
+
+    /// <summary>
+    /// Reserved bytes for future use.
+    /// </summary>
+    [FieldOffset(216)]
+    public fixed byte Reserved[40];
 
     /// <summary>
     /// The expected magic number value for valid Cohesion storage files.

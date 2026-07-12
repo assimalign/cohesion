@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -100,16 +100,18 @@ public sealed partial class SqlQueryParser
             dataType = CurrentText(ref lexer);
             Advance(ref lexer);
 
-            // Handle parameterized types: VARCHAR(100)
+            // Handle parameterized types: VARCHAR(100), DECIMAL(18, 4)
             if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
             {
                 dataType += "(";
                 Advance(ref lexer);
-                if (!IsAtEnd(ref lexer))
+
+                while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
                 {
                     dataType += CurrentText(ref lexer);
                     Advance(ref lexer);
                 }
+
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                 {
                     dataType += ")";

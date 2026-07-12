@@ -44,4 +44,15 @@ public interface IVersionStore
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The number of versions pruned.</returns>
     ValueTask<long> PruneAsync(TransactionSequence oldestActive, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes every version written by the specified transaction. Called during
+    /// rollback and recovery so aborted writers are never consulted by snapshots —
+    /// the snapshot value object deliberately has no commit-log awareness (see the
+    /// project design), which makes unlinking aborted versions the store's duty.
+    /// </summary>
+    /// <param name="writer">The sequence of the aborted transaction.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The number of versions removed.</returns>
+    ValueTask<long> PurgeWriterAsync(TransactionSequence writer, CancellationToken cancellationToken = default);
 }
