@@ -167,6 +167,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.StaticFiles" />
 
         <!-- Supporting libraries the Web family closes over that the base App
              framework does not carry (computed transitive closure). -->

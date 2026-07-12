@@ -35,6 +35,7 @@ jobs:
             'Assimalign.Cohesion.Web.Query',
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.Sessions',
+            'Assimalign.Cohesion.Web.StaticFiles',
             'Assimalign.Cohesion.Web.Testing'
         ]
     steps:
