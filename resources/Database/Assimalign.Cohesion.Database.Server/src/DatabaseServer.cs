@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Hosting;
+
 namespace Assimalign.Cohesion.Database.Server;
 
 /// <summary>
@@ -33,5 +35,25 @@ public static class DatabaseServer
         }
 
         return new DefaultDatabaseServer(options);
+    }
+
+    /// <summary>
+    /// Wraps a server as an <see cref="IHostService"/> so a host can run its accept
+    /// loop and drain it on shutdown per the hosting execution menu.
+    /// </summary>
+    /// <param name="server">The server to host.</param>
+    /// <returns>An endpoint host service that starts the server on start and gracefully drains it on stop.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="server"/> is null.</exception>
+    /// <remarks>
+    /// The adapter lives here rather than in <c>Database.Hosting</c> because the
+    /// resource hosting-isolation rule (COHRES002) bars the hosting module from
+    /// referencing any same-area library except the area root — so only the server's
+    /// own package can name <see cref="IDatabaseServer"/> to compose it. The hosting
+    /// module composes the returned <see cref="IHostService"/> generically.
+    /// </remarks>
+    public static IHostService CreateHostService(IDatabaseServer server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        return new DatabaseServerHostService(server);
     }
 }

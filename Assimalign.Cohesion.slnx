@@ -1556,6 +1556,9 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/src/Assimalign.Cohesion.Database.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/tests/Assimalign.Cohesion.Database.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />

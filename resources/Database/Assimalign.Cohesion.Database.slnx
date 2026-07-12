@@ -254,6 +254,9 @@
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.Database.Hosting/src/Assimalign.Cohesion.Database.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.Database.Hosting/tests/Assimalign.Cohesion.Database.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Indexing/" />
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Indexing/docs/">
 		<File Path="Assimalign.Cohesion.Database.Indexing/docs/DESIGN.md" />

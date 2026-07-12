@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Hosting;
@@ -17,6 +16,7 @@ public sealed class DatabaseApplicationContext : HostContext
     {
         _environment = new HostEnvironment(options.Environment ?? "production");
         _hostedServices = hostedServices;
+        Engines = new List<IDatabaseEngine>(options.Engines);
     }
 
     /// <summary>
@@ -28,4 +28,9 @@ public sealed class DatabaseApplicationContext : HostContext
     /// Gets the hosted services composed by the application.
     /// </summary>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
+
+    /// <summary>
+    /// Gets the engines this host serves.
+    /// </summary>
+    public IReadOnlyList<IDatabaseEngine> Engines { get; }
 }

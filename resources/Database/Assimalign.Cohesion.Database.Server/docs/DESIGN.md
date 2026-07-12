@@ -6,9 +6,19 @@ One server for five engines. The server owns everything that is true regardless 
 
 ## Placement
 
-- The server is a *library* the host composes, not a host service itself: `Database.Hosting`'s `QueryEndpointService` (a `BackgroundService`, per the Hosting execution menu) runs the accept loop. This mirrors the Web split (`WebApplicationServer` inside `Web.Hosting`).
+- The server is a *library* a host composes. The endpoint host service — the
+  `BackgroundService` that runs the accept loop and drains it on shutdown — lives
+  **here**, as `DatabaseServerHostService` (obtained via `DatabaseServer.CreateHostService`),
+  not in `Database.Hosting`. The resource hosting-isolation rule (COHRES002) bars the
+  hosting module from referencing any same-area library except the area root, so the
+  module cannot name `IDatabaseServer` to compose it; the adapter therefore lives with
+  the server, which depends on the non-area hosting foundation (`Assimalign.Cohesion.Hosting`)
+  for the `BackgroundService` base. `Database.Hosting` composes the returned
+  `IHostService` generically. (This differs from the Web split, where the server
+  contract `IWebApplicationServer` lives in the `Web` root so `Web.Hosting` can own the
+  server; promoting the database server contract into the root is a deferred option.)
 - Transport comes from `libraries/Connections` (`IConnectionListener`), so TCP/TLS/named-pipe/in-memory drivers are interchangeable; in-memory makes the server testable without sockets.
-- The relocated `IDatabaseServer` contract lives here, not in the contract root — the root stub (`int Version`, with a stray Web using) was removed in the scaffold pass; server concerns don't belong in the engine contract root.
+- The `IDatabaseServer` contract lives here, not in the contract root — the root stub (`int Version`, with a stray Web using) was removed in the scaffold pass; server concerns don't belong in the engine contract root.
 
 ## Composition seam
 

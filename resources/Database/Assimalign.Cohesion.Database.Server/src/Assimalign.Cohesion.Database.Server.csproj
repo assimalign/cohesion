@@ -6,5 +6,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Security" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<!-- Non-area hosting foundation (libraries/Hosting, NOT the area's *.Hosting
+		     module): supplies the BackgroundService base for the endpoint host-service
+		     adapter that Database.Hosting composes. See docs/DESIGN.md (Placement). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>
