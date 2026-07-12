@@ -1,1 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk"></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+</Project>

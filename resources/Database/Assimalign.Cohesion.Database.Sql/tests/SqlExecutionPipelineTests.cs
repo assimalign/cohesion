@@ -377,4 +377,35 @@ public class SqlExecutionPipelineTests : IDisposable
         await Sql(session, "INSERT INTO t (id) VALUES (7);");
         (await Rows(session, "SELECT id FROM t;"))[0][0].ShouldBe(7);
     }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Session: the text-execute seam parses SQL and binds parameters")]
+    public async Task ExecuteAsync_StatementText_ShouldParseAndBind()
+    {
+        // Arrange: the model-agnostic seam the wire-protocol server calls — the
+        // SQL session owns translating text into a typed request.
+        var engine = await CreateEngine();
+        await using var _ = engine;
+
+        var db = await engine.CreateDatabaseAsync("text-seam");
+        await using var session = await db.CreateSessionAsync();
+
+        // Act
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, label VARCHAR(50));");
+        var insert = await session.ExecuteAsync(
+            "INSERT INTO t (id, label) VALUES (@id, @label);",
+            new Dictionary<string, object?> { ["id"] = 5, ["label"] = "five" });
+
+        var result = await session.ExecuteAsync("SELECT label FROM t WHERE id = @id;", new Dictionary<string, object?> { ["id"] = 5 });
+
+        // Assert
+        insert.AffectedCount.ShouldBe(1);
+        var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+        await foreach (var row in resultSet!.GetRowsAsync())
+        {
+            row.GetString(0).ShouldBe("five");
+        }
+
+        // Parse failures surface as the dedicated parse-exception category.
+        await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync("TRUNCATE TABLE t;"));
+    }
 }

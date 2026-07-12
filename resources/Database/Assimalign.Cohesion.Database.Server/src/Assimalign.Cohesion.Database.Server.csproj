@@ -4,6 +4,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Execution" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Security" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 	</ItemGroup>
 </Project>

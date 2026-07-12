@@ -54,6 +54,17 @@ references makes cross-model ordering a compile-time fact rather than a conventi
 - **JSON kinds are not key components.** `DatabaseType.Json`/`JsonBinary` exist as
   identities for storage/coercion, but ordering JSON is a model-level semantic; the
   writer exposes no append for them.
+- **`DatabaseValueCodec` — one boxed-value bridge, not per-consumer switches.** The
+  wire protocol (#852) moves *untyped* values in both directions: a client encodes
+  boxed parameter values, the server decodes them, and result rows make the same
+  trip in reverse. Both ends need the identical runtime-type→component mapping;
+  duplicating the switch in `Database.Server` and `Database.Client` would let the
+  two drift (a wire-corruption class of bug). The codec dispatches on runtime type
+  (`Append`), reads self-describing components back boxed (`Read`), and offers
+  single-component helpers (`EncodeComponent`/`DecodeComponent`) as the parameter
+  payload format. Strings use `Collation.Binary` — these boundaries need exact
+  round-trips, never ordering. This is *not* the `DatabaseValue` union (still a
+  non-goal below): no value type is introduced, only a mapping.
 
 ## Error model
 

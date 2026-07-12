@@ -53,6 +53,10 @@
 		<File Path="Database/solution.ps1" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
@@ -146,6 +150,10 @@
 		<Project Path="Database/Assimalign.Cohesion.Database.Cache.Storage/tests/Assimalign.Cohesion.Database.Cache.Storage.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Client/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Client/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Client/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Client/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Client/src/Assimalign.Cohesion.Database.Client.csproj" />
 	</Folder>
@@ -372,6 +380,10 @@
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/">
 		<File Path="Database/Assimalign.Cohesion.Database.Security/README.md" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Security/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Security/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />

@@ -4,15 +4,23 @@ The model-agnostic network front-end for database hosts: accepts connections ove
 
 ## Scope
 
-- `IDatabaseServer` — accept/drain lifecycle over the registered engines
+- `IDatabaseServer` — accept/drain lifecycle over the registered engines; created
+  with `DatabaseServer.Create(options)`
 - `IDatabaseServerSession` — connection + principal + engine-session binding
-- `DatabaseServerOptions` — session limits, auth/idle timeouts, drain budget
+- `DatabaseServerOptions` — composition (engines, bound listener, authenticator)
+  plus the DoS guardrails: session limit, auth/idle timeouts, drain budget
+
+Statements execute through the root contract's text-execute seam
+(`IDatabaseSession.ExecuteAsync(string, parameters)`), so the server never
+parses any model language; parameters and result rows ride the shared
+tuple-codec (`DatabaseValueCodec` in `Database.Types`).
 
 ## Dependencies
 
 - `Assimalign.Cohesion.Database` / `Database.Execution` (engine and execution contracts)
 - `Assimalign.Cohesion.Database.Protocol` (framing)
-- `Assimalign.Cohesion.Database.Security` (authorization seam)
+- `Assimalign.Cohesion.Database.Security` (the authenticator seam)
+- `Assimalign.Cohesion.Database.Types` (the shared value codec for wire parameters and rows)
 - `Assimalign.Cohesion.Connections` (transport drivers)
 
 ## Consumers

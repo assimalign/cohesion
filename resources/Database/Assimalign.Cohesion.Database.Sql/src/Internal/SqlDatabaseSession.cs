@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -82,6 +83,21 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The model-agnostic text-execute seam: SQL sessions parse the statement with
+    /// the SQL dialect (<see cref="SqlQueryRequest.FromSql"/>) — this is what lets
+    /// the wire-protocol server execute statement text without knowing any model
+    /// language.
+    /// </remarks>
+    public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfNotOpen();
+        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
+
+        return ExecuteAsync(SqlQueryRequest.FromSql(statement, parameters), cancellationToken);
     }
 
     /// <inheritdoc />

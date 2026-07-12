@@ -40,9 +40,12 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 
 ## Error model
 
-`DatabaseException` (area root) for everything user-facing: parse failures
-(`SqlQueryRequest.FromSql`), plan-time validation, execution errors, constraint
-violations (nullability). `SqlCatalogException` (a `DatabaseException`) surfaces
+`DatabaseException` (area root) for everything user-facing: plan-time
+validation, execution errors, constraint violations (nullability). Parse failures
+(`SqlQueryRequest.FromSql`, and therefore the session's text-execute seam) throw
+the root's `DatabaseParseException` so callers — the wire-protocol server in
+particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
+from execution errors without model knowledge. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged.
 
 ## Non-goals (current cut)

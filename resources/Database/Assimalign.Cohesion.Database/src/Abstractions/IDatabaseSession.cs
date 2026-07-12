@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -46,4 +47,23 @@ public interface IDatabaseSession : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The query result.</returns>
     ValueTask<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes statement text in the session's own language (SQL for a SQL
+    /// session, and so on), binding the given named parameter values.
+    /// </summary>
+    /// <param name="statement">The statement text to parse and execute.</param>
+    /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The query result.</returns>
+    /// <exception cref="DatabaseParseException">Thrown when the statement text fails to parse in the session's language.</exception>
+    /// <exception cref="DatabaseException">Thrown when the statement fails during planning or execution.</exception>
+    /// <remarks>
+    /// This is the model-agnostic text-execute seam consumed by the wire-protocol
+    /// server (<c>Database.Server</c>): the server receives statement text and
+    /// decoded parameters off the wire, and each model's session owns translating
+    /// that text into its typed <see cref="QueryRequest"/> — the server never
+    /// parses any model language.
+    /// </remarks>
+    ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default);
 }
