@@ -18,6 +18,10 @@ this project so ordering is consistent across every database model.
   unsigned byte-wise comparison equals component-by-component value comparison;
   `DatabaseKeyReader` decodes them back (round-trip). `Database.Indexing`'s `IndexKey`
   and every model's key convention consume these.
+- **Boxed-value bridge** — `DatabaseValueCodec` maps boxed runtime values onto the
+  same component encoding (dispatch by runtime type, read back boxed). The wire
+  protocol's parameter and result-row payloads go through it on both the server and
+  client sides.
 
 ## Dependencies
 

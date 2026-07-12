@@ -9,5 +9,9 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
+		<!-- E2E acceptance: a live SQL engine over the in-memory Connections driver
+		     (tests are exempt from the area layering rules). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
 </Project>

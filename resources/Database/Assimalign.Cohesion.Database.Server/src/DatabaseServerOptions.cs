@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Security;
 
 namespace Assimalign.Cohesion.Database.Server;
 
@@ -7,6 +11,27 @@ namespace Assimalign.Cohesion.Database.Server;
 /// </summary>
 public sealed class DatabaseServerOptions
 {
+    /// <summary>
+    /// Gets the engines the server dispatches sessions to. The host registers its
+    /// engines here before creating the server; nothing is discovered at runtime.
+    /// </summary>
+    public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
+
+    /// <summary>
+    /// Gets or sets the bound transport listener the server accepts connections
+    /// from. The host composes the listener (TCP, named pipe, in-memory, …) and
+    /// retains ownership — the server never disposes it.
+    /// </summary>
+    public IConnectionListener? Listener { get; set; }
+
+    /// <summary>
+    /// Gets or sets the authenticator consulted during the session handshake.
+    /// When null the server uses <see cref="DatabaseAuthenticator.AllowAll"/> —
+    /// the MVP development posture, which accepts every principal. Production
+    /// deployments must supply a real implementation.
+    /// </summary>
+    public IDatabaseAuthenticator? Authenticator { get; set; }
+
     /// <summary>
     /// Gets or sets the maximum number of concurrent sessions the server accepts.
     /// Connections beyond the limit are rejected with an unavailable error.

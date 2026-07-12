@@ -41,13 +41,13 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
 
     /// <summary>
     /// Parses SQL text into a request. Parse errors surface as
-    /// <see cref="DatabaseException"/> — callers wanting diagnostics-level control
-    /// parse with <see cref="SqlQueryParser"/> directly.
+    /// <see cref="DatabaseParseException"/> — callers wanting diagnostics-level
+    /// control parse with <see cref="SqlQueryParser"/> directly.
     /// </summary>
     /// <param name="sql">The SQL statement text.</param>
     /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
     /// <returns>The parsed request.</returns>
-    /// <exception cref="DatabaseException">The text failed to parse.</exception>
+    /// <exception cref="DatabaseParseException">The text failed to parse.</exception>
     public static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
@@ -57,7 +57,7 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
         var error = statement.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            throw new DatabaseException($"SQL parse error {error.Code}: {error.Message}");
+            throw new DatabaseParseException($"SQL parse error {error.Code}: {error.Message}");
         }
 
         return parameters is null
