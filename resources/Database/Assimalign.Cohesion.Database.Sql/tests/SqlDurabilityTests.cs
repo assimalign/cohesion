@@ -39,20 +39,12 @@ public sealed class SqlDurabilityTests : IDisposable
         }
     }
 
-    private static SqlQueryRequest InsertRequest(byte[] row)
-    {
-        var expression = new SqlQueryExpression(SqlQueryCommandType.Insert, "INSERT INTO test", null);
-        return new SqlQueryRequest(new SqlQueryStatement(expression), new Dictionary<string, object?>
-        {
-            ["row"] = row,
-        });
-    }
+    private static SqlQueryRequest InsertRequest(string label)
+        => SqlQueryRequest.FromSql("INSERT INTO t (label) VALUES (@label);", new Dictionary<string, object?> { ["label"] = label });
 
-    private static SqlQueryRequest SelectRequest()
-    {
-        var expression = new SqlQueryExpression(SqlQueryCommandType.Select, "SELECT * FROM test", null);
-        return new SqlQueryRequest(new SqlQueryStatement(expression));
-    }
+    private static SqlQueryRequest SelectRequest() => SqlQueryRequest.FromSql("SELECT label FROM t;");
+
+    private static SqlQueryRequest CreateTableRequest() => SqlQueryRequest.FromSql("CREATE TABLE t (label VARCHAR(100));");
 
     private static async Task<int> CountRowsAsync(IDatabaseSession session)
     {
@@ -79,9 +71,11 @@ public sealed class SqlDurabilityTests : IDisposable
         var database = await engine.CreateDatabaseAsync("rollback-db");
         await using var session = await database.CreateSessionAsync();
 
+        await session.ExecuteAsync(CreateTableRequest());
+
         // Act: insert inside an explicit transaction, then roll back.
         var transaction = await session.BeginTransactionAsync();
-        await session.ExecuteAsync(InsertRequest(Encoding.UTF8.GetBytes("discarded-row")));
+        await session.ExecuteAsync(InsertRequest("discarded-row"));
         await transaction.RollbackAsync();
 
         // Assert: the rolled-back row is not visible to a subsequent scan.
@@ -98,9 +92,10 @@ public sealed class SqlDurabilityTests : IDisposable
         var database = await engine.CreateDatabaseAsync("restart-db");
         await using (var session = await database.CreateSessionAsync())
         {
+            await session.ExecuteAsync(CreateTableRequest());
             var transaction = await session.BeginTransactionAsync();
-            await session.ExecuteAsync(InsertRequest(Encoding.UTF8.GetBytes("row-1")));
-            await session.ExecuteAsync(InsertRequest(Encoding.UTF8.GetBytes("row-2")));
+            await session.ExecuteAsync(InsertRequest("row-1"));
+            await session.ExecuteAsync(InsertRequest("row-2"));
             await transaction.CommitAsync();
         }
 

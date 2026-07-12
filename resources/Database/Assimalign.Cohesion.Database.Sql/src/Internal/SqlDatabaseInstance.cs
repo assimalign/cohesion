@@ -4,21 +4,27 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 
 /// <summary>
-/// Internal implementation of a SQL database instance.
+/// Internal implementation of a SQL database instance: the data storage, the
+/// dedicated catalog storage, and the catalog opened over it.
 /// </summary>
 internal sealed class SqlDatabaseInstance : ISqlDatabase
 {
     private readonly SqlStorage _storage;
+    private readonly SqlStorage _catalogStorage;
+    private readonly ISqlCatalog _catalog;
     private bool _disposed;
 
-    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage)
+    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage)
     {
         Name = name;
         Engine = engine;
         _storage = storage;
+        _catalogStorage = catalogStorage;
+        _catalog = SqlCatalog.Open(catalogStorage);
     }
 
     /// <inheritdoc />
@@ -33,7 +39,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var executor = new SqlQueryExecutor(_storage);
+        var executor = new SqlQueryExecutor(_storage, _catalog);
         var session = new SqlDatabaseSession(this, _storage, executor);
 
         return new ValueTask<IDatabaseSession>(session);
@@ -49,6 +55,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
         _disposed = true;
         _storage.Dispose();
+        _catalogStorage.Dispose();
     }
 
     /// <inheritdoc />
@@ -61,6 +68,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
         _disposed = true;
         await _storage.DisposeAsync().ConfigureAwait(false);
+        await _catalogStorage.DisposeAsync().ConfigureAwait(false);
     }
 
     private void ThrowIfDisposed()

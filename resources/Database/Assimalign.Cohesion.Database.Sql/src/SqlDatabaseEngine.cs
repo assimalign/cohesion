@@ -30,6 +30,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private EngineState _state;
     private bool _disposed;
 
+    /// <summary>
+    /// The storage-name suffix of the dedicated catalog file set each database owns.
+    /// </summary>
+    internal const string CatalogSuffix = ".catalog";
+
     private SqlDatabaseEngine(SqlDatabaseEngineOptions options)
     {
         _options = options;
@@ -76,7 +81,8 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             }
 
             var storage = _strategy!.CreateStorage(name);
-            var database = new SqlDatabaseInstance(name, this, storage);
+            var catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
+            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
             _databases[name] = database;
 
             return new ValueTask<IDatabase>(database);
@@ -107,7 +113,10 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             }
 
             var storage = _strategy.OpenStorage(name);
-            var database = new SqlDatabaseInstance(name, this, storage);
+            var catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
+                ? _strategy.OpenStorage(name + CatalogSuffix)
+                : _strategy.CreateStorage(name + CatalogSuffix);
+            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
             _databases[name] = database;
 
             return new ValueTask<IDatabase>(database);
@@ -134,6 +143,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             }
 
             _strategy!.DropStorage(name);
+
+            if (_strategy.StorageExists(name + CatalogSuffix))
+            {
+                _strategy.DropStorage(name + CatalogSuffix);
+            }
         }
 
         return default;
