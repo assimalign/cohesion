@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Query</RootNamespace>
+		<Description>Server-side handling for the RFC 10008 HTTP QUERY method in the Cohesion Web pipeline: request Content-Type validation and Accept-Query negotiation (400/415/406), method-preserving redirect helpers (307/308, 303), and conditional-QUERY evaluation (304/412) over the core HttpConditionalRequest primitives. Middleware-first — every response is written imperatively; no DI, no configuration binding.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+	</ItemGroup>
+</Project>

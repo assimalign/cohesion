@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.StaticFiles</RootNamespace>
+		<Description>Static file serving for the Cohesion Web pipeline over the FileSystem library. UseStaticFiles mounts any IFileSystem (physical, in-memory, aggregate) at a request-path prefix with builder-time options: default documents, Cache-Control, content-type overlays. Implements RFC 9110 conditional GET (ETag from Size+UpdatedOn, Last-Modified, If-None-Match/If-Modified-Since to 304), single byte-range 206/416 responses, HEAD, precompressed sibling (.br/.gz) negotiation with Content-Encoding + Vary, and hard path-traversal defense (requests can never escape the mounted root).</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
+	</ItemGroup>
+</Project>
