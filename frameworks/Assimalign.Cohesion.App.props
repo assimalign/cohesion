@@ -208,14 +208,55 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Database'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Database" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
 
-        <!-- Add as resources/Database/* projects come online:
+        <!-- The kernel: shared storage/durability, the ACID substrate, indexing,
+             types, execution, the shared language infra, and the contract root. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
-        ...etc...
-        -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Indexing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Execution" />
+
+        <!-- Service surface: wire protocol, server, client core, security, and the
+             embedded facade + the host composition module. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Server" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
+
+        <!-- The SQL model family (the MVP engine): engine, dialect, catalog, model
+             storage, and the typed client. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
+
+        <!-- Orchestration manifest (declarative plane; references no runtime). -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.ApplicationModel" />
+
+        <!-- Outside-area transitive dependency the base App framework does not yet
+             carry: the manifest's public surface (AddDatabase, DatabaseResource) exposes
+             ApplicationModel types, so it must be on the Ref pack or consumers hit CS0012.
+             When ApplicationModel graduates into the base App framework (it is WIP-
+             commented there), remove it here to avoid double delivery. Connections/
+             Hosting/Core the server, client, and host close over are already delivered
+             by the base App framework. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
 
         <!--
+            Deliberately EXCLUDED from the MVP framework:
+            - The Documents/Graph/KeyValuePair/Blob/Cache model families - engine
+              scaffolds without shipping surface yet.
+            - Database.Memory - empty in-memory-strategy placeholder (no sources).
+            - Database.Governance, Database.Replication, Database.Sql.Replication,
+              Database.Sql.Security - post-MVP contracts-only/empty shells (#167 /
+              replication / #177). Add each when its feature ships.
+
             Private implementation dependencies. Shipped in App.Database's Runtime
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never
             see these in IntelliSense, but the host resolves them at run time.
