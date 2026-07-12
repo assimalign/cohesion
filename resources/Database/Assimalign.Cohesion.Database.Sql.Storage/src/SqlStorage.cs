@@ -101,13 +101,24 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
-    /// Inserts a row into the storage.
+    /// Inserts a row with auto-commit semantics (a single-operation durable transaction).
     /// </summary>
     /// <param name="row">The serialized row bytes.</param>
     /// <returns>The page and slot location where the row was written.</returns>
     public (PageId PageId, int SlotIndex) InsertRow(ReadOnlySpan<byte> row)
     {
         return InsertRecord(row);
+    }
+
+    /// <summary>
+    /// Inserts a row within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="row">The serialized row bytes.</param>
+    /// <returns>The page and slot location where the row was written.</returns>
+    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ReadOnlySpan<byte> row)
+    {
+        return InsertRecord(transaction, row);
     }
 
     /// <summary>
@@ -122,7 +133,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
-    /// Updates a row at the specified page and slot.
+    /// Updates a row at the specified page and slot with auto-commit semantics.
     /// </summary>
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
@@ -133,7 +144,19 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
-    /// Deletes a row at the specified page and slot.
+    /// Updates a row at the specified page and slot within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page containing the row.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    /// <param name="row">The new row bytes.</param>
+    public void UpdateRow(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> row)
+    {
+        UpdateRecord(transaction, pageId, slotIndex, row);
+    }
+
+    /// <summary>
+    /// Deletes a row at the specified page and slot with auto-commit semantics.
     /// </summary>
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
@@ -143,16 +166,21 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
+    /// Deletes a row at the specified page and slot within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page containing the row.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    public void DeleteRow(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    {
+        DeleteRecord(transaction, pageId, slotIndex);
+    }
+
+    /// <summary>
     /// Flushes all pending changes to the underlying stream.
     /// </summary>
     public void FlushChanges()
     {
         Flush();
     }
-
-    /// <summary>
-    /// Gets the journal logger for transaction management.
-    /// </summary>
-    /// <returns>The <see cref="IJournalLogger"/> owned by this storage instance.</returns>
-    internal IJournalLogger GetJournalLogger() => JournalLogger;
 }

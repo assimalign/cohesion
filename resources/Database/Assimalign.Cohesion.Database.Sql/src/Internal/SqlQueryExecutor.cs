@@ -10,17 +10,16 @@ using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Executes SQL commands against the storage layer with WAL-before-write semantics.
+/// Executes SQL commands against the storage layer. Mutations run inside the
+/// session's storage transaction, which owns write-ahead logging and durability.
 /// </summary>
 internal sealed class SqlQueryExecutor : IQueryExecutor
 {
     private readonly SqlStorage _storage;
-    private readonly IJournalLogger _journal;
 
-    internal SqlQueryExecutor(SqlStorage storage, IJournalLogger journal)
+    internal SqlQueryExecutor(SqlStorage storage)
     {
         _storage = storage;
-        _journal = journal;
     }
 
     /// <summary>
@@ -34,9 +33,9 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
     }
 
     /// <summary>
-    /// Internal execution method that receives the active journal transaction for WAL operations.
+    /// Internal execution method that receives the active storage transaction.
     /// </summary>
-    internal Task<QueryResult> ExecuteAsync(QueryRequest request, JournalTransactionId transactionId, CancellationToken cancellationToken = default)
+    internal Task<QueryResult> ExecuteAsync(QueryRequest request, IStorageTransaction transaction, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -50,9 +49,9 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
 
         QueryResult result = commandType switch
         {
-            SqlQueryCommandType.Insert => ExecuteInsert(sqlRequest, transactionId),
-            SqlQueryCommandType.Update => ExecuteUpdate(sqlRequest, transactionId),
-            SqlQueryCommandType.Delete => ExecuteDelete(sqlRequest, transactionId),
+            SqlQueryCommandType.Insert => ExecuteInsert(sqlRequest, transaction),
+            SqlQueryCommandType.Update => ExecuteUpdate(sqlRequest, transaction),
+            SqlQueryCommandType.Delete => ExecuteDelete(sqlRequest, transaction),
             SqlQueryCommandType.Select => ExecuteSelect(sqlRequest),
             _ => throw new DatabaseException($"Unsupported SQL command type: {commandType}.")
         };
@@ -60,7 +59,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         return Task.FromResult(result);
     }
 
-    private QueryResult ExecuteInsert(SqlQueryRequest request, JournalTransactionId transactionId)
+    private QueryResult ExecuteInsert(SqlQueryRequest request, IStorageTransaction transaction)
     {
         var parameters = request.Parameters
             ?? throw new DatabaseException("INSERT requires parameters. Expected 'row' as byte[].");
@@ -70,16 +69,14 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
             throw new DatabaseException("INSERT requires a 'row' parameter of type byte[].");
         }
 
-        // WAL-before-write: log the operation first
-        _journal.AppendOperation(transactionId, "INSERT", rowData);
-
-        // Then mutate the storage
-        _storage.InsertRow(rowData);
+        // The storage transaction journals the page before-image ahead of the
+        // mutation and the after-image at commit (the write-ahead rule).
+        _storage.InsertRow(transaction, rowData);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 1);
     }
 
-    private QueryResult ExecuteUpdate(SqlQueryRequest request, JournalTransactionId transactionId)
+    private QueryResult ExecuteUpdate(SqlQueryRequest request, IStorageTransaction transaction)
     {
         var parameters = request.Parameters
             ?? throw new DatabaseException("UPDATE requires parameters. Expected 'pageId', 'slotIndex', and 'row'.");
@@ -99,16 +96,12 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
             throw new DatabaseException("UPDATE requires a 'row' parameter of type byte[].");
         }
 
-        // WAL-before-write: log the operation first
-        _journal.AppendOperation(transactionId, "UPDATE", rowData);
-
-        // Then mutate the storage
-        _storage.UpdateRow(pageId, slotIndex, rowData);
+        _storage.UpdateRow(transaction, pageId, slotIndex, rowData);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 1);
     }
 
-    private QueryResult ExecuteDelete(SqlQueryRequest request, JournalTransactionId transactionId)
+    private QueryResult ExecuteDelete(SqlQueryRequest request, IStorageTransaction transaction)
     {
         var parameters = request.Parameters
             ?? throw new DatabaseException("DELETE requires parameters. Expected 'pageId' and 'slotIndex'.");
@@ -123,11 +116,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
             throw new DatabaseException("DELETE requires a 'slotIndex' parameter of type int.");
         }
 
-        // WAL-before-write: log the operation first (empty payload for deletes)
-        _journal.AppendOperation(transactionId, "DELETE", ReadOnlySpan<byte>.Empty);
-
-        // Then mutate the storage
-        _storage.DeleteRow(pageId, slotIndex);
+        _storage.DeleteRow(transaction, pageId, slotIndex);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 1);
     }

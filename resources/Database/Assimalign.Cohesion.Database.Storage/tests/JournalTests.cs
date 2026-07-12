@@ -2,91 +2,202 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
+/// <summary>
+/// Tests for the write-ahead log: LSN ordering, record round-trips, durability
+/// tracking, torn-tail tolerance, and checkpoint truncation (#160).
+/// </summary>
 public sealed class JournalTests
 {
-	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Should assign sequential LSNs and persist all records")]
-	public void Journal_ShouldAssignSequentialLsns_AndPersistAllRecords()
-	{
-		using var stream = new MemoryStream();
-		using var journal = new StreamJournalLogger(stream, leaveOpen: true);
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: LSNs are sequential and records round-trip in order")]
+    public void Journal_AppendedRecords_ShouldRoundTripInLsnOrder()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
 
-		JournalTransactionId transactionId = journal.BeginTransaction("Sql", "Users");
-		long op1Lsn = journal.AppendOperation(transactionId, "INSERT", Encoding.UTF8.GetBytes("row-1"));
-		long op2Lsn = journal.AppendOperation(transactionId, "UPDATE", Encoding.UTF8.GetBytes("row-2"));
-		journal.CommitTransaction(transactionId);
+        // Act
+        long begin = journal.AppendBegin(7);
+        long operation = journal.AppendOperation(7, Encoding.UTF8.GetBytes("row-1"));
+        long commit = journal.AppendCommit(7);
 
-		var records = journal.ReadAll();
+        var records = journal.ReadAll();
 
-		Assert.Equal(4, records.Count);
-		Assert.Equal(new[] { 1L, 2L, 3L, 4L }, records.Select(x => x.Lsn).ToArray());
-		Assert.Equal(JournalRecordType.BeginTransaction, records[0].RecordType);
-		Assert.Equal(JournalRecordType.Operation, records[1].RecordType);
-		Assert.Equal(JournalRecordType.Operation, records[2].RecordType);
-		Assert.Equal(JournalRecordType.CommitTransaction, records[3].RecordType);
-		Assert.Equal(2L, op1Lsn);
-		Assert.Equal(3L, op2Lsn);
-	}
+        // Assert
+        new[] { begin, operation, commit }.ShouldBe(new[] { 1L, 2L, 3L });
+        records.Count.ShouldBe(3);
+        records.Select(x => x.Lsn).ShouldBe(new[] { 1L, 2L, 3L });
+        records[0].Type.ShouldBe(JournalRecordType.BeginTransaction);
+        records[0].TransactionSequence.ShouldBe(7L);
+        records[1].Type.ShouldBe(JournalRecordType.Operation);
+        Encoding.UTF8.GetString(records[1].Payload.Span).ShouldBe("row-1");
+        records[2].Type.ShouldBe(JournalRecordType.CommitTransaction);
+    }
 
-	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Recover should return only committed operations")]
-	public void Journal_RecoverCommittedOperations_ShouldReturnOnlyCommittedOperations()
-	{
-		using var stream = new MemoryStream();
-		using var journal = new StreamJournalLogger(stream, leaveOpen: true);
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page images round-trip with page id and payload")]
+    public void Journal_PageImage_ShouldRoundTrip()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+        var image = new byte[Units.Page.Size];
+        image[100] = 0xAB;
 
-		JournalTransactionId committed = journal.BeginTransaction("Document", "Profiles");
-		journal.AppendOperation(committed, "UPSERT", Encoding.UTF8.GetBytes("committed"));
-		journal.CommitTransaction(committed);
+        // Act
+        journal.AppendPageImage(3, (PageId)9L, JournalRecordType.BeforePageImage, image);
+        var records = journal.ReadAll();
 
-		JournalTransactionId open = journal.BeginTransaction("Document", "Profiles");
-		journal.AppendOperation(open, "UPSERT", Encoding.UTF8.GetBytes("not-committed"));
+        // Assert
+        records.Count.ShouldBe(1);
+        records[0].Type.ShouldBe(JournalRecordType.BeforePageImage);
+        ((long)records[0].PageId).ShouldBe(9L);
+        records[0].Payload.Length.ShouldBe(Units.Page.Size);
+        records[0].Payload.Span[100].ShouldBe((byte)0xAB);
+    }
 
-		var replayRecords = journal.RecoverCommittedOperations();
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page-image append rejects non-image record types")]
+    public void Journal_AppendPageImage_NonImageType_ShouldThrow()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
 
-		Assert.Single(replayRecords);
-		Assert.Equal(committed, replayRecords[0].TransactionId);
-		Assert.Equal("UPSERT", replayRecords[0].OperationName);
-		Assert.Equal("committed", Encoding.UTF8.GetString(replayRecords[0].Payload.Span));
-	}
+        // Act / Assert
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.CommitTransaction, new byte[8]));
+    }
 
-	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Rollback should exclude transaction operations from recovery")]
-	public void Journal_Rollback_ShouldExcludeOperationsFromRecovery()
-	{
-		using var stream = new MemoryStream();
-		using var journal = new StreamJournalLogger(stream, leaveOpen: true);
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: EnsureDurable advances the durable LSN")]
+    public void Journal_EnsureDurable_ShouldAdvanceDurableLsn()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
 
-		JournalTransactionId rollbackTransaction = journal.BeginTransaction("Graph", "Edges");
-		journal.AppendOperation(rollbackTransaction, "ADD_EDGE", Encoding.UTF8.GetBytes("edge-1"));
-		journal.RollbackTransaction(rollbackTransaction);
+        long lsn = journal.AppendBegin(1);
+        journal.DurableLsn.ShouldBe(0L);
 
-		var replayRecords = journal.RecoverCommittedOperations();
-		Assert.Empty(replayRecords);
-	}
+        // Act
+        journal.EnsureDurable(lsn);
 
-	[Fact(DisplayName = "Cohesion Test [Database.Storage] - Journal: Reopened journal should recover committed operations")]
-	public void Journal_ReopenedInstance_ShouldRecoverCommittedOperations()
-	{
-		using var stream = new MemoryStream();
+        // Assert
+        journal.DurableLsn.ShouldBeGreaterThanOrEqualTo(lsn);
+    }
 
-		using (var writerJournal = new StreamJournalLogger(stream, leaveOpen: true))
-		{
-			JournalTransactionId transactionId = writerJournal.BeginTransaction("Sql", "Orders");
-			writerJournal.AppendOperation(transactionId, "INSERT", Encoding.UTF8.GetBytes("order-1"));
-			writerJournal.CommitTransaction(transactionId);
-		}
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: reopened journal continues LSNs after the last record")]
+    public void Journal_Reopen_ShouldContinueLsnSequence()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
 
-		stream.Position = 0;
+        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        {
+            journal.AppendBegin(1);
+            journal.AppendCommit(1);
+            journal.Flush(forceDurable: true);
+        }
 
-		using var recoveryJournal = new StreamJournalLogger(stream, leaveOpen: true);
-		var replayRecords = recoveryJournal.RecoverCommittedOperations();
+        // Act
+        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        long next = reopened.AppendBegin(2);
 
-		Assert.Single(replayRecords);
-		Assert.Equal("Sql", replayRecords[0].ModelName);
-		Assert.Equal("Orders", replayRecords[0].ResourceName);
-		Assert.Equal("INSERT", replayRecords[0].OperationName);
-		Assert.Equal("order-1", Encoding.UTF8.GetString(replayRecords[0].Payload.Span));
-	}
+        // Assert
+        next.ShouldBe(3L);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: a torn tail record is ignored on read")]
+    public void Journal_TornTail_ShouldBeIgnored()
+    {
+        // Arrange: write two full records, then truncate the stream mid-record.
+        using var stream = new MemoryStream();
+
+        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        {
+            journal.AppendBegin(1);
+            journal.AppendOperation(1, Encoding.UTF8.GetBytes("keep"));
+            journal.AppendOperation(1, Encoding.UTF8.GetBytes("torn-away"));
+            journal.Flush();
+        }
+
+        stream.SetLength(stream.Length - 5); // tear the last frame
+
+        // Act
+        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        var records = reopened.ReadAll();
+
+        // Assert
+        records.Count.ShouldBe(2);
+        Encoding.UTF8.GetString(records[1].Payload.Span).ShouldBe("keep");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: a corrupted record terminates the scan")]
+    public void Journal_CorruptedRecord_ShouldTerminateScan()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+
+        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        {
+            journal.AppendBegin(1);
+            journal.AppendOperation(1, Encoding.UTF8.GetBytes("payload"));
+            journal.Flush();
+        }
+
+        // Flip a byte inside the second record's body.
+        var buffer = stream.GetBuffer();
+        buffer[(int)stream.Length - 6] ^= 0xFF;
+
+        // Act
+        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        var records = reopened.ReadAll();
+
+        // Assert
+        records.Count.ShouldBe(1);
+        records[0].Type.ShouldBe(JournalRecordType.BeginTransaction);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: checkpoint truncates and LSNs stay monotonic")]
+    public void Journal_Checkpoint_ShouldTruncateAndPreserveLsnMonotonicity()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+
+        journal.AppendBegin(1);
+        journal.AppendCommit(1);
+        long lastBefore = journal.LastLsn;
+
+        // Act
+        long checkpointLsn = journal.Checkpoint(ReadOnlySpan<long>.Empty);
+        var records = journal.ReadAll();
+
+        // Assert: only the checkpoint record remains and its LSN continues the sequence.
+        checkpointLsn.ShouldBe(lastBefore + 1);
+        records.Count.ShouldBe(1);
+        records[0].Type.ShouldBe(JournalRecordType.Checkpoint);
+        records[0].Lsn.ShouldBe(checkpointLsn);
+        journal.DurableLsn.ShouldBe(checkpointLsn);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: checkpoint payload carries active transaction sequences")]
+    public void Journal_Checkpoint_ShouldCarryActiveTransactions()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+
+        // Act
+        journal.Checkpoint(stackalloc long[] { 5L, 9L });
+        var records = journal.ReadAll();
+
+        // Assert
+        records.Count.ShouldBe(1);
+        records[0].Payload.Length.ShouldBe(2 * sizeof(long));
+        BitConverter.ToInt64(records[0].Payload.Span).ShouldBe(5L);
+        BitConverter.ToInt64(records[0].Payload.Span[8..]).ShouldBe(9L);
+    }
 }

@@ -37,6 +37,13 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     private readonly object _syncRoot = new();
     private readonly int _capacity;
 
+    /// <summary>
+    /// The write-ahead gate: invoked with a page's LSN before the page is written to
+    /// the storage stream, so the journal can be made durable up to that LSN first.
+    /// Set by the owning storage once its journal exists.
+    /// </summary>
+    internal Action<long>? WriteAheadGate;
+
     internal StorageBufferPool(int capacity)
     {
         if (capacity < 1)
@@ -296,10 +303,18 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     }
 
     /// <summary>
-    /// Stamps the page checksum and writes the buffer to the stream, clearing the dirty flag.
+    /// Stamps the page checksum and writes the buffer to the stream, clearing the
+    /// dirty flag. Enforces the write-ahead rule first: the journal must be durable
+    /// up to the page's LSN before the page may reach the data stream.
     /// </summary>
-    private static void WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
+    private void WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
     {
+        long pageLsn = entry.Page.Lsn;
+        if (pageLsn > 0)
+        {
+            WriteAheadGate?.Invoke(pageLsn);
+        }
+
         PageChecksum.Stamp(entry.Buffer);
         stream.WritePage(pageId, entry.Buffer);
         entry.IsDirty = false;

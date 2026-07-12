@@ -80,4 +80,18 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// </remarks>
     /// <returns>A new storage unit iterator.</returns>
     IStorageUnitIterator GetUnitIterator();
+
+    /// <summary>
+    /// Begins a storage-level transaction: the unit of atomicity and durability for
+    /// record mutations. See <see cref="IStorageTransaction"/> for the semantics.
+    /// </summary>
+    /// <returns>The new transaction scope.</returns>
+    IStorageTransaction BeginTransaction();
+
+    /// <summary>
+    /// Checkpoints the storage: durably flushes all page state to the data stream and
+    /// truncates the journal, so the next open recovers instantly.
+    /// </summary>
+    /// <exception cref="StorageTransactionException">A transaction is still active.</exception>
+    void Checkpoint();
 }

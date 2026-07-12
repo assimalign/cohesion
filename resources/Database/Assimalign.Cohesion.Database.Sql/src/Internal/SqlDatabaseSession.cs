@@ -15,7 +15,6 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 {
     private readonly SqlStorage _storage;
     private readonly SqlQueryExecutor _executor;
-    private readonly IJournalLogger _journal;
 
     private SqlDatabaseTransaction? _transaction;
     private SessionState _state;
@@ -25,7 +24,6 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         Database = database;
         _storage = storage;
         _executor = executor;
-        _journal = storage.GetJournalLogger();
         _state = SessionState.Open;
     }
 
@@ -49,10 +47,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
-        var journalTxId = _journal.BeginTransaction("Sql", "default");
-        var transactionId = TransactionId.NewId();
-
-        _transaction = new SqlDatabaseTransaction(transactionId, journalTxId, _journal, _storage);
+        _transaction = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction());
 
         return new ValueTask<IDatabaseTransaction>(_transaction);
     }
@@ -63,19 +58,18 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         ThrowIfNotOpen();
         ArgumentNullException.ThrowIfNull(request);
 
-        // If there is an active transaction, delegate to the executor with its journal tx ID
+        // If there is an active transaction, delegate to the executor with its storage scope
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
-            return await _executor.ExecuteAsync(request, _transaction.JournalTransactionId, cancellationToken).ConfigureAwait(false);
+            return await _executor.ExecuteAsync(request, _transaction.StorageTransaction, cancellationToken).ConfigureAwait(false);
         }
 
         // Auto-commit semantics: wrap in a mini-transaction
-        var journalTxId = _journal.BeginTransaction("Sql", "default");
-        var autoTx = new SqlDatabaseTransaction(TransactionId.NewId(), journalTxId, _journal, _storage);
+        var autoTx = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction());
 
         try
         {
-            var result = await _executor.ExecuteAsync(request, journalTxId, cancellationToken).ConfigureAwait(false);
+            var result = await _executor.ExecuteAsync(request, autoTx.StorageTransaction, cancellationToken).ConfigureAwait(false);
             await autoTx.CommitAsync(cancellationToken).ConfigureAwait(false);
             return result;
         }

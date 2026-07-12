@@ -62,6 +62,21 @@ public class StorageStream : Stream
     /// <inheritdoc />
     public override void Flush() => _inner.Flush();
 
+    /// <summary>
+    /// Flushes with durable (power-safe) semantics where the underlying stream
+    /// supports them: file streams flush through the operating system cache to disk.
+    /// </summary>
+    public void FlushDurable()
+    {
+        if (_inner is FileStream fileStream)
+        {
+            fileStream.Flush(flushToDisk: true);
+            return;
+        }
+
+        _inner.Flush();
+    }
+
     /// <inheritdoc />
     public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
 

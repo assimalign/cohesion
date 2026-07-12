@@ -82,14 +82,68 @@ sequence addressed by (page, slot)". Records above `SlottedPage.MaxRecordSize` a
 rejected at the API boundary; multi-page records ride overflow pages (a later feature —
 the flags and page type are reserved).
 
-## The journal
+## The journal (write-ahead log)
 
-`IJournalLogger` is the durability mechanism — the *only* one. Frames are
-length-prefixed, magic-tagged, and CRC-protected; a torn tail is detected and ignored
-at read time. Commit and checkpoint force a durable flush (`FileStream.Flush(true)`).
-The current record model is transaction-scoped logical operations; the journal
-write-ordering and recovery-replay build-out (#160) evolves this into the ARIES-shaped
-redo/undo contract described in the area design, using the page LSN field added here.
+`IJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
+magic-tagged, and CRC-protected; a torn or corrupted tail terminates the read scan and
+is ignored — it belongs to work that was never acknowledged. Records are typed and
+binary (begin / commit / rollback / checkpoint / before-image / after-image / opaque
+logical operation); transaction identity at this level is a compact monotonic `long`
+sequence — GUID identity belongs to the transaction layer above.
+
+### Write ordering rules (steal / no-force, full page images)
+
+1. **Before-image at first touch.** A transaction's first modification of a page
+   appends the page's full prior image and stamps the pooled page's LSN with that
+   record — mutations then apply in the buffer pool only.
+2. **The write-ahead gate.** The buffer pool may steal (evict) a dirty page at any
+   time, but its write-back first forces the journal durable up to the page's LSN —
+   so any uncommitted content that reaches the data file is always undoable from a
+   durable before-image.
+3. **Commit = after-images + commit record + fsync.** Commit appends the after-image
+   of every touched page (stamping each page's LSN with its record), then the commit
+   record, and acknowledges only after `EnsureDurable(commitLsn)`. Data pages are
+   *not* forced — recovery redoes them (no-force).
+4. **Rollback restores in memory.** Before-images are kept per transaction and copied
+   back into the pooled pages, so rollback is complete without I/O; a rollback record
+   marks the outcome.
+5. **Page-level single-writer.** A page touched by an active transaction is
+   write-locked to it (conflicts throw rather than wait). Record-level concurrency is
+   `Database.Transactions`' job above this layer; full-image logging is only correct
+   because two transactions can never interleave on one page.
+
+Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
+they make recovery a pure idempotent overwrite with no operation replay logic, which
+is the property the crash suites verify. Deltas are a measured-need optimization that
+can ride the same record types later.
+
+### Recovery replay rules
+
+Because images are full pages and pages are single-writer, the desired final state of
+a page is the image of the **last** journal record on it among *committed
+after-images* and *uncommitted before-images* — redo and undo collapse into one
+last-record-wins pass. Replay is idempotent by exact-LSN match: an after-image stamps
+its record LSN, a before-image restores the pre-transaction LSN embedded in the
+captured bytes, and an image is skipped only when the on-disk page already verifies
+(checksum) at exactly the target LSN. Recovery runs on open, writes directly to the
+data stream (bypassing the pool — a corrupt page must be overwritable), and finishes
+with a checkpoint.
+
+### Checkpoints
+
+`Checkpoint()` durably flushes all page state and **truncates** the journal, writing a
+fresh checkpoint record whose LSN continues the sequence (LSNs never restart — page
+LSN comparisons depend on monotonicity across truncation). Checkpointing requires no
+active transactions — truncating live before-images would orphan stolen writes; fuzzy
+checkpoints are a later feature (the record already carries the active-transaction
+set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
+
+### What is deliberately unlogged
+
+Page 0 (the file header) carries only recomputable bookkeeping and is rebuilt or
+revalidated on open; it is flushed but never journaled. Page allocation is likewise
+not undone on rollback — a page allocated by an aborted transaction is restored to
+its empty initialized image and leaks safely until reused.
 
 ## Error model
 

@@ -33,8 +33,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var journal = _storage.GetJournalLogger();
-        var executor = new SqlQueryExecutor(_storage, journal);
+        var executor = new SqlQueryExecutor(_storage);
         var session = new SqlDatabaseSession(this, _storage, executor);
 
         return new ValueTask<IDatabaseSession>(session);

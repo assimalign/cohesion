@@ -4,25 +4,21 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Internal ACID transaction implementation that wraps the journal transaction.
+/// Internal ACID transaction implementation that wraps a storage-level transaction:
+/// commit is acknowledged only after the write-ahead log is durable, and rollback
+/// restores every modified page to its pre-transaction image.
 /// </summary>
 internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
-    private readonly IJournalLogger _journal;
-    private readonly SqlStorage _storage;
-
     private TransactionState _state;
 
-    internal SqlDatabaseTransaction(TransactionId id, JournalTransactionId journalTransactionId, IJournalLogger journal, SqlStorage storage)
+    internal SqlDatabaseTransaction(TransactionId id, IStorageTransaction storageTransaction)
     {
         Id = id;
-        JournalTransactionId = journalTransactionId;
-        _journal = journal;
-        _storage = storage;
+        StorageTransaction = storageTransaction;
         _state = TransactionState.Active;
     }
 
@@ -33,9 +29,9 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     public TransactionState State => _state;
 
     /// <summary>
-    /// Gets the journal-level transaction identifier used by the executor for WAL operations.
+    /// Gets the storage-level transaction the executor mutates through.
     /// </summary>
-    internal JournalTransactionId JournalTransactionId { get; }
+    internal IStorageTransaction StorageTransaction { get; }
 
     /// <inheritdoc />
     public ValueTask CommitAsync(CancellationToken cancellationToken = default)
@@ -49,11 +45,10 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Force durable flush of the journal first (durability guarantee)
-            _journal.CommitTransaction(JournalTransactionId);
-
-            // Then flush dirty data pages to storage
-            _storage.FlushChanges();
+            // Durable by contract: the storage transaction journals after images and
+            // returns only once the commit record is on stable storage (no-force —
+            // data pages flush lazily; recovery replays them).
+            StorageTransaction.Commit();
 
             _state = TransactionState.Committed;
         }
@@ -83,7 +78,7 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _journal.RollbackTransaction(JournalTransactionId);
+            StorageTransaction.Rollback();
 
             _state = TransactionState.RolledBack;
         }
