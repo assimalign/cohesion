@@ -453,6 +453,9 @@
 		<Project Path="Database/Assimalign.Cohesion.Database.Transactions/tests/Assimalign.Cohesion.Database.Transactions.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Types/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Types/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Types/tests/Assimalign.Cohesion.Database.Types.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Types/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
 	</Folder>

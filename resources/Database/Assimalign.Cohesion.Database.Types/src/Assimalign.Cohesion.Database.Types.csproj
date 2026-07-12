@@ -1,8 +1,2 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <Folder Include="VirtualTypes\" />
-    <Folder Include="ScalarTypes\" />
-  </ItemGroup>
-
+<Project Sdk="Microsoft.NET.Sdk">
 </Project>
