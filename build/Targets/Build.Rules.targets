@@ -71,7 +71,7 @@
 	      contains same-area assemblies that arrive TRANSITIVELY through the
 	      sanctioned area-root reference (e.g. Assimalign.Cohesion.Database
 	      aggregates its child roots - Database.Types/Language/Storage/
-	      Transactions/Execution/Protocol/Security/Governance), so COHRES002
+	      Transactions/Execution/Indexing/Protocol/Security/Governance), so COHRES002
 	      constrains the hosting module's direct references, not its closure.
 
 	    Relaxing the rule itself (beyond a per-project exemption) is an

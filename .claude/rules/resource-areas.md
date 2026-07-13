@@ -36,7 +36,7 @@ projects outside `resources/` are untouched). Violations fail the build:
 - `COHRES002` constrains the hosting module's **direct** references only: same-area assemblies
   legitimately arrive in its resolved closure transitively through the sanctioned area-root
   reference (e.g. `Assimalign.Cohesion.Database` aggregates its child roots — `Database.Types`/
-  `Language`/`Storage`/`Transactions`/`Execution`/`Protocol`/`Security`/`Governance` — so
+  `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance` — so
   `Database.Hosting → Database` pulls them all in — that is the root's own composition, not a
   hosting violation).
 - Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are exempt — the rule
@@ -108,7 +108,7 @@ sanctioned COHRES001 exemption above.
   packages of generic base abstractions and default implementations pulled into the parent root
   for maintainability, testability, and separation of concerns (precedent:
   `Assimalign.Cohesion.Database` aggregates `Database.Types`/`Language`/`Storage`/
-  `Transactions`/`Execution`/`Protocol`/`Security`/`Governance`). **The dependency arrow always
+  `Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance`). **The dependency arrow always
   points root → child; a child root never references the root** — that is what keeps each child
   independently consumable, and it means a child owns its own vocabulary (value types, enums)
   and its own exception root (`StorageException`, `ProtocolException` inherit `Exception`, not

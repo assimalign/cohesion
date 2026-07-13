@@ -39,7 +39,7 @@ public interface IIndex
     /// <param name="key">The key to insert.</param>
     /// <param name="entryReference">The opaque entry reference the key maps to.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="DatabaseException">Thrown when the index is unique and the key already maps to a visible entry.</exception>
+    /// <exception cref="IndexException">Thrown when the index is unique and the key already maps to a visible entry.</exception>
     ValueTask InsertAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
 
     /// <summary>

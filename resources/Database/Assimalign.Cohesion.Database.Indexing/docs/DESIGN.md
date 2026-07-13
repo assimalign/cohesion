@@ -53,6 +53,15 @@ entries and splits stay correct.
 
 The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping.
 
+## Error model
+
+`IndexException` is the package's own exception root and inherits `Exception`
+directly, not the area's `DatabaseException` — this package is a child root the
+area root rolls up (2026-07-13 inversion), so it must stay independently
+consumable. `IndexUniqueViolationException : IndexException` is the typed
+unique-violation surface; model engines that expose index failures on the area's
+error surface translate at their own boundary.
+
 ## Relationship to `Database.Storage`
 
 `Database.Storage` provides the *physical* substrate through `IStoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's `IIndexManager` at the wrong layer with no design behind it.)

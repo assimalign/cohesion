@@ -12,9 +12,14 @@ Shared index infrastructure for every Cohesion database engine: order-preserving
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Database` (contract root)
 - `Assimalign.Cohesion.Database.Storage` (pages the structures are built on)
 - `Assimalign.Cohesion.Database.Transactions` (mutations ride the owning transaction)
+
+This package is a **child root** of the Database area: the area root
+(`Assimalign.Cohesion.Database`) rolls it up — never the reverse — so the index
+infrastructure stays independently consumable. Index errors raise the package's
+own `IndexException` root (inherits `Exception`, not `DatabaseException`); model
+engines translate at their boundary.
 
 ## Consumers
 

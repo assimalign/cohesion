@@ -30,9 +30,10 @@ surface. Child roots never reference the root.
   the inversion, vocabulary lives with its owning child (`ProtocolVersion` in
   `Protocol`, `TransactionId`/`TransactionState` in `Transactions`), the root
   consumes it through its child-root references, and consumers reach it
-  transitively through the root. `Database.Indexing` is deliberately *not* rolled
-  up: it is kernel infrastructure that itself consumes the root's contracts, not
-  a base component of them.
+  transitively through the root. `Database.Indexing` joined the child
+  roots on 2026-07-13 (owner direction): its only root coupling was exception
+  ancestry, re-rooted onto its own `IndexException` — index infrastructure is a
+  base component like storage and transactions.
 
 - **Engine → database → session → transaction as four contracts**, not one god
   interface. Each has a distinct lifetime and threading model: engines are

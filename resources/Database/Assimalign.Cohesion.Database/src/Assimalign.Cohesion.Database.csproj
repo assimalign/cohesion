@@ -11,6 +11,7 @@
 		-->
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Execution" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Governance" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Indexing" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Language" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Security" />

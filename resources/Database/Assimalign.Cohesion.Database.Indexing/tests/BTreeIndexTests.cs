@@ -387,7 +387,7 @@ public class BTreeIndexTests
         var transaction = await harness.BeginAsync();
 
         // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(async () =>
+        await Should.ThrowAsync<IndexException>(async () =>
             await harness.IndexManager.CreateIndexAsync(transaction, 1, new IndexDefinition("ix_test")));
 
         harness.IndexManager.TryGetIndex(1, "ix_test", out var found).ShouldBeTrue();
@@ -398,7 +398,7 @@ public class BTreeIndexTests
 
         await harness.IndexManager.DropIndexAsync(transaction, 1, "ix_test");
         harness.IndexManager.TryGetIndex(1, "ix_test", out var afterDrop).ShouldBeFalse();
-        await Should.ThrowAsync<DatabaseException>(async () =>
+        await Should.ThrowAsync<IndexException>(async () =>
             await harness.IndexManager.DropIndexAsync(transaction, 1, "ix_test"));
 
         await harness.RollbackAsync(transaction);

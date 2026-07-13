@@ -15,7 +15,7 @@ In the repo's L1/L2/L3 model (see `docs/DELIVERY_ROADMAP.md`), this area is **L3
 | `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException`, and the application-composition seam (`IDatabaseApplicationBuilder`/`IDatabaseApplication` — model packages register engines here without knowing the hosting layer) — **rolls up the child roots** (references `Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
-| `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (consumes the root; not rolled up) |
+| `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
 | `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
 | `Assimalign.Cohesion.Database.Execution` | Child root — query request/result families, execution pipeline contracts |
 | `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser/diagnostics infrastructure for the model languages |

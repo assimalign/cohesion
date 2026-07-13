@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// Raised when inserting a key into a unique index that already maps to an entry
 /// visible to the writing transaction.
 /// </summary>
-public sealed class IndexUniqueViolationException : DatabaseException
+public sealed class IndexUniqueViolationException : IndexException
 {
     /// <summary>
     /// Initializes a new <see cref="IndexUniqueViolationException"/>.

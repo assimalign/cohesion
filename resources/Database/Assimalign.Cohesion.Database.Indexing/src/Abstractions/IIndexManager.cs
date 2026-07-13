@@ -20,7 +20,7 @@ public interface IIndexManager
     /// <param name="definition">The definition of the index to create.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index.</returns>
-    /// <exception cref="DatabaseException">Thrown when an index with the same name already exists on the object.</exception>
+    /// <exception cref="IndexException">Thrown when an index with the same name already exists on the object.</exception>
     ValueTask<IIndex> CreateIndexAsync(ITransactionContext transaction, ulong objectId, IndexDefinition definition, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -30,7 +30,7 @@ public interface IIndexManager
     /// <param name="objectId">The identity of the object the index belongs to.</param>
     /// <param name="name">The name of the index to drop.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="DatabaseException">Thrown when the index does not exist.</exception>
+    /// <exception cref="IndexException">Thrown when the index does not exist.</exception>
     ValueTask DropIndexAsync(ITransactionContext transaction, ulong objectId, string name, CancellationToken cancellationToken = default);
 
     /// <summary>

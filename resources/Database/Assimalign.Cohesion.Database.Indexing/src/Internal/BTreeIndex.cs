@@ -80,7 +80,7 @@ internal sealed class BTreeIndex : IIndex
 
         if (key.Length > BTreeNode.MaxKeyLength)
         {
-            throw new DatabaseException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
+            throw new IndexException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
         }
 
         // Unique keys arbitrate concurrent writers through the lock manager before
