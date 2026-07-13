@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -9,9 +8,10 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// Lifecycle tests for the root-contract engine start/stop seam (#902): state
-/// transitions, idempotent start, stop-then-start, and the durable-flush-on-stop
-/// guarantee.
+/// Creation/dispose semantics of the engine as a data machine: operational from
+/// <c>Create</c> (no start ceremony), disposal quiesces the workers and durably
+/// flushes and closes every open database, disposal is idempotent, and a disposed
+/// engine rejects every operation.
 /// </summary>
 public sealed class SqlEngineLifecycleTests : IDisposable
 {
@@ -40,110 +40,65 @@ public sealed class SqlEngineLifecycleTests : IDisposable
     private SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "lifecycle", RootPath = _rootPath });
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Start transitions Idle to Running")]
-    public async Task StartAsync_FromIdle_ShouldTransitionToRunning()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Creation: The engine is operational from Create — no start ceremony")]
+    public async Task Create_ShouldReturnOperationalEngine()
     {
-        // Arrange
+        // Arrange / Act
         await using var engine = CreateEngine();
-        engine.State.ShouldBe(EngineState.Idle);
 
-        // Act
-        await engine.StartAsync(CancellationToken.None);
-
-        // Assert
+        // Assert: running from creation, workers spawned, and immediately usable.
         engine.State.ShouldBe(EngineState.Running);
-    }
+        engine.Workers.Count.ShouldBe(5);
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Starting a running engine is a no-op")]
-    public async Task StartAsync_WhenAlreadyRunning_ShouldBeNoOp()
-    {
-        // Arrange
-        await using var engine = CreateEngine();
-        await engine.StartAsync();
-        var database = await engine.CreateDatabaseAsync("double-start");
-
-        // Act: a second start must not reset the engine or drop open databases.
-        await engine.StartAsync();
-
-        // Assert
-        engine.State.ShouldBe(EngineState.Running);
-        engine.TryGetDatabase("double-start", out var found).ShouldBeTrue();
+        var database = await engine.CreateDatabaseAsync("immediate");
+        engine.TryGetDatabase("immediate", out var found).ShouldBeTrue();
         found.ShouldBeSameAs(database);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Stop transitions Running to Stopped and closes databases")]
-    public async Task StopAsync_WhenRunning_ShouldTransitionToStoppedAndCloseDatabases()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Dispose: Disposal closes open databases and is terminal")]
+    public async Task DisposeAsync_WithOpenDatabases_ShouldCloseThemAndRejectFurtherUse()
     {
         // Arrange
-        await using var engine = CreateEngine();
-        await engine.StartAsync();
-        await engine.CreateDatabaseAsync("stopping-db");
-
-        // Act
-        await engine.StopAsync(CancellationToken.None);
-
-        // Assert
-        engine.State.ShouldBe(EngineState.Stopped);
-        engine.TryGetDatabase("stopping-db", out _).ShouldBeFalse();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Stopping a never-started engine is a no-op")]
-    public async Task StopAsync_WhenIdle_ShouldBeNoOp()
-    {
-        // Arrange
-        await using var engine = CreateEngine();
-
-        // Act
-        await engine.StopAsync();
-
-        // Assert
-        engine.State.ShouldBe(EngineState.Idle);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: A stopped engine starts again and reopens its databases")]
-    public async Task StartAsync_AfterStop_ShouldServeExistingDatabases()
-    {
-        // Arrange: create + populate, then stop.
-        await using var engine = CreateEngine();
-        await engine.StartAsync();
-
-        var database = await engine.CreateDatabaseAsync("restartable");
-        await using (var session = await database.CreateSessionAsync())
-        {
-            await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
-            await session.ExecuteAsync("INSERT INTO t (id) VALUES (7)");
-        }
-
-        await engine.StopAsync();
-
-        // Act: start the same engine instance again and reopen the database.
-        await engine.StartAsync();
-        var reopened = await engine.OpenDatabaseAsync("restartable");
-
-        // Assert
-        engine.State.ShouldBe(EngineState.Running);
-        await using var verify = await reopened.CreateSessionAsync();
-        var result = await verify.ExecuteAsync("SELECT id FROM t");
-        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
-
-        int count = 0;
-        await foreach (var _ in rows!.GetRowsAsync())
-        {
-            count++;
-        }
-
-        count.ShouldBe(1);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Stop flushes committed work durably before completing")]
-    public async Task StopAsync_AfterCommit_ShouldFlushDurably()
-    {
-        // Arrange: commit work, stop the engine (not dispose), and read the files a
-        // second engine sees — the stop must have made the committed rows durable.
         var engine = CreateEngine();
-        await engine.StartAsync();
+        await engine.CreateDatabaseAsync("closing-db");
 
-        var database = await engine.CreateDatabaseAsync("durable-stop");
+        // Act
+        await engine.DisposeAsync();
+
+        // Assert
+        engine.State.ShouldBe(EngineState.Disposed);
+        Should.Throw<ObjectDisposedException>(() => engine.TryGetDatabase("closing-db", out _));
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("too-late"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Dispose: Double dispose is safe on both dispose paths")]
+    public async Task Dispose_CalledTwice_ShouldBeIdempotent()
+    {
+        // Arrange
+        var asyncDisposed = CreateEngine();
+        var syncDisposed = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sync-dispose" });
+
+        // Act / Assert: DisposeAsync twice, Dispose twice, and mixed — all no-throw.
+        await asyncDisposed.DisposeAsync();
+        await asyncDisposed.DisposeAsync();
+        asyncDisposed.Dispose();
+
+        syncDisposed.Dispose();
+        syncDisposed.Dispose();
+        await syncDisposed.DisposeAsync();
+
+        asyncDisposed.State.ShouldBe(EngineState.Disposed);
+        syncDisposed.State.ShouldBe(EngineState.Disposed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Dispose: Disposal flushes committed work durably")]
+    public async Task DisposeAsync_AfterCommit_ShouldFlushDurably()
+    {
+        // Arrange: commit work, then dispose — disposal absorbs the old stop
+        // contract (quiesce workers → durable flush → close databases).
+        var engine = CreateEngine();
+
+        var database = await engine.CreateDatabaseAsync("durable-dispose");
         await using (var session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
@@ -154,12 +109,13 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         }
 
         // Act
-        await engine.StopAsync();
+        await engine.DisposeAsync();
 
-        // Assert: a fresh engine over the same root recovers both rows.
+        // Assert: a fresh engine over the same root recovers both rows — and the
+        // fact that it can open the files at all proves the disposed engine's
+        // workers quiesced and its storages closed (file handles released).
         await using var reopenedEngine = CreateEngine();
-        await reopenedEngine.StartAsync();
-        var reopened = await reopenedEngine.OpenDatabaseAsync("durable-stop");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("durable-dispose");
         await using var verify = await reopened.CreateSessionAsync();
 
         var result = await verify.ExecuteAsync("SELECT id FROM t");
@@ -172,40 +128,37 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         }
 
         count.ShouldBe(2);
-        await engine.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Database operations before start are rejected")]
-    public async Task CreateDatabaseAsync_BeforeStart_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Restart: A fresh engine over the same root serves the previous engine's databases")]
+    public async Task Create_OverExistingRoot_ShouldServeExistingDatabases()
     {
-        // Arrange
-        await using var engine = CreateEngine();
+        // Arrange: an engine restart is now create-over-the-same-root — the data
+        // machine itself is not restartable (dispose is terminal).
+        await using (var engine = CreateEngine())
+        {
+            var database = await engine.CreateDatabaseAsync("restartable");
+            await using var session = await database.CreateSessionAsync();
+            await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+            await session.ExecuteAsync("INSERT INTO t (id) VALUES (7)");
+        }
 
-        // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("too-early"));
-    }
+        // Act
+        await using var reopenedEngine = CreateEngine();
+        var reopened = await reopenedEngine.OpenDatabaseAsync("restartable");
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Database operations after stop are rejected")]
-    public async Task CreateDatabaseAsync_AfterStop_ShouldThrow()
-    {
-        // Arrange
-        await using var engine = CreateEngine();
-        await engine.StartAsync();
-        await engine.StopAsync();
+        // Assert
+        reopenedEngine.State.ShouldBe(EngineState.Running);
+        await using var verify = await reopened.CreateSessionAsync();
+        var result = await verify.ExecuteAsync("SELECT id FROM t");
+        var rows = result.ShouldBeAssignableTo<Assimalign.Cohesion.Database.Execution.QueryResultSet>();
 
-        // Act / Assert
-        await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("too-late"));
-    }
+        int count = 0;
+        await foreach (var _ in rows!.GetRowsAsync())
+        {
+            count++;
+        }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Lifecycle: Lifecycle calls on a disposed engine are rejected")]
-    public async Task StartAsync_AfterDispose_ShouldThrowObjectDisposed()
-    {
-        // Arrange
-        var engine = CreateEngine();
-        await engine.DisposeAsync();
-
-        // Act / Assert
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.StartAsync());
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.StopAsync());
+        count.ShouldBe(1);
     }
 }

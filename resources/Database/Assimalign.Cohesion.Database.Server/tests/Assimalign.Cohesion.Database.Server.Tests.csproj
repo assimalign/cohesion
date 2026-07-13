@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
+		<!-- End-to-end acceptance: the server base machinery runs over a live SQL
+		     engine and the in-memory driver (tests are exempt from the area
+		     layering rules). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+	</ItemGroup>
+</Project>

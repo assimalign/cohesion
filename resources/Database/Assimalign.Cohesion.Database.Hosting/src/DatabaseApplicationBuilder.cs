@@ -5,24 +5,30 @@ namespace Assimalign.Cohesion.Database.Hosting;
 
 /// <summary>
 /// The default <see cref="IDatabaseApplicationBuilder"/> implementation: collects
-/// engine and endpoint registrations — including those made by model verbs such as
-/// <c>AddSqlDatabase(...)</c>, which compose against the root interface without
-/// referencing this module — and builds the <see cref="DatabaseApplication"/> host.
-/// Create one with <see cref="DatabaseApplication.CreateBuilder()"/>.
+/// engine and server registrations — including those made by model verbs such as
+/// <c>AddSqlDatabase(...)</c> and <c>AddSqlServer(...)</c>, which compose against
+/// the root interface without referencing this module — and builds the
+/// <see cref="DatabaseApplication"/> host. Create one with
+/// <see cref="DatabaseApplication.CreateBuilder()"/>.
 /// </summary>
 /// <remarks>
 /// The builder wraps a <see cref="DatabaseApplicationOptions"/> instance, exposed
 /// through <see cref="Options"/> for the hosting-only composition surface the root
-/// interface deliberately omits: worker-slot mapping (<c>Options.Workers</c>) and
-/// additional host services (<c>Options.Services</c>). Engine registrations go to
-/// <c>Options.Engines</c>; a deferred server factory runs at <see cref="Build"/>
-/// time with the final engine list and lands on <c>Options.Server</c>.
+/// interface deliberately omits (additional host services on
+/// <c>Options.Services</c>). Engine registrations go to <c>Options.Engines</c>;
+/// server registrations go to <c>Options.Servers</c>, with deferred factories
+/// resolved at <see cref="Build"/> in registration order against the application
+/// context — mirroring the Web area's context-receiving
+/// <c>AddServer(Func&lt;IWebApplicationContext, IWebApplicationServer&gt;)</c>.
 /// </remarks>
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
 
-    private Func<IReadOnlyList<IDatabaseEngine>, IDatabaseServer>? _serverFactory;
+    // Server registrations resolve in registration order at Build: instances are
+    // wrapped as trivial factories so an instance registered after a deferred
+    // factory still lands after it in the context's Servers list.
+    private readonly List<Func<IDatabaseApplicationContext, IDatabaseServer>> _serverRegistrations = new();
     private bool _isBuilt;
 
     /// <summary>
@@ -39,8 +45,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
     /// <summary>
     /// Gets the application options the builder composes into — the hosting-side
-    /// surface (worker-slot mapping, additional host services) that the root
-    /// builder interface deliberately omits.
+    /// surface (additional host services) that the root builder interface
+    /// deliberately omits.
     /// </summary>
     public DatabaseApplicationOptions Options => _options;
 
@@ -61,30 +67,30 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     public DatabaseApplicationBuilder AddServer(IDatabaseServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        ThrowIfServerRegistered();
 
-        _options.Server = server;
+        _serverRegistrations.Add(_ => server);
 
         return this;
     }
 
-    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddServer(Func{IReadOnlyList{IDatabaseEngine}, IDatabaseServer})" />
-    public DatabaseApplicationBuilder AddServer(Func<IReadOnlyList<IDatabaseEngine>, IDatabaseServer> configure)
+    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddServer(Func{IDatabaseApplicationContext, IDatabaseServer})" />
+    public DatabaseApplicationBuilder AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
-        ThrowIfServerRegistered();
 
-        _serverFactory = configure;
+        _serverRegistrations.Add(configure);
 
         return this;
     }
 
     /// <summary>
     /// Builds the <see cref="DatabaseApplication"/> from the registered engines and
-    /// endpoint. A deferred server factory runs here, with the final engine list.
+    /// servers. Deferred server factories run here, in registration order, each
+    /// receiving the application context (final engine list plus every server
+    /// registered ahead of it).
     /// </summary>
     /// <returns>The composed application, ready to start.</returns>
-    /// <exception cref="InvalidOperationException">The application has already been built.</exception>
+    /// <exception cref="InvalidOperationException">The application has already been built, or a deferred server factory returned null.</exception>
     public DatabaseApplication Build()
     {
         if (_isBuilt)
@@ -92,26 +98,25 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             throw new InvalidOperationException("The database application has already been built.");
         }
 
-        if (_serverFactory is not null)
+        // The context wraps the live option lists, so each factory sees every
+        // registration made before it runs.
+        var context = new DatabaseApplicationContext(_options);
+
+        foreach (Func<IDatabaseApplicationContext, IDatabaseServer> registration in _serverRegistrations)
         {
-            _options.Server = _serverFactory.Invoke(Engines);
+            IDatabaseServer server = registration.Invoke(context)
+                ?? throw new InvalidOperationException("A deferred server factory returned null.");
+
+            _options.Servers.Add(server);
         }
 
         _isBuilt = true;
 
-        return new DatabaseApplication(_options);
+        return new DatabaseApplication(_options, context);
     }
 
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(IDatabaseEngine engine) => AddEngine(engine);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(IDatabaseServer server) => AddServer(server);
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(Func<IReadOnlyList<IDatabaseEngine>, IDatabaseServer> configure) => AddServer(configure);
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure) => AddServer(configure);
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
-
-    private void ThrowIfServerRegistered()
-    {
-        if (_options.Server is not null || _serverFactory is not null)
-        {
-            throw new InvalidOperationException("A server has already been registered on this builder.");
-        }
-    }
 }

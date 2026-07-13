@@ -5,9 +5,10 @@
 The standalone database host **executable** — the artifact the `DatabaseResource`
 orchestration manifest declares (`Assimalign.Cohesion.Database.Application`). It is
 the composition root for the out-of-process database resource: it binds the
-conventional environment variables, composes a file-backed SQL engine, a TCP
-endpoint, and the `DatabaseApplication` host (engines + engine-worker slots +
-wire-protocol server), and runs until the shutdown signal drains it gracefully.
+conventional environment variables, composes a file-backed SQL engine (a data
+machine, operational from creation), the SQL model's wire-protocol server
+(`SqlDatabaseServer`) over a TCP listener, and the `DatabaseApplication` host
+that runs the server, and runs until the shutdown signal drains it gracefully.
 
 ## Current Evaluation
 
@@ -29,10 +30,11 @@ wire-protocol server), and runs until the shutdown signal drains it gracefully.
   at the data path (in-memory when unset), durability mode mapped from the
   convention (`full`/`synchronous` → per-commit fsync; `grouped`/`relaxed` → the
   group-commit window), a `TcpConnectionListener` on all interfaces at the
-  configured port (OS-assigned when unset), `DatabaseServer`, and
+  configured port (OS-assigned when unset), `SqlDatabaseServer`, and
   `DatabaseApplication`.
-- Run until SIGTERM/Ctrl+C, then drain: endpoint first, worker slots quiesce,
-  engines flush durably.
+- Run until SIGTERM/Ctrl+C, then drain: the endpoint drains first; disposing the
+  composition then disposes the engine — workers quiesce and the data flushes
+  durably.
 
 ## Key Types
 

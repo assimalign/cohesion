@@ -41,37 +41,53 @@ surface. Child roots never reference the root.
   cheap, single-threaded execution scopes; transactions are explicit ACID
   brackets inside a session. Collapsing them (an `ExecuteAsync` on the engine,
   say) would smuggle session state into a shared object.
-- **Engine lifecycle and engine operations are separate contracts** (owner
-  direction, 2026-07-13). `IDatabaseEngineLifecycle` declares the lifecycle
-  surface — `State`, `Workers`, `StartAsync`, `StopAsync` — and
-  `IDatabaseEngine` inherits it, declaring only identity (`Name`, `Model`) and
-  the database operations. Composition surfaces (a host's engine service, the
-  application) depend on the lifecycle contract alone; data-path consumers (the
-  server, sessions) hold `IDatabaseEngine`. `Workers` sits on the lifecycle
-  contract because the claim handshake is defined relative to `StartAsync` —
-  claiming workers is a composition act, not a data operation. The rejected
-  alternative — two unrelated interfaces with engines implementing both — would
-  force every composition surface that accepts an `IDatabaseEngine` (the
-  builder's `AddEngine`, the application) into runtime casts or doubled generic
-  constraints to reach start/stop; inheritance keeps "every engine is
-  startable" a compile-time guarantee while the declarations stay segregated.
-  Disposal stays on `IDatabaseEngine`: a lifecycle holder starts and stops an
-  engine it does not own — the composition that created the engine disposes it.
-- **The application exposes its composition through `IDatabaseApplicationContext`**
-  (owner direction, 2026-07-13 — the Database instance of the Web area's
-  `IWebApplicationContext` pattern). The context carries the composed state —
-  `Engines` (registration order) and the optional endpoint `Server` — as one
-  navigable, observational surface; lifecycle stays on `IDatabaseApplication`
-  (start/stop) and per engine on `IDatabaseEngineLifecycle`. Deferred
-  composition callbacks on the builder receive the context, mirroring Web's
-  `AddServer(Func<IWebApplicationContext, IWebApplicationServer>)`. The Web
-  context exposes plural `Servers`; the Database context deliberately exposes a
-  single nullable `Server` — the area composes one endpoint per application
-  (`AddServer` throws on a second registration), and a null `Server` is the
-  embedded, in-process composition. *(Contract shipped 2026-07-13; the
-  `IDatabaseApplication.Context` property, the builder-callback signature, and
-  the hosting implementation land in the follow-up refactor pending owner
-  sign-off on this design.)*
+- **Engines are data machines — create → use → dispose, no lifecycle members**
+  (owner decision, 2026-07-13 — **reverses the #903 decision** that put
+  `StartAsync`/`StopAsync` on the root engine contract, and supersedes the
+  short-lived `IDatabaseEngineLifecycle` segregation from earlier the same day,
+  which was deleted before it ever shipped in a release). The new information
+  that changed the calculus: once servers became per-model (below), "running"
+  had an owner — the server fronts the engine on the network and is the thing
+  that starts and stops — and the engine's start/stop ceremony was revealed as
+  accidental service-shape, not data-machine substance. An engine is fully
+  operational from creation (its background workers spawn with it) and disposal
+  is its one transition: quiesce workers → durable flush → close databases.
+  What #903 actually needed — a host that can *align* engine durability with
+  its own lifecycle — is satisfied by disposal alone: the composition root that
+  created the engine disposes it, and committed work is durable when
+  `DisposeAsync` completes. The rejected alternative (keeping idempotent
+  start/stop for restartability) bought a restartable engine object nobody
+  needed — a "restart" is creating a fresh engine over the same storage root,
+  which the recovery path already makes correct — at the cost of a
+  four-state machine on every engine and a start-order protocol between host
+  and composition root.
+- **A minimal observational `State` stays on the engine** (judgment call,
+  recorded): the approved data-machine contract needs no state machine, but
+  worker-fault reporting needs *somewhere* to surface — the old contract threw
+  the recorded fault from `StopAsync`, and with stop gone the only alternatives
+  were throwing from `DisposeAsync` (hostile to `await using`, masks in-flight
+  exceptions) or silence. `EngineState` therefore shrank from a six-state
+  lifecycle enum to three observational conditions: `Running` (from creation),
+  `Faulted` (a background-worker fault was recorded; the engine keeps serving —
+  grouped commits self-help, checkpoints just stop truncating — but the owner
+  should learn it runs degraded), `Disposed`. The health seam (#168) reads this
+  surface; nothing drives transitions from outside.
+- **The application exposes its composition through `IDatabaseApplicationContext`,
+  and the context is plural** (owner direction, 2026-07-13 — the Database
+  instance of the Web area's `IWebApplicationContext` pattern, converged with
+  Web's shape). The context carries `Servers` (registration order — plural
+  because servers are per-model, so one application may front SQL and Documents
+  engines through two servers) and `Engines` (the server-less, embedded
+  registrations; an engine fronted by a server is reachable through that
+  server's context). `IDatabaseApplication` is the Web shape exactly: `Context`
+  plus `StartAsync`/`StopAsync` (the loose `Engines` member it briefly carried
+  is gone). Deferred composition callbacks on the builder receive the context —
+  `AddServer(Func<IDatabaseApplicationContext, IDatabaseServer>)`, mirroring
+  Web — replacing the earlier engine-list-receiving factory: the context view
+  lets a factory observe servers registered ahead of it, not just engines, and
+  keeps the callback signature stable as the context grows. An earlier cut of
+  this contract (same day, superseded before merge) exposed a single nullable
+  `Server`; per-model servers made plurality structural, not optional.
 - **Two execute seams on `IDatabaseSession`.** The typed seam
   (`ExecuteAsync(QueryRequest)`) is for in-process consumers that already speak a
   model's language objects (`SqlQueryRequest`). The **text seam**
@@ -96,39 +112,46 @@ surface. Child roots never reference the root.
   `Database.Transactions` (`IDatabaseTransaction` consumes them), and
   `ProtocolVersion` lives in `Database.Protocol` (`IDatabaseServerSession`
   consumes it).
-- **Background workers are engine-owned objects hosts *schedule*, not host
-  services engines *implement*** (#902). `IDatabaseEngineWorker` (with the guided
-  base `DatabaseEngineWorker`) exposes each durability/maintenance loop — kind,
-  cadence, a blocking pump (`Run`) for dedicated threads, and a bounded step
-  (`RunIteration`) for timer loops — plus an atomic claim handshake:
-  `IDatabaseEngine.StartAsync` self-schedules every unclaimed worker, a host claims
-  before start to drive workers on its own execution menu, and a worker therefore
-  never runs twice concurrently. The rejected alternative — engines implementing the
-  hosting library's service contracts directly — would invert the dependency (the
-  kernel referencing the hosting layer) and strand embedded consumers, who have no
-  host to run services (R10). The two pump shapes exist because the execution menu
-  has two members: a dedicated thread wants one blocking call frame; a pooled timer
-  wants a bounded pass and owns the wait itself. Workers are synchronous by design —
-  every body is storage I/O (fsync, page writes, checkpoint), which has no async
-  fast path.
-- **Server *contracts* live here; the server *runtime* does not** (owner
-  decision, 2026-07-12 — reverses the earlier "server contracts do not live
-  here" non-goal). `IDatabaseServer`/`IDatabaseServerSession` are abstractions
-  over root and child-root concepts only (`IDatabaseEngine`, `IDatabaseSession`,
-  `Protocol`'s `ProtocolVersion`), and the hosting-isolation rule (COHRES001)
-  makes the hosting module unreferenceable by area libraries — without the seam
-  here, no feature library (quotas, health, a future `Database.Testing` factory)
-  could even *name* the server. The runtime implementation stays in
-  `Database.Hosting`; embedded, in-process users still pay for nothing but two
-  interfaces.
+- **Background workers are engine-owned, unconditionally — the claim handshake
+  is gone** (owner decision, 2026-07-13; supersedes the #902 claim model). The
+  engine spawns its worker loops at creation — the latency-critical flusher and
+  write-back loops on dedicated threads the engine itself owns, satisfying the
+  Lane-H dedicated-thread guardrail with no host involvement — and quiesces
+  them on dispose. `IDatabaseEngineWorker` shrank to an **observational**
+  contract (name, kind, cadence — what a diagnostics or health surface needs);
+  the pump machinery (`Run`/`RunIteration`/`WaitForTrigger`) lives on the
+  guided base `DatabaseEngineWorker` for the owning engine's internal use only.
+  The rejected (previous) design — `TryClaim`/`Release` plus host worker slots
+  mapping claimed workers onto the hosting execution menu — existed to let a
+  host own worker scheduling; per R10 the engine had to own the *work* anyway,
+  so the handshake bought configurability nobody used at the price of a
+  two-owner protocol whose failure modes (claim races, disabled slots,
+  half-claimed inventories) all had to be designed away. One owner, no
+  handshake: a worker can never run twice because exactly one engine-internal
+  scheduler exists. Workers remain synchronous by design — every body is
+  storage I/O (fsync, page writes, checkpoint), which has no async fast path.
+- **Server *contracts* live here; the server *machinery* lives in
+  `Database.Server`; servers are per-model** (owner decision, 2026-07-13;
+  extends the 2026-07-12 decision that put the contracts here). A server fronts
+  exactly **one** engine — `IDatabaseServerContext.Engine` is singular — so
+  model-specific wire behavior has a home (`SqlDatabaseServer`), while
+  everything model-agnostic (session state machine, framing, guardrails,
+  drain) ships as the guided abstract base `DatabaseServer` in the shared
+  `Assimalign.Cohesion.Database.Server` library *above* this root. The
+  contracts stay here for the same COHRES001 reason as before: feature
+  libraries (quotas #167, health #168, a future `Database.Testing`) must be
+  able to name the server without referencing any runtime. The context shape
+  (`Context` = engine + sessions) mirrors the application context pattern —
+  observational composition on a context, lifecycle on the owning object.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
-  live here so **model packages register their engines without knowing the
-  hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` as an
-  `extension(IDatabaseApplicationBuilder)` member and never references
-  `Database.Hosting` (COHRES001 intact); the hosting module ships the
-  implementation (`DatabaseApplicationBuilder`) and the creation entry point
-  (`DatabaseApplication.CreateBuilder()`). This mirrors the Web area exactly
+  live here so **model packages register their engines and servers without
+  knowing the hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` and
+  `AddSqlServer(...)` as `extension(IDatabaseApplicationBuilder)` members and
+  never references `Database.Hosting` (COHRES001 intact); the hosting module
+  ships the implementation (`DatabaseApplicationBuilder`) and the creation
+  entry point (`DatabaseApplication.CreateBuilder()`). Multiple `AddServer`
+  registrations are allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
   in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
   pattern is the **cross-area expectation**: every area root provides
@@ -179,19 +202,16 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## Lifecycle pattern
 
-- Engines: `StartAsync`/`StopAsync` are part of the root contract, declared on
-  `IDatabaseEngineLifecycle` (added with #902; segregated from the operations
-  contract 2026-07-13 — previously only the concrete engines exposed them, which
-  meant a host could *serve* engines but not *drive* them generically; `Database.Hosting`
-  and `Database.Embedded` must align engine lifecycle with their own without
-  knowing concrete types). Start is idempotent while `Running`; stop is a no-op
-  when not `Running`; a stopped engine may start again. Stop quiesces
-  background workers, durably flushes, and closes every open database —
-  committed work is durable when `StopAsync` completes. State transitions ride
-  the existing `EngineState` enum (`Idle`/`Stopped` → `Starting` → `Running` →
-  `Stopping` → `Stopped`; `Faulted` is terminal for start).
-- Engines: `IAsyncDisposable` + `IDisposable`; disposal stops and releases all
-  open databases.
+- Engines: **no lifecycle members** (the data-machine decision above). An engine
+  is operational from creation — background workers pumping, databases
+  creatable — and disposal (`IAsyncDisposable` + `IDisposable`, idempotent) is
+  its one transition: quiesce workers → durable flush → close every open
+  database. Committed work is durable when `DisposeAsync` completes. `State` is
+  observational only (`Running`/`Faulted`/`Disposed`).
+- Servers: `StartAsync`/`StopAsync` on `IDatabaseServer` — "running" lives on
+  the per-model server (and the application composing servers), never on the
+  engine. Stop drains gracefully within the server's drain budget; disposal
+  stops the server.
 - Sessions: disposing rolls back any active transaction (documented on the
   interface; sessions must never commit implicitly on dispose).
 - Transactions: disposing an uncommitted transaction rolls it back.
@@ -202,8 +222,9 @@ Contracts, enums, and value objects only — no reflection, no serialization.
 
 ## Non-goals
 
-- No connection/network concepts (that is the server runtime in
-  `Database.Hosting`, and `Database.Client`).
+- No connection/network concepts (that is the server machinery in
+  `Database.Server`, per-model servers in the model packages, and
+  `Database.Client`).
 - No DI or configuration surface (that is `Database.Hosting`'s seam alone).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

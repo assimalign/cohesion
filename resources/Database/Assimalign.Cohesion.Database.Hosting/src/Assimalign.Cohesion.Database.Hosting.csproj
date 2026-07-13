@@ -1,15 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!--
-		COHRES002-clean: the hosting module references only the area root inside the
-		area. The server runtime's own machinery — Database.Protocol (wire framing)
-		and Database.Security (authenticator seam) — arrives TRANSITIVELY through the
-		root, which rolls up every child root (the 2026-07-13 child-root inversion);
-		the former CohesionHostingIsolationExemptions for those two assemblies became
-		unnecessary and was removed. See docs/DESIGN.md.
+		Composition-only, COHRES002-clean: the hosting module references only the
+		area root inside the area, plus the non-area Hosting foundation. The server
+		runtime lives in Assimalign.Cohesion.Database.Server (shared server
+		infrastructure above the root, so per-model servers can derive from it);
+		this module composes IDatabaseServer instances generically as host services
+		and needs no transport (Connections) or wire (Protocol) knowledge at all.
 	-->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>

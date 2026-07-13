@@ -46,7 +46,6 @@ public class SqlExecutionPipelineTests : IDisposable
             EngineName = "test-engine",
             RootPath = _rootPath
         });
-        await engine.StartAsync();
         return engine;
     }
 
@@ -368,7 +367,6 @@ public class SqlExecutionPipelineTests : IDisposable
     public async Task Engine_InMemoryStrategy_ShouldExecuteSql()
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "memory" });
-        await engine.StartAsync();
         await using var _ = engine;
 
         var db = await engine.CreateDatabaseAsync("mem-db");

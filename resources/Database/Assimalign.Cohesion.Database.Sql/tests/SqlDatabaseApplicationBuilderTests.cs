@@ -55,12 +55,34 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
             options.Durability = StorageCommitDurability.Grouped;
         });
 
-        // Assert: the verb registered exactly the engine it returned.
+        // Assert: the verb registered exactly the engine it returned — a data
+        // machine, operational the moment the verb returned.
         builder.Engines.ShouldHaveSingleItem();
         builder.Engines[0].ShouldBeSameAs(engine);
         engine.Name.ShouldBe("verb-engine");
         engine.Model.ShouldBe(EngineModel.Sql);
-        engine.State.ShouldBe(EngineState.Idle);
+        engine.State.ShouldBe(EngineState.Running);
+        engine.Dispose();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - AddSqlServer: Registers a per-model server fronting the given engine")]
+    public async Task AddSqlServer_WithEngineAndListener_ShouldRegisterServer()
+    {
+        // Arrange
+        var builder = new RecordingApplicationBuilder();
+        await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.EngineName = "server-verb");
+        await using var listener = new Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener();
+
+        // Act
+        SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
+
+        // Assert: the verb registered exactly the server it returned, fronting the
+        // one engine (servers are per-model).
+        builder.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
+        server.Engine.ShouldBeSameAs(engine);
+        server.Context.Engine.ShouldBeSameAs(engine);
+        server.Context.Sessions.ShouldBeEmpty();
+        await server.DisposeAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - AddSqlDatabase: Defaults register an in-memory engine that serves SQL")]
@@ -70,8 +92,8 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
         var builder = new RecordingApplicationBuilder();
         await using SqlDatabaseEngine engine = builder.AddSqlDatabase();
 
-        // Act: drive the registered engine end-to-end through the root contracts.
-        await engine.StartAsync(TestContextToken());
+        // Act: drive the registered engine end-to-end through the root contracts —
+        // no start ceremony, the engine is operational from the verb.
         IDatabase database = await engine.CreateDatabaseAsync("builder-db", TestContextToken());
         await using IDatabaseSession session = await database.CreateSessionAsync(TestContextToken());
 

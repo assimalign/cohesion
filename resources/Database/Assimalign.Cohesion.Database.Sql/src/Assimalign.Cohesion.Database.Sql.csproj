@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<!-- Shared server infrastructure (feature-to-feature, COHRES-legal): the
+		     per-model SqlDatabaseServer derives from the DatabaseServer guided base. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />

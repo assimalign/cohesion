@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		Shared server infrastructure ABOVE the area root: the guided abstract base
+		(DatabaseServer) every per-model server derives from. References the root
+		(which rolls up the child roots - Database.Protocol wire framing and
+		Database.Security's authenticator seam arrive transitively) and the
+		Connections transport drivers. Deliberately NOT part of Database.Hosting:
+		per-model servers (Database.Sql's SqlDatabaseServer, ...) must derive from
+		the base, and COHRES001 makes the hosting module unreferenceable by area
+		libraries - so the machinery lives here, where models can see it.
+	-->
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+</Project>

@@ -39,11 +39,12 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | Project | Role |
 |---|---|
 | `Assimalign.Cohesion.Database.Protocol` | Child root — wire protocol frames and message contracts (shared client/server), `ProtocolVersion` |
+| `Assimalign.Cohesion.Database.Server` | Shared server infrastructure — the guided base (`DatabaseServer`) per-model servers derive from: session state machine, guardrails, two-phase drain (resurrected 2026-07-13; servers are per-model) |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
-| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
+| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); composition-only — wraps composed `IDatabaseServer` instances as endpoint host services (the server machinery lives in `Database.Server` + the per-model servers) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
 | `Assimalign.Cohesion.Database.Application` | **Interim:** the standalone host executable — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption). **Target design (pinned, #906):** the manifest-generation project SDK consumers load — build tasks code-gen the application manifest, `Database.ApplicationModel` surfaces it to the gateway (the `<Area>.Application` convention, `.claude/rules/resource-areas.md`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
@@ -52,7 +53,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 - `libraries/Core` — foundational primitives (everywhere)
 - `libraries/Hosting` — host lifecycle + per-service execution menu (`Database.Hosting`)
-- `libraries/Connections` — transport drivers for the server runtime (`Database.Hosting`)
+- `libraries/Connections` — transport drivers for the server machinery (`Database.Server` and, transitively, the per-model servers)
 - `libraries/ApplicationModel` — orchestration contracts (`Database.ApplicationModel` only)
 - `resources/Web` — private implementation detail of the root project (HTTP admin surface); hidden from consumers via `CohesionPrivateProjectReference`
 

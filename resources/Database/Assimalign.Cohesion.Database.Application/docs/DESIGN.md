@@ -6,8 +6,8 @@ The out-of-process database resource needs a process, and the orchestration plan
 already names it: `DatabaseResource.Artifact` is
 `"Assimalign.Cohesion.Database.Application"`. This project is that artifact — the
 **composition-root executable**, and nothing else: every behavior it exhibits
-(engine lifecycle, worker scheduling, endpoint drain, durability) lives in the
-libraries it composes. If a piece of logic here starts feeling like a feature, it
+(engine durability and its worker loops, endpoint drain) lives in the libraries
+it composes. If a piece of logic here starts feeling like a feature, it
 belongs in a library.
 
 ## Target design (pinned — #906)
@@ -45,9 +45,11 @@ is what the gateway E2E launches) until that issue lands.
   the proof-of-pattern consumer. The bootstrap starts from
   `DatabaseApplication.CreateBuilder()`, registers the SQL engine through the
   model's own verb (`builder.AddSqlDatabase(...)` — shipped by `Database.Sql`
-  against the root's `IDatabaseApplicationBuilder` seam), registers the TCP
-  endpoint as a *deferred* server factory (it receives the final engine list at
-  build), and parks the default-database provisioner on
+  against the root's `IDatabaseApplicationBuilder` seam; the engine is a data
+  machine, operational the moment the verb returns), fronts it with the SQL
+  model's server (`builder.AddSqlServer(engine, ...)` over the TCP listener —
+  eager, not deferred: a per-model server needs only its one engine, already in
+  hand), and parks the default-database provisioner on
   `builder.Options.Services`. Hand-assembling `DatabaseApplicationOptions` was
   the interim shape; the builder is the same options object with the model
   registration inverted to the package that owns the model.
@@ -67,16 +69,16 @@ is what the gateway E2E launches) until that issue lands.
   with a default the operator did not choose.
 - **Graceful shutdown via `PosixSignalRegistration`** for SIGINT and SIGTERM (the
   orchestrator's stop): the handler cancels the run token — the host's shutdown
-  signal — so the endpoint drains first, worker slots quiesce, and engines flush
-  durably before exit. `ProcessExit` alone was rejected: it races the runtime's
+  signal — so the endpoint drains first, and the composition's disposal then
+  disposes the engine, quiescing its workers and flushing durably before exit. `ProcessExit` alone was rejected: it races the runtime's
   teardown; the signal registration pre-empts default termination cleanly on all
   platforms.
 - **The host provisions a default database (`app`).** The wire protocol has no
   CREATE DATABASE verb (database provisioning is a deployment concern in the MVP),
   so a fresh server process with zero databases would be unusable — no client
   could bind anything. An internal `DefaultDatabaseProvisioner` host service runs
-  after the engine starts and before the endpoint accepts: it opens `app` when its
-  files exist (restart) and creates it on first launch. The name is a convention
+  before the endpoint accepts (services start ahead of the servers): it opens
+  `app` when its files exist (restart) and creates it on first launch. The name is a convention
   for now; a `COHESION_DATABASE_NAME` binding (mirrored by a
   `DatabaseResourceOptions` knob so both planes agree) is the natural follow-up
   when multi-database deployments need it.
@@ -94,7 +96,8 @@ is what the gateway E2E launches) until that issue lands.
 Configuration errors (`FormatException` from the port binder or the durability
 mapping) print a `cohesion-db:`-prefixed line to stderr and exit `1` before
 anything binds. Runtime faults propagate from the host (`Host<TContext>` rolls back
-a failed start; a worker fault surfaces from the engine's stop).
+a failed start; an engine background-worker fault is observable as
+`EngineState.Faulted` — the engine keeps serving, degraded).
 
 ## AOT posture
 

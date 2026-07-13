@@ -65,7 +65,6 @@ public sealed class SqlDurabilityTests : IDisposable
     {
         // Arrange
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
-        await engine.StartAsync();
         await using var _ = engine;
 
         var database = await engine.CreateDatabaseAsync("rollback-db");
@@ -87,7 +86,6 @@ public sealed class SqlDurabilityTests : IDisposable
     {
         // Arrange: write two committed rows, then dispose the engine (clean shutdown).
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
-        await engine.StartAsync();
 
         var database = await engine.CreateDatabaseAsync("restart-db");
         await using (var session = await database.CreateSessionAsync())
@@ -103,7 +101,6 @@ public sealed class SqlDurabilityTests : IDisposable
 
         // Act: a fresh engine over the same root reopens the database.
         var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "durability", RootPath = _rootPath });
-        await reopenedEngine.StartAsync();
         await using var __ = reopenedEngine;
 
         var reopenedDatabase = await reopenedEngine.OpenDatabaseAsync("restart-db");

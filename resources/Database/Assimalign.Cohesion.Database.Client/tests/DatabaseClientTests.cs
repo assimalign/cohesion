@@ -112,7 +112,7 @@ public class DatabaseClientTests
         // Assert: the same client connection (and its server session) served both
         // rents — no re-dial, no re-authentication.
         second.ShouldBeSameAs(first);
-        harness.Server.Sessions.ShouldHaveSingleItem();
+        harness.Server.Context.Sessions.ShouldHaveSingleItem();
 
         await second.DisposeAsync();
     }

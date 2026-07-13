@@ -11,19 +11,18 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
 /// Tests for the application builder — the area's instance of the cross-area
-/// builder pattern: engines register against the root's
+/// builder pattern: engines and servers register against the root's
 /// <c>IDatabaseApplicationBuilder</c> seam, a deferred server factory receives the
-/// final engine list at build, and the built <c>IDatabaseApplication</c> serves
-/// the registered engines on the standard start/stop lifecycle.
+/// application context at build (the Web shape), and the built
+/// <c>IDatabaseApplication</c> exposes the composition through its context.
 /// </summary>
 public class DatabaseApplicationBuilderTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Built application serves the registered engine across start and stop")]
-    public async Task Build_WithRegisteredEngine_ShouldServeEngineLifecycle()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Built application exposes the registered engine through its context")]
+    public async Task Build_WithRegisteredEngine_ShouldExposeEngineOnContext()
     {
         // Arrange: register through the ROOT interface, the seam model verbs use.
-        var log = new List<string>();
-        var engine = new RecordingEngine(log);
+        var engine = new RecordingEngine();
         IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         builder.AddEngine(engine);
@@ -33,30 +32,30 @@ public class DatabaseApplicationBuilderTests
         IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
 
-        // Assert: the application serves the engine and drives its lifecycle.
-        application.Engines.ShouldHaveSingleItem();
-        application.Engines[0].ShouldBeSameAs(engine);
+        // Assert: the context carries the server-less registration; the engine is a
+        // data machine the application does not drive (no lifecycle calls to fake).
+        application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(engine);
+        application.Context.Servers.ShouldBeEmpty();
         engine.State.ShouldBe(EngineState.Running);
 
         await application.StopAsync(DatabaseHostTestHarness.Timeout());
-        engine.State.ShouldBe(EngineState.Stopped);
-        log.ShouldBe(["engine:start", "engine:stop"]);
+        engine.State.ShouldBe(EngineState.Running);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred server factory receives the final engine list and runs as the endpoint")]
-    public async Task Build_WithDeferredServerFactory_ShouldComposeEndpointOverRegisteredEngines()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred server factory receives the context with the final engine list")]
+    public async Task Build_WithDeferredServerFactory_ShouldComposeEndpointOverContext()
     {
         // Arrange: the server factory is registered BEFORE the engine — it must
-        // still see the full engine list, because it runs at Build.
+        // still see the full engine list, because it runs at Build with the context.
         var log = new List<string>();
-        var engine = new RecordingEngine(log);
-        var server = new RecordingServer(log);
+        var engine = new RecordingEngine();
+        var server = new RecordingServer(log, "deferred");
         IReadOnlyList<IDatabaseEngine>? observedEngines = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(engines =>
+        builder.AddServer(context =>
         {
-            observedEngines = engines;
+            observedEngines = context.Engines;
             return server;
         });
         builder.AddEngine(engine);
@@ -66,24 +65,45 @@ public class DatabaseApplicationBuilderTests
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
 
-        // Assert: the factory saw the registered engine, and the endpoint started
-        // last / drained first around the engine lifecycle.
+        // Assert: the factory saw the registered engine through the context, and
+        // the produced server ran as the endpoint.
         observedEngines.ShouldNotBeNull();
-        observedEngines.ShouldHaveSingleItem();
-        observedEngines[0].ShouldBeSameAs(engine);
-        log.ShouldBe(["engine:start", "server:start", "server:stop", "engine:stop"]);
+        observedEngines.ShouldHaveSingleItem().ShouldBeSameAs(engine);
+        application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
+        log.ShouldBe(["deferred:start", "deferred:stop"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Second server registration is rejected")]
-    public void AddServer_WhenServerAlreadyRegistered_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Multiple servers register — one per model — and resolve in registration order")]
+    public async Task AddServer_MultipleRegistrations_ShouldComposeAllInOrder()
     {
-        // Arrange
+        // Arrange: an instance registration plus a deferred factory that observes
+        // the server registered ahead of it through the context.
         var log = new List<string>();
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(new RecordingServer(log));
+        var first = new RecordingServer(log, "first");
+        var second = new RecordingServer(log, "second");
+        IReadOnlyList<IDatabaseServer>? observedServers = null;
 
-        // Act + Assert
-        Should.Throw<InvalidOperationException>(() => builder.AddServer(_ => new RecordingServer(log)));
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        builder.AddServer(first);
+        builder.AddServer(context =>
+        {
+            observedServers = [.. context.Servers];
+            return second;
+        });
+
+        // Act
+        DatabaseApplication application = builder.Build();
+        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert: both servers composed in registration order; the deferred factory
+        // saw the first server already registered; stop drains in reverse.
+        observedServers.ShouldNotBeNull();
+        observedServers.ShouldHaveSingleItem().ShouldBeSameAs(first);
+        application.Context.Servers.Count.ShouldBe(2);
+        application.Context.Servers[0].ShouldBeSameAs(first);
+        application.Context.Servers[1].ShouldBeSameAs(second);
+        log.ShouldBe(["first:start", "second:start", "second:stop", "first:stop"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Building twice is rejected")]
@@ -91,8 +111,19 @@ public class DatabaseApplicationBuilderTests
     {
         // Arrange
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(new RecordingEngine(new List<string>()));
+        builder.AddEngine(new RecordingEngine());
         builder.Build();
+
+        // Act + Assert
+        Should.Throw<InvalidOperationException>(() => builder.Build());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: A deferred factory returning null is rejected at build")]
+    public void Build_WhenDeferredFactoryReturnsNull_ShouldThrow()
+    {
+        // Arrange
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        builder.AddServer(_ => null!);
 
         // Act + Assert
         Should.Throw<InvalidOperationException>(() => builder.Build());

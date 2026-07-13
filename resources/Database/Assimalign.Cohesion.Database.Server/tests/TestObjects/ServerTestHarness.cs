@@ -4,18 +4,19 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 
-namespace Assimalign.Cohesion.Database.Hosting.Tests;
+namespace Assimalign.Cohesion.Database.Server.Tests;
 
 /// <summary>
 /// A live SQL engine + in-memory listener + running server, with a seeded
-/// <c>users</c> table, for end-to-end protocol tests without sockets.
+/// <c>users</c> table, for end-to-end protocol tests without sockets. The server
+/// is a minimal <see cref="DatabaseServer"/> derivative fronting the one engine —
+/// the per-model shape.
 /// </summary>
 internal sealed class ServerTestHarness : IAsyncDisposable
 {
-    private ServerTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, IDatabaseServer server)
+    private ServerTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, TestDatabaseServer server)
     {
         Engine = engine;
         Listener = listener;
@@ -26,14 +27,13 @@ internal sealed class ServerTestHarness : IAsyncDisposable
 
     public InMemoryConnectionListener Listener { get; }
 
-    public IDatabaseServer Server { get; }
+    public TestDatabaseServer Server { get; }
 
     public const string DatabaseName = "app";
 
     public static async Task<ServerTestHarness> StartAsync(Action<DatabaseServerOptions>? configure = null)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-e2e" });
-        await engine.StartAsync();
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 
@@ -46,10 +46,9 @@ internal sealed class ServerTestHarness : IAsyncDisposable
         var listener = new InMemoryConnectionListener();
         var options = new DatabaseServerOptions { Listener = listener };
 
-        options.Engines.Add(engine);
         configure?.Invoke(options);
 
-        var server = DatabaseServer.Create(options);
+        var server = new TestDatabaseServer(engine, options);
         await server.StartAsync();
 
         return new ServerTestHarness(engine, listener, server);

@@ -27,8 +27,9 @@ shared storage, with DDL flowing through the relational catalog
 ## Usage
 
 ```csharp
-var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = dataDirectory });
-await engine.StartAsync();
+// A data machine: operational from Create (background workers running), no
+// start ceremony; dispose to durably flush and close.
+await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = dataDirectory });
 
 var database = await engine.CreateDatabaseAsync("app");
 await using var session = await database.CreateSessionAsync();
@@ -42,15 +43,22 @@ await session.ExecuteAsync(SqlQueryRequest.FromSql(
 
 ### Registering on a database application
 
-The model's builder verb composes against the area root's
-`IDatabaseApplicationBuilder` seam (no hosting reference — the verb ships here,
-per the area builder pattern):
+The model's builder verbs compose against the area root's
+`IDatabaseApplicationBuilder` seam (no hosting reference — the verbs ship here,
+per the area builder pattern). `AddSqlDatabase` registers the engine;
+`AddSqlServer` fronts it with the SQL model's wire-protocol server
+(`SqlDatabaseServer`, derived from the `Database.Server` guided base):
 
 ```csharp
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
 {
     options.RootPath = dataDirectory;          // omit for in-memory
     options.Durability = StorageCommitDurability.Grouped;
+});
+
+SqlDatabaseServer server = builder.AddSqlServer(engine, options =>
+{
+    options.Listener = listener;               // the bound transport listener
 });
 ```
 

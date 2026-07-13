@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Database.Application.Internal;
 /// <summary>
 /// Builds the standalone database host from the bound environment configuration:
 /// a file-backed SQL engine at the data path, a TCP listener on the configured
-/// port, the wire-protocol server, and the <see cref="DatabaseApplication"/>
-/// composing them. <c>Program</c> is a thin shim over this type so tests can
-/// drive the whole composition without spawning a process.
+/// port, the SQL model's wire-protocol server fronting the engine, and the
+/// <see cref="DatabaseApplication"/> composing them. <c>Program</c> is a thin shim
+/// over this type so tests can drive the whole composition without spawning a
+/// process.
 /// </summary>
 internal static class DatabaseApplicationBootstrap
 {
@@ -28,10 +29,12 @@ internal static class DatabaseApplicationBootstrap
     /// <summary>
     /// Composes a runnable database application from the configuration, through the
     /// area's builder pattern: <see cref="DatabaseApplication.CreateBuilder()"/> is
-    /// the entry point, the SQL model registers its own engine via its
-    /// <c>AddSqlDatabase</c> verb (shipped by <c>Database.Sql</c> against the root's
-    /// <see cref="IDatabaseApplicationBuilder"/> seam), and the endpoint is a
-    /// deferred server factory that receives the registered engines at build time.
+    /// the entry point, and the SQL model registers its own engine and server via
+    /// the <c>AddSqlDatabase</c>/<c>AddSqlServer</c> verbs (shipped by
+    /// <c>Database.Sql</c> against the root's
+    /// <see cref="IDatabaseApplicationBuilder"/> seam). The engine is a data
+    /// machine — operational the moment the verb returns; the server is what the
+    /// application starts and stops.
     /// </summary>
     /// <param name="configuration">The bound host configuration.</param>
     /// <returns>The composed parts; the caller owns their disposal.</returns>
@@ -62,27 +65,16 @@ internal static class DatabaseApplicationBootstrap
             EndPoint = new IPEndPoint(IPAddress.Any, configuration.Port ?? 0),
         });
 
-        // Deferred: the factory runs at Build with the final registered engine
-        // list, so the endpoint always serves exactly what the builder composed.
-        builder.AddServer(engines =>
-        {
-            var serverOptions = new DatabaseServerOptions { Listener = listener };
+        // The SQL model's per-model server fronts the engine on the listener; the
+        // application wraps it as its endpoint host service (started last, drained
+        // first).
+        SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 
-            foreach (IDatabaseEngine registered in engines)
-            {
-                serverOptions.Engines.Add(registered);
-            }
-
-            return DatabaseServer.Create(serverOptions);
-        });
-
-        // Provision the default database after the engine starts and before the
-        // endpoint accepts (additional services sit between the worker slots and the
-        // endpoint in the start order), so a client can always bind it.
+        // Provision the default database ahead of the endpoint (additional services
+        // start before the servers), so a client can always bind it.
         builder.Options.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
 
         DatabaseApplication application = builder.Build();
-        IDatabaseServer server = builder.Options.Server!;
 
         return new DatabaseApplicationComposition(engine, listener, server, application);
     }

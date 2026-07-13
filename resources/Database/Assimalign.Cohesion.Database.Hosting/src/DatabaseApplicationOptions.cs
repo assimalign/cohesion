@@ -5,49 +5,42 @@ namespace Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Hosting;
 
 /// <summary>
-/// Options for <see cref="DatabaseApplication"/>: the engines the host serves, the
-/// wire-protocol server, additional host services composed on top of the durability
-/// worker slots, and toggles for the durability services.
+/// Options for <see cref="DatabaseApplication"/>: the wire-protocol servers the
+/// application runs, the engines it holds as server-less embedded registrations,
+/// and any additional host services.
 /// </summary>
 /// <remarks>
-/// The hosting module owns the database server runtime (folded in from the former
-/// <c>Database.Server</c> project), so the host composes the endpoint directly:
-/// build the server with <see cref="DatabaseServer.Create"/> and assign it to
-/// <see cref="Server"/> — <see cref="DatabaseApplication"/> wraps it in the internal
-/// endpoint host service and registers it last, so it starts last and drains first.
+/// The hosting module is composition-only: it wraps each registered
+/// <see cref="IDatabaseServer"/> in an internal endpoint host service, registered
+/// after every other service so the servers start last and drain first. Engines
+/// have no lifecycle for the host to drive — they are data machines, operational
+/// from creation — so <see cref="Engines"/> is purely the application context's
+/// observational registry of server-less engines. Per-model servers are composed by
+/// the model packages (for example <c>SqlDatabaseServer</c> via the
+/// <c>AddSqlServer</c> builder verb in <c>Assimalign.Cohesion.Database.Sql</c>) or
+/// directly by the composition root, and assigned here.
 /// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
     /// <summary>
-    /// Gets the engines this host serves. The application drives each engine's
-    /// lifecycle through the root contract (<see cref="IDatabaseEngine.StartAsync"/>/
-    /// <see cref="IDatabaseEngine.StopAsync"/>): engines start before every other
-    /// composed service and stop last, after the endpoint has drained. An engine the
-    /// composition root already started (for example to seed databases) is served
-    /// as-is — engine start is idempotent.
+    /// Gets the engines this application holds as server-less, embedded
+    /// registrations (exposed through
+    /// <see cref="IDatabaseApplicationContext.Engines"/>). The composition root
+    /// that created an engine owns its disposal; the application never starts,
+    /// stops, or disposes engines.
     /// </summary>
     public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
 
     /// <summary>
-    /// Gets or sets the wire-protocol server the host runs as its endpoint, or null
-    /// when the host serves no network endpoint. The application wraps the server in
-    /// its internal endpoint host service, registered last — the endpoint starts
-    /// last and drains first on stop.
+    /// Gets the wire-protocol servers the application runs — one per model it
+    /// serves. Each is wrapped in an internal endpoint host service registered
+    /// last, so servers start last and drain first on stop.
     /// </summary>
-    public IDatabaseServer? Server { get; set; }
+    public IList<IDatabaseServer> Servers { get; } = new List<IDatabaseServer>();
 
     /// <summary>
-    /// Gets the additional host services composed on top of the worker slots and
-    /// ahead of the endpoint. They start after the worker services and stop before
-    /// them.
+    /// Gets the additional host services composed ahead of the servers. They start
+    /// before the servers and stop after the servers have drained.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
-
-    /// <summary>
-    /// Gets the mapping of engine-owned background workers onto the execution menu:
-    /// per worker kind, whether the host claims it and which execution model drives
-    /// it. The host never owns the work — disabling a slot hands the loop back to
-    /// the engine's own scheduler (see <see cref="DatabaseWorkerSlotOptions"/>).
-    /// </summary>
-    public DatabaseWorkerMappingOptions Workers { get; } = new();
 }

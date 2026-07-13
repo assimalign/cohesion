@@ -9,9 +9,11 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
-		<!-- Composition acceptance: the host runs a real SQL engine + the wire server
-		     (owned by Hosting) over the in-memory driver, driven end-to-end by a
-		     client (tests are exempt from the area layering rules). -->
+		<!-- Composition acceptance: the host runs a real SQL engine fronted by the
+		     SQL model's server (SqlDatabaseServer over the Database.Server base)
+		     on the in-memory driver, driven end-to-end by a client (tests are
+		     exempt from the area layering rules). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

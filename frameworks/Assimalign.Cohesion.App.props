@@ -226,11 +226,14 @@
              closure, so the framework must deliver it. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
-        <!-- Service surface: wire protocol, client core, security, the embedded
-             facade, and the host composition module (which owns the server runtime;
-             Database.Server was folded into Database.Hosting 2026-07-12). -->
+        <!-- Service surface: wire protocol, the shared server base (per-model
+             servers derive from Database.Server; resurrected 2026-07-13 after the
+             2026-07-12 fold into Database.Hosting - COHRES001 means model servers
+             cannot derive from a base living in the hosting module), client core,
+             security, the embedded facade, and the composition-only hosting module. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Server" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />

@@ -17,6 +17,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<!-- The AddSqlServer verb test binds a real (in-memory) listener. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
 
 </Project>

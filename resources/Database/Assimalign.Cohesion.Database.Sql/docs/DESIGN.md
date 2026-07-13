@@ -38,13 +38,17 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
 
-## Engine-owned background workers (#902)
+## Engine-owned background workers
 
-The engine exposes the five-worker inventory of the root contract's
-`IDatabaseEngineWorker` seam — created with the engine (so hosts can claim them
-before start) and iterating a lock-free snapshot of every open storage file set
-(data + catalog per database, rebuilt when databases open/close; passes tolerate
-racing a drop):
+The engine is a **data machine**: `Create(options)` returns it operational, with
+the five-worker inventory already pumping — one dedicated background thread per
+worker, spawned by the constructor and joined on dispose. Nothing outside the
+engine schedules, claims, or configures these loops (the 2026-07-13 redesign
+deleted the #902 claim handshake — see the root DESIGN.md); the root contract's
+`IDatabaseEngineWorker` view of them is observational (name, kind, cadence).
+Each worker iterates a lock-free snapshot of every open storage file set (data +
+catalog per database, rebuilt when databases open/close; passes tolerate racing
+a drop):
 
 - **`SqlWriteAheadFlushWorker`** — signal-driven group-commit flusher. Every open
   storage's `OnCommitPending` hook sets one engine-level event; a pass resets the
@@ -62,33 +66,56 @@ racing a drop):
   compaction yet. They keep the inventory — and any host mapping over it — stable;
   the bodies fill in when those integrations land, without touching the seam.
 
-**Scheduling handoff (single ownership):** `StartAsync` claims and self-schedules
-every worker nobody claimed, one dedicated background thread per worker — an
-embedded consumer gets identical durability with no host (R10). A host claims
-workers before start and drives them on its own execution menu instead. `StopAsync`
-quiesces the self-scheduled pumps *before* closing databases, releases the engine's
-claims (so a stop-start cycle or a later host can re-claim), and surfaces any worker
-fault collected during the run as a `DatabaseException` — a faulted worker never
-compromises correctness (grouped commits self-help within the window; checkpoints
-simply stop truncating), but the owner must learn the engine ran degraded.
+**Lifecycle (create → use → dispose):** the worker threads live exactly as long
+as the engine. Disposal signals the pumps, joins the threads *before* closing
+storages (no worker pass may touch a database being disposed), then durably
+flushes and closes every open database — an embedded consumer gets identical
+durability with no host and no composition at all (R10). A worker fault flips
+the engine's observational `State` to `Faulted` without stopping service — a
+faulted worker never compromises correctness (grouped commits self-help within
+the window; checkpoints simply stop truncating), but the owner can observe the
+engine runs degraded. (Previously the fault was thrown from `StopAsync`; with
+lifecycle members gone, `State` is the reporting surface — throwing from
+`DisposeAsync` would be hostile to `await using`.)
 
-Cadence knobs live here, on `SqlDatabaseEngineOptions`, not on the host — the
-engine owns the loop whether or not a host maps it, and hosts read cadence through
+Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
+loop, so cadence is engine configuration; observers read it through
 `IDatabaseEngineWorker.Interval`.
 
-## The application-builder verb (`AddSqlDatabase`)
+## The per-model server (`SqlDatabaseServer`)
 
-The model registers itself on a database application through
-`AddSqlDatabase(Action<SqlDatabaseEngineOptions>?)` — an
-`extension(IDatabaseApplicationBuilder)` member in `Extensions/`, composing
+The SQL model ships its own wire-protocol server: `SqlDatabaseServer :
+DatabaseServer` (the guided base in `Assimalign.Cohesion.Database.Server` — a
+feature-to-feature reference, COHRES-legal), fronting exactly one
+`SqlDatabaseEngine` (`Create(engine, options)`). Servers are per-model by
+design: this type is where SQL-specific wire behavior grows (typed relational
+payloads, SQL transaction frames) as the protocol's model-specific surface
+lands; today it adds the typed `Engine` accessor and the composition seam, and
+execution rides the base's model-agnostic text-execute path. "Running" lives
+here — the engine underneath has no lifecycle; the server starts and stops
+around it.
+
+## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
+
+The model registers itself on a database application through two
+`extension(IDatabaseApplicationBuilder)` members in `Extensions/`, composing
 against the **area root's builder seam only** (this package references no
 hosting module; COHRES001 stays intact — the same rule that puts
-`AddAuthentication` in `Web.Authentication`, not `Web.Hosting`). The verb
-returns the registered `SqlDatabaseEngine` — the Web convention of returning
-the feature's own composition object — so a composition root can seed or
-provision databases before the application starts. Registration is
-dependency-free: the verb news the engine up from options and hands it to
-`AddEngine`; no container, no configuration binding.
+`AddAuthentication` in `Web.Authentication`, not `Web.Hosting`):
+
+- `AddSqlDatabase(Action<SqlDatabaseEngineOptions>?)` creates and registers the
+  engine — operational the moment the verb returns — and returns it (the Web
+  convention of returning the feature's own composition object), so a
+  composition root can seed or provision databases, or front the engine with a
+  server, before the application starts.
+- `AddSqlServer(SqlDatabaseEngine, Action<DatabaseServerOptions>)` creates and
+  registers a `SqlDatabaseServer` fronting the given engine and returns it. The
+  verb composes eagerly — a per-model server needs only its one engine, already
+  in hand, so the deferred context-receiving `AddServer` overload exists for
+  composition roots with genuinely late-bound decisions, not for model verbs.
+
+Registration is dependency-free: the verbs new the objects up from options and
+hand them to `AddEngine`/`AddServer`; no container, no configuration binding.
 
 ## Error model
 
