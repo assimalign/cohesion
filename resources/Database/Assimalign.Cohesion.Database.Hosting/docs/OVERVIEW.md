@@ -22,11 +22,13 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
   `Host<DatabaseApplicationContext>`, composing the durability worker slots, any
   additional host services, and the wire-protocol endpoint (registered last so it
   starts last and drains first).
-- The server runtime: `IDatabaseServer` (accept/drain lifecycle over the registered
-  engines, created with `DatabaseServer.Create(options)`), `IDatabaseServerSession`
-  (connection + principal + engine-session binding), and `DatabaseServerOptions`
-  (engines, bound listener, authenticator, plus the DoS guardrails: session limit,
-  auth/idle timeouts, drain budget). Statements execute through the root contract's
+- The server runtime: the `IDatabaseServer` implementation (accept/drain lifecycle
+  over the registered engines, created with `DatabaseServer.Create(options)`) and
+  `DatabaseServerOptions` (engines, bound listener, authenticator, plus the DoS
+  guardrails: session limit, auth/idle timeouts, drain budget). The abstractions
+  themselves — `IDatabaseServer`, `IDatabaseServerSession`, `ProtocolVersion` — live
+  in the area root so feature libraries can consume the seam without referencing
+  this module. Statements execute through the root contract's
   text-execute seam (`IDatabaseSession.ExecuteAsync(string, parameters)`), so the
   server never parses any model language; parameters and result rows ride the shared
   tuple-codec (`DatabaseValueCodec` in `Database.Types`).
@@ -43,8 +45,7 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 - `DatabaseApplicationContext`
 - `DatabaseApplicationOptions`
 - `DatabaseHostConfiguration`
-- `IDatabaseServer` / `DatabaseServer`
-- `IDatabaseServerSession`
+- `DatabaseServer` (implements the root's `IDatabaseServer`)
 - `DatabaseServerOptions`
 
 ## Composing a host

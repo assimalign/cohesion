@@ -1,8 +1,6 @@
 using System;
 
-using Assimalign.Cohesion.Database.Protocol;
-
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// One authenticated client session on the server: the binding between a network

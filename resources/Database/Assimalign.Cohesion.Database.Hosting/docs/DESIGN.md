@@ -9,9 +9,13 @@ composing the resource's units of work as hosted services and serving as the are
 DI/Configuration/Logging seam.
 
 This module also **owns the database server runtime** — the model-agnostic network
-front-end (`IDatabaseServer`, `DatabaseServer.Create`, the session pump). The server
-was originally a separate `Database.Server` library; it was folded into this module by
-owner decision on 2026-07-12 (see "The server runtime is a hosting concern" below).
+front-end (`DatabaseServer.Create`, the session pump). The server was originally a
+separate `Database.Server` library; it was folded into this module by owner decision
+on 2026-07-12 (see "The server runtime is a hosting concern" below). The server
+*abstractions* (`IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
+value type) live in the area root — the hosting-isolation rule makes this module
+unreferenceable by area libraries, so the seam must sit where they can see it. This
+module ships the implementation and the composition surface only.
 
 ## Execution model
 
@@ -90,9 +94,16 @@ Consequences:
   manual/custom composition path — a host that is not `DatabaseApplication` drives
   `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle instead of wrapping an
   `IHostService`.
-- The earlier alternative — promoting the server contract into the area root, the Web
-  area's shape (`IWebApplicationServer` lives in the `Web` root) — remains possible
-  but is no longer needed: the host owns the endpoint directly.
+- **The server contract was promoted into the area root** (owner decision, later the
+  same day): `IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
+  value type moved to `Assimalign.Cohesion.Database` — the Web area's shape
+  (`IWebApplicationServer` lives in the `Web` root). COHRES001 makes this module
+  unreferenceable by area libraries, so keeping the seam here would have made the
+  server invisible to quotas/health (#167/#168) and a future `Database.Testing`
+  factory. This module keeps the implementation (`DefaultDatabaseServer`, the session
+  pump) and the composition surface (`DatabaseServer.Create`, `DatabaseServerOptions`).
+  `ProtocolVersion.Current` stays with `Database.Protocol` as a static extension
+  member — the version claim lives with the wire implementation that makes it true.
 
 ### One server for five engines
 

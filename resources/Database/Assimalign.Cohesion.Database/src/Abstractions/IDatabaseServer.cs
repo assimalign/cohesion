@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// The network front-end of a database host: accepts connections, authenticates
@@ -11,10 +11,12 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// </summary>
 /// <remarks>
 /// The server is model-agnostic — it serves whichever engines the host registered.
-/// It is not itself an <c>IHostService</c>: <see cref="DatabaseApplication"/> wraps
-/// the server assigned to <see cref="DatabaseApplicationOptions.Server"/> in its
-/// internal endpoint host service, and an embedded or custom host drives
-/// <see cref="StartAsync"/>/<see cref="StopAsync"/> directly.
+/// It is not itself a host service: the hosting module's <c>DatabaseApplication</c>
+/// wraps the server configured on its options in an internal endpoint host service,
+/// and an embedded or custom host drives <see cref="StartAsync"/>/<see cref="StopAsync"/>
+/// directly. The runtime implementation lives in the hosting module
+/// (<c>Assimalign.Cohesion.Database.Hosting</c>); this seam lets area libraries
+/// observe or compose the server without referencing the runtime.
 /// </remarks>
 public interface IDatabaseServer : IAsyncDisposable
 {

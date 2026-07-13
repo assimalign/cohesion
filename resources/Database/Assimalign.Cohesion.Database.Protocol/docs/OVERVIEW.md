@@ -6,7 +6,7 @@ The Cohesion database wire protocol: the frame model and message contracts share
 
 - `ProtocolFrameHeader` / `ProtocolFrame` — 5-byte header (big-endian `u32` payload length + `u8` message type) and frame model (implemented, tested)
 - `ProtocolMessageType` — startup/auth, execute, streaming results (header/row/complete), transaction control, error, liveness, terminate
-- `ProtocolVersion` — negotiated at startup; `Current` is 1.0
+- `ProtocolVersion` — negotiated at startup; the value type lives in the area root (it is `IDatabaseServerSession` vocabulary), while this package publishes `ProtocolVersion.Current` (1.0) as a static extension member — the version this assembly implements
 - `ProtocolErrorCode` — stable, append-only error codes
 - `IProtocolFrameReader` / `IProtocolFrameWriter` — the transport-facing seams
 - `ProtocolException` — framing violations

@@ -35,10 +35,21 @@ produced it.
   root aggregates the execution family rather than owning it: execution is its
   own child root with pipeline/context machinery the contract root has no
   business carrying.
-- **Server contracts do not live here.** `IDatabaseServer` belongs to the
-  hosting module (`Database.Hosting`, which owns the server runtime); the engine
-  contract root must stay consumable by embedded, in-process users that never
-  open a socket.
+- **Server *contracts* live here; the server *runtime* does not** (owner
+  decision, 2026-07-12 — reverses the earlier "server contracts do not live
+  here" non-goal). `IDatabaseServer`/`IDatabaseServerSession` are abstractions
+  over root concepts only (`IDatabaseEngine`, `IDatabaseSession`,
+  `ProtocolVersion`), and the hosting-isolation rule (COHRES001) makes the
+  hosting module unreferenceable by area libraries — without the seam here, no
+  feature library (quotas, health, a future `Database.Testing` factory) could
+  even *name* the server. The runtime implementation stays in
+  `Database.Hosting`; embedded, in-process users still pay for nothing but two
+  interfaces and a two-`ushort` value type.
+- **`ProtocolVersion` (the value type) lives here; the version the wire speaks
+  does not.** The struct is `IDatabaseServerSession` vocabulary, so it moves
+  with the seam. `ProtocolVersion.Current` — "the version this assembly
+  implements" — is published by `Database.Protocol` as a static extension
+  member, keeping the claim with the implementation that makes it true.
 
 ## Error model
 
