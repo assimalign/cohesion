@@ -138,6 +138,46 @@ active transactions — truncating live before-images would orphan stolen writes
 checkpoints are a later feature (the record already carries the active-transaction
 set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
 
+With a background checkpointer (#902) checkpoints race live transactions, so the
+emptiness check hardened from "no page write locks" to an **active-transaction count**
+taken in `BeginTransaction` under the transaction lock and released exactly once per
+commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
+appended its begin record, and the whole checkpoint now runs *under* the transaction
+lock, so no transaction can slip between the emptiness check and the truncation.
+(Lock order is transaction lock → buffer pool → journal; no path takes them in
+reverse.) A checkpoint attempted while transactions are active still throws
+`StorageTransactionException` — background checkpointers treat that as "busy, retry
+next pass".
+
+### Commit durability modes (group commit)
+
+`Storage.CommitDurability` selects who performs the commit's durable flush — never
+whether it happens:
+
+- **`Synchronous` (default):** commit calls `EnsureDurable(commitLsn)` inline — one
+  fsync per commit, simplest latency profile.
+- **`Grouped`:** commit registers its LSN on the internal group-commit gate, wakes
+  the engine's flush worker through the `OnCommitPending` hook, and waits. The worker
+  calls `IStorage.FlushPendingCommits()` — one durable flush covering the highest
+  pending LSN — and wakes every covered committer, so concurrent commits share one
+  fsync. **Self-help invariant:** a committer not woken within `GroupCommitWindow`
+  flushes inline itself; a missing, stalled, or misconfigured worker costs bounded
+  latency, never durability. A commit is acknowledged only after its records are
+  durable in either mode.
+
+The gate lives in storage (not the engine) because commit blocks inside
+`CommitTransaction`; the engine contributes only the worker loop and the wake signal.
+Page write locks release after the durability wait, exactly as in synchronous mode.
+
+### Paced page write-back
+
+`IStorage.WriteBackDirtyPages(maxPages)` writes back a bounded batch of dirty
+buffered pages without evicting them — the page-writer worker's pass between
+checkpoints, so a checkpoint's `FlushAll` does not spike. Every write-back path (this
+one, eviction, `FlushAll`) funnels through the buffer pool's single write-back
+routine, so the write-ahead gate (journal durable ≥ page LSN) holds for stolen pages
+here exactly as everywhere else.
+
 ### What is deliberately unlogged
 
 Page 0 (the file header) carries only recomputable bookkeeping and is rebuilt or

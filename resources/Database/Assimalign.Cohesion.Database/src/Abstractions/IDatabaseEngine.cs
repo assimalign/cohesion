@@ -31,6 +31,16 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     EngineModel Model { get; }
 
     /// <summary>
+    /// Gets the engine-owned background workers (checkpointing, write-ahead-log
+    /// flushing, page write-back, maintenance). Workers exist from engine creation so
+    /// a host can claim them (<see cref="IDatabaseEngineWorker.TryClaim"/>) before
+    /// <see cref="StartAsync"/>; the engine self-schedules every worker still
+    /// unclaimed when it starts, so embedded consumers get identical behavior with no
+    /// host at all. See <see cref="IDatabaseEngineWorker"/> for the ownership rules.
+    /// </summary>
+    IReadOnlyList<IDatabaseEngineWorker> Workers { get; }
+
+    /// <summary>
     /// Starts the engine: composes its internal subsystems (storage strategy, background
     /// workers) and transitions it to <see cref="EngineState.Running"/>. Databases can be
     /// created, opened, and dropped only while the engine is running.

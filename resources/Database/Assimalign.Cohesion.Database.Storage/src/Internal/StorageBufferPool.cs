@@ -206,6 +206,38 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
+    /// <summary>
+    /// Writes back up to <paramref name="maxPages"/> dirty pages without evicting
+    /// them — the paced write-back pass a page-writer worker performs between
+    /// checkpoints. Each write-back honors the write-ahead gate like any other.
+    /// </summary>
+    /// <param name="stream">The stream to write to.</param>
+    /// <param name="maxPages">The maximum number of dirty pages to write.</param>
+    /// <returns>The number of pages written.</returns>
+    internal int FlushSome(StorageStream stream, int maxPages)
+    {
+        lock (_syncRoot)
+        {
+            int written = 0;
+
+            foreach (var kvp in _entries)
+            {
+                if (written >= maxPages)
+                {
+                    break;
+                }
+
+                if (kvp.Value.IsDirty)
+                {
+                    WriteBack(stream, (PageId)kvp.Key, kvp.Value);
+                    written++;
+                }
+            }
+
+            return written;
+        }
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

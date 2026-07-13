@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
+using Assimalign.Cohesion.Database.Sql.Storage;
+
 using Internal;
 
 /// <summary>
@@ -25,8 +27,15 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly SqlDatabaseEngineOptions _options;
     private readonly Dictionary<string, IDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
+    private readonly IDatabaseEngineWorker[] _workers;
+    private readonly ManualResetEventSlim _commitPendingSignal = new();
+    private readonly Action _signalCommitPending;
+    private readonly List<(IDatabaseEngineWorker Worker, Thread Thread)> _selfScheduled = new();
 
     private ISqlStorageStrategy? _strategy;
+    private SqlStorage[] _storageSnapshot = [];
+    private CancellationTokenSource? _workerStopSource;
+    private Exception? _workerFault;
     private EngineState _state;
     private bool _disposed;
 
@@ -40,6 +49,15 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         _options = options;
         Name = options.EngineName ?? "sql-engine";
         _state = EngineState.Idle;
+        _signalCommitPending = _commitPendingSignal.Set;
+        _workers =
+        [
+            new SqlWriteAheadFlushWorker(this, _commitPendingSignal),
+            new SqlPageWriteBackWorker(this),
+            new SqlCheckpointWorker(this),
+            new SqlVersionPurgeWorker(this),
+            new SqlIndexMaintenanceWorker(this),
+        ];
     }
 
     /// <inheritdoc />
@@ -50,6 +68,22 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Sql;
+
+    /// <inheritdoc />
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
+
+    /// <summary>
+    /// Gets the engine options, for the engine's background workers.
+    /// </summary>
+    internal SqlDatabaseEngineOptions EngineOptions => _options;
+
+    /// <summary>
+    /// Gets a point-in-time snapshot of every open storage file set (the data and
+    /// catalog sets of every open database), for the engine's background workers.
+    /// The snapshot is rebuilt when databases open or close; a worker pass may
+    /// therefore race a drop, which workers tolerate.
+    /// </summary>
+    internal SqlStorage[] GetStorageSnapshot() => Volatile.Read(ref _storageSnapshot);
 
     /// <summary>
     /// Creates a new SQL database engine from options.
@@ -80,10 +114,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new DatabaseException($"A database with name '{name}' already exists.");
             }
 
-            var storage = _strategy!.CreateStorage(name);
-            var catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
+            var storage = ConfigureStorage(_strategy!.CreateStorage(name));
+            var catalogStorage = ConfigureStorage(_strategy.CreateStorage(name + CatalogSuffix));
             var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
             _databases[name] = database;
+            RebuildStorageSnapshotLocked();
 
             return new ValueTask<IDatabase>(database);
         }
@@ -112,12 +147,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new DatabaseException($"Database '{name}' does not exist.");
             }
 
-            var storage = _strategy.OpenStorage(name);
-            var catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
+            var storage = ConfigureStorage(_strategy.OpenStorage(name));
+            var catalogStorage = ConfigureStorage(_strategy.StorageExists(name + CatalogSuffix)
                 ? _strategy.OpenStorage(name + CatalogSuffix)
-                : _strategy.CreateStorage(name + CatalogSuffix);
+                : _strategy.CreateStorage(name + CatalogSuffix));
             var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
             _databases[name] = database;
+            RebuildStorageSnapshotLocked();
 
             return new ValueTask<IDatabase>(database);
         }
@@ -138,8 +174,12 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         {
             if (_databases.TryGetValue(name, out var database))
             {
-                database.Dispose();
+                // Publish the shrunken snapshot before disposing so worker passes
+                // stop touching the storage as early as possible (a pass already in
+                // flight may still race the dispose, which workers tolerate).
                 _databases.Remove(name);
+                RebuildStorageSnapshotLocked();
+                database.Dispose();
             }
 
             _strategy!.DropStorage(name);
@@ -217,6 +257,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 Directory.CreateDirectory(_options.RootPath);
             }
 
+            // Self-schedule every background worker nobody claimed: an embedded
+            // consumer (no host) gets identical checkpoint/flush/write-back behavior
+            // out of the box, while a host that claimed workers before this start
+            // drives them on its own execution menu instead (R10 — the engine owns
+            // the work; the scheduler is pluggable).
+            StartSelfScheduledWorkersLocked();
+
             _state = EngineState.Running;
         }
 
@@ -246,7 +293,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             _state = EngineState.Stopping;
             snapshot = [.. _databases.Values];
             _databases.Clear();
+            _storageSnapshot = [];
         }
+
+        // Quiesce the self-scheduled workers before closing storages: no worker pass
+        // may touch a database that is being disposed. Host-claimed workers were
+        // already stopped by the host (its worker slots stop before the engines).
+        StopSelfScheduledWorkers();
 
         // Closing a database durably flushes it: storage disposal checkpoints when no
         // transaction is active (clean shutdown) and force-flushes the journal otherwise,
@@ -260,6 +313,15 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         {
             _state = EngineState.Stopped;
         }
+
+        // Surface a background-worker fault collected during the run: the work kept
+        // its correctness guarantees (commits self-help, checkpoints retry), but the
+        // owner must learn the engine ran degraded.
+        Exception? fault = Interlocked.Exchange(ref _workerFault, null);
+        if (fault is not null)
+        {
+            throw new DatabaseException($"Engine '{Name}' background worker faulted during the run. See inner exception.", fault);
+        }
     }
 
     /// <inheritdoc />
@@ -272,6 +334,8 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
         _disposed = true;
 
+        StopSelfScheduledWorkers();
+
         lock (_syncRoot)
         {
             foreach (var database in _databases.Values)
@@ -279,8 +343,10 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 database.Dispose();
             }
             _databases.Clear();
+            _storageSnapshot = [];
         }
 
+        _commitPendingSignal.Dispose();
         _state = EngineState.Stopped;
     }
 
@@ -294,11 +360,14 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
         _disposed = true;
 
+        StopSelfScheduledWorkers();
+
         IDatabase[] snapshot;
         lock (_syncRoot)
         {
             snapshot = [.. _databases.Values];
             _databases.Clear();
+            _storageSnapshot = [];
         }
 
         foreach (var database in snapshot)
@@ -306,7 +375,117 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             await database.DisposeAsync().ConfigureAwait(false);
         }
 
+        _commitPendingSignal.Dispose();
         _state = EngineState.Stopped;
+    }
+
+    /// <summary>
+    /// Configures a freshly created or opened storage file set with the engine's
+    /// durability policy and wires its commit-pending hook to the engine's flush
+    /// worker signal.
+    /// </summary>
+    private SqlStorage ConfigureStorage(SqlStorage storage)
+    {
+        storage.CommitDurability = _options.Durability;
+        storage.GroupCommitWindow = _options.GroupCommitWindow;
+        storage.OnCommitPending = _signalCommitPending;
+        return storage;
+    }
+
+    /// <summary>
+    /// Rebuilds the storage snapshot the background workers iterate. Called under
+    /// the engine lock whenever the open-database set changes.
+    /// </summary>
+    private void RebuildStorageSnapshotLocked()
+    {
+        var storages = new SqlStorage[_databases.Count * 2];
+        int index = 0;
+
+        foreach (var database in _databases.Values)
+        {
+            var instance = (SqlDatabaseInstance)database;
+            storages[index++] = instance.DataStorage;
+            storages[index++] = instance.CatalogStorage;
+        }
+
+        Volatile.Write(ref _storageSnapshot, storages);
+    }
+
+    /// <summary>
+    /// Claims and self-schedules every worker no host claimed, one dedicated
+    /// background thread per worker (the embedded execution model — R10).
+    /// </summary>
+    private void StartSelfScheduledWorkersLocked()
+    {
+        var stopSource = new CancellationTokenSource();
+        _workerStopSource = stopSource;
+
+        foreach (var worker in _workers)
+        {
+            if (!worker.TryClaim())
+            {
+                // A host claimed this worker before start and drives it on its own
+                // execution menu.
+                continue;
+            }
+
+            var thread = new Thread(() => PumpWorker(worker, stopSource.Token))
+            {
+                IsBackground = true,
+                Name = worker.Name,
+            };
+
+            _selfScheduled.Add((worker, thread));
+            thread.Start();
+        }
+    }
+
+    /// <summary>
+    /// The self-scheduled worker pump frame: runs the worker until the engine stops.
+    /// A cooperative cancellation exit is a clean stop; any other fault is recorded
+    /// and surfaced by <see cref="StopAsync"/> (an escaped exception on a raw thread
+    /// would terminate the process).
+    /// </summary>
+    private void PumpWorker(IDatabaseEngineWorker worker, CancellationToken cancellationToken)
+    {
+        try
+        {
+            worker.Run(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Clean stop.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Interlocked.CompareExchange(ref _workerFault, exception, null);
+        }
+    }
+
+    /// <summary>
+    /// Stops and joins the self-scheduled worker pumps and releases the engine's
+    /// claims, so a stop-then-start cycle (or a host composed later) can claim them
+    /// afresh.
+    /// </summary>
+    private void StopSelfScheduledWorkers()
+    {
+        var stopSource = _workerStopSource;
+        if (stopSource is null)
+        {
+            return;
+        }
+
+        _workerStopSource = null;
+        stopSource.Cancel();
+
+        foreach (var (worker, thread) in _selfScheduled)
+        {
+            thread.Join();
+            worker.Release();
+        }
+
+        _selfScheduled.Clear();
+        stopSource.Dispose();
     }
 
     private void ThrowIfDisposed()

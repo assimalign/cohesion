@@ -117,4 +117,25 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <exception cref="StorageTransactionException">A transaction is still active.</exception>
     void Checkpoint();
+
+    /// <summary>
+    /// Performs one group-commit flush pass on behalf of a write-ahead flush worker:
+    /// makes the journal durable up to the highest commit currently waiting on the
+    /// grouped durability gate and wakes every covered committer. A no-op when
+    /// nothing is pending (including in the synchronous durability mode).
+    /// </summary>
+    /// <returns>True when a durable flush was performed; false when nothing was pending.</returns>
+    bool FlushPendingCommits();
+
+    /// <summary>
+    /// Writes back up to <paramref name="maxPages"/> dirty buffered pages to the data
+    /// stream — the paced write-back a page-writer worker performs between
+    /// checkpoints so a checkpoint's flush does not spike. Honors the write-ahead
+    /// rule: the journal is made durable past each page's LSN before the page is
+    /// written.
+    /// </summary>
+    /// <param name="maxPages">The maximum number of dirty pages to write in this pass.</param>
+    /// <returns>The number of pages written.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxPages"/> is not positive.</exception>
+    int WriteBackDirtyPages(int maxPages);
 }

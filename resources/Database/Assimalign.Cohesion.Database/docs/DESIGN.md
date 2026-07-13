@@ -35,6 +35,21 @@ produced it.
   root aggregates the execution family rather than owning it: execution is its
   own child root with pipeline/context machinery the contract root has no
   business carrying.
+- **Background workers are engine-owned objects hosts *schedule*, not host
+  services engines *implement*** (#902). `IDatabaseEngineWorker` (with the guided
+  base `DatabaseEngineWorker`) exposes each durability/maintenance loop — kind,
+  cadence, a blocking pump (`Run`) for dedicated threads, and a bounded step
+  (`RunIteration`) for timer loops — plus an atomic claim handshake:
+  `IDatabaseEngine.StartAsync` self-schedules every unclaimed worker, a host claims
+  before start to drive workers on its own execution menu, and a worker therefore
+  never runs twice concurrently. The rejected alternative — engines implementing the
+  hosting library's service contracts directly — would invert the dependency (the
+  kernel referencing the hosting layer) and strand embedded consumers, who have no
+  host to run services (R10). The two pump shapes exist because the execution menu
+  has two members: a dedicated thread wants one blocking call frame; a pooled timer
+  wants a bounded pass and owns the wait itself. Workers are synchronous by design —
+  every body is storage I/O (fsync, page writes, checkpoint), which has no async
+  fast path.
 - **Server *contracts* live here; the server *runtime* does not** (owner
   decision, 2026-07-12 — reverses the earlier "server contracts do not live
   here" non-goal). `IDatabaseServer`/`IDatabaseServerSession` are abstractions

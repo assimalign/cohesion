@@ -45,6 +45,9 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
+
+    /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 internal sealed class RecordingEngine : IDatabaseEngine
 {
     private readonly List<string> _log;
+    private readonly List<IDatabaseEngineWorker> _workers = new();
     private EngineState _state = EngineState.Idle;
 
     public RecordingEngine(List<string> log)
@@ -24,6 +25,13 @@ internal sealed class RecordingEngine : IDatabaseEngine
     public EngineState State => _state;
 
     public EngineModel Model => EngineModel.Sql;
+
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
+
+    /// <summary>
+    /// Adds a worker to the engine's inventory (before composing the application).
+    /// </summary>
+    public void AddWorker(IDatabaseEngineWorker worker) => _workers.Add(worker);
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {

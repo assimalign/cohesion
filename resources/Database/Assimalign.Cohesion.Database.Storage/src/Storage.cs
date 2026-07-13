@@ -40,9 +40,11 @@ public abstract class Storage : IStorage
     private readonly StorageFreeSpaceMap _freeSpaceMap;
     private readonly Dictionary<long, long> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
+    private readonly StorageGroupCommitGate _groupCommitGate = new();
     private StoragePageManager? _pageManager;
     private StreamJournal? _journal;
     private long _nextTransactionSequence;
+    private int _activeTransactionCount;
     private StorageId _id;
     private Name _name;
     private PageId? _currentWritePageId;
@@ -109,6 +111,33 @@ public abstract class Storage : IStorage
     /// </remarks>
     protected IStorageJournal WriteAheadLog =>
         _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
+
+    /// <summary>
+    /// Gets or sets how commits reach stable storage. The default,
+    /// <see cref="StorageCommitDurability.Synchronous"/>, flushes the journal durably
+    /// inside every commit; <see cref="StorageCommitDurability.Grouped"/> batches
+    /// concurrent commits behind one durable flush performed by a flush worker
+    /// (see <see cref="FlushPendingCommits"/>). Both modes acknowledge a commit only
+    /// after its records are durable.
+    /// </summary>
+    public StorageCommitDurability CommitDurability { get; set; } = StorageCommitDurability.Synchronous;
+
+    /// <summary>
+    /// Gets or sets the bounded window a grouped commit waits for the flush worker
+    /// before flushing inline itself. Only meaningful when
+    /// <see cref="CommitDurability"/> is <see cref="StorageCommitDurability.Grouped"/>.
+    /// </summary>
+    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.FromMilliseconds(5);
+
+    /// <summary>
+    /// Gets or sets the hook invoked when a grouped commit registers for durability,
+    /// so an engine-level flush worker can be woken. Invoked outside storage locks.
+    /// </summary>
+    public Action? OnCommitPending
+    {
+        get => _groupCommitGate.CommitPending;
+        set => _groupCommitGate.CommitPending = value;
+    }
 
     /// <summary>
     /// Creates a new storage file set with the specified name, writing the file header
@@ -251,6 +280,11 @@ public abstract class Storage : IStorage
         lock (_transactionLock)
         {
             sequence = ++_nextTransactionSequence;
+
+            // Counted under the same lock the checkpoint holds, so a checkpoint can
+            // never truncate the journal between a transaction's begin and its
+            // completion (which would orphan its before images).
+            _activeTransactionCount++;
         }
 
         _journal.AppendBegin(sequence);
@@ -285,18 +319,53 @@ public abstract class Storage : IStorage
     /// <inheritdoc />
     public void Checkpoint()
     {
+        // The whole checkpoint runs under the transaction lock: BeginTransaction
+        // increments the active count under the same lock, so no transaction can
+        // start (and journal no before image) between the emptiness check and the
+        // journal truncation. Lock order is transaction lock → buffer pool → journal;
+        // no other path takes them in the opposite order.
         lock (_transactionLock)
         {
-            if (_pageWriteLocks.Count > 0)
+            if (_activeTransactionCount > 0)
             {
                 throw new StorageTransactionException("Checkpoint requires no active transactions.");
             }
+
+            UpdateFileHeader();
+            _pageManager?.FlushAll();
+            Data.FlushDurable();
+            long? checkpointLsn = _journal?.Checkpoint(ReadOnlySpan<long>.Empty);
+
+            if (checkpointLsn is not null)
+            {
+                // Wake any group-commit bookkeeping past the truncation point.
+                _groupCommitGate.PublishDurable(checkpointLsn.Value);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool FlushPendingCommits()
+    {
+        if (_journal is null)
+        {
+            return false;
         }
 
-        UpdateFileHeader();
-        _pageManager?.FlushAll();
-        Data.FlushDurable();
-        _journal?.Checkpoint(ReadOnlySpan<long>.Empty);
+        return _groupCommitGate.FlushPending(_journal);
+    }
+
+    /// <inheritdoc />
+    public int WriteBackDirtyPages(int maxPages)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
+
+        if (_pageManager is null || _disposed)
+        {
+            return 0;
+        }
+
+        return _bufferPool.FlushSome(Data, maxPages);
     }
 
     /// <summary>
@@ -513,7 +582,18 @@ public abstract class Storage : IStorage
         }
 
         long commitLsn = _journal!.AppendCommit(transaction.Sequence);
-        _journal.EnsureDurable(commitLsn);
+
+        if (CommitDurability == StorageCommitDurability.Grouped)
+        {
+            // Ride the group-commit gate: wait (bounded) for the flush worker's
+            // shared durable flush, self-helping inline if it does not come. The
+            // commit is acknowledged only once the journal is durable either way.
+            _groupCommitGate.AwaitDurable(commitLsn, GroupCommitWindow, _journal);
+        }
+        else
+        {
+            _journal.EnsureDurable(commitLsn);
+        }
 
         ReleasePageWriteLocks(transaction);
     }
@@ -610,7 +690,7 @@ public abstract class Storage : IStorage
         bool idle;
         lock (_transactionLock)
         {
-            idle = _pageWriteLocks.Count == 0;
+            idle = _activeTransactionCount == 0;
         }
 
         if (idle)
@@ -737,6 +817,11 @@ public abstract class Storage : IStorage
                     _pageWriteLocks.Remove(pageId);
                 }
             }
+
+            // Commit and rollback each end exactly one begun transaction (the scope
+            // guards double completion), so the active count pairs with
+            // BeginTransaction's increment.
+            _activeTransactionCount--;
         }
     }
 

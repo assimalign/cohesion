@@ -37,21 +37,17 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public IDatabaseServer? Server { get; set; }
 
     /// <summary>
-    /// Gets the additional host services composed on top of the durability worker
-    /// slots and ahead of the endpoint. They start after the durability services and
-    /// stop before them.
+    /// Gets the additional host services composed on top of the worker slots and
+    /// ahead of the endpoint. They start after the worker services and stop before
+    /// them.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 
     /// <summary>
-    /// Gets or sets a value indicating whether the write-ahead flush worker slot is
-    /// composed. Defaults to <see langword="true"/>.
+    /// Gets the mapping of engine-owned background workers onto the execution menu:
+    /// per worker kind, whether the host claims it and which execution model drives
+    /// it. The host never owns the work — disabling a slot hands the loop back to
+    /// the engine's own scheduler (see <see cref="DatabaseWorkerSlotOptions"/>).
     /// </summary>
-    public bool EnableWriteAheadFlushService { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the page-writer worker slot is
-    /// composed. Defaults to <see langword="true"/>.
-    /// </summary>
-    public bool EnablePageWriterService { get; set; } = true;
+    public DatabaseWorkerMappingOptions Workers { get; } = new();
 }

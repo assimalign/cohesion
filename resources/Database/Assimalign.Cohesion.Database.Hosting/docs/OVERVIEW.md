@@ -13,15 +13,17 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 
 ## Current Evaluation
 
-- Status: Composition + server runtime delivered — the host runs the wire endpoint and drains it on stop; durability worker slots are documented placeholders pending the engine's background-worker seam (#902).
+- Status: Composition + server runtime + engine-worker mapping delivered — the host drives engine lifecycle through the root contract, claims the engine-owned background workers (WAL group-commit flush, page write-back, checkpoint, maintenance) onto the execution menu (#902), runs the wire endpoint, and drains it all in order on stop.
 - Project references: `Assimalign.Cohesion.Database` (area root), `Assimalign.Cohesion.Database.Protocol` + `Assimalign.Cohesion.Database.Security` (the server's own machinery, COHRES002-exempted via `CohesionHostingIsolationExemptions`), `Assimalign.Cohesion.Connections` (transport drivers), `Assimalign.Cohesion.Hosting` (non-area hosting foundation).
 
 ## Primary Responsibilities
 
 - `DatabaseApplication` owns the resource process lifecycle (start, run, stop) via
-  `Host<DatabaseApplicationContext>`, composing the durability worker slots, any
-  additional host services, and the wire-protocol endpoint (registered last so it
-  starts last and drains first).
+  `Host<DatabaseApplicationContext>`, composing (in registration order) the engine
+  lifecycle services, the claimed engine-worker slots, any additional host services,
+  and the wire-protocol endpoint (registered last so it starts last and drains
+  first). Worker slots schedule engine-owned `IDatabaseEngineWorker`s — the work
+  itself lives in the engine, so embedded consumers get it without this module.
 - The server runtime: the `IDatabaseServer` implementation (accept/drain lifecycle
   over the registered engines, created with `DatabaseServer.Create(options)`) and
   `DatabaseServerOptions` (engines, bound listener, authenticator, plus the DoS
@@ -35,7 +37,8 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 - `DatabaseApplicationContext` carries the environment, the served engines, and the
   composed hosted services.
 - `DatabaseApplicationOptions` collects the engines, the server, additional
-  `IHostService`s, and the durability-slot toggles.
+  `IHostService`s, and the worker mapping (`Workers`: per-kind enable + execution
+  model; cadence lives on the engine's own options).
 - `DatabaseHostConfiguration` binds the environment-variable conventions a gateway
   injects (data path, endpoint port, durability).
 
@@ -44,6 +47,7 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 - `DatabaseApplication`
 - `DatabaseApplicationContext`
 - `DatabaseApplicationOptions`
+- `DatabaseWorkerMappingOptions` / `DatabaseWorkerSlotOptions` / `DatabaseWorkerExecution`
 - `DatabaseHostConfiguration`
 - `DatabaseServer` (implements the root's `IDatabaseServer`)
 - `DatabaseServerOptions`
@@ -59,7 +63,7 @@ options.Engines.Add(engine);
 options.Server = DatabaseServer.Create(serverOptions);   // the wire endpoint
 
 await using var app = new DatabaseApplication(options);
-await app.RunAsync();   // starts durability slots, then the endpoint; drains on shutdown
+await app.RunAsync();   // starts engines, then the claimed worker slots, then the endpoint
 ```
 
 A custom or embedded host composes `DatabaseServer.Create(...)` manually and drives

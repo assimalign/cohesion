@@ -88,6 +88,8 @@ public class EmbeddedDatabaseTests
 
         public EngineModel Model { get; }
 
+        public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
+
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
