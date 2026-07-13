@@ -60,12 +60,43 @@ semicolon-delimited, in its own csproj:
   assembly, or `COHRES002` for a listed same-area assembly, in the declaring project only.
 - Setting the property is itself the deviation marker at the point of use — always pair it with
   a comment stating the rationale, and surface it in the change summary.
-- **Standing convention:** each area's test factory, `Assimalign.Cohesion.<Area>.Testing`, is
-  the one expected exemption per area — it drives the concrete runtime, which cannot be done
-  through abstractions alone. Precedent: `resources/Web/Assimalign.Cohesion.Web.Testing`.
+- **Standing conventions — the three expected exemption holders per area** (anything else needs
+  the deviation protocol case-by-case):
+  - `Assimalign.Cohesion.<Area>.Testing` — the test factory drives the concrete runtime, which
+    cannot be done through abstractions alone. Precedent:
+    `resources/Web/Assimalign.Cohesion.Web.Testing`.
+  - `Assimalign.Cohesion.<Area>.Application` — the composition-root project an SDK consumer
+    loads (see "The `<Area>.Application` convention" below); composing the hosting module is
+    its purpose, the analog of a user application. Precedent:
+    `resources/Database/Assimalign.Cohesion.Database.Application`.
+  - `Assimalign.Cohesion.<Area>.ApplicationModel` — the SDK-specific orchestration plane that
+    surfaces the area's generated manifest to the gateway; sanctioned for when that bridging
+    requires naming the runtime (today's instances are manifest-only and declare no exemption —
+    the sanction is standing, not a mandate to take the reference).
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
   the missing piece is almost always a seam on the area root (that is how the Web area moved its
   authentication builder verbs out of `Web.Hosting`).
+
+## The `<Area>.Application` convention
+
+Every area pairs `Assimalign.Cohesion.<Area>.Application` with
+`Assimalign.Cohesion.<Area>.ApplicationModel`, and the **target design** (owner direction,
+2026-07-13) is:
+
+- `<Area>.Application` is **not an executable** — it is the **manifest-generation project**. An
+  SDK consumer loads this specific project; build tasks code-generate the application manifest
+  from it; the SDK-specific `<Area>.ApplicationModel` then helps the gateway access that
+  manifest. This is the same convention in every resource area.
+- `<Area>.ApplicationModel` stays the declarative orchestration plane (the resource manifest +
+  `Add<Area>(...)` verbs) and never references the runtime.
+
+**Interim state (pinned):** the current `Database.Application` is a composition-root
+*executable* serving the SQL engine — it exists because the resource needed a real process for
+the gateway E2E before the ApplicationModel program landed. The realignment to the
+manifest-generation design is deliberately pinned on that program:
+[assimalign/cohesion#906](https://github.com/assimalign/cohesion/issues/906). Until it lands,
+new areas that need a runnable host may follow the same interim executable shape, carrying the
+sanctioned COHRES001 exemption above.
 
 ## What every area is expected to provide
 

@@ -10,6 +10,19 @@ already names it: `DatabaseResource.Artifact` is
 libraries it composes. If a piece of logic here starts feeling like a feature, it
 belongs in a library.
 
+## Target design (pinned — #906)
+
+The executable is the **interim state**. Per the `<Area>.Application` convention
+(owner direction, 2026-07-13; `.claude/rules/resource-areas.md`), this project's
+target design is the **manifest-generation project**, not an executable: an SDK
+consumer loads this specific project, build tasks code-generate the application
+manifest from it, and the SDK-specific `Database.ApplicationModel` then helps the
+gateway access that manifest — the same convention in every resource area. The
+realignment is deliberately pinned on the ApplicationModel program (a separate
+beast altogether): [#906](https://github.com/assimalign/cohesion/issues/906).
+Everything below documents the interim executable, which stays load-bearing (it
+is what the gateway E2E launches) until that issue lands.
+
 ## Why-this-not-that decisions
 
 - **A sanctioned COHRES001 exemption, not a rule change.** The hosting-isolation

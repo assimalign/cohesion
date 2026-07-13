@@ -45,7 +45,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
-| `Assimalign.Cohesion.Database.Application` | The standalone host **executable** — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption) |
+| `Assimalign.Cohesion.Database.Application` | **Interim:** the standalone host executable — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption). **Target design (pinned, #906):** the manifest-generation project SDK consumers load — build tasks code-gen the application manifest, `Database.ApplicationModel` surfaces it to the gateway (the `<Area>.Application` convention, `.claude/rules/resource-areas.md`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
 
 ## Dependencies on other areas
