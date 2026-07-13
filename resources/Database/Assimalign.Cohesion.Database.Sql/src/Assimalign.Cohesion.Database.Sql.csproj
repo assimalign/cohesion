@@ -4,6 +4,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
+		     surface exposes StorageCommitDurability and its workers drive the IStorage
+		     worker seams. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

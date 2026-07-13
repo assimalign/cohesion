@@ -38,6 +38,44 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
 
+## Engine-owned background workers (#902)
+
+The engine exposes the five-worker inventory of the root contract's
+`IDatabaseEngineWorker` seam — created with the engine (so hosts can claim them
+before start) and iterating a lock-free snapshot of every open storage file set
+(data + catalog per database, rebuilt when databases open/close; passes tolerate
+racing a drop):
+
+- **`SqlWriteAheadFlushWorker`** — signal-driven group-commit flusher. Every open
+  storage's `OnCommitPending` hook sets one engine-level event; a pass resets the
+  event first (a mid-pass registration re-arms it) then calls
+  `FlushPendingCommits()` per storage. Only does work under
+  `SqlDatabaseEngineOptions.Durability = Grouped`; the default stays synchronous
+  per-commit fsync.
+- **`SqlPageWriteBackWorker`** — paced `WriteBackDirtyPages(batch)` per storage per
+  pass (`PageWriteBackInterval`/`PageWriteBackBatchSize`).
+- **`SqlCheckpointWorker`** — checkpoints **both** file sets of every open database
+  per pass (`CheckpointInterval`); a busy storage (`StorageTransactionException`) is
+  skipped and retried next pass.
+- **`SqlVersionPurgeWorker` / `SqlIndexMaintenanceWorker`** — documented stubs: the
+  engine serializes at page grain (no MVCC version store) and the index layer has no
+  compaction yet. They keep the inventory — and any host mapping over it — stable;
+  the bodies fill in when those integrations land, without touching the seam.
+
+**Scheduling handoff (single ownership):** `StartAsync` claims and self-schedules
+every worker nobody claimed, one dedicated background thread per worker — an
+embedded consumer gets identical durability with no host (R10). A host claims
+workers before start and drives them on its own execution menu instead. `StopAsync`
+quiesces the self-scheduled pumps *before* closing databases, releases the engine's
+claims (so a stop-start cycle or a later host can re-claim), and surfaces any worker
+fault collected during the run as a `DatabaseException` — a faulted worker never
+compromises correctness (grouped commits self-help within the window; checkpoints
+simply stop truncating), but the owner must learn the engine ran degraded.
+
+Cadence knobs live here, on `SqlDatabaseEngineOptions`, not on the host — the
+engine owns the loop whether or not a host maps it, and hosts read cadence through
+`IDatabaseEngineWorker.Interval`.
+
 ## Error model
 
 `DatabaseException` (area root) for everything user-facing: plan-time

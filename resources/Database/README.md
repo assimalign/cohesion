@@ -45,6 +45,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Governance` | Quotas, tenancy boundaries, audit events |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
+| `Assimalign.Cohesion.Database.Application` | The standalone host **executable** — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
 
 ## Dependencies on other areas

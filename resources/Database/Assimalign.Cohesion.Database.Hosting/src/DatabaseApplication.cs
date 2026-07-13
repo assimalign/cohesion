@@ -12,11 +12,13 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 /// the <c>Assimalign.Cohesion.Hosting</c> per-service execution menu (see docs/DESIGN.md).
 /// </summary>
 /// <remarks>
-/// Registration order is durability workers first, then any additional services, then
-/// the wire-protocol endpoint (<see cref="DatabaseApplicationOptions.Server"/>).
-/// Because a host starts services in registration order and stops them in reverse, the
-/// endpoint starts last and stops first — connections drain before the durability
-/// workers shut down.
+/// Registration order is engines first, then the claimed engine-worker slots
+/// (<see cref="DatabaseApplicationOptions.Workers"/>), then any additional services,
+/// then the wire-protocol endpoint (<see cref="DatabaseApplicationOptions.Server"/>).
+/// Because a host starts services in registration order and stops them in reverse,
+/// engines are running before anything pumps them and the endpoint starts last and
+/// stops first — connections drain before the worker slots shut down, and the
+/// workers quiesce before the engines perform their final durable flush.
 /// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 {
@@ -33,15 +35,34 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 
         var services = new List<IHostService>();
 
-        // Durability worker slots first: they own their threads for the host's whole
-        // life and stop last, so an endpoint always drains ahead of them.
-        if (options.EnableWriteAheadFlushService)
+        // Engines register first: they start before every worker slot and the endpoint,
+        // and stop last — after the endpoint has drained and the worker slots have
+        // quiesced — so the engine's own stop performs the final durable flush.
+        foreach (IDatabaseEngine engine in options.Engines)
         {
-            services.Add(new WriteAheadFlushService());
+            services.Add(new DatabaseEngineHostService(engine));
         }
-        if (options.EnablePageWriterService)
+
+        // Worker slots next: claim each engine-owned worker whose slot is enabled and
+        // map it onto the configured execution-menu member. Claims are taken here, at
+        // composition time and before the engines start, so an engine never
+        // self-schedules a worker the host drives (single ownership). A worker whose
+        // claim fails — the engine was started before this composition and already
+        // self-scheduled it — stays with the engine; a disabled slot likewise hands
+        // the loop back to the engine's own scheduler. Either way the work runs.
+        foreach (IDatabaseEngine engine in options.Engines)
         {
-            services.Add(new PageWriterService());
+            foreach (IDatabaseEngineWorker worker in engine.Workers)
+            {
+                DatabaseWorkerSlotOptions slot = options.Workers.GetSlot(worker.Kind);
+
+                if (!slot.Enabled || !worker.TryClaim())
+                {
+                    continue;
+                }
+
+                services.Add(CreateWorkerService(worker, slot.Execution));
+            }
         }
 
         // Then the composition root's additional services.
@@ -65,4 +86,28 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
     /// Gets the application context.
     /// </summary>
     public override DatabaseApplicationContext Context => _context;
+
+    /// <summary>
+    /// Wraps a claimed engine worker in the host service matching the configured
+    /// execution-menu member, preferring the named per-kind service types so worker
+    /// threads are recognizable in dumps.
+    /// </summary>
+    private static IHostService CreateWorkerService(IDatabaseEngineWorker worker, DatabaseWorkerExecution execution)
+    {
+        if (execution == DatabaseWorkerExecution.DedicatedThread)
+        {
+            return worker.Kind switch
+            {
+                DatabaseEngineWorkerKind.WriteAheadFlush => new WriteAheadFlushService(worker),
+                DatabaseEngineWorkerKind.PageWriteBack => new PageWriterService(worker),
+                _ => new DatabaseWorkerThreadService(worker),
+            };
+        }
+
+        return worker.Kind switch
+        {
+            DatabaseEngineWorkerKind.Checkpoint => new CheckpointService(worker),
+            _ => new DatabaseWorkerTimerService(worker),
+        };
+    }
 }

@@ -33,6 +33,16 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <inheritdoc />
     public IDatabaseEngine Engine { get; }
 
+    /// <summary>
+    /// Gets the data storage file set, for the engine's background workers.
+    /// </summary>
+    internal SqlStorage DataStorage => _storage;
+
+    /// <summary>
+    /// Gets the dedicated catalog storage file set, for the engine's background workers.
+    /// </summary>
+    internal SqlStorage CatalogStorage => _catalogStorage;
+
     /// <inheritdoc />
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {

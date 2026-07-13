@@ -31,11 +31,15 @@ state manager for the dependent to consume, tears down in **reverse order**, and
 dependents **`Blocked`** if the database fails to become ready. These are covered by
 `DatabaseOrchestrationTests` over a recording controller + state manager.
 
-A full `LocalGateway` end-to-end that *launches the real host process* is deferred: it
-needs the packaged `Assimalign.Cohesion.Database.Application` executable artifact on disk
-(the local resolver throws `FileNotFoundException` otherwise), which is host-packaging
-work outside a manifest unit test. The generic-algorithm coverage above proves every
-gateway-observable behavior the manifest is responsible for.
+The full `LocalGateway` end-to-end that *launches the real host process* — deferred
+until the executable artifact existed — is now delivered (#904): the
+`Assimalign.Cohesion.Database.Application` project is the artifact, and its test suite
+(`DatabaseGatewayEndToEndTests`) drives `AddDatabase(...)` through a real `LocalGateway`
+that resolves the apphost from the test output, launches it as a supervised child
+process with the manifest-injected environment, round-trips SQL over TCP, and proves
+WAL recovery across a forceful-kill relaunch on the same data mount. The
+generic-algorithm coverage above still proves every gateway-observable behavior the
+manifest itself is responsible for.
 
 ## Non-goals
 

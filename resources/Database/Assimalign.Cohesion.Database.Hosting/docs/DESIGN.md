@@ -25,41 +25,62 @@ defined by `Assimalign.Cohesion.Hosting` (see
 
 | Service | Menu member | Why |
 | --- | --- | --- |
-| `WriteAheadFlushService` | `DedicatedThreadService` (dedicated OS thread) | a synchronous blocking flush loop must own its thread for its whole life |
-| `PageWriterService` | `DedicatedThreadService` (dedicated OS thread) | a synchronous blocking page write-back loop must own its thread for its whole life |
+| `DatabaseEngineHostService` (per engine) | plain `IHostService` | forwards the engine's own `StartAsync`/`StopAsync`; no loop of its own |
+| `WriteAheadFlushService` / `PageWriterService` | `DedicatedThreadService` (dedicated OS thread) | each drives one claimed engine worker's blocking pump for its whole life |
+| `CheckpointService` / `DatabaseWorkerTimerService` | `BackgroundService` (pool-scheduled timer) | each ticks one claimed engine worker's bounded pass per interval |
 | `DatabaseServerHostService` (endpoint) | `BackgroundService` (pool-scheduled) | an async accept loop belongs on the pool |
 
-Registration order is durability workers first, then any additional composed services,
-then the endpoint. A host starts services in registration order and stops them in
-reverse, so the endpoint starts last and stops first — connections drain ahead of the
-durability workers.
+Registration order is engines first, then the claimed worker slots, then any
+additional composed services, then the endpoint. A host starts services in
+registration order and stops them in reverse, so the endpoint starts last and stops
+first — connections drain ahead of the worker slots, and the worker slots quiesce
+before the engines perform their final durable flush.
 
-## Execution-model mapping (the #902 worker inventory)
+## Execution-model mapping (the #902 worker inventory — implemented)
 
-The plan for the database's background services, reconciling the Lane-H guardrails
-(WAL flush / page writer on dedicated threads, endpoint on the pool) with requirement
-R10 (engine self-sufficiency). **Core principle: the engine owns every
-durability/maintenance work loop** behind the #902 `IDatabaseEngine` lifecycle seam,
+The database's background services, reconciling the Lane-H guardrails (WAL flush /
+page writer on dedicated threads, endpoint on the pool) with requirement R10 (engine
+self-sufficiency). **Core principle: the engine owns every durability/maintenance
+work loop** behind the `IDatabaseEngine` lifecycle + `IDatabaseEngineWorker` seams,
 so an embedded consumer gets identical behavior with no host at all;
-`DatabaseApplicationOptions` merely *maps* each engine worker onto the execution menu
-— the per-worker threading choice plus cadence knobs (group-commit window, checkpoint
-interval, purge batch size). The host never owns the work, or embedded mode would
-silently lose it.
+`DatabaseApplicationOptions.Workers` merely *maps* each engine worker onto the
+execution menu (per-worker enable + threading choice). Cadence deliberately lives on
+the **engine's** options (group-commit window, checkpoint interval, write-back batch
+size on `SqlDatabaseEngineOptions`) and reaches the host through
+`IDatabaseEngineWorker.Interval` — the engine owns the loop whether or not a host
+maps it, so cadence configured host-side would drift from the embedded mode. The
+host never owns the work, or embedded mode would silently lose it.
 
 | Worker | Owner | Execution-menu member | Rationale |
 | --- | --- | --- | --- |
-| WAL group-commit flusher | engine | `DedicatedThreadService` | Latency-critical steady loop — every commit waits on it, so it must be immune to thread-pool starvation. Drives the journal's durable-flush batching (`IStorageJournal.EnsureDurable` group commit). Today the engine flushes synchronously at commit; the async group-commit window is the #902 upgrade this slot maps. |
-| Page write-back (dirty-page writer) | engine | `DedicatedThreadService` | Paced synchronous I/O that owns its thread for its whole life; coordinates with the buffer pool's `WriteAheadGate` (a page reaches the data file only once the journal is durable past its LSN). |
-| Checkpointer (flush + journal truncate) | engine | `BackgroundService`, timer-driven | Periodic and not latency-critical; serializes with the flusher (checkpoint = durable flush, then truncate with continued LSNs). A timer loop on the pool is enough. |
-| MVCC version purge / vacuum | engine | `BackgroundService` | Bursty, yieldy, low priority — drains aborted/pruneable version chains via `IVersionStore.PurgeWriterAsync` and the oldest-active prune bound. |
-| B+Tree maintenance (tombstone vacuum, page merges) | engine (future) | `BackgroundService`, throttled | Same shape as version purge once the index layer grows compaction; throttled so maintenance never competes with foreground writes. |
+| WAL group-commit flusher | engine (`SqlWriteAheadFlushWorker`) | `DedicatedThreadService` (`WriteAheadFlushService`) | Latency-critical steady loop — every grouped commit waits on it, so it must be immune to thread-pool starvation. Signal-driven: woken by the storages' commit-pending hook, it performs one durable flush per storage covering every pending commit (`IStorage.FlushPendingCommits`). Synchronous per-commit durability remains the default; `StorageCommitDurability.Grouped` opts commits onto this worker, and a commit whose bounded window lapses flushes inline itself — durability is never hostage to the worker. |
+| Page write-back (dirty-page writer) | engine (`SqlPageWriteBackWorker`) | `DedicatedThreadService` (`PageWriterService`) | Paced synchronous I/O that owns its thread for its whole life; writes a bounded batch per pass (`IStorage.WriteBackDirtyPages`) and coordinates with the buffer pool's write-ahead gate (a page reaches the data file only once the journal is durable past its LSN). |
+| Checkpointer (flush + journal truncate) | engine (`SqlCheckpointWorker`) | `BackgroundService`, timer-driven (`CheckpointService`) | Periodic and not latency-critical; checkpoints every open file set (data **and** `.catalog`) with continued LSNs. A busy storage (active transaction) is skipped and retried next pass. |
+| MVCC version purge / vacuum | engine (`SqlVersionPurgeWorker`, documented stub) | `BackgroundService` (`DatabaseWorkerTimerService`) | Bursty, yieldy, low priority — will drain version chains via `IVersionStore.PurgeWriterAsync` and the oldest-active prune bound once the shared MVCC manager integrates with engine sessions; the SQL engine currently serializes at page grain and holds no version store, so the worker body is an inert stub keeping the inventory (and host mappings) stable. |
+| B+Tree maintenance (tombstone vacuum, page merges) | engine (`SqlIndexMaintenanceWorker`, documented stub — sanctioned by #902) | `BackgroundService`, throttled (`DatabaseWorkerTimerService`) | Same shape as version purge once the index layer grows compaction; throttled so maintenance never competes with foreground writes. |
 | Protocol endpoint accept loop | hosting | `BackgroundService` | Already live (`DatabaseServerHostService`): an async accept loop belongs on the pool. Starts last, drains first. |
 | Session idle sweep | — (server-internal) | not a host-service slot | Idle eviction is per-session `CancelAfter` timers inside the session pump; promoting it to a host service would add a slot with nothing to own. |
 | Deadlock detection | — (lock manager, synchronous) | not a host-service slot (today) | The lock manager detects cycles at acquire time (requester-closes-cycle victim policy) — there is no background scanner to schedule. A wait-for-graph scanner only becomes a service if lock acquisition ever moves to blocking-with-timeout; noted as a possible future row, not planned. |
 
-Until #902 lands the engine-owned worker seam, `WriteAheadFlushService` and
-`PageWriterService` are the first two rows' *slots*: placeholders that park until
-shutdown (see the next section). #902's acceptance criteria carry this same inventory.
+### Worker ownership — the claim handshake
+
+A worker must never run twice concurrently (engine self-scheduling *and* a host
+slot). The handoff is a **claim taken at composition time**:
+
+- `DatabaseApplication`'s constructor claims (`IDatabaseEngineWorker.TryClaim`) every
+  worker whose slot is enabled, *before* the engines start, and wraps each in the
+  configured execution-menu service.
+- `IDatabaseEngine.StartAsync` self-schedules only the workers still unclaimed —
+  embedded consumers (nobody claims anything) get every loop engine-side; a fully
+  mapped host runs every loop on its menu.
+- A **disabled slot** simply leaves the worker unclaimed, handing the loop back to
+  the engine's own scheduler — turning a slot off never loses durability work.
+- A **failed claim** (the composition root started the engine before composing the
+  application, so the engine already self-scheduled its workers) skips the slot for
+  that worker; behavior is identical, ownership just stayed engine-side.
+- Host claims are held for the composition's lifetime (slots do not release on
+  stop), so a host restart — engines start first, slots re-run their pumps — leaves
+  ownership stable. The engine releases its own claims when it stops.
 
 ## Why-this-not-that
 
@@ -141,28 +162,32 @@ language package. Parameters decode with `DatabaseValueCodec`
 encode the same way, one component per column, so both directions ride the one
 shared codec.
 
-### Durability worker slots are documented placeholders, not owners of durability
+### Worker slots schedule engine-owned work — they never own it (#902 delivered)
 
 Requirement R10 (the platform data layer) mandates **engine self-sufficiency**: an
 engine owns its durability whether embedded or hosted, so the host composition is
-composition-only. The SQL engine today flushes synchronously at commit (steal/no-force
-WAL) and writes pages back inside its own storage layer, so there is **no host-driven
-flush or page-writer work to do** — and there must not be, or an embedded consumer
-(no host) would silently lose it. `WriteAheadFlushService`/`PageWriterService` are
-therefore the execution-menu *slots* for a future engine-owned background
-checkpoint/flush worker: they park until shutdown and are documented as such. When the
-engine grows a host-mappable background-worker seam, these slots drive it. That engine
-seam is filed as **#902** under the engine self-sufficiency feature #862; the full
-worker inventory and per-worker menu assignments live in "Execution-model mapping"
-above. The slots are on by default (to keep the standalone host's execution-menu
-shape) and can be toggled off for embedded/self-sufficient composition.
+composition-only. With #902 the slots stopped being placeholders:
+`WriteAheadFlushService`/`PageWriterService` drive the engine's claimed WAL
+group-commit flusher and dirty-page writer on dedicated threads, and
+`CheckpointService`/`DatabaseWorkerTimerService` tick the pooled rows — but the
+worker *bodies* live inside the engine (`Database.Sql`'s `Sql*Worker` types over the
+`IStorage.FlushPendingCommits`/`WriteBackDirtyPages`/`Checkpoint` seams), reached
+only through the root contract's `IDatabaseEngineWorker`. The slots are on by
+default; disabling one hands the loop back to the engine's own scheduler (see "Worker
+ownership" above), so no composition shape can lose durability work.
 
-### Engine lifecycle stays with the composition root
+### The host drives engine lifecycle through the root contract (#902)
 
-`IDatabaseEngine` carries no start/stop on its contract (the concrete engines expose
-their own `StartAsync`/`StopAsync`). The host therefore serves engines the composition
-root started; it exposes them on the context but does not drive their lifecycle. A
-root-level engine-lifecycle seam is part of #902.
+`IDatabaseEngine` now carries `StartAsync`/`StopAsync` (the #902 lifecycle seam), so
+the application registers one internal `DatabaseEngineHostService` per composed engine
+**first** — engines start before every worker slot and the endpoint, and stop last,
+after the endpoint has drained and the worker slots have quiesced, so the engine's own
+stop performs the final durable flush. Engine start is idempotent by contract, which
+keeps the pre-#902 composition style working: a composition root that starts an engine
+itself (to seed databases before the host runs) hands the host an already-running
+engine and the host's start is a no-op. This replaces the earlier posture ("engine
+lifecycle stays with the composition root") that existed only because the root
+contract had no lifecycle members.
 
 ## Session state machine
 

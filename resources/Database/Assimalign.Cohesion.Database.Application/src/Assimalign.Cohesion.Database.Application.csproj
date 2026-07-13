@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<!-- The standalone database host executable is a deployment artifact, not a library:
+		     it is delivered as the DatabaseResource artifact, never through a framework or as
+		     a NuGet package. -->
+		<IsPackable>false</IsPackable>
+		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001): this is the
+		     composition-root EXECUTABLE for the database resource — the analog of a user
+		     application, and the artifact `DatabaseResource` declares — so it composes the
+		     hosting module by definition. Precedent: the standing `<Area>.Testing` convention
+		     for projects that must drive the concrete runtime (resource-areas.md). -->
+		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Database.Hosting</CohesionHostingIsolationExemptions>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+	</ItemGroup>
+</Project>

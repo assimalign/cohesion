@@ -45,6 +45,30 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
+
+    /// <inheritdoc />
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _state = EngineState.Running;
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_state == EngineState.Running)
+        {
+            _state = EngineState.Stopped;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
         => throw new NotImplementedException("Key-value engine lifecycle is implemented by the L03.02.04 work items.");
 

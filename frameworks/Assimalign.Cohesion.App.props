@@ -250,6 +250,10 @@
 
         <!--
             Deliberately EXCLUDED from the MVP framework:
+            - Database.Application - the standalone host EXECUTABLE (the artifact
+              DatabaseResource declares). Frameworks deliver libraries to
+              applications; the executable ships as a deployment artifact
+              (published binary / container image), never through a framework.
             - The Documents/Graph/KeyValuePair/Blob/Cache model families - engine
               scaffolds without shipping surface yet.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).

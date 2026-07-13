@@ -19,9 +19,12 @@ using Assimalign.Cohesion.Hosting;
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
     /// <summary>
-    /// Gets the engines this host serves. Engines are composed and started by the
-    /// composition root and exposed here for the host context; engine start/stop is
-    /// not yet part of the <see cref="IDatabaseEngine"/> contract (see docs/DESIGN.md).
+    /// Gets the engines this host serves. The application drives each engine's
+    /// lifecycle through the root contract (<see cref="IDatabaseEngine.StartAsync"/>/
+    /// <see cref="IDatabaseEngine.StopAsync"/>): engines start before every other
+    /// composed service and stop last, after the endpoint has drained. An engine the
+    /// composition root already started (for example to seed databases) is served
+    /// as-is — engine start is idempotent.
     /// </summary>
     public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
 
@@ -34,21 +37,17 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public IDatabaseServer? Server { get; set; }
 
     /// <summary>
-    /// Gets the additional host services composed on top of the durability worker
-    /// slots and ahead of the endpoint. They start after the durability services and
-    /// stop before them.
+    /// Gets the additional host services composed on top of the worker slots and
+    /// ahead of the endpoint. They start after the worker services and stop before
+    /// them.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 
     /// <summary>
-    /// Gets or sets a value indicating whether the write-ahead flush worker slot is
-    /// composed. Defaults to <see langword="true"/>.
+    /// Gets the mapping of engine-owned background workers onto the execution menu:
+    /// per worker kind, whether the host claims it and which execution model drives
+    /// it. The host never owns the work — disabling a slot hands the loop back to
+    /// the engine's own scheduler (see <see cref="DatabaseWorkerSlotOptions"/>).
     /// </summary>
-    public bool EnableWriteAheadFlushService { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the page-writer worker slot is
-    /// composed. Defaults to <see langword="true"/>.
-    /// </summary>
-    public bool EnablePageWriterService { get; set; } = true;
+    public DatabaseWorkerMappingOptions Workers { get; } = new();
 }

@@ -19,6 +19,17 @@
 	<Folder Name="/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Application/" />
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Application/docs/">
+		<File Path="Assimalign.Cohesion.Database.Application/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Application/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Application/src/">
+		<Project Path="Assimalign.Cohesion.Database.Application/src/Assimalign.Cohesion.Database.Application.csproj" />
+	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Application/tests/">
+		<Project Path="Assimalign.Cohesion.Database.Application/tests/Assimalign.Cohesion.Database.Application.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.ApplicationModel/" />
 	<Folder Name="/Database/Assimalign.Cohesion.Database.ApplicationModel/docs/">
 		<File Path="Assimalign.Cohesion.Database.ApplicationModel/docs/DESIGN.md" />

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -32,41 +33,117 @@ public class DatabaseApplicationTests
         result.Rows[0].ShouldBe([1, "ada"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: defaults compose the durability slots plus the endpoint")]
-    public async Task Application_Defaults_ShouldComposeDurabilityAndEndpointServices()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: defaults claim the engine's five workers plus the engine and endpoint services")]
+    public async Task Application_Defaults_ShouldComposeEngineWorkersAndEndpointServices()
     {
-        // Arrange
+        // Arrange: the harness hands the application an unstarted engine, so every
+        // worker slot claims its worker at composition time.
         await using var harness = await DatabaseHostTestHarness.CreateAsync();
 
-        // Assert: WriteAheadFlush + PageWriter + the one endpoint host service
+        // Assert: 1 engine lifecycle service + 5 claimed worker slots + the endpoint.
         int count = 0;
         foreach (IHostService _ in harness.Application.Context.HostedServices)
         {
             count++;
         }
 
-        count.ShouldBe(3);
+        count.ShouldBe(7);
         harness.Application.Context.Engines.ShouldHaveSingleItem();
+
+        // Every engine worker is claimed by the host (a second claim fails).
+        foreach (IDatabaseEngineWorker worker in harness.Engine.Workers)
+        {
+            worker.TryClaim().ShouldBeFalse();
+        }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: disabling the durability slots composes the endpoint only")]
-    public async Task Application_DisabledDurabilitySlots_ShouldComposeEndpointOnly()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: disabling slots hands those workers back to the engine")]
+    public async Task Application_DisabledDurabilitySlots_ShouldLeaveWorkersWithEngine()
     {
-        // Arrange
+        // Arrange: disable the two dedicated-thread slots; the engine self-schedules
+        // those workers at start instead (the work is never lost — R10).
         await using var harness = await DatabaseHostTestHarness.CreateAsync(options =>
         {
-            options.EnableWriteAheadFlushService = false;
-            options.EnablePageWriterService = false;
+            options.Workers.WriteAheadFlush.Enabled = false;
+            options.Workers.PageWriteBack.Enabled = false;
         });
 
-        // Assert
+        // Assert: 1 engine service + 3 remaining worker slots + the endpoint.
         int count = 0;
         foreach (IHostService _ in harness.Application.Context.HostedServices)
         {
             count++;
         }
 
-        count.ShouldBe(1);
+        count.ShouldBe(5);
+
+        // The disabled kinds stay unclaimed until the engine starts.
+        foreach (IDatabaseEngineWorker worker in harness.Engine.Workers)
+        {
+            if (worker.Kind is DatabaseEngineWorkerKind.WriteAheadFlush or DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                worker.TryClaim().ShouldBeTrue();
+                worker.Release();
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Workers: host-mapped workers pump while the host runs and stop with it")]
+    public async Task Lifecycle_HostMappedWorkers_ShouldPumpBetweenStartAndStop()
+    {
+        // Arrange: a recording engine exposing one worker per execution-menu member.
+        var log = new List<string>();
+        var engine = new RecordingEngine(log);
+        var flushWorker = new RecordingWorker(DatabaseEngineWorkerKind.WriteAheadFlush, TimeSpan.FromMilliseconds(10));
+        var checkpointWorker = new RecordingWorker(DatabaseEngineWorkerKind.Checkpoint, TimeSpan.FromMilliseconds(10));
+        engine.AddWorker(flushWorker);
+        engine.AddWorker(checkpointWorker);
+
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        var application = new DatabaseApplication(options);
+
+        // Both workers were claimed at composition time.
+        flushWorker.TryClaim().ShouldBeFalse();
+        checkpointWorker.TryClaim().ShouldBeFalse();
+
+        // Act: start the host; the dedicated-thread slot enters Run and the timer
+        // slot ticks RunIteration.
+        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+
+        flushWorker.RunEntered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+        checkpointWorker.IterationRan.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+
+        // Act: stop the host; both pumps exit.
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert
+        flushWorker.RunExited.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: engines start before the endpoint and stop after it drains")]
+    public async Task Lifecycle_EngineAndEndpoint_ShouldStartEngineFirstAndStopItLast()
+    {
+        // Arrange: a recording engine + recording server capture the relative order of
+        // lifecycle calls made by the host.
+        var log = new List<string>();
+        var engine = new RecordingEngine(log);
+        var server = new RecordingServer(log);
+
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        options.Server = server;
+
+        var application = new DatabaseApplication(options);
+
+        // Act
+        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert: engine start precedes server start; server stop precedes engine stop.
+        log.IndexOf("engine:start").ShouldBeLessThan(log.IndexOf("server:start"));
+        log.IndexOf("server:stop").ShouldBeLessThan(log.IndexOf("engine:stop"));
+        engine.State.ShouldBe(EngineState.Stopped);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: stopping the host drains and reaches the stopped state")]
