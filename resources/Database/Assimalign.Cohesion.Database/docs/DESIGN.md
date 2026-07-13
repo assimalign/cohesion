@@ -61,6 +61,16 @@ because the parse-vs-execute distinction is part of the session contract.
 
 ## Lifecycle pattern
 
+- Engines: `StartAsync`/`StopAsync` are part of the root contract (added with
+  #902 — previously only the concrete engines exposed them, which meant a host
+  could *serve* engines but not *drive* them generically; `Database.Hosting`
+  and `Database.Embedded` must align engine lifecycle with their own without
+  knowing concrete types). Start is idempotent while `Running`; stop is a no-op
+  when not `Running`; a stopped engine may start again. Stop quiesces
+  background workers, durably flushes, and closes every open database —
+  committed work is durable when `StopAsync` completes. State transitions ride
+  the existing `EngineState` enum (`Idle`/`Stopped` → `Starting` → `Running` →
+  `Stopping` → `Stopped`; `Faulted` is terminal for start).
 - Engines: `IAsyncDisposable` + `IDisposable`; disposal stops and releases all
   open databases.
 - Sessions: disposing rolls back any active transaction (documented on the

@@ -157,12 +157,18 @@ worker inventory and per-worker menu assignments live in "Execution-model mappin
 above. The slots are on by default (to keep the standalone host's execution-menu
 shape) and can be toggled off for embedded/self-sufficient composition.
 
-### Engine lifecycle stays with the composition root
+### The host drives engine lifecycle through the root contract (#902)
 
-`IDatabaseEngine` carries no start/stop on its contract (the concrete engines expose
-their own `StartAsync`/`StopAsync`). The host therefore serves engines the composition
-root started; it exposes them on the context but does not drive their lifecycle. A
-root-level engine-lifecycle seam is part of #902.
+`IDatabaseEngine` now carries `StartAsync`/`StopAsync` (the #902 lifecycle seam), so
+the application registers one internal `DatabaseEngineHostService` per composed engine
+**first** — engines start before every worker slot and the endpoint, and stop last,
+after the endpoint has drained and the worker slots have quiesced, so the engine's own
+stop performs the final durable flush. Engine start is idempotent by contract, which
+keeps the pre-#902 composition style working: a composition root that starts an engine
+itself (to seed databases before the host runs) hands the host an already-running
+engine and the host's start is a no-op. This replaces the earlier posture ("engine
+lifecycle stays with the composition root") that existed only because the root
+contract had no lifecycle members.
 
 ## Session state machine
 

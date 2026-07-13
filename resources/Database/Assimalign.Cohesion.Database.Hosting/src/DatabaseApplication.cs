@@ -12,11 +12,13 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 /// the <c>Assimalign.Cohesion.Hosting</c> per-service execution menu (see docs/DESIGN.md).
 /// </summary>
 /// <remarks>
-/// Registration order is durability workers first, then any additional services, then
-/// the wire-protocol endpoint (<see cref="DatabaseApplicationOptions.Server"/>).
-/// Because a host starts services in registration order and stops them in reverse, the
-/// endpoint starts last and stops first — connections drain before the durability
-/// workers shut down.
+/// Registration order is engines first, then the durability worker slots, then any
+/// additional services, then the wire-protocol endpoint
+/// (<see cref="DatabaseApplicationOptions.Server"/>). Because a host starts services
+/// in registration order and stops them in reverse, engines are running before
+/// anything pumps them and the endpoint starts last and stops first — connections
+/// drain before the durability workers shut down, and the workers quiesce before the
+/// engines perform their final durable flush.
 /// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 {
@@ -33,8 +35,16 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 
         var services = new List<IHostService>();
 
-        // Durability worker slots first: they own their threads for the host's whole
-        // life and stop last, so an endpoint always drains ahead of them.
+        // Engines register first: they start before every worker slot and the endpoint,
+        // and stop last — after the endpoint has drained and the worker slots have
+        // quiesced — so the engine's own stop performs the final durable flush.
+        foreach (IDatabaseEngine engine in options.Engines)
+        {
+            services.Add(new DatabaseEngineHostService(engine));
+        }
+
+        // Durability worker slots next: they own their threads for the host's whole
+        // life and stop after the endpoint, so connections always drain ahead of them.
         if (options.EnableWriteAheadFlushService)
         {
             services.Add(new WriteAheadFlushService());

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -32,25 +33,25 @@ public class DatabaseApplicationTests
         result.Rows[0].ShouldBe([1, "ada"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: defaults compose the durability slots plus the endpoint")]
-    public async Task Application_Defaults_ShouldComposeDurabilityAndEndpointServices()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: defaults compose the engine, the durability slots, and the endpoint")]
+    public async Task Application_Defaults_ShouldComposeEngineDurabilityAndEndpointServices()
     {
         // Arrange
         await using var harness = await DatabaseHostTestHarness.CreateAsync();
 
-        // Assert: WriteAheadFlush + PageWriter + the one endpoint host service
+        // Assert: the engine lifecycle service + WriteAheadFlush + PageWriter + the endpoint
         int count = 0;
         foreach (IHostService _ in harness.Application.Context.HostedServices)
         {
             count++;
         }
 
-        count.ShouldBe(3);
+        count.ShouldBe(4);
         harness.Application.Context.Engines.ShouldHaveSingleItem();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: disabling the durability slots composes the endpoint only")]
-    public async Task Application_DisabledDurabilitySlots_ShouldComposeEndpointOnly()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: disabling the durability slots composes the engine and endpoint only")]
+    public async Task Application_DisabledDurabilitySlots_ShouldComposeEngineAndEndpointOnly()
     {
         // Arrange
         await using var harness = await DatabaseHostTestHarness.CreateAsync(options =>
@@ -66,7 +67,32 @@ public class DatabaseApplicationTests
             count++;
         }
 
-        count.ShouldBe(1);
+        count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: engines start before the endpoint and stop after it drains")]
+    public async Task Lifecycle_EngineAndEndpoint_ShouldStartEngineFirstAndStopItLast()
+    {
+        // Arrange: a recording engine + recording server capture the relative order of
+        // lifecycle calls made by the host.
+        var log = new List<string>();
+        var engine = new RecordingEngine(log);
+        var server = new RecordingServer(log);
+
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        options.Server = server;
+
+        var application = new DatabaseApplication(options);
+
+        // Act
+        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert: engine start precedes server start; server stop precedes engine stop.
+        log.IndexOf("engine:start").ShouldBeLessThan(log.IndexOf("server:start"));
+        log.IndexOf("server:stop").ShouldBeLessThan(log.IndexOf("engine:stop"));
+        engine.State.ShouldBe(EngineState.Stopped);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: stopping the host drains and reaches the stopped state")]

@@ -191,53 +191,75 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_state == EngineState.Running)
+        lock (_syncRoot)
         {
-            return Task.CompletedTask;
+            switch (_state)
+            {
+                case EngineState.Running:
+                    return Task.CompletedTask;
+                case EngineState.Starting or EngineState.Stopping:
+                    throw new DatabaseException($"Engine '{Name}' has a lifecycle transition in progress ({_state}).");
+                case EngineState.Faulted:
+                    throw new DatabaseException($"Engine '{Name}' is faulted and cannot be started.");
+            }
+
+            _state = EngineState.Starting;
+
+            // Resolve the storage strategy
+            _strategy = _options.StorageStrategy
+                ?? (string.IsNullOrWhiteSpace(_options.RootPath)
+                    ? new InMemorySqlStorageStrategy()
+                    : new FileSystemSqlStorageStrategy(_options.RootPath));
+
+            // Ensure root directory exists for file-based strategies
+            if (!string.IsNullOrWhiteSpace(_options.RootPath))
+            {
+                Directory.CreateDirectory(_options.RootPath);
+            }
+
+            _state = EngineState.Running;
         }
 
-        _state = EngineState.Starting;
-
-        // Resolve the storage strategy
-        _strategy = _options.StorageStrategy
-            ?? (string.IsNullOrWhiteSpace(_options.RootPath)
-                ? new InMemorySqlStorageStrategy()
-                : new FileSystemSqlStorageStrategy(_options.RootPath));
-
-        // Ensure root directory exists for file-based strategies
-        if (!string.IsNullOrWhiteSpace(_options.RootPath))
-        {
-            Directory.CreateDirectory(_options.RootPath);
-        }
-
-        _state = EngineState.Running;
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_state != EngineState.Running)
-        {
-            return Task.CompletedTask;
-        }
-
-        _state = EngineState.Stopping;
+        IDatabase[] snapshot;
 
         lock (_syncRoot)
         {
-            foreach (var database in _databases.Values)
+            if (_state is EngineState.Starting or EngineState.Stopping)
             {
-                database.Dispose();
+                throw new DatabaseException($"Engine '{Name}' has a lifecycle transition in progress ({_state}).");
             }
+
+            if (_state != EngineState.Running)
+            {
+                return;
+            }
+
+            _state = EngineState.Stopping;
+            snapshot = [.. _databases.Values];
             _databases.Clear();
         }
 
-        _state = EngineState.Stopped;
-        return Task.CompletedTask;
+        // Closing a database durably flushes it: storage disposal checkpoints when no
+        // transaction is active (clean shutdown) and force-flushes the journal otherwise,
+        // so committed work is on stable storage before the stop completes.
+        foreach (var database in snapshot)
+        {
+            await database.DisposeAsync().ConfigureAwait(false);
+        }
+
+        lock (_syncRoot)
+        {
+            _state = EngineState.Stopped;
+        }
     }
 
     /// <inheritdoc />

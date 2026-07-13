@@ -19,9 +19,12 @@ using Assimalign.Cohesion.Hosting;
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
     /// <summary>
-    /// Gets the engines this host serves. Engines are composed and started by the
-    /// composition root and exposed here for the host context; engine start/stop is
-    /// not yet part of the <see cref="IDatabaseEngine"/> contract (see docs/DESIGN.md).
+    /// Gets the engines this host serves. The application drives each engine's
+    /// lifecycle through the root contract (<see cref="IDatabaseEngine.StartAsync"/>/
+    /// <see cref="IDatabaseEngine.StopAsync"/>): engines start before every other
+    /// composed service and stop last, after the endpoint has drained. An engine the
+    /// composition root already started (for example to seed databases) is served
+    /// as-is — engine start is idempotent.
     /// </summary>
     public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
 

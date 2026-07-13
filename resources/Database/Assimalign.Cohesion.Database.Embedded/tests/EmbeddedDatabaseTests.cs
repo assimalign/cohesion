@@ -88,6 +88,10 @@ public class EmbeddedDatabaseTests
 
         public EngineModel Model { get; }
 
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
