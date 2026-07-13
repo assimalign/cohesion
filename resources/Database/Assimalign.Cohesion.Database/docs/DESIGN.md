@@ -41,6 +41,37 @@ surface. Child roots never reference the root.
   cheap, single-threaded execution scopes; transactions are explicit ACID
   brackets inside a session. Collapsing them (an `ExecuteAsync` on the engine,
   say) would smuggle session state into a shared object.
+- **Engine lifecycle and engine operations are separate contracts** (owner
+  direction, 2026-07-13). `IDatabaseEngineLifecycle` declares the lifecycle
+  surface — `State`, `Workers`, `StartAsync`, `StopAsync` — and
+  `IDatabaseEngine` inherits it, declaring only identity (`Name`, `Model`) and
+  the database operations. Composition surfaces (a host's engine service, the
+  application) depend on the lifecycle contract alone; data-path consumers (the
+  server, sessions) hold `IDatabaseEngine`. `Workers` sits on the lifecycle
+  contract because the claim handshake is defined relative to `StartAsync` —
+  claiming workers is a composition act, not a data operation. The rejected
+  alternative — two unrelated interfaces with engines implementing both — would
+  force every composition surface that accepts an `IDatabaseEngine` (the
+  builder's `AddEngine`, the application) into runtime casts or doubled generic
+  constraints to reach start/stop; inheritance keeps "every engine is
+  startable" a compile-time guarantee while the declarations stay segregated.
+  Disposal stays on `IDatabaseEngine`: a lifecycle holder starts and stops an
+  engine it does not own — the composition that created the engine disposes it.
+- **The application exposes its composition through `IDatabaseApplicationContext`**
+  (owner direction, 2026-07-13 — the Database instance of the Web area's
+  `IWebApplicationContext` pattern). The context carries the composed state —
+  `Engines` (registration order) and the optional endpoint `Server` — as one
+  navigable, observational surface; lifecycle stays on `IDatabaseApplication`
+  (start/stop) and per engine on `IDatabaseEngineLifecycle`. Deferred
+  composition callbacks on the builder receive the context, mirroring Web's
+  `AddServer(Func<IWebApplicationContext, IWebApplicationServer>)`. The Web
+  context exposes plural `Servers`; the Database context deliberately exposes a
+  single nullable `Server` — the area composes one endpoint per application
+  (`AddServer` throws on a second registration), and a null `Server` is the
+  embedded, in-process composition. *(Contract shipped 2026-07-13; the
+  `IDatabaseApplication.Context` property, the builder-callback signature, and
+  the hosting implementation land in the follow-up refactor pending owner
+  sign-off on this design.)*
 - **Two execute seams on `IDatabaseSession`.** The typed seam
   (`ExecuteAsync(QueryRequest)`) is for in-process consumers that already speak a
   model's language objects (`SqlQueryRequest`). The **text seam**
@@ -148,9 +179,10 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## Lifecycle pattern
 
-- Engines: `StartAsync`/`StopAsync` are part of the root contract (added with
-  #902 — previously only the concrete engines exposed them, which meant a host
-  could *serve* engines but not *drive* them generically; `Database.Hosting`
+- Engines: `StartAsync`/`StopAsync` are part of the root contract, declared on
+  `IDatabaseEngineLifecycle` (added with #902; segregated from the operations
+  contract 2026-07-13 — previously only the concrete engines exposed them, which
+  meant a host could *serve* engines but not *drive* them generically; `Database.Hosting`
   and `Database.Embedded` must align engine lifecycle with their own without
   knowing concrete types). Start is idempotent while `Running`; stop is a no-op
   when not `Running`; a stopped engine may start again. Stop quiesces
