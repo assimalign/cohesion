@@ -12,7 +12,7 @@ In the repo's L1/L2/L3 model (see `docs/DELIVERY_ROADMAP.md`), this area is **L3
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException` — **rolls up the child roots** (references `Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException`, and the application-composition seam (`IDatabaseApplicationBuilder`/`IDatabaseApplication` — model packages register engines here without knowing the hosting layer) — **rolls up the child roots** (references `Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (consumes the root; not rolled up) |
@@ -43,7 +43,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
-| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
+| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
 | `Assimalign.Cohesion.Database.Application` | The standalone host **executable** — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |

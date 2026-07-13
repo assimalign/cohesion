@@ -26,7 +26,12 @@ internal static class DatabaseApplicationBootstrap
     internal const string DefaultDatabaseName = "app";
 
     /// <summary>
-    /// Composes a runnable database application from the configuration.
+    /// Composes a runnable database application from the configuration, through the
+    /// area's builder pattern: <see cref="DatabaseApplication.CreateBuilder()"/> is
+    /// the entry point, the SQL model registers its own engine via its
+    /// <c>AddSqlDatabase</c> verb (shipped by <c>Database.Sql</c> against the root's
+    /// <see cref="IDatabaseApplicationBuilder"/> seam), and the endpoint is a
+    /// deferred server factory that receives the registered engines at build time.
     /// </summary>
     /// <param name="configuration">The bound host configuration.</param>
     /// <returns>The composed parts; the caller owns their disposal.</returns>
@@ -38,14 +43,16 @@ internal static class DatabaseApplicationBootstrap
 
         StorageCommitDurability durability = MapDurability(configuration.Durability);
 
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+
         // File-backed at the mounted data path; the in-memory strategy when no path
         // is configured (ephemeral dev runs — the orchestration manifest always
         // injects the data path of its volume mount).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
         {
-            EngineName = "sql",
-            RootPath = configuration.DataPath,
-            Durability = durability,
+            options.EngineName = "sql";
+            options.RootPath = configuration.DataPath;
+            options.Durability = durability;
         });
 
         // Bind all interfaces (container-style: the gateway injects the port and
@@ -55,20 +62,27 @@ internal static class DatabaseApplicationBootstrap
             EndPoint = new IPEndPoint(IPAddress.Any, configuration.Port ?? 0),
         });
 
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
-        serverOptions.Engines.Add(engine);
-        IDatabaseServer server = DatabaseServer.Create(serverOptions);
+        // Deferred: the factory runs at Build with the final registered engine
+        // list, so the endpoint always serves exactly what the builder composed.
+        builder.AddServer(engines =>
+        {
+            var serverOptions = new DatabaseServerOptions { Listener = listener };
 
-        var applicationOptions = new DatabaseApplicationOptions();
-        applicationOptions.Engines.Add(engine);
-        applicationOptions.Server = server;
+            foreach (IDatabaseEngine registered in engines)
+            {
+                serverOptions.Engines.Add(registered);
+            }
+
+            return DatabaseServer.Create(serverOptions);
+        });
 
         // Provision the default database after the engine starts and before the
         // endpoint accepts (additional services sit between the worker slots and the
         // endpoint in the start order), so a client can always bind it.
-        applicationOptions.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
+        builder.Options.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
 
-        var application = new DatabaseApplication(applicationOptions);
+        DatabaseApplication application = builder.Build();
+        IDatabaseServer server = builder.Options.Server!;
 
         return new DatabaseApplicationComposition(engine, listener, server, application);
     }

@@ -84,6 +84,17 @@ semicolon-delimited, in its own csproj:
   the area exception root — the layer that owns both vocabularies translates at its boundary).
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
+- **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
+  `I<Area>Application` it builds); the hosting module implements them and exposes the creation
+  entry point (`<Area>Application.CreateBuilder()`). Feature/model registration verbs ship with
+  their feature package as `extension(I<Area>ApplicationBuilder)` members and compose against
+  the root builder — never against the hosting module — so a feature or model registers itself
+  on any composition surface without knowing the hosting layer. Registration stays
+  dependency-free (values and options objects; no container, no configuration binding).
+  Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder()`
+  (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
+  (Database root) + `DatabaseApplication.CreateBuilder()` (`Database.Hosting`) +
+  `AddSqlDatabase` (`Database.Sql`). This pattern is expected to be the same in every area.
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
   non-area infrastructure. **If the hosting module ever appears to need a same-area dependency
   beyond the root, that is an architecture revisit — surface it to the user — not a case for

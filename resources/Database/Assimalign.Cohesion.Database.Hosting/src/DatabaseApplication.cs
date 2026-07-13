@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -19,8 +21,12 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 /// engines are running before anything pumps them and the endpoint starts last and
 /// stops first — connections drain before the worker slots shut down, and the
 /// workers quiesce before the engines perform their final durable flush.
+/// Compose one through <see cref="CreateBuilder()"/> (the builder-first surface —
+/// model packages register their engines on the root's
+/// <see cref="IDatabaseApplicationBuilder"/> seam) or construct it directly from
+/// fully populated <see cref="DatabaseApplicationOptions"/>.
 /// </remarks>
-public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
+public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDatabaseApplication
 {
     private readonly DatabaseApplicationContext _context;
 
@@ -86,6 +92,47 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
     /// Gets the application context.
     /// </summary>
     public override DatabaseApplicationContext Context => _context;
+
+    /// <summary>
+    /// Gets the database engines this application serves, in registration order.
+    /// </summary>
+    public IReadOnlyList<IDatabaseEngine> Engines => _context.Engines;
+
+    /// <summary>
+    /// Creates a builder for composing a database application — the entry point of
+    /// the area's builder pattern (mirrors <c>WebApplication.CreateBuilder()</c>).
+    /// Model packages register their engines on the returned builder through the
+    /// root's <see cref="IDatabaseApplicationBuilder"/> seam.
+    /// </summary>
+    /// <returns>A new application builder over default options.</returns>
+    public static DatabaseApplicationBuilder CreateBuilder()
+    {
+        return CreateBuilder(new DatabaseApplicationOptions());
+    }
+
+    /// <summary>
+    /// Creates a builder for composing a database application over the specified
+    /// options.
+    /// </summary>
+    /// <param name="options">The application options the builder composes into.</param>
+    /// <returns>A new application builder over <paramref name="options"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new DatabaseApplicationBuilder(options);
+    }
+
+    Task IDatabaseApplication.StartAsync(CancellationToken cancellationToken)
+    {
+        return ((IHost)this).StartAsync(cancellationToken);
+    }
+
+    Task IDatabaseApplication.StopAsync(CancellationToken cancellationToken)
+    {
+        return ((IHost)this).StopAsync(cancellationToken);
+    }
 
     /// <summary>
     /// Wraps a claimed engine worker in the host service matching the configured

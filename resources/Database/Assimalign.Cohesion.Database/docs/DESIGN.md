@@ -89,6 +89,22 @@ surface. Child roots never reference the root.
   could even *name* the server. The runtime implementation stays in
   `Database.Hosting`; embedded, in-process users still pay for nothing but two
   interfaces.
+- **The application builder is a root seam; the implementation is not** (owner
+  direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
+  live here so **model packages register their engines without knowing the
+  hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` as an
+  `extension(IDatabaseApplicationBuilder)` member and never references
+  `Database.Hosting` (COHRES001 intact); the hosting module ships the
+  implementation (`DatabaseApplicationBuilder`) and the creation entry point
+  (`DatabaseApplication.CreateBuilder()`). This mirrors the Web area exactly
+  (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
+  in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
+  pattern is the **cross-area expectation**: every area root provides
+  `I<Area>ApplicationBuilder`, and feature/model registration verbs ship with
+  their feature package (see `.claude/rules/resource-areas.md`). The rejected
+  alternative — a builder type in the hosting module — would force every model
+  package that wants a registration verb to reference the composition surface,
+  which is precisely what the hosting-isolation rule forbids.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain

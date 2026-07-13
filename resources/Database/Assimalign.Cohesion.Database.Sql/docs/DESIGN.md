@@ -76,6 +76,20 @@ Cadence knobs live here, on `SqlDatabaseEngineOptions`, not on the host — the
 engine owns the loop whether or not a host maps it, and hosts read cadence through
 `IDatabaseEngineWorker.Interval`.
 
+## The application-builder verb (`AddSqlDatabase`)
+
+The model registers itself on a database application through
+`AddSqlDatabase(Action<SqlDatabaseEngineOptions>?)` — an
+`extension(IDatabaseApplicationBuilder)` member in `Extensions/`, composing
+against the **area root's builder seam only** (this package references no
+hosting module; COHRES001 stays intact — the same rule that puts
+`AddAuthentication` in `Web.Authentication`, not `Web.Hosting`). The verb
+returns the registered `SqlDatabaseEngine` — the Web convention of returning
+the feature's own composition object — so a composition root can seed or
+provision databases before the application starts. Registration is
+dependency-free: the verb news the engine up from options and hands it to
+`AddEngine`; no container, no configuration binding.
+
 ## Error model
 
 `DatabaseException` (area root) for everything user-facing: plan-time

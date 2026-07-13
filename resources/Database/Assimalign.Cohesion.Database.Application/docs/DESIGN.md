@@ -28,6 +28,16 @@ belongs in a library.
   `DatabaseApplicationBootstrap` (+ `DatabaseApplicationComposition`), so tests
   drive the full env-config → running-host path in-process — no process spawning,
   no flaky stdout scraping.
+- **Composed through the area builder pattern (2026-07-13)** — this executable is
+  the proof-of-pattern consumer. The bootstrap starts from
+  `DatabaseApplication.CreateBuilder()`, registers the SQL engine through the
+  model's own verb (`builder.AddSqlDatabase(...)` — shipped by `Database.Sql`
+  against the root's `IDatabaseApplicationBuilder` seam), registers the TCP
+  endpoint as a *deferred* server factory (it receives the final engine list at
+  build), and parks the default-database provisioner on
+  `builder.Options.Services`. Hand-assembling `DatabaseApplicationOptions` was
+  the interim shape; the builder is the same options object with the model
+  registration inverted to the package that owns the model.
 - **Bind all interfaces, gateway-injected port (container-style).** The gateway
   owns the network boundary and injects `COHESION_DATABASE_ENDPOINT_PORT`; inside
   its own (container/pod) boundary the host binds `0.0.0.0`. Loopback-only binding

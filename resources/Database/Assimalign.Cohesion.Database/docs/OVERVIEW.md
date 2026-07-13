@@ -19,6 +19,11 @@ including child-owned vocabulary the contracts speak (`TransactionId` and
 
 - **Engine contracts** — create/open/drop/enumerate logical databases; engine
   lifecycle (`EngineState`) and model identity (`EngineModel`).
+- **Application composition seam** — `IDatabaseApplicationBuilder` /
+  `IDatabaseApplication`: model packages register their engines against this
+  root seam (e.g. `Database.Sql`'s `AddSqlDatabase(...)` verb) without knowing
+  the hosting layer; `Database.Hosting` implements it
+  (`DatabaseApplication.CreateBuilder()`).
 - **Session contracts** — query execution (typed `QueryRequest` and
   language-text overloads) and transaction management. Sessions are
   single-threaded by contract; disposing one rolls back its active transaction.

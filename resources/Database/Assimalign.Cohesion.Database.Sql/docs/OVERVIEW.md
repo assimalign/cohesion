@@ -40,4 +40,18 @@ await session.ExecuteAsync(SqlQueryRequest.FromSql(
     new Dictionary<string, object?> { ["id"] = 1L, ["name"] = "Ada" }));
 ```
 
+### Registering on a database application
+
+The model's builder verb composes against the area root's
+`IDatabaseApplicationBuilder` seam (no hosting reference — the verb ships here,
+per the area builder pattern):
+
+```csharp
+SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+{
+    options.RootPath = dataDirectory;          // omit for in-memory
+    options.Durability = StorageCommitDurability.Grouped;
+});
+```
+
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.

@@ -44,7 +44,8 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 
 ## Key Types
 
-- `DatabaseApplication`
+- `DatabaseApplication` (implements the root's `IDatabaseApplication`; `CreateBuilder()` is the composition entry point)
+- `DatabaseApplicationBuilder` (implements the root's `IDatabaseApplicationBuilder`)
 - `DatabaseApplicationContext`
 - `DatabaseApplicationOptions`
 - `DatabaseWorkerMappingOptions` / `DatabaseWorkerSlotOptions` / `DatabaseWorkerExecution`
@@ -54,18 +55,30 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 
 ## Composing a host
 
+Builder-first — model packages register their engines through the root's
+`IDatabaseApplicationBuilder` seam (verbs ship with the model package, e.g.
+`AddSqlDatabase` in `Database.Sql`), and the endpoint is a deferred factory that
+receives the final engine list at build:
+
 ```csharp
-var serverOptions = new DatabaseServerOptions { Listener = listener };
-serverOptions.Engines.Add(engine);
+var builder = DatabaseApplication.CreateBuilder();
 
-var options = new DatabaseApplicationOptions();
-options.Engines.Add(engine);
-options.Server = DatabaseServer.Create(serverOptions);   // the wire endpoint
+SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
 
-await using var app = new DatabaseApplication(options);
+builder.AddServer(engines =>
+{
+    var serverOptions = new DatabaseServerOptions { Listener = listener };
+    foreach (var registered in engines) serverOptions.Engines.Add(registered);
+    return DatabaseServer.Create(serverOptions);          // the wire endpoint
+});
+
+await using var app = builder.Build();
 await app.RunAsync();   // starts engines, then the claimed worker slots, then the endpoint
 ```
 
-A custom or embedded host composes `DatabaseServer.Create(...)` manually and drives
+Hosting-only composition (worker-slot mapping, additional host services) lives on
+`builder.Options`; constructing `new DatabaseApplication(options)` directly from
+fully populated options remains supported. A custom or embedded host composes
+`DatabaseServer.Create(...)` manually and drives
 `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle. `Database.Client` is the
 counterpart on the other end of the wire.

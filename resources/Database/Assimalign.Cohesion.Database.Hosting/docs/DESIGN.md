@@ -245,11 +245,39 @@ how the composition root builds the engine (data path, durability) and the liste
 realized process, so the manifest side and the host side agree by convention (the two
 projects share no assembly).
 
+## The builder-first composition surface (2026-07-13)
+
+`DatabaseApplication.CreateBuilder()` is the composition entry point, following
+the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
+
+- **The root's `IDatabaseApplicationBuilder`** carries what model packages need:
+  engine registration (`AddEngine`) and the endpoint seam (`AddServer` — an
+  instance, or a factory deferred to `Build` so it receives the *final*
+  registered engine list regardless of verb ordering). Model verbs like
+  `Database.Sql`'s `AddSqlDatabase(...)` compose against this seam only, so a
+  model registers its engine **without knowing the hosting layer** —
+  registration is dependency-free (values and options objects; no container).
+- **This module's `DatabaseApplicationBuilder`** implements the seam over a
+  `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
+  the hosting-only surface the root interface deliberately omits: worker-slot
+  mapping and additional host services. `Build()` returns the concrete
+  `DatabaseApplication` (the guided richer signature; the interface member
+  forwards), which now implements the root's `IDatabaseApplication` —
+  engines list + start/stop — so composition roots can stay abstraction-typed.
+- Direct construction (`new DatabaseApplication(options)`) remains supported for
+  fully manual hosts; the builder is sugar over the same options object, never a
+  second composition model.
+
+The `Database.Application` executable is the proof-of-pattern consumer: its
+bootstrap registers the SQL engine through `AddSqlDatabase`, defers the TCP
+endpoint to a server factory, and parks the default-database provisioner on
+`builder.Options.Services`.
+
 ## Status and non-goals
 
-- No builder or DI container surface yet; construct `DatabaseApplication` with
-  `DatabaseApplicationOptions` directly. A `CreateBuilder` surface can follow the
-  `WebApplication` pattern when the resource matures.
+- No DI-container surface on the builder — registration stays values/options
+  only, per the area composition rules (`*.Hosting` remains the DI seam for
+  everything else).
 - No governance/quotas (#167) or health/readiness (#168) surfaces yet — separate
   features.
 - No per-model message handling in the server — payload semantics belong to engines
