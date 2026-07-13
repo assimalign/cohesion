@@ -14,10 +14,11 @@ using Assimalign.Cohesion.Hosting;
 /// documented placeholder that parks until the host stops: durability is engine-owned
 /// (requirement R10) — the SQL engine flushes synchronously at commit
 /// (steal/no-force WAL), so there is no host-driven flush work to do, and an embedded
-/// consumer must get the same durability without a host. When the engine grows a
-/// host-mappable background checkpoint/flush worker seam (filed follow-up under the
-/// engine self-sufficiency feature #862), this slot drives it. It never owns durability
-/// itself, or embedded consumers would silently lose it.
+/// consumer must get the same durability without a host. This is the slot for the
+/// engine-owned WAL group-commit flusher planned in #902 (under the engine
+/// self-sufficiency feature #862) — see the "Execution-model mapping" section of
+/// docs/DESIGN.md for the full worker inventory. It never owns durability itself, or
+/// embedded consumers would silently lose it.
 /// </remarks>
 internal sealed class WriteAheadFlushService : DedicatedThreadService
 {

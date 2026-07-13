@@ -30,6 +30,33 @@ then the endpoint. A host starts services in registration order and stops them i
 reverse, so the endpoint starts last and stops first — connections drain ahead of the
 durability workers.
 
+## Execution-model mapping (the #902 worker inventory)
+
+The plan for the database's background services, reconciling the Lane-H guardrails
+(WAL flush / page writer on dedicated threads, endpoint on the pool) with requirement
+R10 (engine self-sufficiency). **Core principle: the engine owns every
+durability/maintenance work loop** behind the #902 `IDatabaseEngine` lifecycle seam,
+so an embedded consumer gets identical behavior with no host at all;
+`DatabaseApplicationOptions` merely *maps* each engine worker onto the execution menu
+— the per-worker threading choice plus cadence knobs (group-commit window, checkpoint
+interval, purge batch size). The host never owns the work, or embedded mode would
+silently lose it.
+
+| Worker | Owner | Execution-menu member | Rationale |
+| --- | --- | --- | --- |
+| WAL group-commit flusher | engine | `DedicatedThreadService` | Latency-critical steady loop — every commit waits on it, so it must be immune to thread-pool starvation. Drives the journal's durable-flush batching (`IStorageJournal.EnsureDurable` group commit). Today the engine flushes synchronously at commit; the async group-commit window is the #902 upgrade this slot maps. |
+| Page write-back (dirty-page writer) | engine | `DedicatedThreadService` | Paced synchronous I/O that owns its thread for its whole life; coordinates with the buffer pool's `WriteAheadGate` (a page reaches the data file only once the journal is durable past its LSN). |
+| Checkpointer (flush + journal truncate) | engine | `BackgroundService`, timer-driven | Periodic and not latency-critical; serializes with the flusher (checkpoint = durable flush, then truncate with continued LSNs). A timer loop on the pool is enough. |
+| MVCC version purge / vacuum | engine | `BackgroundService` | Bursty, yieldy, low priority — drains aborted/pruneable version chains via `IVersionStore.PurgeWriterAsync` and the oldest-active prune bound. |
+| B+Tree maintenance (tombstone vacuum, page merges) | engine (future) | `BackgroundService`, throttled | Same shape as version purge once the index layer grows compaction; throttled so maintenance never competes with foreground writes. |
+| Protocol endpoint accept loop | hosting | `BackgroundService` | Already live (`DatabaseServerHostService`): an async accept loop belongs on the pool. Starts last, drains first. |
+| Session idle sweep | — (server-internal) | not a host-service slot | Idle eviction is per-session `CancelAfter` timers inside the session pump; promoting it to a host service would add a slot with nothing to own. |
+| Deadlock detection | — (lock manager, synchronous) | not a host-service slot (today) | The lock manager detects cycles at acquire time (requester-closes-cycle victim policy) — there is no background scanner to schedule. A wait-for-graph scanner only becomes a service if lock acquisition ever moves to blocking-with-timeout; noted as a possible future row, not planned. |
+
+Until #902 lands the engine-owned worker seam, `WriteAheadFlushService` and
+`PageWriterService` are the first two rows' *slots*: placeholders that park until
+shutdown (see the next section). #902's acceptance criteria carry this same inventory.
+
 ## Why-this-not-that
 
 ### The server runtime is a hosting concern (2026-07-12 fold)
@@ -114,9 +141,10 @@ flush or page-writer work to do** — and there must not be, or an embedded cons
 therefore the execution-menu *slots* for a future engine-owned background
 checkpoint/flush worker: they park until shutdown and are documented as such. When the
 engine grows a host-mappable background-worker seam, these slots drive it. That engine
-seam is filed as **#902** under the engine self-sufficiency feature #862. The slots
-are on by default (to keep the standalone host's execution-menu shape) and can be
-toggled off for embedded/self-sufficient composition.
+seam is filed as **#902** under the engine self-sufficiency feature #862; the full
+worker inventory and per-worker menu assignments live in "Execution-model mapping"
+above. The slots are on by default (to keep the standalone host's execution-menu
+shape) and can be toggled off for embedded/self-sufficient composition.
 
 ### Engine lifecycle stays with the composition root
 

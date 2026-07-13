@@ -14,9 +14,10 @@ using Assimalign.Cohesion.Hosting;
 /// documented placeholder that parks until the host stops: page write-back is
 /// engine-owned (requirement R10) — the buffer pool's write-ahead gate keeps dirty
 /// pages steal-safe and the engine writes them back within its own storage layer, and
-/// an embedded consumer must get the same behavior without a host. When the engine
-/// grows a host-mappable background page-writer/checkpoint worker seam (filed follow-up
-/// under the engine self-sufficiency feature #862), this slot drives it.
+/// an embedded consumer must get the same behavior without a host. This is the slot
+/// for the engine-owned dirty-page writer planned in #902 (under the engine
+/// self-sufficiency feature #862) — see the "Execution-model mapping" section of
+/// docs/DESIGN.md for the full worker inventory.
 /// </remarks>
 internal sealed class PageWriterService : DedicatedThreadService
 {
