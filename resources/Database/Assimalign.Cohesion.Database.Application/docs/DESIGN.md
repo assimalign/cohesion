@@ -48,6 +48,15 @@ belongs in a library.
   durably before exit. `ProcessExit` alone was rejected: it races the runtime's
   teardown; the signal registration pre-empts default termination cleanly on all
   platforms.
+- **The host provisions a default database (`app`).** The wire protocol has no
+  CREATE DATABASE verb (database provisioning is a deployment concern in the MVP),
+  so a fresh server process with zero databases would be unusable — no client
+  could bind anything. An internal `DefaultDatabaseProvisioner` host service runs
+  after the engine starts and before the endpoint accepts: it opens `app` when its
+  files exist (restart) and creates it on first launch. The name is a convention
+  for now; a `COHESION_DATABASE_NAME` binding (mirrored by a
+  `DatabaseResourceOptions` knob so both planes agree) is the natural follow-up
+  when multi-database deployments need it.
 - **Deliberately not in the `App.Database` framework manifest.** Frameworks
   deliver libraries to applications; this *is* an application. It ships as a
   deployment artifact (published executable / container image), documented in the

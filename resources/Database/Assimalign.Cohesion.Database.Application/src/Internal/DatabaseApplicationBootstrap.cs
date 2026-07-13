@@ -18,6 +18,14 @@ namespace Assimalign.Cohesion.Database.Application.Internal;
 internal static class DatabaseApplicationBootstrap
 {
     /// <summary>
+    /// The name of the database the host provisions (create-if-missing, open on
+    /// restart) before the endpoint starts. The wire protocol has no CREATE DATABASE
+    /// verb, so the server process brings its default database with it; clients bind
+    /// it by this name.
+    /// </summary>
+    internal const string DefaultDatabaseName = "app";
+
+    /// <summary>
     /// Composes a runnable database application from the configuration.
     /// </summary>
     /// <param name="configuration">The bound host configuration.</param>
@@ -54,6 +62,11 @@ internal static class DatabaseApplicationBootstrap
         var applicationOptions = new DatabaseApplicationOptions();
         applicationOptions.Engines.Add(engine);
         applicationOptions.Server = server;
+
+        // Provision the default database after the engine starts and before the
+        // endpoint accepts (additional services sit between the worker slots and the
+        // endpoint in the start order), so a client can always bind it.
+        applicationOptions.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
 
         var application = new DatabaseApplication(applicationOptions);
 

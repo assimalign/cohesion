@@ -10,8 +10,12 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Application" />
 		<!-- E2E acceptance: the composed stack is driven over real TCP loopback with the
-		     typed SQL client (tests are exempt from the area layering rules). -->
+		     typed SQL client, and the real-process gateway E2E launches the published
+		     apphost through the LocalGateway + DatabaseResource manifest (tests are
+		     exempt from the area layering rules). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
