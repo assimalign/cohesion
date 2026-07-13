@@ -23,7 +23,7 @@ public static class TransactionLog
     /// </summary>
     /// <param name="journal">The storage journal.</param>
     /// <returns>The transaction log.</returns>
-    public static ITransactionLog CreateJournalBound(IJournal journal)
+    public static ITransactionLog CreateJournalBound(IStorageJournal journal)
     {
         ArgumentNullException.ThrowIfNull(journal);
         return new JournalTransactionLog(journal);

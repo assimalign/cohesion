@@ -107,7 +107,7 @@ public abstract class Storage : IStorage
     /// managed by the storage transaction scope — derived classes should not append
     /// page images directly.
     /// </remarks>
-    protected IJournal WriteAheadLog =>
+    protected IStorageJournal WriteAheadLog =>
         _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
 
     /// <summary>

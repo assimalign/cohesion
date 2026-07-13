@@ -23,7 +23,7 @@ Every frame is `u32 payload-length (big-endian) + u8 message-type + payload`. De
 
 ## Non-goals
 
-- No transport here (TLS, sockets, pipes belong to `libraries/Connections` + `Database.Server`); `ProtocolFraming` gives stream-based reader/writer implementations any transport can wrap.
+- No transport here (TLS, sockets, pipes belong to `libraries/Connections` + the server runtime in `Database.Hosting`); `ProtocolFraming` gives stream-based reader/writer implementations any transport can wrap.
 - Payload schemas land message-by-message; today: `Startup`, `Error`, `Execute` (statement + named parameters as shared tuple-codec components), `ResultHeader` (column names + shared type identity bytes), `ResultComplete` (affected count). `ResultRow` payloads are raw tuple-codec bytes — one typed component per column — so rows need no wrapper type. The MVP authenticate exchange (server build-out, #852) carries empty payloads — a trust challenge with opaque response bytes for the authenticator seam; method-specific Authenticate payload schemas and the Transaction payload arrive with later features.
 - No compression negotiation in 1.0.
 

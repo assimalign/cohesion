@@ -15,8 +15,31 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        # Every delivered Database project is listed so the area's dependency-rule guard
+        # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
+        # each of them - most importantly Database.Hosting, which nothing else pulls in
+        # transitively. The as-yet source-less model scaffolds (Documents/Graph/
+        # KeyValuePair/Blob/Cache) and the post-MVP contract shells (Governance,
+        # Replication, Sql.Replication, Sql.Security, Memory) are excluded until they ship.
         projects: [
-            'Assimalign.Cohesion.Database'
+            'Assimalign.Cohesion.Database',
+            'Assimalign.Cohesion.Database.Types',
+            'Assimalign.Cohesion.Database.Language',
+            'Assimalign.Cohesion.Database.Storage',
+            'Assimalign.Cohesion.Database.Transactions',
+            'Assimalign.Cohesion.Database.Indexing',
+            'Assimalign.Cohesion.Database.Execution',
+            'Assimalign.Cohesion.Database.Protocol',
+            'Assimalign.Cohesion.Database.Security',
+            'Assimalign.Cohesion.Database.Client',
+            'Assimalign.Cohesion.Database.Embedded',
+            'Assimalign.Cohesion.Database.Hosting',
+            'Assimalign.Cohesion.Database.Sql',
+            'Assimalign.Cohesion.Database.Sql.Language',
+            'Assimalign.Cohesion.Database.Sql.Catalog',
+            'Assimalign.Cohesion.Database.Sql.Storage',
+            'Assimalign.Cohesion.Database.Sql.Client',
+            'Assimalign.Cohesion.Database.ApplicationModel'
         ]
     steps:
       - uses: actions/checkout@v4

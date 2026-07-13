@@ -4,9 +4,11 @@ The contract root of the Cohesion Data Platform: the model-agnostic interfaces
 every engine implements and every consumer programs against —
 `IDatabaseEngine` (lifecycle of logical databases), `IDatabase` (a logical
 database), `IDatabaseSession` (scoped execution context), and
-`IDatabaseTransaction` (explicit ACID scope) — plus the area's exception root
-(`DatabaseException`, `DatabaseParseException`) and shared value objects
-(`DatabaseName`, `TransactionId`, lifecycle enums).
+`IDatabaseTransaction` (explicit ACID scope) — plus the server seam
+(`IDatabaseServer`, `IDatabaseServerSession`; the runtime lives in
+`Database.Hosting`), the area's exception root (`DatabaseException`,
+`DatabaseParseException`), and shared value objects (`DatabaseName`,
+`TransactionId`, `ProtocolVersion`, lifecycle enums).
 
 ## Scope
 
@@ -27,8 +29,8 @@ concern, excluded from the package dependency list).
 ## Consumers
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
-implement the contracts; `Database.Server` pumps wire-protocol frames into
-sessions; `Database.Client` mirrors results on the caller side;
-`Database.Hosting` composes engines into a host.
+implement the contracts; the server runtime in `Database.Hosting` pumps
+wire-protocol frames into sessions; `Database.Client` mirrors results on the
+caller side; `Database.Hosting` composes engines into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.

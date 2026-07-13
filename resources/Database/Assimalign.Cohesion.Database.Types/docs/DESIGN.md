@@ -58,7 +58,7 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   wire protocol (#852) moves *untyped* values in both directions: a client encodes
   boxed parameter values, the server decodes them, and result rows make the same
   trip in reverse. Both ends need the identical runtime-type→component mapping;
-  duplicating the switch in `Database.Server` and `Database.Client` would let the
+  duplicating the switch in the server runtime and `Database.Client` would let the
   two drift (a wire-corruption class of bug). The codec dispatches on runtime type
   (`Append`), reads self-describing components back boxed (`Read`), and offers
   single-component helpers (`EncodeComponent`/`DecodeComponent`) as the parameter

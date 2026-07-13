@@ -84,7 +84,7 @@ the flags and page type are reserved).
 
 ## The journal (write-ahead log)
 
-`IJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
+`IStorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
 magic-tagged, and CRC-protected; a torn or corrupted tail terminates the read scan and
 is ignored — it belongs to work that was never acknowledged. Records are typed and
 binary (begin / commit / rollback / checkpoint / before-image / after-image / opaque

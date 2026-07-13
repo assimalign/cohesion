@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// end of the stream; durable flushes use <see cref="FileStream.Flush(bool)"/> when
 /// the underlying stream is a file.
 /// </summary>
-public sealed class StreamJournal : Journal
+public sealed class StreamJournal : StorageJournal
 {
     private readonly Stream _stream;
     private readonly bool _leaveOpen;

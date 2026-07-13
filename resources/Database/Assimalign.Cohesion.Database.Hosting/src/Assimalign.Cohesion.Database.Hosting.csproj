@@ -1,6 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES002): the hosting module owns the
+		     database server runtime (Database.Server folded in per 2026-07-12 owner decision) — Protocol (wire framing)
+		     and Security (authenticator seam) are the server's own machinery, not hosted features. Protocol cannot be
+		     aggregated into the area root (it references the root). -->
+		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Database.Protocol;Assimalign.Cohesion.Database.Security</CohesionHostingIsolationExemptions>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Security" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>

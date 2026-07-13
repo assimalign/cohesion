@@ -7,7 +7,8 @@ to implementations composed by the host, never here.
 
 ## Why-this-not-that decisions
 
-- **`IDatabaseAuthenticator` lives here, not in `Database.Server`.** The server
+- **`IDatabaseAuthenticator` lives here, not with the server runtime
+  (`Database.Hosting`).** The server
   *drives* the handshake, but who-is-this is a security question that embedded
   hosts, replication peers, and future admin surfaces also need to answer. Homing
   the seam in the security contract project lets implementations ship without a

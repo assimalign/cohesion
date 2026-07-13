@@ -1,12 +1,12 @@
 # Assimalign.Cohesion.Database.Protocol — Overview
 
-The Cohesion database wire protocol: the frame model and message contracts shared by the database server (`Database.Server`) and the client core (`Database.Client`). Pure value objects and reader/writer contracts — no sockets, no transport.
+The Cohesion database wire protocol: the frame model and message contracts shared by the database server (the server runtime in `Database.Hosting`) and the client core (`Database.Client`). Pure value objects and reader/writer contracts — no sockets, no transport.
 
 ## Scope
 
 - `ProtocolFrameHeader` / `ProtocolFrame` — 5-byte header (big-endian `u32` payload length + `u8` message type) and frame model (implemented, tested)
 - `ProtocolMessageType` — startup/auth, execute, streaming results (header/row/complete), transaction control, error, liveness, terminate
-- `ProtocolVersion` — negotiated at startup; `Current` is 1.0
+- `ProtocolVersion` — negotiated at startup; the value type lives in the area root (it is `IDatabaseServerSession` vocabulary), while this package publishes `ProtocolVersion.Current` (1.0) as a static extension member — the version this assembly implements
 - `ProtocolErrorCode` — stable, append-only error codes
 - `IProtocolFrameReader` / `IProtocolFrameWriter` — the transport-facing seams
 - `ProtocolException` — framing violations
@@ -17,4 +17,4 @@ The Cohesion database wire protocol: the frame model and message contracts share
 
 ## Consumers
 
-`Database.Server` (frame pump into sessions) and `Database.Client` (connection core). Per-model payload encodings layer on top; the framing never changes per model.
+The server runtime in `Database.Hosting` (frame pump into sessions) and `Database.Client` (connection core). Per-model payload encodings layer on top; the framing never changes per model.

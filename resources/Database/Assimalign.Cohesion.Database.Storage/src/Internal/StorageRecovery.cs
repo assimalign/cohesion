@@ -33,7 +33,7 @@ internal static class StorageRecovery
     /// Runs recovery and returns the highest transaction sequence observed in the
     /// journal (zero when the journal is empty).
     /// </summary>
-    internal static long Run(StorageStream data, IJournal journal)
+    internal static long Run(StorageStream data, IStorageJournal journal)
     {
         var records = journal.ReadAll();
 

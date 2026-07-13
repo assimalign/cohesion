@@ -21,7 +21,7 @@ public static class TransactionRecovery
     /// </summary>
     /// <param name="journal">The storage journal to analyze.</param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
-    public static TransactionRecoveryPlan Analyze(IJournal journal)
+    public static TransactionRecoveryPlan Analyze(IStorageJournal journal)
     {
         ArgumentNullException.ThrowIfNull(journal);
 

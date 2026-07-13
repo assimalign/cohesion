@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -6,10 +7,17 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
-/// The standalone hosting application for the database engine resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// The standalone hosting application for the database engine resource. Composes the
+/// resource's units of work as hosted services, each selecting its execution model per
+/// the <c>Assimalign.Cohesion.Hosting</c> per-service execution menu (see docs/DESIGN.md).
 /// </summary>
+/// <remarks>
+/// Registration order is durability workers first, then any additional services, then
+/// the wire-protocol endpoint (<see cref="DatabaseApplicationOptions.Server"/>).
+/// Because a host starts services in registration order and stops them in reverse, the
+/// endpoint starts last and stops first — connections drain before the durability
+/// workers shut down.
+/// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 {
     private readonly DatabaseApplicationContext _context;
@@ -23,12 +31,34 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _context = new DatabaseApplicationContext(options, new IHostService[]
+        var services = new List<IHostService>();
+
+        // Durability worker slots first: they own their threads for the host's whole
+        // life and stop last, so an endpoint always drains ahead of them.
+        if (options.EnableWriteAheadFlushService)
         {
-            new WriteAheadFlushService(),
-            new PageWriterService(),
-            new QueryEndpointService(),
-        });
+            services.Add(new WriteAheadFlushService());
+        }
+        if (options.EnablePageWriterService)
+        {
+            services.Add(new PageWriterService());
+        }
+
+        // Then the composition root's additional services.
+        foreach (IHostService service in options.Services)
+        {
+            services.Add(service);
+        }
+
+        // The wire-protocol endpoint registers last: a host starts services in
+        // registration order and stops them in reverse, so the endpoint starts
+        // last and drains first.
+        if (options.Server is not null)
+        {
+            services.Add(new DatabaseServerHostService(options.Server));
+        }
+
+        _context = new DatabaseApplicationContext(options, services);
     }
 
     /// <summary>
