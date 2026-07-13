@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// acknowledged.
 /// </para>
 /// </remarks>
-public interface IJournal : IAsyncDisposable, IDisposable
+public interface IStorageJournal : IAsyncDisposable, IDisposable
 {
     /// <summary>
     /// Gets the LSN of the most recently appended record, or zero when the journal

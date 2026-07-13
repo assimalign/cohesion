@@ -17,7 +17,7 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   `IStorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
-- **Journal** — `IJournalLogger` write-ahead logging with begin/commit/rollback
+- **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
   markers, CRC-protected frames, and recovery replay of committed operations.
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
   (`.log`), and backup (`.bak`), wrapped by `StorageStream`.

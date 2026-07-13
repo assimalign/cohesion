@@ -18,7 +18,7 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// [payload]</c>. A record whose length prefix, magic, or checksum does not verify
 /// terminates the read scan — a torn tail belongs to work that was never acknowledged.
 /// </remarks>
-public abstract class Journal : IJournal
+public abstract class StorageJournal : IStorageJournal
 {
     private readonly object _syncRoot = new();
     private long _lastLsn;
@@ -29,7 +29,7 @@ public abstract class Journal : IJournal
     /// <summary>
     /// Initializes a new journal instance.
     /// </summary>
-    protected Journal() { }
+    protected StorageJournal() { }
 
     /// <inheritdoc />
     public long LastLsn
