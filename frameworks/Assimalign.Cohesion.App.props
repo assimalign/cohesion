@@ -219,11 +219,11 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Indexing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Execution" />
 
-        <!-- Service surface: wire protocol, server, client core, security, and the
-             embedded facade + the host composition module. -->
+        <!-- Service surface: wire protocol, client core, security, the embedded
+             facade, and the host composition module (which owns the server runtime;
+             Database.Server was folded into Database.Hosting 2026-07-12). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Server" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />

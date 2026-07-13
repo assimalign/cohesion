@@ -6,15 +6,15 @@ using Assimalign.Cohesion.Hosting;
 
 /// <summary>
 /// Options for <see cref="DatabaseApplication"/>: the engines the host serves, the
-/// endpoint (and other) host services composed on top of the durability worker slots,
-/// and toggles for the durability services.
+/// wire-protocol server, additional host services composed on top of the durability
+/// worker slots, and toggles for the durability services.
 /// </summary>
 /// <remarks>
-/// The host composes over the area root abstractions and non-area hosting
-/// infrastructure only (the resource hosting-isolation rule, COHRES002). It therefore
-/// cannot name the wire-protocol server directly; the composition root builds the
-/// server from <c>Database.Server</c> and adds its endpoint host service
-/// (<c>DatabaseServer.CreateHostService</c>) to <see cref="Services"/>.
+/// The hosting module owns the database server runtime (folded in from the former
+/// <c>Database.Server</c> project), so the host composes the endpoint directly:
+/// build the server with <see cref="DatabaseServer.Create"/> and assign it to
+/// <see cref="Server"/> — <see cref="DatabaseApplication"/> wraps it in the internal
+/// endpoint host service and registers it last, so it starts last and drains first.
 /// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
@@ -26,10 +26,17 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
 
     /// <summary>
-    /// Gets the host services composed on top of the durability worker slots —
-    /// typically the wire-protocol endpoint (<c>DatabaseServer.CreateHostService</c>).
-    /// They start after the durability services and stop before them, so connections
-    /// drain ahead of durability shutdown.
+    /// Gets or sets the wire-protocol server the host runs as its endpoint, or null
+    /// when the host serves no network endpoint. The application wraps the server in
+    /// its internal endpoint host service, registered last — the endpoint starts
+    /// last and drains first on stop.
+    /// </summary>
+    public IDatabaseServer? Server { get; set; }
+
+    /// <summary>
+    /// Gets the additional host services composed on top of the durability worker
+    /// slots and ahead of the endpoint. They start after the durability services and
+    /// stop before them.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 

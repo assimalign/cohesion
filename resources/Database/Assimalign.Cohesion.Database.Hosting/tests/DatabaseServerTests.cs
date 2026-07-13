@@ -9,7 +9,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
 /// End-to-end tests for the server runtime (#852): the session state machine,
@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Server.Tests;
 /// </summary>
 public class DatabaseServerTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Handshake: startup/authenticate/ready reaches an authenticated session")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: startup/authenticate/ready reaches an authenticated session")]
     public async Task Handshake_WithCurrentVersion_ShouldReachReady()
     {
         // Arrange
@@ -35,7 +35,7 @@ public class DatabaseServerTests
         session.DatabaseSession.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Handshake: unknown protocol major is rejected with UnsupportedVersion")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: unknown protocol major is rejected with UnsupportedVersion")]
     public async Task Handshake_WithUnknownMajorVersion_ShouldRejectWithUnsupportedVersion()
     {
         // Arrange
@@ -53,7 +53,7 @@ public class DatabaseServerTests
         (await client.ReadAsync()).ShouldBeNull(); // the server closed the connection
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Handshake: unknown database is rejected with DatabaseNotFound")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: unknown database is rejected with DatabaseNotFound")]
     public async Task Handshake_WithUnknownDatabase_ShouldRejectWithDatabaseNotFound()
     {
         // Arrange
@@ -68,7 +68,7 @@ public class DatabaseServerTests
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.DatabaseNotFound);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Handshake: a rejecting authenticator yields AuthenticationFailed")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: a rejecting authenticator yields AuthenticationFailed")]
     public async Task Handshake_WithRejectingAuthenticator_ShouldFailAuthentication()
     {
         // Arrange
@@ -85,7 +85,7 @@ public class DatabaseServerTests
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.AuthenticationFailed);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Execute: SELECT streams ResultHeader, rows, and ResultComplete")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: SELECT streams ResultHeader, rows, and ResultComplete")]
     public async Task Execute_SelectStatement_ShouldStreamHeaderRowsAndComplete()
     {
         // Arrange
@@ -114,7 +114,7 @@ public class DatabaseServerTests
         ProtocolResultCompleteMessage.Decode(completeFrame.Payload.Span).AffectedCount.ShouldBe(-1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Execute: statement results return the affected count")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: statement results return the affected count")]
     public async Task Execute_InsertStatement_ShouldReturnAffectedCount()
     {
         // Arrange
@@ -130,7 +130,7 @@ public class DatabaseServerTests
         ProtocolResultCompleteMessage.Decode(frame.Payload.Span).AffectedCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Execute: wire parameters decode and bind by bare name")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: wire parameters decode and bind by bare name")]
     public async Task Execute_WithParameters_ShouldBindDecodedValues()
     {
         // Arrange
@@ -152,7 +152,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Execute: parse failures report ParseFailure and keep the session alive")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: parse failures report ParseFailure and keep the session alive")]
     public async Task Execute_InvalidSql_ShouldReportParseFailureAndKeepSessionAlive()
     {
         // Arrange
@@ -174,7 +174,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Execute: execution failures report ExecutionFailure and keep the session alive")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: execution failures report ExecutionFailure and keep the session alive")]
     public async Task Execute_UnknownTable_ShouldReportExecutionFailureAndKeepSessionAlive()
     {
         // Arrange
@@ -195,7 +195,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Guardrails: connections beyond MaxSessions are rejected with Unavailable")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: connections beyond MaxSessions are rejected with Unavailable")]
     public async Task Accept_BeyondMaxSessions_ShouldRejectWithUnavailable()
     {
         // Arrange
@@ -212,7 +212,7 @@ public class DatabaseServerTests
         (await second.ReadAsync()).ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Guardrails: unauthenticated connections are dropped after the authentication timeout")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: unauthenticated connections are dropped after the authentication timeout")]
     public async Task Handshake_WhenAuthenticationTimesOut_ShouldDropConnection()
     {
         // Arrange
@@ -227,7 +227,7 @@ public class DatabaseServerTests
         await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Guardrails: idle sessions are evicted after the idle timeout")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: idle sessions are evicted after the idle timeout")]
     public async Task ReadyLoop_WhenIdleTimeoutLapses_ShouldEvictSession()
     {
         // Arrange
@@ -244,7 +244,7 @@ public class DatabaseServerTests
         await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Liveness: ping frames answer with pong")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Liveness: ping frames answer with pong")]
     public async Task ReadyLoop_OnPing_ShouldAnswerPong()
     {
         // Arrange
@@ -259,7 +259,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.Pong);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Lifecycle: terminate closes the session cleanly")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: terminate closes the session cleanly")]
     public async Task ReadyLoop_OnTerminate_ShouldCloseSession()
     {
         // Arrange
@@ -275,7 +275,7 @@ public class DatabaseServerTests
         await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Server] - Lifecycle: StopAsync drains idle sessions within the budget")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: StopAsync drains idle sessions within the budget")]
     public async Task StopAsync_WithIdleSessions_ShouldDrainGracefully()
     {
         // Arrange

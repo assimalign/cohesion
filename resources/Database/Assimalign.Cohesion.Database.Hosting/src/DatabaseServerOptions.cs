@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Security;
 
-namespace Assimalign.Cohesion.Database.Server;
+namespace Assimalign.Cohesion.Database.Hosting;
 
 /// <summary>
 /// Options controlling the database server front-end.

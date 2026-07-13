@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Server;
+using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Client.Tests;

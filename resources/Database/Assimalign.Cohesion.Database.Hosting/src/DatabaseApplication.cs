@@ -12,10 +12,11 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 /// the <c>Assimalign.Cohesion.Hosting</c> per-service execution menu (see docs/DESIGN.md).
 /// </summary>
 /// <remarks>
-/// Registration order is durability workers first, then the composed endpoint (and any
-/// other) services. Because a host starts services in registration order and stops them
-/// in reverse, endpoints start last and stop first — connections drain before the
-/// durability workers shut down.
+/// Registration order is durability workers first, then any additional services, then
+/// the wire-protocol endpoint (<see cref="DatabaseApplicationOptions.Server"/>).
+/// Because a host starts services in registration order and stops them in reverse, the
+/// endpoint starts last and stops first — connections drain before the durability
+/// workers shut down.
 /// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
 {
@@ -43,11 +44,18 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>
             services.Add(new PageWriterService());
         }
 
-        // Then the composition root's endpoint (and any other) services — typically the
-        // wire-protocol server via DatabaseServer.CreateHostService.
+        // Then the composition root's additional services.
         foreach (IHostService service in options.Services)
         {
             services.Add(service);
+        }
+
+        // The wire-protocol endpoint registers last: a host starts services in
+        // registration order and stops them in reverse, so the endpoint starts
+        // last and drains first.
+        if (options.Server is not null)
+        {
+            services.Add(new DatabaseServerHostService(options.Server));
         }
 
         _context = new DatabaseApplicationContext(options, services);

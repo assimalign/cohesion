@@ -21,7 +21,8 @@ None — a leaf contract project.
 
 ## Consumers
 
-`Database.Server` drives `IDatabaseAuthenticator` from its session handshake;
+The server runtime in `Database.Hosting` drives `IDatabaseAuthenticator` from
+its session handshake;
 engines and model security packages consume `IAuthorizationService` as the
 authorization surface matures.
 

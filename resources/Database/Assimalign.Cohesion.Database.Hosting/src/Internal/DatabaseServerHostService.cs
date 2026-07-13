@@ -4,19 +4,18 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Database.Server;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// The endpoint host service: runs a <see cref="IDatabaseServer"/>'s accept loop as a
 /// pool-scheduled <see cref="BackgroundService"/> and drains it gracefully on host stop.
 /// </summary>
 /// <remarks>
-/// This adapter lives with the server, not in <c>Database.Hosting</c>: the resource
-/// hosting-isolation rule (COHRES002) forbids the hosting module from referencing any
-/// same-area library except the area root, so the module cannot name
-/// <see cref="IDatabaseServer"/> to compose it. The server owns its own two-phase
-/// drain; this service maps that lifecycle onto the hosting execution menu, and
-/// <c>Database.Hosting</c> composes the resulting <see cref="IHostService"/>.
+/// The server owns its own two-phase drain; this service only maps that lifecycle
+/// onto the hosting execution menu. <see cref="DatabaseApplication"/> constructs it
+/// for the server assigned to <see cref="DatabaseApplicationOptions.Server"/> and
+/// registers it last, so the endpoint starts after — and drains before — every
+/// other composed service.
 /// </remarks>
 internal sealed class DatabaseServerHostService : BackgroundService
 {

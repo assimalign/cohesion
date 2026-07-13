@@ -3,11 +3,11 @@ using System;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public class DatabaseServerOptionsTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database] - Server: Options carry safe defaults")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Server: Options carry safe defaults")]
     public void Options_Defaults_ShouldBeBounded()
     {
         // Arrange

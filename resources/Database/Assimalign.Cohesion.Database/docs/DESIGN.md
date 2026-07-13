@@ -35,9 +35,10 @@ produced it.
   root aggregates the execution family rather than owning it: execution is its
   own child root with pipeline/context machinery the contract root has no
   business carrying.
-- **Server contracts do not live here.** `IDatabaseServer` belongs to
-  `Database.Server`; the engine contract root must stay consumable by embedded,
-  in-process users that never open a socket.
+- **Server contracts do not live here.** `IDatabaseServer` belongs to the
+  hosting module (`Database.Hosting`, which owns the server runtime); the engine
+  contract root must stay consumable by embedded, in-process users that never
+  open a socket.
 
 ## Error model
 
@@ -61,7 +62,8 @@ Contracts, enums, and value objects only — no reflection, no serialization.
 
 ## Non-goals
 
-- No connection/network concepts (that is `Database.Server`/`Database.Client`).
+- No connection/network concepts (that is the server runtime in
+  `Database.Hosting`, and `Database.Client`).
 - No DI or configuration surface (that is `Database.Hosting`'s seam alone).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

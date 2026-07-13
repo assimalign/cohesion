@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Protocol — Overview
 
-The Cohesion database wire protocol: the frame model and message contracts shared by the database server (`Database.Server`) and the client core (`Database.Client`). Pure value objects and reader/writer contracts — no sockets, no transport.
+The Cohesion database wire protocol: the frame model and message contracts shared by the database server (the server runtime in `Database.Hosting`) and the client core (`Database.Client`). Pure value objects and reader/writer contracts — no sockets, no transport.
 
 ## Scope
 
@@ -17,4 +17,4 @@ The Cohesion database wire protocol: the frame model and message contracts share
 
 ## Consumers
 
-`Database.Server` (frame pump into sessions) and `Database.Client` (connection core). Per-model payload encodings layer on top; the framing never changes per model.
+The server runtime in `Database.Hosting` (frame pump into sessions) and `Database.Client` (connection core). Per-model payload encodings layer on top; the framing never changes per model.

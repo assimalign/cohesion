@@ -60,7 +60,7 @@ public interface IDatabaseSession : IAsyncDisposable
     /// <exception cref="DatabaseException">Thrown when the statement fails during planning or execution.</exception>
     /// <remarks>
     /// This is the model-agnostic text-execute seam consumed by the wire-protocol
-    /// server (<c>Database.Server</c>): the server receives statement text and
+    /// server (the server runtime in <c>Database.Hosting</c>): the server receives statement text and
     /// decoded parameters off the wire, and each model's session owns translating
     /// that text into its typed <see cref="QueryRequest"/> — the server never
     /// parses any model language.

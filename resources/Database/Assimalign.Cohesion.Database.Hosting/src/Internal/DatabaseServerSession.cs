@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Server;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// One server-side session pump: drives the protocol state machine

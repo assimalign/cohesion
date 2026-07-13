@@ -31,7 +31,6 @@ jobs:
             'Assimalign.Cohesion.Database.Execution',
             'Assimalign.Cohesion.Database.Protocol',
             'Assimalign.Cohesion.Database.Security',
-            'Assimalign.Cohesion.Database.Server',
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Hosting',

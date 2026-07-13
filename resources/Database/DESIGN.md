@@ -54,9 +54,10 @@ The platform runs in two modes, matching Cohesion's identity:
 │ Orchestration      Database.ApplicationModel (manifest-only)        │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Hosting            Database.Hosting (Host<TContext> composition,    │
-│                    DI/Config/Logging seam — the ONLY DI seam)       │
+│                    DI/Config/Logging seam — the ONLY DI seam — and  │
+│                    the server runtime: accept loop, sessions, drain)│
 ├─────────────────────────────────────────────────────────────────────┤
-│ Service surface    Database.Server ── Database.Protocol ── Database.Client
+│ Service surface    Database.Protocol ── Database.Client             │
 │                    Database.Security · Database.Replication · Database.Governance
 ├─────────────────────────────────────────────────────────────────────┤
 │ Model engines      Sql · Documents · Graph · Blob · KeyValuePair    │
@@ -102,14 +103,14 @@ Per-model satellite projects follow one matrix: `.Language` (where a language ex
 ### 3.4 Service surface
 
 - **`Database.Protocol`** (new) — the wire protocol shared by server and client: length-prefixed, big-endian frame header (`u32 length + u8 type`), message families for startup/auth, query execute (parse/bind/execute), streaming result sets (header/row/complete), transaction control, and errors. Versioned handshake so protocol evolution never breaks deployed clients. Pure value objects + reader/writer contracts; no sockets here.
-- **`Database.Server`** (new) — the network front-end: accepts connections (via `libraries/Connections` drivers), authenticates a session principal, binds a session to a database, and pumps protocol frames into `IDatabaseSession` executions. Model-agnostic — it serves whatever engines the host registered.
+- **The server runtime** — the network front-end: accepts connections (via `libraries/Connections` drivers), authenticates a session principal, binds a session to a database, and pumps protocol frames into `IDatabaseSession` executions. Model-agnostic — it serves whatever engines the host registered. Originally the separate `Database.Server` project; folded into `Database.Hosting` on 2026-07-12 (the server exists to put engines on the network, which is the hosting concern — see §3.5 and the decision log).
 - **`Database.Client`** — the shared client core: connection strings, connection pooling, protocol client, result materialization. Per-model `.Client` projects add typed surfaces on top.
 - **`Database.Security`** — authn/authz contracts (principals, roles, permission checks) consumed by the server and per-model security projects.
 - **`Database.Replication` / `Database.Governance`** — shared replication contracts (log shipping seam over the WAL) and operational governance (quotas, tenancy, audit events). Post-MVP build-out; contracts stay in place so model services don't invent local equivalents.
 
 ### 3.5 Hosting and orchestration
 
-`Database.Hosting` composes the host: engine(s) + `DatabaseServer` + the internal services (`WriteAheadFlushService`, `PageWriterService` as `DedicatedThreadService`; the protocol endpoint as `BackgroundService`). It is the only project that touches DI/Configuration/Logging (repo rule: `*.Hosting` is the only DI seam). Per the engine self-sufficiency principle (R10), the host's services *map* engine-owned workers onto the execution menu — they do not own durability work themselves, or embedded consumers would lose it. `Database.ApplicationModel` is manifest-only: `DatabaseResource` declares artifact `Assimalign.Cohesion.Database.Application`, one declared endpoint (`db` / scheme `cohesion-db`, platform-allocated port by default), and a persistent data volume mount; `AddDatabase(...)` composes it into an application graph. When the repo-wide `.Hosting` → `.Application` rename lands (ApplicationModel DESIGN.md Phase 3), Database follows.
+`Database.Hosting` owns the server runtime (`IDatabaseServer`, folded in from `Database.Server` on 2026-07-12 — the fold takes the sanctioned per-project COHRES002 exemption for `Database.Protocol` + `Database.Security`, the server's own machinery) and composes the host: engine(s) + `DatabaseServer` + the internal services (`WriteAheadFlushService`, `PageWriterService` as `DedicatedThreadService`; the protocol endpoint as `BackgroundService`). It is the only project that touches DI/Configuration/Logging (repo rule: `*.Hosting` is the only DI seam). Per the engine self-sufficiency principle (R10), the host's services *map* engine-owned workers onto the execution menu — they do not own durability work themselves, or embedded consumers would lose it. `Database.ApplicationModel` is manifest-only: `DatabaseResource` declares artifact `Assimalign.Cohesion.Database.Application`, one declared endpoint (`db` / scheme `cohesion-db`, platform-allocated port by default), and a persistent data volume mount; `AddDatabase(...)` composes it into an application graph. When the repo-wide `.Hosting` → `.Application` rename lands (ApplicationModel DESIGN.md Phase 3), Database follows.
 
 ### 3.6 ACID, concretely
 
@@ -137,7 +138,7 @@ What existed before this scaffold vs. what a real multi-model OLTP engine needs.
 |---|---|---|
 | Transactions / MVCC / lock manager — nothing beyond the `IDatabaseTransaction` surface | only task #164 ("transaction boundaries") | New `Database.Transactions` project + new feature under #31 (Core Engine) |
 | Shared index infrastructure — `IStorageIndexManager` was a name with no design | indexing mentioned only for Documents (#188) | New `Database.Indexing` project + new feature under #31 |
-| Wire protocol + server front-end + client core — `IDatabaseServer` was an empty stub | per-model "client APIs" tasks, no protocol foundation | New `Database.Protocol` + `Database.Server` projects + new feature under #31 |
+| Wire protocol + server front-end + client core — `IDatabaseServer` was an empty stub | per-model "client APIs" tasks, no protocol foundation | New `Database.Protocol` + `Database.Server` projects + new feature under #31 (the server runtime later folded into `Database.Hosting`, 2026-07-12) |
 | ApplicationModel manifest — no `Database.ApplicationModel`, no `AddDatabase` | not in backlog | New manifest project + new feature under #31 |
 | SDK build tooling — `Migration.targets` and the Tasks project were empty shells | #176 covers migration *workflows* as engine behavior only | SDK scaffold (targets + task skeletons) + new tooling epic |
 | Shared type system — `Database.Types` skeletal, no collation/encoding story | #173 covers SQL type coercion only | Fleshed out via new feature under #31; `IndexKey` encoding depends on it |
@@ -160,7 +161,8 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 | Keep the pre-existing project matrix | It matches the backlog 1:1, keeps model semantics out of the kernel, and the owner confirmed the layout intent. Consolidation would churn 50 projects for aesthetic gain. |
 | Transactions as its own kernel project (not inside Storage or Execution) | ACID is the platform's defining requirement (R1); the MVCC/lock/snapshot machinery has consumers in every engine and a different change cadence than page I/O. |
 | One shared wire protocol, model-agnostic server | Five per-model servers would quintuple the security surface. Model semantics live in message payloads (and per-model clients), not in transport framing. |
-| Protocol project split from Server | The client core must speak the protocol without referencing server internals; value-object frames are testable without sockets. |
+| Protocol project split from the server runtime | The client core must speak the protocol without referencing server internals; value-object frames are testable without sockets. |
+| `Database.Server` folded into `Database.Hosting` (2026-07-12, owner decision) | The server runtime exists to put engines on the network — the hosting concern (mirrors the Web-area `Web.Server`→`Web.Hosting` direction). Keeping it separate only existed to satisfy COHRES002 and forced a cross-assembly endpoint-adapter seam (`DatabaseServer.CreateHostService`); the fold replaces that with direct composition plus the sanctioned per-project `CohesionHostingIsolationExemptions` for `Database.Protocol` + `Database.Security` (the server's own machinery, not hosted features). |
 | No `.Language` for Blob and KeyValuePair | Blob is stream/metadata API-driven; KV commands are simple protocol verbs. A parser would be ceremony. Cache (#208, post-MVP) may still get one. |
 | SQL migration tooling in the SDK, apply engine in `Sql.Catalog` | Build-time diffing belongs to MSBuild (R7–R9); runtime apply must be transactional inside the engine. Splitting keeps the SDK task a thin orchestrator. |
 | `EngineModel.KeyValueStore` enum name vs `KeyValuePair` project naming | Left as-is for now — renaming the enum member is surface churn with no behavior; revisit before the first public package. |

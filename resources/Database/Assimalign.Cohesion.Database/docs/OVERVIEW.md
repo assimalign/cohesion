@@ -27,8 +27,8 @@ concern, excluded from the package dependency list).
 ## Consumers
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
-implement the contracts; `Database.Server` pumps wire-protocol frames into
-sessions; `Database.Client` mirrors results on the caller side;
-`Database.Hosting` composes engines into a host.
+implement the contracts; the server runtime in `Database.Hosting` pumps
+wire-protocol frames into sessions; `Database.Client` mirrors results on the
+caller side; `Database.Hosting` composes engines into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.

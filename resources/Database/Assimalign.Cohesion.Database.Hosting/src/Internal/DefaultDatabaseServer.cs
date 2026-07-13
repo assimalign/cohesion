@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 
-namespace Assimalign.Cohesion.Database.Server;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// The default server runtime: an accept loop over the composed listener, a

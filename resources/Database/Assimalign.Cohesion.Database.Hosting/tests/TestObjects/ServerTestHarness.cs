@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
 /// A live SQL engine + in-memory listener + running server, with a seeded
