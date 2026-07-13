@@ -23,6 +23,7 @@ jobs:
         # Replication, Sql.Replication, Sql.Security, Memory) are excluded until they ship.
         projects: [
             'Assimalign.Cohesion.Database',
+            'Assimalign.Cohesion.Database.Application',
             'Assimalign.Cohesion.Database.Types',
             'Assimalign.Cohesion.Database.Language',
             'Assimalign.Cohesion.Database.Storage',
