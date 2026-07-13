@@ -8,6 +8,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// End-to-end tests for the SQL engine (#178/#179): sessions and transactions over

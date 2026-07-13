@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		A child root of the Database area: the area root (Assimalign.Cohesion.Database)
+		references THIS project, never the reverse, so the ACID substrate stays an
+		independently consumable base component. Child-to-child references (Storage,
+		the journal/page substrate the implementations bind to) are fine.
+	-->
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 	</ItemGroup>
 </Project>

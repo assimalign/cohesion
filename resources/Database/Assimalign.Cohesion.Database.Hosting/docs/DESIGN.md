@@ -12,10 +12,11 @@ This module also **owns the database server runtime** — the model-agnostic net
 front-end (`DatabaseServer.Create`, the session pump). The server was originally a
 separate `Database.Server` library; it was folded into this module by owner decision
 on 2026-07-12 (see "The server runtime is a hosting concern" below). The server
-*abstractions* (`IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
-value type) live in the area root — the hosting-isolation rule makes this module
-unreferenceable by area libraries, so the seam must sit where they can see it. This
-module ships the implementation and the composition surface only.
+*abstractions* (`IDatabaseServer`, `IDatabaseServerSession`) live in the area root —
+the hosting-isolation rule makes this module unreferenceable by area libraries, so
+the seam must sit where they can see it (`ProtocolVersion`, their wire vocabulary,
+lives with `Database.Protocol`, which the root rolls up). This module ships the
+implementation and the composition surface only.
 
 ## Execution model
 
@@ -99,15 +100,19 @@ precisely what the standalone host is for — so `Database.Server` was folded in
 module (mirroring the Web-area direction of merging `Web.Server` into `Web.Hosting`).
 Consequences:
 
-- **COHRES002 exemption (sanctioned, per `deviations.md` + `resource-areas.md`).** The
+- **COHRES002 exemption — taken 2026-07-12, made unnecessary 2026-07-13.** The
   merged module needs `Database.Protocol` (wire framing) and `Database.Security` (the
-  authenticator seam) as direct same-area references. Both are the *server's own
-  machinery*, not hosted features, and `Database.Protocol` cannot be aggregated into
-  the area root because it references the root. The csproj therefore declares
-  `CohesionHostingIsolationExemptions` for exactly those two assemblies.
-  `Database.Execution` and `Database.Types` are deliberately **not** direct references
-  — they arrive transitively through the sanctioned area-root reference
-  (root → Execution → Types), which COHRES002 permits.
+  authenticator seam) — the *server's own machinery*, not hosted features. At fold
+  time `Database.Protocol` referenced the area root, so it could not be aggregated
+  into the root, and the csproj declared `CohesionHostingIsolationExemptions` for
+  exactly those two assemblies. The **child-root inversion** (2026-07-13, area
+  DESIGN.md decision log) reversed that arrow: the root now rolls up every child
+  root, so Protocol and Security arrive in this module's closure **transitively
+  through the sanctioned area-root reference** — the same route Execution and Types
+  always took, which COHRES002 permits. The exemption and both direct references
+  were removed; this module is COHRES002-clean with the root as its only same-area
+  reference. (History kept because the exemption was the first non-Testing use of
+  the opt-out property in the repo.)
 - **The cross-assembly endpoint seam is gone.** `DatabaseApplication` constructs the
   internal `DatabaseServerHostService` directly from
   `DatabaseApplicationOptions.Server`; `CreateHostService` was **internalized**
@@ -116,15 +121,18 @@ Consequences:
   `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle instead of wrapping an
   `IHostService`.
 - **The server contract was promoted into the area root** (owner decision, later the
-  same day): `IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
-  value type moved to `Assimalign.Cohesion.Database` — the Web area's shape
-  (`IWebApplicationServer` lives in the `Web` root). COHRES001 makes this module
-  unreferenceable by area libraries, so keeping the seam here would have made the
-  server invisible to quotas/health (#167/#168) and a future `Database.Testing`
-  factory. This module keeps the implementation (`DefaultDatabaseServer`, the session
-  pump) and the composition surface (`DatabaseServer.Create`, `DatabaseServerOptions`).
-  `ProtocolVersion.Current` stays with `Database.Protocol` as a static extension
-  member — the version claim lives with the wire implementation that makes it true.
+  same day): `IDatabaseServer` and `IDatabaseServerSession` moved to
+  `Assimalign.Cohesion.Database` — the Web area's shape (`IWebApplicationServer`
+  lives in the `Web` root). COHRES001 makes this module unreferenceable by area
+  libraries, so keeping the seam here would have made the server invisible to
+  quotas/health (#167/#168) and a future `Database.Testing` factory. This module
+  keeps the implementation (`DefaultDatabaseServer`, the session pump) and the
+  composition surface (`DatabaseServer.Create`, `DatabaseServerOptions`). The
+  `ProtocolVersion` value type rode along into the root at the time (with
+  `Current` grafted on from `Protocol` as a static extension member) because
+  Protocol→root made root→Protocol impossible; the 2026-07-13 child-root
+  inversion moved the struct home to `Database.Protocol` with `Current` as a
+  plain static property — the root consumes it through its child-root reference.
 
 ### One server for five engines
 
@@ -251,9 +259,10 @@ projects share no assembly).
   wire lands with the protocol's `Transaction` payload schema).
 - No HTTP admin surface — that is the root `Database` project's private-Web concern,
   deliberately separate from the wire protocol path.
-- Direct references: the area root, the COHRES002-exempted `Database.Protocol` +
-  `Database.Security` server machinery, and the non-area `Connections` + `Hosting`
-  foundations. Nothing else.
+- Direct references: the area root (which rolls up the child roots — the
+  `Database.Protocol` + `Database.Security` server machinery arrives
+  transitively through it) and the non-area `Connections` + `Hosting`
+  foundations. Nothing else; no `CohesionHostingIsolationExemptions`.
 
 ## AOT posture
 

@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Internal implementation of a SQL database session.

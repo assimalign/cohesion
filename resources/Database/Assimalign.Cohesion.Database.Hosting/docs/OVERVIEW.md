@@ -14,7 +14,7 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
 ## Current Evaluation
 
 - Status: Composition + server runtime + engine-worker mapping delivered — the host drives engine lifecycle through the root contract, claims the engine-owned background workers (WAL group-commit flush, page write-back, checkpoint, maintenance) onto the execution menu (#902), runs the wire endpoint, and drains it all in order on stop.
-- Project references: `Assimalign.Cohesion.Database` (area root), `Assimalign.Cohesion.Database.Protocol` + `Assimalign.Cohesion.Database.Security` (the server's own machinery, COHRES002-exempted via `CohesionHostingIsolationExemptions`), `Assimalign.Cohesion.Connections` (transport drivers), `Assimalign.Cohesion.Hosting` (non-area hosting foundation).
+- Project references: `Assimalign.Cohesion.Database` (area root — the server's own machinery, `Database.Protocol` + `Database.Security`, arrives transitively through the root's child-root rollup; no `CohesionHostingIsolationExemptions`), `Assimalign.Cohesion.Connections` (transport drivers), `Assimalign.Cohesion.Hosting` (non-area hosting foundation).
 
 ## Primary Responsibilities
 
@@ -28,7 +28,7 @@ into engine `IDatabaseSession` executions (`Database.Server` was folded in on
   over the registered engines, created with `DatabaseServer.Create(options)`) and
   `DatabaseServerOptions` (engines, bound listener, authenticator, plus the DoS
   guardrails: session limit, auth/idle timeouts, drain budget). The abstractions
-  themselves — `IDatabaseServer`, `IDatabaseServerSession`, `ProtocolVersion` — live
+  themselves — `IDatabaseServer`, `IDatabaseServerSession` — live
   in the area root so feature libraries can consume the seam without referencing
   this module. Statements execute through the root contract's
   text-execute seam (`IDatabaseSession.ExecuteAsync(string, parameters)`), so the

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Internal ACID transaction implementation that wraps a storage-level transaction:

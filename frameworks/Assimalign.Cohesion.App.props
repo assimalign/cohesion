@@ -209,8 +209,11 @@
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Database'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Database" />
 
-        <!-- The kernel: shared storage/durability, the ACID substrate, indexing,
-             types, execution, the shared language infra, and the contract root. -->
+        <!-- The kernel: the contract root plus the child roots it rolls up
+             (storage/durability, the ACID substrate, types, execution, the shared
+             language infra, wire protocol, security, governance - the root
+             REFERENCES all of them, so every child root in the root's closure
+             must ship), and indexing (a kernel consumer of the root). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Language" />
@@ -218,6 +221,10 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Indexing" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Execution" />
+        <!-- Governance is a near-empty contracts shell (#167 fills it), but the
+             child-root inversion (2026-07-13) put it in the root's reference
+             closure, so the framework must deliver it. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
         <!-- Service surface: wire protocol, client core, security, the embedded
              facade, and the host composition module (which owns the server runtime;
@@ -257,9 +264,10 @@
             - The Documents/Graph/KeyValuePair/Blob/Cache model families - engine
               scaffolds without shipping surface yet.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
-            - Database.Governance, Database.Replication, Database.Sql.Replication,
-              Database.Sql.Security - post-MVP contracts-only/empty shells (#167 /
-              replication / #177). Add each when its feature ships.
+            - Database.Replication, Database.Sql.Replication, Database.Sql.Security
+              - post-MVP contracts-only/empty shells (replication / #177). Add each
+              when its feature ships. (Database.Governance graduated into the
+              shipping set with the child-root inversion - see the kernel group.)
 
             Private implementation dependencies. Shipped in App.Database's Runtime
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never

@@ -1,7 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Core" />
+		<!--
+			The area root rolls up the child roots: the base components a database is
+			made of (execution, governance, language infra, wire protocol, security,
+			storage, transactions, types) ship as independently consumable packages the
+			root aggregates. Child roots never reference the root — the root references
+			THEM — so each stays usable on its own and the root remains the one
+			reference an engine or feature library needs.
+		-->
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Execution" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Governance" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Language" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Protocol" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Security" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Transactions" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types" />
 		<!--
 			Web is an internal implementation detail of the database server piece.
 			PrivateAssets='all' (via CohesionPrivateProjectReference) keeps Web from

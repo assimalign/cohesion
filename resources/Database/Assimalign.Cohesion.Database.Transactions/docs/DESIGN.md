@@ -8,9 +8,26 @@ One transaction substrate for five engines. ACID is the platform's defining requ
 
 Readers never block writers and writers never block readers — the OLTP profile all five models share. Locking is retained only where MVCC cannot arbitrate: write-write conflicts, in `ILockManager`, with intent modes so object-level operations (drop table, reindex) coexist with entry-level writes.
 
+## A child root — no area dependency
+
+This package is a child root the area root aggregates (root → Transactions,
+never the reverse — the 2026-07-13 inversion; see the area DESIGN.md decision
+log). The transaction vocabulary lives here — `TransactionId`,
+`TransactionState`, `TransactionSequence`, `IsolationLevel` — and the root's
+`IDatabaseTransaction` contract consumes it through the root's child-root
+reference. The contracts in this package speak only Transactions-owned types:
+the earlier doc-level nods to the root's `IDatabaseTransaction` are *named*
+(`<c>`), not referenced (`<see cref>`), and the adaptation between
+`ITransactionContext` and the public `IDatabaseTransaction` surface belongs to
+whoever owns both vocabularies — the model engines' session/transaction
+implementations above the root (the same place `IQueryTransactionScope` in
+`Execution` puts its engine adaptation, the area's standing cycle-avoidance
+shape). `Storage` is the one reference (child-to-child): the journal/page
+substrate the implementations bind to.
+
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
-`TransactionId` (contract root) is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project introduces `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. The split mirrors PostgreSQL's virtual-txid vs. xid distinction and keeps the public contract root free of MVCC mechanics.
+`TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. The split mirrors PostgreSQL's virtual-txid vs. xid distinction and keeps the public session surface free of MVCC mechanics.
 
 ## Snapshot semantics
 
@@ -52,7 +69,7 @@ Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the
 
 ## Error model
 
-`TransactionAbortedException : DatabaseException` for engine-initiated aborts; `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error and throws nothing.
+`TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error and throws nothing.
 
 ## Non-goals
 

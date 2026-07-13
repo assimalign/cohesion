@@ -7,8 +7,9 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <remarks>
 /// Execution operators carry this context to storage, index, and catalog operations
 /// so every read resolves through the same snapshot and every write is stamped with
-/// the same sequence. It is the engine-side counterpart of the public
-/// <see cref="IDatabaseTransaction"/> surface.
+/// the same sequence. It is the engine-side counterpart of the area root's public
+/// <c>IDatabaseTransaction</c> surface — named, not referenced: this package is a
+/// child root the area root aggregates, so it speaks only its own vocabulary.
 /// </remarks>
 public interface ITransactionContext
 {
