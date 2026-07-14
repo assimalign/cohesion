@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Indexing;
@@ -112,6 +113,34 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
         {
             return _indexes.Where(pair => pair.Key.ObjectId == objectId).Select(pair => (IIndex)pair.Value).ToList();
         }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<long> PurgeWritersAsync(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(writers);
+
+        if (writers.Count == 0)
+        {
+            return new ValueTask<long>(0L);
+        }
+
+        List<BTreeIndex> indexes;
+        lock (_sync)
+        {
+            indexes = _indexes.Values.ToList();
+        }
+
+        long purged = 0;
+
+        foreach (var index in indexes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            purged += index.PurgeWriters(transaction, writers);
+        }
+
+        return new ValueTask<long>(purged);
     }
 
     /// <inheritdoc />

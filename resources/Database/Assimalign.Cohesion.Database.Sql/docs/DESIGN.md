@@ -141,6 +141,67 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
 
+## Secondary indexes
+
+`CREATE [UNIQUE] INDEX` / `DROP INDEX` are end-to-end: dialect (the DIALECT.md
+matrix), plan nodes, catalog metadata, and B+Tree trees through
+`Database.Indexing`'s manager — **on the same database file set** (index pages
+ride the data storage's transactional page surface; no new file assets). The
+engine is the Indexing child root's first real consumer; the split of duties is
+unchanged: the tree is physical, the catalog owns persistence (schema
+description + exported registrations), the engine binds them.
+
+- **DDL flow.** CREATE INDEX takes the table's Exclusive lock (DDL-blocking
+  build — in-flight writers finish first, Indexing's documented no-online-rebuild
+  posture), builds inside one gated **durably committed** bracket (the
+  self-committing DDL posture: the catalog record commits independently and must
+  never describe a tree a crash could revert), walks **every stored version** and
+  inserts entries carrying the version's original writer/deleter stamps — so
+  snapshots older than the index read exactly what the row scan shows them —
+  then persists metadata + registrations in **one catalog self-commit** (the two
+  must never tear: a registration without a description is an unused tree; a
+  description without a registration would promise uniqueness no tree enforces).
+  Crash windows leave only orphaned tree pages — safe leaks, never a
+  half-attached index. DROP INDEX inverts the order (catalog first — the
+  authoritative drop — then the in-memory directory) under the same lock; DROP
+  TABLE drops its indexes' metadata/registrations atomically with the table
+  record and DROP COLUMN on an indexed column is rejected (drop the index
+  first — entries key on the column's values).
+- **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
+  adds entries stamped with the writer's sequence; DELETE stamps entry deleters
+  (tombstones — old snapshots keep seeing them); UPDATE tombstones the
+  old-location entries and inserts new-location entries, the index image of the
+  in-space version chain. Every effect is recorded in the version-store ledger,
+  so **logical rollback undoes index stamps through the ledger** (physical erase
+  of aborted inserts, deleter-clear of aborted tombstones — the Indexing
+  `EraseAsync`/`ClearDeleterAsync` undo surfaces), and the open-time recovery
+  scrub purges unproven writers out of every tree in one walk
+  (`IIndexManager.PurgeWritersAsync`, driven by the same
+  `TransactionRecovery.Analyze` classification that scrubs the record space).
+  The ledger route was chosen for live rollback (surgical, O(transaction
+  effects)) and the tree walk for open-time scrub (the ledger dies with the
+  process) — both end in the same physical operations.
+- **The lock-ordering rule** (uniform across INSERT/UPDATE/DELETE so cycles stay
+  detectable and rare): phase one acquires the table IntentExclusive lock, then
+  row Exclusive locks sorted by packed location, then **unique-index key locks
+  sorted by key hash** (`IndexKey.Hash`, the same FNV-1a identity the B+Tree
+  locks internally). Inside the apply gate the B+Tree re-acquires the key lock
+  as a same-owner re-grant that completes synchronously — **no lock wait can
+  ever occur while the gate is held** (a wait there would be invisible to
+  deadlock detection). Non-unique indexes take no key locks. Key locks and row
+  locks share the `LockResource.Entry` space; a hash/location collision only
+  over-locks, and the class ordering keeps acquisition globally consistent.
+- **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
+  lock** (never snapshot visibility — write skew; the recorded #851 lesson).
+  Violations surface as the area root's `DatabaseException` at the model
+  boundary (`IndexUniqueViolationException` translated — the child-root error
+  policy); the statement's bracket has rolled back, the session stays usable.
+  Unique keys treat nulls as values (stricter than ANSI; consistent with the
+  codec's nulls-first ordering — documented dialect decision).
+- **Registrations re-export at persistence points** (root page ids drift on
+  splits): index DDL itself, each checkpoint pass, and instance disposal — each
+  compares against the stored set first, so an idle checkpoint writes nothing.
+
 ## Engine-owned background workers
 
 The engine is a **data machine**: `Create(options)` returns it operational, with
@@ -404,10 +465,11 @@ four independently shippable steps:
 ## Non-goals (current cut)
 
 Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, secondary-index
-usage in plans (the B+Tree infrastructure exists — planner adoption is the next
-SQL feature), `Serializable` isolation (rejected at begin), and cost-based
-optimization. (Row-level MVCC visibility was a non-goal of the first engine cut
-and is now delivered — see "The MVCC integration" above.)
+usage in plans (maintenance and DDL are delivered — planner seek adoption is
+the immediately-following feature), `Serializable` isolation (rejected at
+begin), and cost-based optimization. (Row-level MVCC visibility and secondary
+indexes themselves were non-goals of earlier cuts and are now delivered; see
+"The MVCC integration" and "Secondary indexes" above.)
 
 ## AOT posture
 

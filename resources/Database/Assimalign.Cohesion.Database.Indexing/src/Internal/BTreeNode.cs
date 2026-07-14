@@ -236,4 +236,19 @@ internal readonly ref struct BTreeNode
         BinaryPrimitives.WriteUInt16LittleEndian(_body[start..], offset);
         EntryCount = (ushort)(count + 1);
     }
+
+    /// <summary>
+    /// Removes a leaf entry from the sorted directory. The entry's data bytes stay
+    /// orphaned in the body until the node is rebuilt (a split) or vacuumed — the
+    /// removal exists for the rare undo paths (aborted-writer purge), where the
+    /// bounded space cost beats a full node rewrite per removed entry.
+    /// </summary>
+    internal void RemoveLeafEntry(int index)
+    {
+        int count = EntryCount;
+        int start = directoryOffset + 2 * index;
+
+        _body.Slice(start + 2, 2 * (count - index - 1)).CopyTo(_body[start..]);
+        EntryCount = (ushort)(count - 1);
+    }
 }

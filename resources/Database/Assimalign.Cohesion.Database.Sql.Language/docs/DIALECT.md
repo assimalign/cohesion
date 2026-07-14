@@ -20,11 +20,13 @@ for planners and tooling).
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `NOT NULL`/`NULL`, `PRIMARY KEY`, `DEFAULT <literal>` |
 | `ALTER TABLE` | Supported | `ADD [COLUMN] <definition>`, `DROP [COLUMN] <name>` |
 | `DROP TABLE` | Supported | `IF EXISTS` |
+| `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
+| `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; statement composition rejected |
 | `WITH` (CTEs) | Recognized, not supported | |
 | Window functions / `OVER` | Recognized, not supported | function names lexed |
 | `BEGIN` / `COMMIT` / `ROLLBACK` | Recognized, not supported | transaction control is a session/protocol concern, not statement text, in the MVP |
-| `MERGE`, `TRUNCATE`, `CREATE INDEX/VIEW`, `GRANT` | Not in the dialect | `SQL0002` |
+| `MERGE`, `TRUNCATE`, `CREATE VIEW`, `GRANT` | Not in the dialect | `SQL0002` |
 
 ## Expressions
 

@@ -23,9 +23,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int counterRecordKind = 2;
     private const int indexRegistrationsKind = 3;
     private const int recordSpaceFormatKind = 4;
+    private const int indexRecordKind = 5;
 
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
+    private readonly Dictionary<(ulong TableObjectId, string Name), IndexSlot> _indexes = new(IndexNameComparer.Instance);
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private int _recordSpaceFormatVersion = 1;
@@ -119,13 +121,56 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
             }
 
+            // The table's index descriptions and registrations fall with it, in the
+            // same self-committing transaction — a dropped table must not leave a
+            // description promising an index, nor a registration re-attaching one.
+            var droppedIndexes = new List<IndexSlot>();
+            foreach (var indexSlot in _indexes.Values)
+            {
+                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId)
+                {
+                    droppedIndexes.Add(indexSlot);
+                }
+            }
+
+            var remainingRegistrations = new List<BTreeIndexRegistration>();
+            foreach (var registration in _registrations)
+            {
+                if (registration.ObjectId != slot.Table.ObjectId)
+                {
+                    remainingRegistrations.Add(registration);
+                }
+            }
+
             using (var transaction = _storage.BeginTransaction())
             {
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
+
+                foreach (var indexSlot in droppedIndexes)
+                {
+                    _storage.DeleteRow(transaction, indexSlot.Location.PageId, indexSlot.Location.SlotIndex);
+                }
+
+                if (droppedIndexes.Count > 0)
+                {
+                    _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remainingRegistrations));
+                }
+
                 transaction.Commit();
             }
 
             _tables.Remove((schema, name));
+
+            foreach (var indexSlot in droppedIndexes)
+            {
+                _indexes.Remove((indexSlot.Index.TableObjectId, indexSlot.Index.Name));
+            }
+
+            if (droppedIndexes.Count > 0)
+            {
+                _registrations = remainingRegistrations;
+            }
+
             return default;
         }
     }
@@ -171,6 +216,18 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
             }
 
+            // An indexed column cannot be dropped: index entries key on the column's
+            // values (and row rewrites must never invalidate live entry references).
+            foreach (var indexSlot in _indexes.Values)
+            {
+                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
+                    indexSlot.Index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new SqlCatalogException(
+                        $"Column '{columnName}' is referenced by index '{indexSlot.Index.Name}' on '{schema}.{name}'. Drop the index first.");
+                }
+            }
+
             if (slot.Table.Columns.Count == 1)
             {
                 throw new SqlCatalogException($"Cannot drop the last column of '{schema}.{name}'.");
@@ -182,6 +239,105 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong tableObjectId)
+    {
+        lock (_sync)
+        {
+            var result = new List<SqlCatalogIndex>();
+
+            foreach (var slot in _indexes.Values)
+            {
+                if (slot.Index.TableObjectId == tableObjectId)
+                {
+                    result.Add(slot.Index);
+                }
+            }
+
+            return result;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetIndex(ulong tableObjectId, string name, out SqlCatalogIndex index)
+    {
+        lock (_sync)
+        {
+            if (_indexes.TryGetValue((tableObjectId, name), out var slot))
+            {
+                index = slot.Index;
+                return true;
+            }
+        }
+
+        index = null!;
+        return false;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        ArgumentNullException.ThrowIfNull(registrations);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_sync)
+        {
+            var table = FindTableByObjectId(index.TableObjectId)
+                ?? throw new SqlCatalogException($"No table with object id {index.TableObjectId} exists.");
+
+            if (_indexes.ContainsKey((index.TableObjectId, index.Name)))
+            {
+                throw new SqlCatalogException($"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
+            }
+
+            foreach (string column in index.ColumnNames)
+            {
+                if (table.FindColumn(column) is null)
+                {
+                    throw new SqlCatalogException($"Index '{index.Name}': table '{table.Schema}.{table.Name}' has no column named '{column}'.");
+                }
+            }
+
+            using (var transaction = _storage.BeginTransaction())
+            {
+                var location = _storage.InsertRow(transaction, EncodeIndex(index));
+                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                transaction.Commit();
+                _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
+            }
+
+            _registrations = registrations.ToList();
+            return new ValueTask<SqlCatalogIndex>(index);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(registrations);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_sync)
+        {
+            if (!_indexes.TryGetValue((tableObjectId, name), out var slot))
+            {
+                throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
+            }
+
+            using (var transaction = _storage.BeginTransaction())
+            {
+                _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
+                _registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+                transaction.Commit();
+            }
+
+            _indexes.Remove((tableObjectId, name));
+            _registrations = registrations.ToList();
+            return default;
         }
     }
 
@@ -296,6 +452,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                     _formatLocation = (unit.PageId, unit.SlotIndex);
                     break;
 
+                case indexRecordKind:
+                    var index = DecodeIndex(ref reader);
+                    _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
+                    break;
+
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
@@ -310,6 +471,19 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
 
         return slot;
+    }
+
+    private SqlCatalogTable? FindTableByObjectId(ulong objectId)
+    {
+        foreach (var slot in _tables.Values)
+        {
+            if (slot.Table.ObjectId == objectId)
+            {
+                return slot.Table;
+            }
+        }
+
+        return null;
     }
 
     private void ReplaceTable(TableSlot slot, SqlCatalogTable updated)
@@ -472,6 +646,39 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         return new SqlCatalogTable(objectId, schema, name, columns, primaryKey);
     }
 
+    private static byte[] EncodeIndex(SqlCatalogIndex index)
+    {
+        var writer = new DatabaseKeyWriter();
+        writer.AppendInt32(indexRecordKind)
+              .AppendInt64((long)index.TableObjectId)
+              .AppendString(index.Name, Collation.Binary)
+              .AppendBoolean(index.IsUnique)
+              .AppendInt32(index.ColumnNames.Count);
+
+        foreach (string column in index.ColumnNames)
+        {
+            writer.AppendString(column, Collation.Binary);
+        }
+
+        return writer.ToArray();
+    }
+
+    private static SqlCatalogIndex DecodeIndex(ref DatabaseKeyReader reader)
+    {
+        ulong tableObjectId = (ulong)reader.ReadInt64();
+        string name = reader.ReadString(out _);
+        bool isUnique = reader.ReadBoolean();
+        int columnCount = reader.ReadInt32();
+
+        var columns = new List<string>(columnCount);
+        for (int i = 0; i < columnCount; i++)
+        {
+            columns.Add(reader.ReadString(out _));
+        }
+
+        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique);
+    }
+
     private static byte[] EncodeRegistrations(IReadOnlyList<BTreeIndexRegistration> registrations)
     {
         var writer = new DatabaseKeyWriter();
@@ -510,6 +717,20 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     }
 
     private sealed record TableSlot(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location);
+
+    private sealed record IndexSlot(SqlCatalogIndex Index, (PageId PageId, int SlotIndex) Location);
+
+    private sealed class IndexNameComparer : IEqualityComparer<(ulong TableObjectId, string Name)>
+    {
+        internal static IndexNameComparer Instance { get; } = new();
+
+        public bool Equals((ulong TableObjectId, string Name) x, (ulong TableObjectId, string Name) y)
+            => x.TableObjectId == y.TableObjectId
+            && string.Equals(x.Name, y.Name, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((ulong TableObjectId, string Name) value)
+            => HashCode.Combine(value.TableObjectId, StringComparer.OrdinalIgnoreCase.GetHashCode(value.Name));
+    }
 
     private sealed class TableNameComparer : IEqualityComparer<(string Schema, string Name)>
     {

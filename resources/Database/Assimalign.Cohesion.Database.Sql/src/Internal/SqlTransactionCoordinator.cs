@@ -220,9 +220,39 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
     /// <param name="apply">The physical mutations, given the statement bracket.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The apply result.</returns>
-    internal async ValueTask<T> ApplyStatementAsync<T>(
+    internal ValueTask<T> ApplyStatementAsync<T>(
         ITransactionContext context,
         Func<IStorageTransaction, T> apply,
+        CancellationToken cancellationToken = default)
+        => ApplyStatementAsync(context, bracket => new ValueTask<T>(apply(bracket)), durable: false, cancellationToken);
+
+    /// <summary>
+    /// The asynchronous form of the statement apply, for statement bodies that
+    /// drive index maintenance (index mutations are asynchronous surfaces).
+    /// <b>Invariant: nothing awaited inside the gate may actually wait.</b> The
+    /// only awaits index maintenance performs are unique-key lock acquisitions,
+    /// and the executor pre-acquires every unique key lock in its lock phase —
+    /// before the gate — so the index's internal acquisition is a same-owner
+    /// re-grant that completes synchronously. A genuine wait inside the gate
+    /// would be invisible to the lock manager's deadlock detection (the recorded
+    /// page-conflict-fallback lesson).
+    /// </summary>
+    /// <typeparam name="T">The apply result type.</typeparam>
+    /// <param name="context">The transaction the statement belongs to.</param>
+    /// <param name="apply">The physical mutations, given the statement bracket.</param>
+    /// <param name="durable">
+    /// When true the bracket commits durably — the self-committing DDL posture
+    /// (an index build must not be provable-after-crash only through a user
+    /// transaction's later commit record, because its registration in the
+    /// catalog file set commits independently). When false the transaction's
+    /// commit record owns durability (the DML statement posture).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The apply result.</returns>
+    internal async ValueTask<T> ApplyStatementAsync<T>(
+        ITransactionContext context,
+        Func<IStorageTransaction, ValueTask<T>> apply,
+        bool durable = false,
         CancellationToken cancellationToken = default)
     {
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -238,8 +268,8 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
 
             try
             {
-                var result = apply(bracket);
-                bracket.Commit(awaitDurability: false);
+                var result = await apply(bracket).ConfigureAwait(false);
+                bracket.Commit(awaitDurability: durable);
                 return result;
             }
             catch
@@ -266,17 +296,19 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
     }
 
     /// <summary>
-    /// Runs open-time transaction recovery: classifies every sequence in the
-    /// recovered journal (<see cref="TransactionRecovery.Analyze"/>), scrubs
-    /// every unproven writer's stamps out of the record space (the open-time
-    /// form of <see cref="IVersionStore.PurgeWriterAsync"/> — one pass instead
-    /// of one scan per writer, because the in-memory ledger died with the
-    /// process), seeds the prunable set with surviving committed tombstones,
-    /// and then checkpoints the storage so the journal starts clean — in that
-    /// order, because the truncation destroys the lifecycle records
-    /// classification reads.
+    /// Runs the first half of open-time transaction recovery: classifies every
+    /// sequence in the recovered journal (<see cref="TransactionRecovery.Analyze"/>),
+    /// scrubs every unproven writer's stamps out of the record space (the
+    /// open-time form of <see cref="IVersionStore.PurgeWriterAsync"/> — one pass
+    /// instead of one scan per writer, because the in-memory ledger died with
+    /// the process), seeds the prunable set with surviving committed tombstones,
+    /// and anchors the prune bound. The caller scrubs any structures of its own
+    /// (secondary indexes) with the returned plan, then calls
+    /// <see cref="CompleteRecovery"/> — the checkpoint must come last because
+    /// the truncation destroys the lifecycle records classification reads.
     /// </summary>
-    internal void Recover()
+    /// <returns>The recovery classification, for the caller's own scrub passes.</returns>
+    internal TransactionRecoveryPlan AnalyzeAndScrub()
     {
         var plan = TransactionRecovery.Analyze(_storage.WriteAheadJournal);
 
@@ -288,9 +320,16 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
         // proven ceiling over every stamp the record space can carry.
         _recoveredSequenceFloor = new TransactionSequence((ulong)_storage.ReserveTransactionSequence());
 
-        // Analysis is done; start the journal clean (the deferred open-time
-        // checkpoint — see ISqlStorageStrategy.OpenStorage). No logical
-        // transactions exist yet, so the active list is empty.
+        return plan;
+    }
+
+    /// <summary>
+    /// Completes open-time recovery: starts the journal clean (the deferred
+    /// open-time checkpoint — see <c>ISqlStorageStrategy.OpenStorage</c>). No
+    /// logical transactions exist yet, so the active list is empty.
+    /// </summary>
+    internal void CompleteRecovery()
+    {
         _storage.Checkpoint();
     }
 

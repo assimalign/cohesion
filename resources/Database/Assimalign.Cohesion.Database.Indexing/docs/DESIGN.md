@@ -2,7 +2,7 @@
 
 ## Intent
 
-Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction.
+Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction. The SQL engine is the first real consumer (#912): CREATE/DROP INDEX, write-path maintenance, and planner seeks all compose this package's manager, trees, and cursors.
 
 ## Byte-comparable keys
 
@@ -48,6 +48,37 @@ entries and splits stay correct.
 ## Transactional binding
 
 `IIndex` mutations take an `ITransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *visible* state (a unique violation with an in-flight competing writer resolves through the lock manager, not the index).
+
+### The maintenance surfaces (model-engine consumers)
+
+The SQL engine's index adoption (#912) added a small family of operations that
+deliberately take the **physical bracket** (`IStorageTransaction`) instead of a
+transaction context — they run where no statement bracket exists:
+
+- **`InsertVersionAsync(bracket, key, reference, writer, deleter)`** — the
+  offline (DDL-blocking) build path: an index built over existing rows inserts
+  each stored version with its original stamps, so pre-existing snapshots read
+  through the new index exactly what the row scan shows them. No uniqueness
+  check — the builder detects live duplicates itself under the object's
+  exclusive lock (online rebuild remains a non-goal).
+- **`EraseAsync` / `ClearDeleterAsync`** — the logical-undo pair: physically
+  remove an aborted writer's insert; clear an aborted writer's tombstone. Both
+  verify the recorded stamp before acting, so replays and stale ledgers no-op.
+  Physical removal drops only the directory slot; the entry bytes stay orphaned
+  in the node until a split rebuilds it (bounded space for a rare path).
+- **`IIndexManager.PurgeWritersAsync(bracket, writers)`** — the open-time
+  recovery obligation: one walk per tree removes every unproven writer's
+  entries and clears their tombstones (the in-memory undo ledger died with the
+  process; snapshots have no commit-log awareness, so unproven stamps must not
+  serve reads). Idempotent across the crash window.
+- **`OpenCursor(TransactionSnapshot, range)`** — reads through an explicit
+  snapshot, so a statement-scoped reader (per-statement snapshots under
+  ReadCommitted) sees exactly the same visibility through the index as through
+  its row scan.
+- **`IndexKey.Hash()`** — publishes the FNV-1a key-lock identity so a writer
+  that must never wait inside a serialized apply scope can pre-acquire the
+  unique-key lock in its own lock phase and rely on the lock manager's
+  same-owner re-grant when the tree acquires it again internally.
 
 ## Entry references are opaque `ulong`s
 

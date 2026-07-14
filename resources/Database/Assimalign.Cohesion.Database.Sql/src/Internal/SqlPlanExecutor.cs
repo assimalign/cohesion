@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -17,22 +18,30 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// Executes bound plans against shared storage: table scans with predicate
-/// filtering, projection/sort/limit for SELECT, typed writes for DML, and catalog
-/// calls for DDL. Results are deterministic: scans yield rows in physical order and
-/// ORDER BY sorts are stable.
+/// filtering, projection/sort/limit for SELECT, typed writes for DML with
+/// secondary-index maintenance, and catalog calls for DDL. Results are
+/// deterministic: scans yield rows in physical order and ORDER BY sorts are stable.
 /// </summary>
 internal sealed class SqlPlanExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
+    private readonly IIndexManager _indexManager;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
+    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;
         _catalog = catalog;
+        _indexManager = indexManager;
         _parameters = parameters;
     }
+
+    /// <summary>
+    /// A registered index paired with its live tree and resolved key ordinals —
+    /// what one statement's maintenance loop works with.
+    /// </summary>
+    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals);
 
     internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -50,6 +59,10 @@ internal sealed class SqlPlanExecutor
                 return await ExecuteCreateTableAsync(create, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
                 return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
+            case SqlCreateIndexPlan createIndex:
+                return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
+            case SqlDropIndexPlan dropIndex:
+                return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 await AcquireObjectLockAsync(statement, addColumn.Schema, addColumn.Name, LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 await _catalog.AddColumnAsync(addColumn.Schema, addColumn.Name, addColumn.Column, cancellationToken).ConfigureAwait(false);
@@ -215,7 +228,8 @@ internal sealed class SqlPlanExecutor
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
-        var rows = new List<byte[]>();
+        var indexes = GetLiveIndexes(plan.Table);
+        var rows = new List<(byte[] Record, object?[] Values)>();
 
         foreach (var valueRow in plan.Rows)
         {
@@ -237,29 +251,50 @@ internal sealed class SqlPlanExecutor
                 }
             }
 
-            rows.Add(SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence));
+            rows.Add((SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence), values));
         }
 
         // Inserts need no row locks (the rows do not exist yet); the intent
-        // lock coordinates with table-grain DDL.
+        // lock coordinates with table-grain DDL, and every unique key the
+        // statement will touch is locked here — before the apply gate — per the
+        // lock-ordering rule.
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
 
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        var uniqueKeyHashes = new List<ulong>();
+        foreach (var (_, values) in rows)
         {
-            foreach (byte[] row in rows)
-            {
-                var (pageId, slotIndex) = _storage.InsertRow(bracket, plan.Table.ObjectId, row);
-                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, pageId, slotIndex);
-            }
+            CollectUniqueKeyHashes(indexes, plan.Table, values, uniqueKeyHashes);
+        }
 
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
-        }, cancellationToken).ConfigureAwait(false);
+        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+            {
+                foreach (var (record, values) in rows)
+                {
+                    var (pageId, slotIndex) = _storage.InsertRow(bracket, plan.Table.ObjectId, record);
+                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, pageId, slotIndex);
+
+                    await InsertIndexEntriesAsync(
+                        statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
+                }
+
+                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
+            }, durable: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IndexUniqueViolationException exception)
+        {
+            throw TranslateUniqueViolation(plan.Table, exception);
+        }
     }
 
     private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
+        var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
         foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
@@ -270,7 +305,7 @@ internal sealed class SqlPlanExecutor
             }
         }
 
-        var replacements = new List<(PageId PageId, int SlotIndex, byte[] NewVersion)>(targets.Count);
+        var replacements = new List<(PageId PageId, int SlotIndex, object?[] OldValues, object?[] NewValues, byte[] NewVersion)>(targets.Count);
 
         foreach (var (pageId, slotIndex, values) in targets)
         {
@@ -282,60 +317,100 @@ internal sealed class SqlPlanExecutor
                 updated[ordinal] = CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
             }
 
-            replacements.Add((pageId, slotIndex,
+            replacements.Add((pageId, slotIndex, values, updated,
                 SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence)));
         }
 
         await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
 
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        // Unique key locks after the row locks (the lock-ordering rule): both the
+        // old key (its entry is tombstoned) and the new key (its entry is
+        // inserted) of every unique index.
+        var uniqueKeyHashes = new List<ulong>();
+        foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            foreach (var (pageId, slotIndex, newVersion) in replacements)
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+        }
+
+        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
+                foreach (var (pageId, slotIndex, oldValues, newValues, newVersion) in replacements)
+                {
+                    EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
 
-                // MVCC update = version chain in the record space: tombstone the
-                // old version in place (same-length write — never relocates) and
-                // insert the new version, both stamped with this transaction's
-                // sequence.
-                TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
-                var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
-                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, location.PageId, location.SlotIndex);
-            }
+                    // MVCC update = version chain in the record space: tombstone the
+                    // old version in place (same-length write — never relocates) and
+                    // insert the new version, both stamped with this transaction's
+                    // sequence. The index entries mirror the row versions exactly:
+                    // the old location's entries get the same deleter, the new
+                    // location gets fresh entries with the same writer.
+                    TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+                    await TombstoneIndexEntriesAsync(
+                        statement, indexes, plan.Table, oldValues, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
 
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, replacements.Count);
-        }, cancellationToken).ConfigureAwait(false);
+                    var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
+                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, location.PageId, location.SlotIndex);
+                    await InsertIndexEntriesAsync(
+                        statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                }
+
+                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, replacements.Count);
+            }, durable: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IndexUniqueViolationException exception)
+        {
+            throw TranslateUniqueViolation(plan.Table, exception);
+        }
     }
 
     private async Task<QueryResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
-        var targets = new List<(PageId PageId, int SlotIndex)>();
+        var indexes = GetLiveIndexes(plan.Table);
+        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
         foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
-                targets.Add(location);
+                targets.Add((location.PageId, location.SlotIndex, values));
             }
         }
 
-        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets, cancellationToken).ConfigureAwait(false);
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
 
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        // Deletes on unique indexes take the key lock too (the B+Tree
+        // delete-side discipline) — acquired here, before the apply gate.
+        var uniqueKeyHashes = new List<ulong>();
+        foreach (var (_, _, values) in targets)
         {
-            foreach (var (pageId, slotIndex) in targets)
+            CollectUniqueKeyHashes(indexes, plan.Table, values, uniqueKeyHashes);
+        }
+
+        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+        {
+            foreach (var (pageId, slotIndex, values) in targets)
             {
                 EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
 
                 // Tombstone, not slot removal: older snapshots must keep seeing
                 // the row until the purge worker reclaims versions below every
-                // live snapshot's horizon.
+                // live snapshot's horizon. The index entries mirror the row
+                // version's deleter stamp.
                 TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+                await TombstoneIndexEntriesAsync(
+                    statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
             }
 
             return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, targets.Count);
-        }, cancellationToken).ConfigureAwait(false);
+        }, durable: false, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -364,6 +439,195 @@ internal sealed class SqlPlanExecutor
             await locks.AcquireAsync(owner, LockResource.Entry(objectId, key), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    // ── Secondary-index maintenance ────────────────────────────────────
+    //
+    // Lock-ordering rule (keep it consistent across INSERT/UPDATE/DELETE so
+    // cycles stay detectable and rare): a write statement acquires, in phase
+    // one and in deterministic order,
+    //
+    //   1. the table's IntentExclusive object lock,
+    //   2. its target rows' Exclusive locks, sorted by packed location,
+    //   3. its unique-index key locks, sorted by key hash (deduplicated).
+    //
+    // The B+Tree re-acquires the key lock inside the apply gate — a same-owner
+    // re-grant that completes synchronously — so no lock wait can ever happen
+    // while the apply gate is held (a wait there would be invisible to the lock
+    // manager's deadlock detection). Non-unique indexes take no key locks at
+    // all. Key locks and row locks share the Entry resource space (a hash could
+    // collide with a packed location); a collision only over-locks, and the
+    // class ordering above keeps acquisition order globally consistent.
+
+    /// <summary>
+    /// Resolves a column name to its ordinal (case-insensitive, SQL identifier
+    /// rules). Index key columns are validated at plan/DDL time, so a miss here
+    /// is a programming error surfaced loudly.
+    /// </summary>
+    private static int FindColumnOrdinal(SqlCatalogTable table, string columnName)
+    {
+        for (int i = 0; i < table.Columns.Count; i++)
+        {
+            if (string.Equals(table.Columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        throw new DatabaseException($"Table '{table.Schema}.{table.Name}' has no column named '{columnName}'.");
+    }
+
+    /// <summary>
+    /// Resolves the table's registered indexes to their live trees and key
+    /// ordinals for one statement.
+    /// </summary>
+    private List<SqlLiveIndex> GetLiveIndexes(SqlCatalogTable table)
+    {
+        var metadataList = _catalog.GetIndexes(table.ObjectId);
+
+        if (metadataList.Count == 0)
+        {
+            return new List<SqlLiveIndex>();
+        }
+
+        var result = new List<SqlLiveIndex>(metadataList.Count);
+
+        foreach (var metadata in metadataList)
+        {
+            if (!_indexManager.TryGetIndex(table.ObjectId, metadata.Name, out var index))
+            {
+                // Defensive: metadata and registrations persist atomically, so a
+                // described index always has a tree; tolerate a torn state by
+                // skipping rather than failing writes.
+                continue;
+            }
+
+            var ordinals = new int[metadata.ColumnNames.Count];
+            for (int i = 0; i < ordinals.Length; i++)
+            {
+                ordinals[i] = FindColumnOrdinal(table, metadata.ColumnNames[i]);
+            }
+
+            result.Add(new SqlLiveIndex(metadata, index, ordinals));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds an index key from a row's values: one order-preserving component
+    /// per key column, encoded exactly like the row payload encodes the value
+    /// (null components participate — nulls sort first and count as key values).
+    /// </summary>
+    private static IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    {
+        var writer = new DatabaseKeyWriter();
+
+        foreach (int ordinal in keyOrdinals)
+        {
+            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal]);
+        }
+
+        return IndexKey.From(writer);
+    }
+
+    /// <summary>
+    /// Collects the key-lock hashes a row contributes on every unique index.
+    /// </summary>
+    private static void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    {
+        foreach (var liveIndex in indexes)
+        {
+            if (liveIndex.Metadata.IsUnique)
+            {
+                hashes.Add(BuildIndexKey(table, liveIndex.KeyOrdinals, values).Hash());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Phase-one acquisition of the statement's unique-index key locks, in
+    /// deterministic (sorted, deduplicated) order — after the row locks, per the
+    /// lock-ordering rule above.
+    /// </summary>
+    private static async ValueTask AcquireUniqueKeyLocksAsync(
+        SqlStatementContext statement,
+        ulong objectId,
+        List<ulong> keyHashes,
+        CancellationToken cancellationToken)
+    {
+        if (keyHashes.Count == 0)
+        {
+            return;
+        }
+
+        keyHashes.Sort();
+
+        ulong? previous = null;
+        foreach (ulong hash in keyHashes)
+        {
+            if (previous == hash)
+            {
+                continue;
+            }
+
+            previous = hash;
+            await statement.Coordinator.LockManager.AcquireAsync(
+                statement.Transaction.Sequence, LockResource.Entry(objectId, hash), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Inserts one row version's entries into every index, stamped with the
+    /// writing transaction's sequence, and records them in the version-store
+    /// ledger so a logical rollback erases them again.
+    /// </summary>
+    private async ValueTask InsertIndexEntriesAsync(
+        SqlStatementContext statement,
+        List<SqlLiveIndex> indexes,
+        SqlCatalogTable table,
+        object?[] values,
+        ulong entryReference,
+        CancellationToken cancellationToken)
+    {
+        foreach (var liveIndex in indexes)
+        {
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            statement.Coordinator.VersionStore.RecordIndexEntryCreated(statement.Transaction.Sequence, liveIndex.Index, key, entryReference);
+        }
+    }
+
+    /// <summary>
+    /// Tombstones one row version's entries in every index with the writing
+    /// transaction's sequence (mirroring the row version's deleter stamp), and
+    /// records them in the ledger so a logical rollback restores them.
+    /// </summary>
+    private async ValueTask TombstoneIndexEntriesAsync(
+        SqlStatementContext statement,
+        List<SqlLiveIndex> indexes,
+        SqlCatalogTable table,
+        object?[] values,
+        ulong entryReference,
+        CancellationToken cancellationToken)
+    {
+        foreach (var liveIndex in indexes)
+        {
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Index, key, entryReference);
+        }
+    }
+
+    /// <summary>
+    /// Translates the index layer's unique violation into the area's error
+    /// surface at the model boundary (the recorded child-root error policy).
+    /// The statement's physical bracket has already rolled back — the session
+    /// stays usable.
+    /// </summary>
+    private static DatabaseException TranslateUniqueViolation(SqlCatalogTable table, IndexUniqueViolationException exception)
+        => new(
+            $"UNIQUE constraint violation on '{table.Schema}.{table.Name}': {exception.Message}",
+            exception);
 
     /// <summary>
     /// The latest-state check under the exclusive row lock: a target tombstoned
@@ -515,7 +779,22 @@ internal sealed class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        // The table's indexes fall with it. The catalog removes their metadata
+        // and registrations atomically with the table record; the live trees
+        // then leave the manager's directory (their pages await vacuum — see the
+        // Indexing DESIGN). Order matters: catalog first (durable), directory
+        // second, all under the exclusive lock so no writer maintains a ghost.
+        var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
+
         await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
+
+        foreach (var metadata in droppedIndexes)
+        {
+            if (_indexManager.TryGetIndex(table.ObjectId, metadata.Name, out _))
+            {
+                await _indexManager.DropIndexAsync(statement.Transaction, table.ObjectId, metadata.Name, cancellationToken).ConfigureAwait(false);
+            }
+        }
 
         // Release the table's record chain: per-object pages make the drop a
         // page-directory walk instead of a garbage legacy. Rides the statement
@@ -541,6 +820,139 @@ internal sealed class SqlPlanExecutor
             await statement.Coordinator.LockManager.AcquireAsync(
                 statement.Transaction.Sequence, LockResource.Object(table.ObjectId), mode, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Creates a secondary index: a DDL-blocking build under the table's
+    /// Exclusive lock (in-flight writers finish first; new ones wait), inside a
+    /// gated, <b>durably committed</b> bracket — the self-committing DDL posture,
+    /// because the catalog's metadata+registration record commits independently
+    /// and must never describe a tree whose pages a crash could revert. The
+    /// build walks every stored version — visible or not — and inserts entries
+    /// carrying the version's original stamps, so snapshots older than the index
+    /// read exactly what the equivalent row scan shows them. Uniqueness is
+    /// checked across the live versions during the build (the exclusive lock
+    /// excludes concurrent writers, so live state cannot move underneath it).
+    /// </summary>
+    private async Task<QueryResult> ExecuteCreateIndexAsync(SqlCreateIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
+        {
+            if (plan.IfNotExists)
+            {
+                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            }
+
+            throw new DatabaseException($"An index named '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
+        }
+
+        await statement.Coordinator.LockManager.AcquireAsync(
+            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        var ordinals = new int[plan.ColumnNames.Count];
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = FindColumnOrdinal(plan.Table, plan.ColumnNames[i]);
+        }
+
+        var definition = new IndexDefinition(plan.IndexName, IndexKind.BTree, plan.IsUnique);
+        bool registered = false;
+
+        try
+        {
+            await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+            {
+                var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
+                registered = true;
+
+                var liveKeys = plan.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
+
+                foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
+                {
+                    var key = BuildIndexKey(plan.Table, ordinals, values);
+
+                    if (liveKeys is not null && deleter == TransactionSequence.None && !liveKeys.Add(Convert.ToHexString(key.Encoded.Span)))
+                    {
+                        throw new DatabaseException(
+                            $"Cannot create UNIQUE index '{plan.IndexName}' on '{plan.Table.Schema}.{plan.Table.Name}': the existing rows contain duplicate keys.");
+                    }
+
+                    await index.InsertVersionAsync(
+                        bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
+            }, durable: true, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bracket rolled back physically (the tree's pages reverted);
+            // unregister the in-memory directory entry it left behind. The
+            // catalog was never touched.
+            if (registered)
+            {
+                await _indexManager.DropIndexAsync(statement.Transaction, plan.Table.ObjectId, plan.IndexName, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
+        // Metadata + registrations persist in ONE catalog self-commit: a crash
+        // cannot leave a described index without a tree registration (or the
+        // reverse). A crash before this write leaves only orphaned tree pages —
+        // a safe leak, never a re-attached index.
+        var registrations = ((IIndexRegistry)_indexManager).ExportRegistrations();
+        await _catalog.CreateIndexAsync(
+            new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique),
+            registrations,
+            cancellationToken).ConfigureAwait(false);
+
+        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+    }
+
+    /// <summary>
+    /// Drops a secondary index under the table's Exclusive lock: the catalog
+    /// removes the metadata and registration first (one durable self-commit —
+    /// the authoritative drop), then the live tree leaves the manager's
+    /// directory; its pages await vacuum. The exclusive lock excludes writers
+    /// for the whole statement, so no maintenance can race the two steps.
+    /// </summary>
+    private async Task<QueryResult> ExecuteDropIndexAsync(SqlDropIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        if (!_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out var metadata))
+        {
+            if (plan.IfExists)
+            {
+                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            }
+
+            throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
+        }
+
+        await statement.Coordinator.LockManager.AcquireAsync(
+            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        // The canonical (creation-time) name keyed by the catalog drives the
+        // manager lookup: catalog names are case-insensitive, directory names
+        // are exact.
+        var remaining = new List<BTreeIndexRegistration>();
+        foreach (var registration in ((IIndexRegistry)_indexManager).ExportRegistrations())
+        {
+            if (!(registration.ObjectId == plan.Table.ObjectId &&
+                  string.Equals(registration.Definition.Name, metadata.Name, StringComparison.Ordinal)))
+            {
+                remaining.Add(registration);
+            }
+        }
+
+        await _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken).ConfigureAwait(false);
+
+        if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
+        {
+            await _indexManager.DropIndexAsync(statement.Transaction, plan.Table.ObjectId, metadata.Name, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
     // ── Scan + coercion helpers ────────────────────────────────────────

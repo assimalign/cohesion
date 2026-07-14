@@ -54,3 +54,12 @@ internal sealed record SqlDropTablePlan(string Schema, string Name, bool IfExist
 internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column) : SqlPlan;
 
 internal sealed record SqlDropColumnPlan(string Schema, string Name, string ColumnName) : SqlPlan;
+
+internal sealed record SqlCreateIndexPlan(
+    SqlCatalogTable Table,
+    string IndexName,
+    IReadOnlyList<string> ColumnNames,
+    bool IsUnique,
+    bool IfNotExists) : SqlPlan;
+
+internal sealed record SqlDropIndexPlan(SqlCatalogTable Table, string IndexName, bool IfExists) : SqlPlan;

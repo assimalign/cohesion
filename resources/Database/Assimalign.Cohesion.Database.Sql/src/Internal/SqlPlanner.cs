@@ -42,6 +42,8 @@ internal sealed class SqlPlanner
             SqlCreateTableExpression create => PlanCreateTable(create),
             SqlDropTableExpression drop => PlanDropTable(drop),
             SqlAlterTableExpression alter => PlanAlterTable(alter),
+            SqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
+            SqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
             _ => throw new DatabaseException($"Statement type {expression.CommandType} is not supported by the executor yet."),
         };
     }
@@ -240,6 +242,43 @@ internal sealed class SqlPlanner
 
     private SqlDropTablePlan PlanDropTable(SqlDropTableExpression drop)
         => new(drop.Table.SchemaName ?? DefaultSchema, drop.Table.TableName, drop.IfExists);
+
+    private SqlCreateIndexPlan PlanCreateIndex(SqlCreateIndexExpression create)
+    {
+        if (string.IsNullOrWhiteSpace(create.IndexName) || create.IndexName == "?")
+        {
+            throw new DatabaseException("CREATE INDEX requires an index name.");
+        }
+
+        if (create.Columns.Count == 0)
+        {
+            throw new DatabaseException($"CREATE INDEX '{create.IndexName}' requires at least one key column.");
+        }
+
+        var table = ResolveTable(create.Table);
+
+        foreach (string column in create.Columns)
+        {
+            FindColumnOrdinal(table, column); // throws for unknown columns at plan time
+        }
+
+        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists);
+    }
+
+    private SqlDropIndexPlan PlanDropIndex(SqlDropIndexExpression drop)
+    {
+        if (string.IsNullOrWhiteSpace(drop.IndexName) || drop.IndexName == "?")
+        {
+            throw new DatabaseException("DROP INDEX requires an index name.");
+        }
+
+        if (drop.Table.TableName == "?")
+        {
+            throw new DatabaseException("DROP INDEX requires the table-qualified form: DROP INDEX <name> ON <table>.");
+        }
+
+        return new SqlDropIndexPlan(ResolveTable(drop.Table), drop.IndexName, drop.IfExists);
+    }
 
     private SqlPlan PlanAlterTable(SqlAlterTableExpression alter)
     {

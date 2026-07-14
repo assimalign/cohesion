@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Indexing;
@@ -48,4 +49,19 @@ public interface IIndexManager
     /// <param name="objectId">The identity of the object.</param>
     /// <returns>The indexes defined on the object.</returns>
     IReadOnlyList<IIndex> GetIndexes(ulong objectId);
+
+    /// <summary>
+    /// Purges the given writers' stamps out of every live index in one walk per
+    /// tree: entries the writers inserted are physically removed and tombstones
+    /// they stamped are cleared. This is the open-time recovery obligation — the
+    /// journal cannot prove these writers committed, the in-memory undo ledger
+    /// died with the process, and snapshots have no commit-log awareness, so an
+    /// unproven writer's stamps must not remain visible-by-default in any index.
+    /// Idempotent: re-running after a crash mid-purge removes what remains.
+    /// </summary>
+    /// <param name="transaction">The physical storage bracket the purge rides.</param>
+    /// <param name="writers">The transaction sequences the journal cannot prove committed.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The number of entries removed or restored.</returns>
+    ValueTask<long> PurgeWritersAsync(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default);
 }

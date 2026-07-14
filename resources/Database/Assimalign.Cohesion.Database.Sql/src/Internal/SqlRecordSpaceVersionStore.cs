@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -94,6 +95,22 @@ internal sealed class SqlRecordSpaceVersionStore : IVersionStore
         => Record(writer, new LedgerEntry(LedgerEntryKind.Tombstoned, objectId, SqlRecordLocation.Pack(pageId, slotIndex)));
 
     /// <summary>
+    /// Records that <paramref name="writer"/> inserted an index entry — the
+    /// index-side mirror of <see cref="RecordCreated"/>, so a logical rollback
+    /// physically erases the aborted writer's entries from the index too.
+    /// </summary>
+    internal void RecordIndexEntryCreated(TransactionSequence writer, IIndex index, IndexKey key, ulong entryReference)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryCreated, 0, entryReference, index, key.Encoded.ToArray()));
+
+    /// <summary>
+    /// Records that <paramref name="writer"/> tombstoned an index entry — the
+    /// index-side mirror of <see cref="RecordTombstoned"/>, so a logical rollback
+    /// restores the entry's deleter stamp.
+    /// </summary>
+    internal void RecordIndexEntryTombstoned(TransactionSequence writer, IIndex index, IndexKey key, ulong entryReference)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryTombstoned, 0, entryReference, index, key.Encoded.ToArray()));
+
+    /// <summary>
     /// Completes a committed writer's ledger: created versions are permanent
     /// (nothing to track), tombstoned versions move to the prunable set — they
     /// are reclaimable once the oldest snapshot bound passes the writer.
@@ -143,6 +160,11 @@ internal sealed class SqlRecordSpaceVersionStore : IVersionStore
         }
         catch (StorageException)
         {
+            return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The slot was reverted out of existence by a bracket rollback.
             return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
         }
 
@@ -385,6 +407,19 @@ internal sealed class SqlRecordSpaceVersionStore : IVersionStore
                         }
 
                         break;
+
+                    case LedgerEntryKind.IndexEntryCreated:
+                        // Physical erase of the aborted insert's entry: both index
+                        // ops verify the recorded stamp before acting, so a stale
+                        // ledger entry is a no-op, never a misdelete.
+                        await entry.Index!.EraseAsync(bracket, new IndexKey(entry.Key), entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                        removed++;
+                        break;
+
+                    case LedgerEntryKind.IndexEntryTombstoned:
+                        await entry.Index!.ClearDeleterAsync(bracket, new IndexKey(entry.Key), entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                        removed++;
+                        break;
                 }
             }
 
@@ -429,6 +464,13 @@ internal sealed class SqlRecordSpaceVersionStore : IVersionStore
         {
             return false;
         }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The slot no longer exists: a failed statement's bracket rollback
+            // restored the page's before-image, reverting the very insert this
+            // ledger entry recorded. Nothing to undo.
+            return false;
+        }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
         {
@@ -443,9 +485,16 @@ internal sealed class SqlRecordSpaceVersionStore : IVersionStore
     {
         Created = 0,
         Tombstoned,
+        IndexEntryCreated,
+        IndexEntryTombstoned,
     }
 
-    private readonly record struct LedgerEntry(LedgerEntryKind Kind, ulong ObjectId, ulong Location);
+    private readonly record struct LedgerEntry(
+        LedgerEntryKind Kind,
+        ulong ObjectId,
+        ulong Location,
+        IIndex? Index = null,
+        byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);
 }

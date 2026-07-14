@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -22,6 +23,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly SqlStorage _catalogStorage;
     private readonly ISqlCatalog _catalog;
     private readonly SqlTransactionCoordinator _coordinator;
+    private readonly IIndexManager _indexManager;
     private bool _disposed;
 
     internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage, bool recover = false)
@@ -33,12 +35,37 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         _catalog = SqlCatalog.Open(catalogStorage);
         _coordinator = new SqlTransactionCoordinator(storage);
 
+        // Re-attach the persisted secondary indexes before recovery: the
+        // open-time scrub must be able to purge unproven writers' entries out of
+        // every tree. Index pages live in the SAME data file set as rows (the
+        // transactional page surface), so storage recovery has already replayed
+        // them by the time the manager attaches.
+        _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = storage,
+            TransactionSource = _coordinator,
+            LockManager = _coordinator.LockManager,
+            ExistingIndexes = _catalog.GetIndexRegistrations(),
+        });
+
         if (recover)
         {
             // Reopened storage: classify the recovered journal, purge unproven
-            // writers from the version store, then checkpoint (the open-time
-            // checkpoint the storage strategy deferred).
-            _coordinator.Recover();
+            // writers from the record space AND the secondary indexes, then
+            // checkpoint (the open-time checkpoint the storage strategy
+            // deferred — it must come last, because truncation destroys the
+            // lifecycle records classification reads).
+            var plan = _coordinator.AnalyzeAndScrub();
+
+            if (plan.Aborted.Count > 0)
+            {
+                using var scrub = _storage.BeginTransaction();
+                _indexManager.PurgeWritersAsync(scrub, plan.Aborted)
+                    .AsTask().GetAwaiter().GetResult();
+                scrub.Commit();
+            }
+
+            _coordinator.CompleteRecovery();
         }
 
         UpgradeRecordSpaceIfNeeded();
@@ -222,6 +249,66 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     internal ISqlCatalog Catalog => _catalog;
 
     /// <summary>
+    /// Gets the database's index manager (the live B+Tree directory over the data
+    /// file set), for the executor, the engine's background workers, and tests.
+    /// </summary>
+    internal IIndexManager IndexManager => _indexManager;
+
+    /// <summary>
+    /// Persists the index manager's current registrations when they drifted from
+    /// the stored set — root page ids change on splits, so this runs at the
+    /// engine's persistence points (checkpoint passes and disposal) in addition
+    /// to index DDL itself.
+    /// </summary>
+    internal void SaveIndexRegistrationsIfChanged()
+    {
+        var current = ((IIndexRegistry)_indexManager).ExportRegistrations();
+        var stored = _catalog.GetIndexRegistrations();
+
+        if (RegistrationsEqual(current, stored))
+        {
+            return;
+        }
+
+        // Synchronous over the ValueTask by design: catalog writes complete
+        // synchronously (worker passes and disposal are synchronous paths).
+        _catalog.SaveIndexRegistrationsAsync(current).AsTask().GetAwaiter().GetResult();
+
+        static bool RegistrationsEqual(
+            IReadOnlyList<BTreeIndexRegistration> left,
+            IReadOnlyList<BTreeIndexRegistration> right)
+        {
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+
+            // Registration sets are tiny; order-insensitive comparison by value
+            // (BTreeIndexRegistration is a record).
+            foreach (var registration in left)
+            {
+                bool found = false;
+
+                foreach (var candidate in right)
+                {
+                    if (registration == candidate)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Gets the database's transaction coordinator (the MVCC composition sessions
     /// bind to), for the engine's background workers and tests.
     /// </summary>
@@ -241,7 +328,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var executor = new SqlQueryExecutor(_storage, _catalog);
+        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
         var session = new SqlDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);
@@ -260,8 +347,11 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         // The coordinator first: the manager aborts every still-active logical
         // transaction (rolling its paired bracket back) while the storage is
         // still open. Synchronous over the ValueTask by design — the in-process
-        // implementations complete synchronously.
+        // implementations complete synchronously. Registrations re-export after
+        // the aborts (a rollback never moves roots, but the order costs nothing)
+        // and before the storages close.
         _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        SaveIndexRegistrationsIfChanged();
         _storage.Dispose();
         _catalogStorage.Dispose();
     }
@@ -276,6 +366,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
         _disposed = true;
         await _coordinator.DisposeAsync().ConfigureAwait(false);
+        SaveIndexRegistrationsIfChanged();
         await _storage.DisposeAsync().ConfigureAwait(false);
         await _catalogStorage.DisposeAsync().ConfigureAwait(false);
     }

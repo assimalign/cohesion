@@ -106,4 +106,67 @@ public class SqlDdlParserTests
         var dropAction = alter.Action.ShouldBeOfType<SqlAlterDropColumnAction>();
         dropAction.ColumnName.ShouldBe("Email");
     }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Parse: CREATE INDEX parses name, table, and key columns")]
+    public void Parse_CreateIndex_ParsesNameTableAndColumns()
+    {
+        // Act
+        var statement = (SqlQueryStatement)_parser.Parse(
+            "CREATE INDEX ix_users_name ON Users (Name);");
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateIndexExpression>();
+
+        // Assert
+        create.CommandType.ShouldBe(SqlQueryCommandType.Create);
+        create.IndexName.ShouldBe("ix_users_name");
+        create.Table.TableName.ShouldBe("Users");
+        create.Columns.ShouldBe(new[] { "Name" });
+        create.IsUnique.ShouldBeFalse();
+        create.IfNotExists.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Parse: CREATE UNIQUE INDEX IF NOT EXISTS parses modifiers and composite keys")]
+    public void Parse_CreateUniqueIndex_ParsesModifiersAndCompositeColumns()
+    {
+        // Act
+        var statement = (SqlQueryStatement)_parser.Parse(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_email ON dbo.Users (Email, TenantId);");
+        var create = statement.SqlExpression.ShouldBeOfType<SqlCreateIndexExpression>();
+
+        // Assert
+        create.IsUnique.ShouldBeTrue();
+        create.IfNotExists.ShouldBeTrue();
+        create.IndexName.ShouldBe("ix_email");
+        create.Table.SchemaName.ShouldBe("dbo");
+        create.Table.TableName.ShouldBe("Users");
+        create.Columns.ShouldBe(new[] { "Email", "TenantId" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Parse: DROP INDEX parses the table-qualified form")]
+    public void Parse_DropIndex_ParsesTableQualifiedForm()
+    {
+        // Act
+        var statement = (SqlQueryStatement)_parser.Parse(
+            "DROP INDEX ix_users_name ON Users;");
+        var drop = statement.SqlExpression.ShouldBeOfType<SqlDropIndexExpression>();
+
+        // Assert
+        drop.CommandType.ShouldBe(SqlQueryCommandType.Drop);
+        drop.IndexName.ShouldBe("ix_users_name");
+        drop.Table.TableName.ShouldBe("Users");
+        drop.IfExists.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Parse: DROP INDEX IF EXISTS parses the existence modifier")]
+    public void Parse_DropIndexIfExists_SetsIfExists()
+    {
+        // Act
+        var statement = (SqlQueryStatement)_parser.Parse(
+            "DROP INDEX IF EXISTS ix_gone ON dbo.Users;");
+        var drop = statement.SqlExpression.ShouldBeOfType<SqlDropIndexExpression>();
+
+        // Assert
+        drop.IfExists.ShouldBeTrue();
+        drop.IndexName.ShouldBe("ix_gone");
+        drop.Table.SchemaName.ShouldBe("dbo");
+    }
 }

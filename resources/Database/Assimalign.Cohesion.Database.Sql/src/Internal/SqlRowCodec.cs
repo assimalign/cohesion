@@ -147,7 +147,12 @@ internal static class SqlRowCodec
         return values;
     }
 
-    private static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value)
+    /// <summary>
+    /// Appends one typed value as a self-describing, order-preserving component —
+    /// shared by the row payload encoder and the index-key builder, so a key
+    /// component always encodes exactly like the row value it indexes.
+    /// </summary>
+    internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value)
     {
         if (value is null)
         {
