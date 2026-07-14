@@ -6,7 +6,7 @@ The Database area is the data layer for the rest of the Cohesion platform (area 
 
 ## The engine self-sufficiency principle
 
-The facade can only be thin because of an invariant this project *enforces by existing*: **engines are self-sufficient libraries**. An engine owns its internal background workers — WAL flushing, checkpointing, version pruning — whether it runs embedded or hosted. `Database.Hosting` merely *composes* engines with the wire-protocol server and maps their workers onto the host's execution menu; it adds no behavior an embedded consumer would lose. If an engine ever requires the host to function, embedded consumers break — that is a design defect in the engine, not a missing feature here.
+The facade can only be thin because of an invariant this project *enforces by existing*: **engines are self-sufficient libraries**. An engine owns its internal background workers — WAL flushing, checkpointing, version pruning — whether it runs embedded or hosted. `Database.Hosting` merely composes the per-model wire-protocol servers that front engines; it adds no behavior an embedded consumer would lose (since 2026-07-13 the engine's worker loops are engine-internal, always — there is no host scheduling to miss). If an engine ever requires the host to function, embedded consumers break — that is a design defect in the engine, not a missing feature here.
 
 ## Decisions
 

@@ -80,10 +80,13 @@ public sealed class DatabaseApplicationBootstrapTests : IDisposable
         // Act
         await using var composition = DatabaseApplicationBootstrap.Compose(configuration);
 
-        // Assert: one SQL engine served by both the server and the application, and
-        // a TCP listener bound to all interfaces on the configured (OS-assigned) port.
+        // Assert: one SQL engine fronted by the SQL server, registered on the
+        // application, and a TCP listener bound to all interfaces on the configured
+        // (OS-assigned) port.
         composition.Engine.Model.ShouldBe(EngineModel.Sql);
-        composition.Server.Engines.ShouldHaveSingleItem().ShouldBeSameAs(composition.Engine);
+        composition.Server.Context.Engine.ShouldBeSameAs(composition.Engine);
+        composition.Server.Engine.ShouldBeSameAs(composition.Engine);
+        composition.Application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(composition.Server);
         composition.Application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(composition.Engine);
 
         var endpoint = composition.Listener.EndPoint.ShouldBeOfType<IPEndPoint>();
@@ -110,22 +113,26 @@ public sealed class DatabaseApplicationBootstrapTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [Database.Application] - Compose: The bootstrap builds a startable, stoppable application")]
     public async Task Compose_WithFileBackedConfiguration_ShouldBuildStartableApplication()
     {
-        // Arrange
+        // Arrange: composing creates the engine — a data machine, operational (and
+        // its data root on disk) before the host ever starts.
         var configuration = new DatabaseHostConfiguration { DataPath = _rootPath, Port = 0 };
         await using var composition = DatabaseApplicationBootstrap.Compose(configuration);
 
-        // Act: start the composed host (engine → worker slots → endpoint).
-        await ((IHost)composition.Application).StartAsync(TestTimeout());
-
-        // Assert: the host is serving, the engine is running, and the data root exists.
-        composition.Application.Context.State.ShouldBe(HostState.Started);
         composition.Engine.State.ShouldBe(EngineState.Running);
         Directory.Exists(_rootPath).ShouldBeTrue();
 
-        // Act / Assert: a clean stop drains to Stopped and stops the engine.
+        // Act: start the composed host (provisioner → endpoint).
+        await ((IHost)composition.Application).StartAsync(TestTimeout());
+
+        // Assert: the host is serving.
+        composition.Application.Context.State.ShouldBe(HostState.Started);
+
+        // Act / Assert: a clean stop drains the endpoint to Stopped; the engine —
+        // untouched by the host lifecycle — stays a live data machine until the
+        // composition disposes it.
         await ((IHost)composition.Application).StopAsync(TestTimeout());
         composition.Application.Context.State.ShouldBe(HostState.Stopped);
-        composition.Engine.State.ShouldBe(EngineState.Stopped);
+        composition.Engine.State.ShouldBe(EngineState.Running);
     }
 
     private static System.Threading.CancellationToken TestTimeout(int seconds = 30)

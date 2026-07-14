@@ -2,70 +2,67 @@
 
 ## Summary
 
-The standalone hosting application for the database engine resource: a `Host<TContext>`
+The standalone hosting application for the database resource: a `Host<TContext>`
 subclass that composes the resource's units of work as hosted services on the
-per-service execution menu, and the one DI/Configuration/Logging seam for the area.
-The module also owns the **database server runtime** — the model-agnostic network
-front-end that accepts connections over `libraries/Connections` drivers, authenticates
-a session principal, binds the session to a database, and pumps wire-protocol frames
-into engine `IDatabaseSession` executions (`Database.Server` was folded in on
-2026-07-12; see `docs/DESIGN.md`).
+per-service execution menu, and the one DI/Configuration/Logging seam for the
+area. Composition-only: it wraps the composed per-model wire-protocol servers
+(`IDatabaseServer`) generically as endpoint host services — the server machinery
+itself lives inside each model package (the SQL model's `SqlDatabaseServer` in
+`Assimalign.Cohesion.Database.Sql`), and engines are self-sufficient data
+machines this module never drives (see `docs/DESIGN.md`).
 
 ## Current Evaluation
 
-- Status: Composition + server runtime + engine-worker mapping delivered — the host drives engine lifecycle through the root contract, claims the engine-owned background workers (WAL group-commit flush, page write-back, checkpoint, maintenance) onto the execution menu (#902), runs the wire endpoint, and drains it all in order on stop.
-- Project references: `Assimalign.Cohesion.Database` (area root), `Assimalign.Cohesion.Database.Protocol` + `Assimalign.Cohesion.Database.Security` (the server's own machinery, COHRES002-exempted via `CohesionHostingIsolationExemptions`), `Assimalign.Cohesion.Connections` (transport drivers), `Assimalign.Cohesion.Hosting` (non-area hosting foundation).
+- Status: Composition delivered on the redesigned shape (2026-07-13) — the
+  application runs the composition root's services, then the registered servers
+  (started last, drained first), and implements the root's application-builder
+  seam. Engines take no part in the host lifecycle; workers are engine-internal.
+- Project references: `Assimalign.Cohesion.Database` (area root) and
+  `Assimalign.Cohesion.Hosting` (non-area hosting foundation). Nothing else — no
+  `Connections`, no `CohesionHostingIsolationExemptions`.
 
 ## Primary Responsibilities
 
-- `DatabaseApplication` owns the resource process lifecycle (start, run, stop) via
-  `Host<DatabaseApplicationContext>`, composing (in registration order) the engine
-  lifecycle services, the claimed engine-worker slots, any additional host services,
-  and the wire-protocol endpoint (registered last so it starts last and drains
-  first). Worker slots schedule engine-owned `IDatabaseEngineWorker`s — the work
-  itself lives in the engine, so embedded consumers get it without this module.
-- The server runtime: the `IDatabaseServer` implementation (accept/drain lifecycle
-  over the registered engines, created with `DatabaseServer.Create(options)`) and
-  `DatabaseServerOptions` (engines, bound listener, authenticator, plus the DoS
-  guardrails: session limit, auth/idle timeouts, drain budget). The abstractions
-  themselves — `IDatabaseServer`, `IDatabaseServerSession`, `ProtocolVersion` — live
-  in the area root so feature libraries can consume the seam without referencing
-  this module. Statements execute through the root contract's
-  text-execute seam (`IDatabaseSession.ExecuteAsync(string, parameters)`), so the
-  server never parses any model language; parameters and result rows ride the shared
-  tuple-codec (`DatabaseValueCodec` in `Database.Types`).
-- `DatabaseApplicationContext` carries the environment, the served engines, and the
-  composed hosted services.
-- `DatabaseApplicationOptions` collects the engines, the server, additional
-  `IHostService`s, and the worker mapping (`Workers`: per-kind enable + execution
-  model; cadence lives on the engine's own options).
-- `DatabaseHostConfiguration` binds the environment-variable conventions a gateway
-  injects (data path, endpoint port, durability).
+- `DatabaseApplication` owns the resource process lifecycle (start, run, stop)
+  via `Host<DatabaseApplicationContext>`, composing (in registration order) the
+  composition root's additional host services, then one endpoint service per
+  registered server — servers start last and drain first.
+- `DatabaseApplicationContext` implements the root's
+  `IDatabaseApplicationContext`: the registered servers (plural — one per model)
+  and the server-less engine registrations.
+- `DatabaseApplicationOptions` collects the servers, the embedded engine
+  registrations, and additional `IHostService`s.
+- `DatabaseHostConfiguration` binds the environment-variable conventions a
+  gateway injects (data path, endpoint port, durability).
 
 ## Key Types
 
-- `DatabaseApplication`
-- `DatabaseApplicationContext`
+- `DatabaseApplication` (implements the root's `IDatabaseApplication`; `CreateBuilder()` is the composition entry point)
+- `DatabaseApplicationBuilder` (implements the root's `IDatabaseApplicationBuilder`)
+- `DatabaseApplicationContext` (implements the root's `IDatabaseApplicationContext`)
 - `DatabaseApplicationOptions`
-- `DatabaseWorkerMappingOptions` / `DatabaseWorkerSlotOptions` / `DatabaseWorkerExecution`
 - `DatabaseHostConfiguration`
-- `DatabaseServer` (implements the root's `IDatabaseServer`)
-- `DatabaseServerOptions`
 
 ## Composing a host
 
+Builder-first — model packages register their engines *and servers* through the
+root's `IDatabaseApplicationBuilder` seam (verbs ship with the model package,
+e.g. `AddSqlDatabase` / `AddSqlServer` in `Database.Sql`):
+
 ```csharp
-var serverOptions = new DatabaseServerOptions { Listener = listener };
-serverOptions.Engines.Add(engine);
+var builder = DatabaseApplication.CreateBuilder();
 
-var options = new DatabaseApplicationOptions();
-options.Engines.Add(engine);
-options.Server = DatabaseServer.Create(serverOptions);   // the wire endpoint
+SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
+SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 
-await using var app = new DatabaseApplication(options);
-await app.RunAsync();   // starts engines, then the claimed worker slots, then the endpoint
+await using var app = builder.Build();
+await app.RunAsync();   // starts services, then the servers (the engine is already live)
 ```
 
-A custom or embedded host composes `DatabaseServer.Create(...)` manually and drives
-`IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle. `Database.Client` is the
-counterpart on the other end of the wire.
+Hosting-only composition (additional host services) lives on `builder.Options`;
+constructing `new DatabaseApplication(options)` directly from fully populated
+options remains supported. A custom or embedded host creates a model server
+(`SqlDatabaseServer.Create(engine, options)`) and drives
+`IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle — or skips servers
+entirely and uses the engine in-process. `Database.Client` is the counterpart on
+the other end of the wire.

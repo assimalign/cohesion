@@ -6,24 +6,26 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Sql.Storage;
-using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
-/// Internal implementation of a SQL database session.
+/// Internal implementation of a SQL database session, bound to the database's
+/// MVCC transaction manager: explicit and auto-commit statements alike run under
+/// an <see cref="ITransactionContext"/> paired with a storage bracket, so
+/// visibility semantics never fork between the two paths.
 /// </summary>
 internal sealed class SqlDatabaseSession : IDatabaseSession
 {
-    private readonly SqlStorage _storage;
+    private readonly SqlTransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
 
     private SqlDatabaseTransaction? _transaction;
     private SessionState _state;
 
-    internal SqlDatabaseSession(ISqlDatabase database, SqlStorage storage, SqlQueryExecutor executor)
+    internal SqlDatabaseSession(ISqlDatabase database, SqlTransactionCoordinator coordinator, SqlQueryExecutor executor)
     {
         Database = database;
-        _storage = storage;
+        _coordinator = coordinator;
         _executor = executor;
         _state = SessionState.Open;
     }
@@ -39,18 +41,40 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
     /// <inheritdoc />
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The session begins an MVCC transaction context on the database's
+    /// transaction manager alongside the physical storage bracket (paired under
+    /// one sequence): <see cref="IsolationLevel.Snapshot"/> fixes the visibility
+    /// snapshot at begin, <see cref="IsolationLevel.ReadCommitted"/> refreshes
+    /// it per statement. <see cref="IsolationLevel.Serializable"/> is rejected —
+    /// the engine has no serialization-conflict detection yet, and the root
+    /// contract forbids running a transaction weaker than requested.
+    /// </remarks>
+    public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (isolationLevel == IsolationLevel.Serializable)
+        {
+            throw new DatabaseException(
+                "IsolationLevel.Serializable is not supported by the SQL engine yet: serialization-conflict " +
+                "detection is a post-MVP feature, and the session contract forbids running weaker than requested. " +
+                "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
+        }
 
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
-        _transaction = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction());
+        var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+        _transaction = new SqlDatabaseTransaction(_coordinator, context);
 
-        return new ValueTask<IDatabaseTransaction>(_transaction);
+        return _transaction;
     }
 
     /// <inheritdoc />
@@ -59,26 +83,62 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         ThrowIfNotOpen();
         ArgumentNullException.ThrowIfNull(request);
 
-        // If there is an active transaction, delegate to the executor with its storage scope
+        // Inside an explicit transaction, the statement rides its context.
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
-            return await _executor.ExecuteAsync(request, _transaction.StorageTransaction, cancellationToken).ConfigureAwait(false);
+            var scope = new SqlStatementContext(_transaction.Context, _coordinator);
+
+            try
+            {
+                return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TransactionDeadlockException exception)
+            {
+                // The requester-closes-cycle victim: the statement failed and is
+                // retryable by construction — roll the transaction back and
+                // re-attempt. The session stays usable.
+                throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+            }
+            catch (TransactionAbortedException exception)
+            {
+                throw new DatabaseTransactionAbortedException(exception.Message, exception);
+            }
         }
 
-        // Auto-commit semantics: wrap in a mini-transaction
-        var autoTx = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction());
+        // Auto-commit semantics: a one-statement manager transaction, so
+        // visibility and conflict semantics are identical to the explicit path.
+        var context = await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
 
         try
         {
-            var result = await _executor.ExecuteAsync(request, autoTx.StorageTransaction, cancellationToken).ConfigureAwait(false);
-            await autoTx.CommitAsync(cancellationToken).ConfigureAwait(false);
+            var scope = new SqlStatementContext(context, _coordinator);
+            var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
+        }
+        catch (TransactionDeadlockException exception)
+        {
+            if (context.State == TransactionState.Active)
+            {
+                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+        }
+        catch (TransactionAbortedException exception)
+        {
+            if (context.State == TransactionState.Active)
+            {
+                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw new DatabaseTransactionAbortedException(exception.Message, exception);
         }
         catch
         {
-            if (autoTx.State == TransactionState.Active)
+            if (context.State == TransactionState.Active)
             {
-                await autoTx.RollbackAsync().ConfigureAwait(false);
+                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
             }
 
             throw;

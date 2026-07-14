@@ -84,15 +84,11 @@ public class EmbeddedDatabaseTests
 
         public string Name { get; }
 
-        public EngineState State => EngineState.Idle;
+        public EngineState State => EngineState.Running;
 
         public EngineModel Model { get; }
 
         public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
-
-        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();

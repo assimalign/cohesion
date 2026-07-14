@@ -6,9 +6,22 @@ The out-of-process database resource needs a process, and the orchestration plan
 already names it: `DatabaseResource.Artifact` is
 `"Assimalign.Cohesion.Database.Application"`. This project is that artifact — the
 **composition-root executable**, and nothing else: every behavior it exhibits
-(engine lifecycle, worker scheduling, endpoint drain, durability) lives in the
-libraries it composes. If a piece of logic here starts feeling like a feature, it
+(engine durability and its worker loops, endpoint drain) lives in the libraries
+it composes. If a piece of logic here starts feeling like a feature, it
 belongs in a library.
+
+## Target design (pinned — #906)
+
+The executable is the **interim state**. Per the `<Area>.Application` convention
+(owner direction, 2026-07-13; `.claude/rules/resource-areas.md`), this project's
+target design is the **manifest-generation project**, not an executable: an SDK
+consumer loads this specific project, build tasks code-generate the application
+manifest from it, and the SDK-specific `Database.ApplicationModel` then helps the
+gateway access that manifest — the same convention in every resource area. The
+realignment is deliberately pinned on the ApplicationModel program (a separate
+beast altogether): [#906](https://github.com/assimalign/cohesion/issues/906).
+Everything below documents the interim executable, which stays load-bearing (it
+is what the gateway E2E launches) until that issue lands.
 
 ## Why-this-not-that decisions
 
@@ -28,6 +41,18 @@ belongs in a library.
   `DatabaseApplicationBootstrap` (+ `DatabaseApplicationComposition`), so tests
   drive the full env-config → running-host path in-process — no process spawning,
   no flaky stdout scraping.
+- **Composed through the area builder pattern (2026-07-13)** — this executable is
+  the proof-of-pattern consumer. The bootstrap starts from
+  `DatabaseApplication.CreateBuilder()`, registers the SQL engine through the
+  model's own verb (`builder.AddSqlDatabase(...)` — shipped by `Database.Sql`
+  against the root's `IDatabaseApplicationBuilder` seam; the engine is a data
+  machine, operational the moment the verb returns), fronts it with the SQL
+  model's server (`builder.AddSqlServer(engine, ...)` over the TCP listener —
+  eager, not deferred: a per-model server needs only its one engine, already in
+  hand), and parks the default-database provisioner on
+  `builder.Options.Services`. Hand-assembling `DatabaseApplicationOptions` was
+  the interim shape; the builder is the same options object with the model
+  registration inverted to the package that owns the model.
 - **Bind all interfaces, gateway-injected port (container-style).** The gateway
   owns the network boundary and injects `COHESION_DATABASE_ENDPOINT_PORT`; inside
   its own (container/pod) boundary the host binds `0.0.0.0`. Loopback-only binding
@@ -44,16 +69,17 @@ belongs in a library.
   with a default the operator did not choose.
 - **Graceful shutdown via `PosixSignalRegistration`** for SIGINT and SIGTERM (the
   orchestrator's stop): the handler cancels the run token — the host's shutdown
-  signal — so the endpoint drains first, worker slots quiesce, and engines flush
-  durably before exit. `ProcessExit` alone was rejected: it races the runtime's
+  signal — so the endpoint drains first, and the composition's disposal then
+  disposes the engine, quiescing its workers and flushing durably before exit. `ProcessExit` alone was rejected: it races the runtime's
   teardown; the signal registration pre-empts default termination cleanly on all
   platforms.
-- **The host provisions a default database (`app`).** The wire protocol has no
-  CREATE DATABASE verb (database provisioning is a deployment concern in the MVP),
-  so a fresh server process with zero databases would be unusable — no client
-  could bind anything. An internal `DefaultDatabaseProvisioner` host service runs
-  after the engine starts and before the endpoint accepts: it opens `app` when its
-  files exist (restart) and creates it on first launch. The name is a convention
+- **The host provisions a default database (`app`).** The wire protocol carries no
+  database-management verbs **by standing design principle** (code-first
+  provisioning — area DESIGN §2.4: databases are declared by the deployment, never
+  created by clients over the wire), so a fresh server process must provision its
+  declared databases before accepting. An internal `DefaultDatabaseProvisioner` host service runs
+  before the endpoint accepts (services start ahead of the servers): it opens
+  `app` when its files exist (restart) and creates it on first launch. The name is a convention
   for now; a `COHESION_DATABASE_NAME` binding (mirrored by a
   `DatabaseResourceOptions` knob so both planes agree) is the natural follow-up
   when multi-database deployments need it.
@@ -71,7 +97,8 @@ belongs in a library.
 Configuration errors (`FormatException` from the port binder or the durability
 mapping) print a `cohesion-db:`-prefixed line to stderr and exit `1` before
 anything binds. Runtime faults propagate from the host (`Host<TContext>` rolls back
-a failed start; a worker fault surfaces from the engine's stop).
+a failed start; an engine background-worker fault is observable as
+`EngineState.Faulted` — the engine keeps serving, degraded).
 
 ## AOT posture
 

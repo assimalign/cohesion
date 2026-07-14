@@ -1,10 +1,15 @@
 using System;
 
-namespace Assimalign.Cohesion.Database;
+namespace Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// A strongly-typed unique identifier for a database transaction, backed by a <see cref="Guid"/>.
 /// </summary>
+/// <remarks>
+/// The external identity of a transaction — good for sessions, diagnostics, and the
+/// wire protocol, but unordered. MVCC visibility ordering uses
+/// <see cref="TransactionSequence"/> instead (see docs/DESIGN.md).
+/// </remarks>
 public readonly struct TransactionId : IEquatable<TransactionId>
 {
     private readonly Guid _value;

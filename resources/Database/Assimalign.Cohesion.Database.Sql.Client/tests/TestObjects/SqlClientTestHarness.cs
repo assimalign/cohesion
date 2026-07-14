@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
-using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
@@ -15,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 internal sealed class SqlClientTestHarness : IAsyncDisposable
 {
-    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, IDatabaseServer server, ISqlClient client)
+    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, ISqlClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -27,19 +26,18 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
 
     public InMemoryConnectionListener Listener { get; }
 
-    public IDatabaseServer Server { get; }
+    public SqlDatabaseServer Server { get; }
 
     public ISqlClient Client { get; }
 
     public const string DatabaseName = "app";
 
     public static async Task<SqlClientTestHarness> StartAsync(
-        Action<DatabaseServerOptions>? configureServer = null,
+        Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
         ISqlClientObserver? observer = null)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-typed-client-e2e" });
-        await engine.StartAsync();
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 
@@ -50,12 +48,11 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
         }
 
         var listener = new InMemoryConnectionListener();
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
+        var serverOptions = new SqlDatabaseServerOptions { Listener = listener };
 
-        serverOptions.Engines.Add(engine);
         configureServer?.Invoke(serverOptions);
 
-        var server = DatabaseServer.Create(serverOptions);
+        var server = SqlDatabaseServer.Create(engine, serverOptions);
         await server.StartAsync();
 
         var settings = new DatabaseConnectionSettings

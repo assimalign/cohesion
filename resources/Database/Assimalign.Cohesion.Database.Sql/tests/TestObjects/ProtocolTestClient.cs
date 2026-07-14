@@ -6,7 +6,7 @@ using Shouldly;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Hosting.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// A hand-driven protocol client over one in-memory connection: sends raw frames

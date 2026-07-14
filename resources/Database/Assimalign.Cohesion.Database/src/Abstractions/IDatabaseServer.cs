@@ -1,44 +1,44 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The network front-end of a database host: accepts connections, authenticates
-/// sessions, and pumps protocol frames into engine sessions.
+/// The network front-end for one database engine: accepts connections,
+/// authenticates sessions, and pumps protocol frames into engine sessions.
 /// </summary>
 /// <remarks>
-/// The server is model-agnostic — it serves whichever engines the host registered.
-/// It is not itself a host service: the hosting module's <c>DatabaseApplication</c>
-/// wraps the server configured on its options in an internal endpoint host service,
-/// and an embedded or custom host drives <see cref="StartAsync"/>/<see cref="StopAsync"/>
-/// directly. The runtime implementation lives in the hosting module
-/// (<c>Assimalign.Cohesion.Database.Hosting</c>); this seam lets area libraries
-/// observe or compose the server without referencing the runtime.
+/// Servers are <b>per-model</b>: each fronts exactly one engine (see
+/// <see cref="IDatabaseServerContext.Engine"/>) so model-specific wire behavior has
+/// a home. This contract is the only area-wide server requirement — every model
+/// implements it its own way, against <c>Connections</c> and the protocol child
+/// root, inside its model package (the SQL model's <c>SqlDatabaseServer</c> in
+/// <c>Assimalign.Cohesion.Database.Sql</c>). "Running" lives here, not on the
+/// engine: an engine is a data machine (create → use → dispose), and the server is
+/// the thing that starts and stops. An <see cref="IDatabaseApplication"/> composes
+/// servers generically as host services; an embedded or custom host drives
+/// <see cref="StartAsync"/>/<see cref="StopAsync"/> directly.
 /// </remarks>
 public interface IDatabaseServer : IAsyncDisposable
 {
     /// <summary>
-    /// Gets the engines this server dispatches sessions to.
+    /// Gets the composed state of the server: the engine it fronts and the
+    /// sessions currently active on it.
     /// </summary>
-    IReadOnlyList<IDatabaseEngine> Engines { get; }
-
-    /// <summary>
-    /// Gets the sessions currently active on this server.
-    /// </summary>
-    IReadOnlyCollection<IDatabaseServerSession> Sessions { get; }
+    IDatabaseServerContext Context { get; }
 
     /// <summary>
     /// Starts accepting connections.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task that completes once the server is accepting.</returns>
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stops accepting connections and drains active sessions gracefully.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token bounding the drain.</param>
+    /// <returns>A task that completes once the drain has finished.</returns>
     Task StopAsync(CancellationToken cancellationToken = default);
 }

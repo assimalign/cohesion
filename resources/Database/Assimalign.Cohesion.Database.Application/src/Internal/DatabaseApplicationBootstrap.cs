@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Database.Application.Internal;
 /// <summary>
 /// Builds the standalone database host from the bound environment configuration:
 /// a file-backed SQL engine at the data path, a TCP listener on the configured
-/// port, the wire-protocol server, and the <see cref="DatabaseApplication"/>
-/// composing them. <c>Program</c> is a thin shim over this type so tests can
-/// drive the whole composition without spawning a process.
+/// port, the SQL model's wire-protocol server fronting the engine, and the
+/// <see cref="DatabaseApplication"/> composing them. <c>Program</c> is a thin shim
+/// over this type so tests can drive the whole composition without spawning a
+/// process.
 /// </summary>
 internal static class DatabaseApplicationBootstrap
 {
@@ -26,7 +27,14 @@ internal static class DatabaseApplicationBootstrap
     internal const string DefaultDatabaseName = "app";
 
     /// <summary>
-    /// Composes a runnable database application from the configuration.
+    /// Composes a runnable database application from the configuration, through the
+    /// area's builder pattern: <see cref="DatabaseApplication.CreateBuilder()"/> is
+    /// the entry point, and the SQL model registers its own engine and server via
+    /// the <c>AddSqlDatabase</c>/<c>AddSqlServer</c> verbs (shipped by
+    /// <c>Database.Sql</c> against the root's
+    /// <see cref="IDatabaseApplicationBuilder"/> seam). The engine is a data
+    /// machine — operational the moment the verb returns; the server is what the
+    /// application starts and stops.
     /// </summary>
     /// <param name="configuration">The bound host configuration.</param>
     /// <returns>The composed parts; the caller owns their disposal.</returns>
@@ -38,14 +46,16 @@ internal static class DatabaseApplicationBootstrap
 
         StorageCommitDurability durability = MapDurability(configuration.Durability);
 
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+
         // File-backed at the mounted data path; the in-memory strategy when no path
         // is configured (ephemeral dev runs — the orchestration manifest always
         // injects the data path of its volume mount).
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
         {
-            EngineName = "sql",
-            RootPath = configuration.DataPath,
-            Durability = durability,
+            options.EngineName = "sql";
+            options.RootPath = configuration.DataPath;
+            options.Durability = durability;
         });
 
         // Bind all interfaces (container-style: the gateway injects the port and
@@ -55,20 +65,16 @@ internal static class DatabaseApplicationBootstrap
             EndPoint = new IPEndPoint(IPAddress.Any, configuration.Port ?? 0),
         });
 
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
-        serverOptions.Engines.Add(engine);
-        IDatabaseServer server = DatabaseServer.Create(serverOptions);
+        // The SQL model's per-model server fronts the engine on the listener; the
+        // application wraps it as its endpoint host service (started last, drained
+        // first).
+        SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 
-        var applicationOptions = new DatabaseApplicationOptions();
-        applicationOptions.Engines.Add(engine);
-        applicationOptions.Server = server;
+        // Provision the default database ahead of the endpoint (additional services
+        // start before the servers), so a client can always bind it.
+        builder.Options.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
 
-        // Provision the default database after the engine starts and before the
-        // endpoint accepts (additional services sit between the worker slots and the
-        // endpoint in the start order), so a client can always bind it.
-        applicationOptions.Services.Add(new DefaultDatabaseProvisioner(engine, DefaultDatabaseName));
-
-        var application = new DatabaseApplication(applicationOptions);
+        DatabaseApplication application = builder.Build();
 
         return new DatabaseApplicationComposition(engine, listener, server, application);
     }

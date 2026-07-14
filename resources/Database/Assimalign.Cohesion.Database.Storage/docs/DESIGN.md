@@ -110,7 +110,56 @@ sequence — GUID identity belongs to the transaction layer above.
 5. **Page-level single-writer.** A page touched by an active transaction is
    write-locked to it (conflicts throw rather than wait). Record-level concurrency is
    `Database.Transactions`' job above this layer; full-image logging is only correct
-   because two transactions can never interleave on one page.
+   because two transactions can never interleave on one page. This division is
+   permanent in the MVCC integration design (area DESIGN.md §3.8): storage
+   transactions remain the **physical WAL bracket** — the MVCC manager layers
+   row-grain snapshots/locks *above* them (paired per transaction via
+   `IStorageTransactionSource`), and page locks stop being the user-visible
+   conflict surface without ever weakening the invariant that makes page-image
+   logging correct.
+
+### The physical/logical bracket interplay (MVCC layering rules)
+
+The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
+engine) added three storage-side rules that keep the logical layer sound:
+
+- **One sequence namespace.** `IStorage.ReserveTransactionSequence()` +
+  `IStorage.BeginTransaction(long sequence)` let an engine's transaction manager
+  allocate from the storage's own counter and pair each logical transaction with
+  a bracket that *adopts the same sequence*. The bracket's commit record then
+  proves the logical transaction at recovery — there is no window in which page
+  images are committed under one sequence while the logical outcome hangs on
+  another, and internally sequenced brackets (catalog self-commits, auto-commit
+  record operations) can never collide with manager-assigned sequences. An
+  adopted bracket appends **no begin record** — the reserving caller's
+  transaction log owns lifecycle records; the bracket contributes page images
+  and its commit/rollback record.
+- **The sequence floor.** The file header persists the storage's high-water
+  transaction sequence (`LastTransactionSequence`, updated on every header
+  write). On open, sequence assignment resumes above `max(journal-max, floor)`:
+  a checkpoint truncates the journal — the only other sequence witness — while
+  MVCC row stamps persist in data pages, so a recycled sequence would corrupt
+  snapshot visibility. Files written before the field read zero, a safe floor
+  (they predate row stamps).
+- **Checkpoints carry logical actives; the open-time checkpoint is deferrable.**
+  `Checkpoint(ReadOnlySpan<long>)` embeds in-flight *logical* sequences in the
+  truncating checkpoint record (their begin records are being destroyed;
+  `TransactionRecovery.Analyze` reads them back so an unproven sequence still
+  classifies as aborted). Storage-level brackets must still be quiescent — the
+  active-count interlock is unchanged, and logical actives are the caller's to
+  supply because storage cannot see above its own layer. Symmetrically,
+  `OpenExisting(checkpointOnOpen: false)` lets an engine analyze the recovered
+  journal *before* the truncation destroys the records classification reads.
+- **Inner brackets may commit non-durably.** `Commit(awaitDurability: false)`
+  appends the same records (after images + commit record) without the durable
+  flush — for per-statement physical brackets whose durability is owned by the
+  outer logical transaction's commit record: the journal is ordered, so
+  flushing the later record makes the earlier ones durable first, and a crash
+  before that leaves the bracket unproven — its pages undone by recovery —
+  which is exactly the outer transaction's abort semantics. The write-ahead
+  gate protects stolen pages regardless of the flag; the flag never weakens
+  the rule that an *acknowledged* commit is durable, because acknowledgment
+  belongs to the outer commit.
 
 Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
 they make recovery a pure idempotent overwrite with no operation replay logic, which

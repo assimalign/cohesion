@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -6,25 +7,117 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// Internal implementation of a SQL database instance: the data storage, the
-/// dedicated catalog storage, and the catalog opened over it.
+/// dedicated catalog storage, the catalog opened over it, and the transaction
+/// coordinator — the per-database MVCC composition (transaction manager, lock
+/// manager, version store) every session binds to.
 /// </summary>
 internal sealed class SqlDatabaseInstance : ISqlDatabase
 {
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;
     private readonly ISqlCatalog _catalog;
+    private readonly SqlTransactionCoordinator _coordinator;
     private bool _disposed;
 
-    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage)
+    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage, bool recover = false)
     {
         Name = name;
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
         _catalog = SqlCatalog.Open(catalogStorage);
+        _coordinator = new SqlTransactionCoordinator(storage);
+
+        if (recover)
+        {
+            // Reopened storage: classify the recovered journal, purge unproven
+            // writers from the version store, then checkpoint (the open-time
+            // checkpoint the storage strategy deferred).
+            _coordinator.Recover();
+        }
+
+        UpgradeRecordSpaceIfNeeded();
+    }
+
+    /// <summary>
+    /// Upgrades a pre-MVCC (format-version-1) record space in place: every data
+    /// record gains a zeroed 16-byte version-stamp header (writer zero reads as
+    /// committed bootstrap data, visible to every snapshot), and the catalog
+    /// then persists format version 2. Runs once per database lifetime, at open,
+    /// before any session exists. Crash-safety across the two storages: the
+    /// rewrite rides one data-storage transaction (all-or-nothing), the marker
+    /// is written after it, and the rewrite itself is idempotent — a version-1
+    /// record always begins with the tuple codec's nonzero <c>Int64</c> tag
+    /// byte, so a record already carrying a zeroed stamp header is provably
+    /// upgraded and is skipped when a crash between the rewrite commit and the
+    /// marker write replays the upgrade on the next open.
+    /// </summary>
+    private void UpgradeRecordSpaceIfNeeded()
+    {
+        if (_catalog.RecordSpaceFormatVersion >= SqlRowCodec.RecordSpaceFormatVersion)
+        {
+            return;
+        }
+
+        var records = new List<(PageId PageId, int SlotIndex, byte[] Data)>();
+
+        using (var iterator = _storage.GetUnitIterator())
+        {
+            while (iterator.MoveNext())
+            {
+                var unit = iterator.Current;
+
+                if (!IsUpgraded(unit.Data.Span))
+                {
+                    records.Add((unit.PageId, unit.SlotIndex, unit.Data.ToArray()));
+                }
+            }
+        }
+
+        if (records.Count > 0)
+        {
+            using var transaction = _storage.BeginTransaction();
+
+            foreach (var (pageId, slotIndex, data) in records)
+            {
+                byte[] upgraded = SqlRowCodec.UpgradeUnstamped(data);
+
+                try
+                {
+                    _storage.UpdateRow(transaction, pageId, slotIndex, upgraded);
+                }
+                catch (SlottedPageException)
+                {
+                    // The stamp header outgrew the slot: relocate.
+                    _storage.DeleteRow(transaction, pageId, slotIndex);
+                    _storage.InsertRow(transaction, upgraded);
+                }
+            }
+
+            transaction.Commit();
+        }
+
+        // Marker last. Synchronous over the ValueTask by design: catalog writes
+        // complete synchronously and instance open is a synchronous path.
+        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
+            .AsTask().GetAwaiter().GetResult();
+
+        static bool IsUpgraded(ReadOnlySpan<byte> record)
+        {
+            // A version-1 record starts with the tuple codec's Int64 tag byte
+            // (never zero); an upgraded-but-unmarked record starts with the
+            // zeroed bootstrap stamp header.
+            if (record.Length < SqlRowCodec.StampHeaderSize)
+            {
+                return false;
+            }
+
+            return !record.Slice(0, SqlRowCodec.StampHeaderSize).ContainsAnyExcept((byte)0);
+        }
     }
 
     /// <inheritdoc />
@@ -43,6 +136,20 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// </summary>
     internal SqlStorage CatalogStorage => _catalogStorage;
 
+    /// <summary>
+    /// Gets the database's transaction coordinator (the MVCC composition sessions
+    /// bind to), for the engine's background workers and tests.
+    /// </summary>
+    internal SqlTransactionCoordinator Coordinator => _coordinator;
+
+    /// <summary>
+    /// Checkpoints the data storage through the coordinator, so the truncating
+    /// checkpoint record carries the sequences of in-flight logical transactions
+    /// (recovery classification stays sound). The catalog storage has no logical
+    /// transactions above it and checkpoints directly.
+    /// </summary>
+    internal void CheckpointDataStorage() => _coordinator.Checkpoint();
+
     /// <inheritdoc />
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
@@ -50,7 +157,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new SqlQueryExecutor(_storage, _catalog);
-        var session = new SqlDatabaseSession(this, _storage, executor);
+        var session = new SqlDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);
     }
@@ -64,6 +171,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         }
 
         _disposed = true;
+
+        // The coordinator first: the manager aborts every still-active logical
+        // transaction (rolling its paired bracket back) while the storage is
+        // still open. Synchronous over the ValueTask by design — the in-process
+        // implementations complete synchronously.
+        _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _storage.Dispose();
         _catalogStorage.Dispose();
     }
@@ -77,6 +190,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         }
 
         _disposed = true;
+        await _coordinator.DisposeAsync().ConfigureAwait(false);
         await _storage.DisposeAsync().ConfigureAwait(false);
         await _catalogStorage.DisposeAsync().ConfigureAwait(false);
     }

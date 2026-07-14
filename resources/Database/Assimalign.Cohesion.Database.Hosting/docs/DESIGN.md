@@ -2,261 +2,180 @@
 
 ## Design intent
 
-`DatabaseApplication` is the standalone host for the database engine resource. Per the
-Cohesion hosting model, each resource type runs as its own `Host<TContext>` subclass
-owning its own lifecycle in its own process; this project is that hosting shell,
-composing the resource's units of work as hosted services and serving as the area's one
-DI/Configuration/Logging seam.
-
-This module also **owns the database server runtime** — the model-agnostic network
-front-end (`DatabaseServer.Create`, the session pump). The server was originally a
-separate `Database.Server` library; it was folded into this module by owner decision
-on 2026-07-12 (see "The server runtime is a hosting concern" below). The server
-*abstractions* (`IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
-value type) live in the area root — the hosting-isolation rule makes this module
-unreferenceable by area libraries, so the seam must sit where they can see it. This
-module ships the implementation and the composition surface only.
+`DatabaseApplication` is the standalone host for the database resource. Per the
+Cohesion hosting model, each resource type runs as its own `Host<TContext>`
+subclass owning its own lifecycle in its own process; this project is that hosting
+shell — and, since the 2026-07-13 redesign, it is **composition-only in the
+strictest sense**: it wraps composed `IDatabaseServer` instances generically as
+endpoint host services, runs any additional services the composition root adds,
+and implements the root's application-builder seam. It owns no server machinery
+(servers are per-model, implemented inside the model packages — the SQL model's
+`SqlDatabaseServer` lives in `Database.Sql`), no engine lifecycle
+(engines are data machines — operational from creation, disposed by their
+composition root), and no worker scheduling (engines own their loops
+unconditionally). Its references shrank accordingly: the area root plus the
+non-area `Hosting` foundation — nothing else, not even `Connections`.
 
 ## Execution model
 
-Threading is a per-service decision made by static dispatch from the execution menu
-defined by `Assimalign.Cohesion.Hosting` (see
+Threading is a per-service decision made by static dispatch from the execution
+menu defined by `Assimalign.Cohesion.Hosting` (see
 `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md`):
 
 | Service | Menu member | Why |
 | --- | --- | --- |
-| `DatabaseEngineHostService` (per engine) | plain `IHostService` | forwards the engine's own `StartAsync`/`StopAsync`; no loop of its own |
-| `WriteAheadFlushService` / `PageWriterService` | `DedicatedThreadService` (dedicated OS thread) | each drives one claimed engine worker's blocking pump for its whole life |
-| `CheckpointService` / `DatabaseWorkerTimerService` | `BackgroundService` (pool-scheduled timer) | each ticks one claimed engine worker's bounded pass per interval |
-| `DatabaseServerHostService` (endpoint) | `BackgroundService` (pool-scheduled) | an async accept loop belongs on the pool |
+| `DatabaseServerHostService` (one per registered server) | `BackgroundService` (pool-scheduled) | an async accept loop belongs on the pool |
+| Composition-root services (`DatabaseApplicationOptions.Services`) | caller's choice | e.g. the Application executable's default-database provisioner |
 
-Registration order is engines first, then the claimed worker slots, then any
-additional composed services, then the endpoint. A host starts services in
-registration order and stops them in reverse, so the endpoint starts last and stops
-first — connections drain ahead of the worker slots, and the worker slots quiesce
-before the engines perform their final durable flush.
+Registration order is the additional services first, then one endpoint service
+per registered server. A host starts services in registration order and stops
+them in reverse, so **the servers start last and drain first** — the unchanged
+ordering rule — and provisioning-style services complete before any endpoint
+accepts.
 
-## Execution-model mapping (the #902 worker inventory — implemented)
+Everything that used to sit between those two rows is gone by design:
 
-The database's background services, reconciling the Lane-H guardrails (WAL flush /
-page writer on dedicated threads, endpoint on the pool) with requirement R10 (engine
-self-sufficiency). **Core principle: the engine owns every durability/maintenance
-work loop** behind the `IDatabaseEngine` lifecycle + `IDatabaseEngineWorker` seams,
-so an embedded consumer gets identical behavior with no host at all;
-`DatabaseApplicationOptions.Workers` merely *maps* each engine worker onto the
-execution menu (per-worker enable + threading choice). Cadence deliberately lives on
-the **engine's** options (group-commit window, checkpoint interval, write-back batch
-size on `SqlDatabaseEngineOptions`) and reaches the host through
-`IDatabaseEngineWorker.Interval` — the engine owns the loop whether or not a host
-maps it, so cadence configured host-side would drift from the embedded mode. The
-host never owns the work, or embedded mode would silently lose it.
+- **No engine host services.** Engines have no `StartAsync`/`StopAsync` to
+  forward (the data-machine decision — root DESIGN.md). The composition root
+  creates engines before building the application and disposes them after
+  stopping it; durability rides engine disposal, not host stop.
+- **No worker slot services.** The engine spawns its own worker loops at
+  creation — the latency-critical WAL flusher and page write-back on dedicated
+  threads the engine itself owns (the Lane-H dedicated-thread guardrail is
+  satisfied inside the engine), checkpoint/maintenance on engine-owned timers —
+  and quiesces them on dispose. The host cannot schedule, claim, enable, or
+  disable them. See "Worker ownership" below for the reversal record.
 
-| Worker | Owner | Execution-menu member | Rationale |
-| --- | --- | --- | --- |
-| WAL group-commit flusher | engine (`SqlWriteAheadFlushWorker`) | `DedicatedThreadService` (`WriteAheadFlushService`) | Latency-critical steady loop — every grouped commit waits on it, so it must be immune to thread-pool starvation. Signal-driven: woken by the storages' commit-pending hook, it performs one durable flush per storage covering every pending commit (`IStorage.FlushPendingCommits`). Synchronous per-commit durability remains the default; `StorageCommitDurability.Grouped` opts commits onto this worker, and a commit whose bounded window lapses flushes inline itself — durability is never hostage to the worker. |
-| Page write-back (dirty-page writer) | engine (`SqlPageWriteBackWorker`) | `DedicatedThreadService` (`PageWriterService`) | Paced synchronous I/O that owns its thread for its whole life; writes a bounded batch per pass (`IStorage.WriteBackDirtyPages`) and coordinates with the buffer pool's write-ahead gate (a page reaches the data file only once the journal is durable past its LSN). |
-| Checkpointer (flush + journal truncate) | engine (`SqlCheckpointWorker`) | `BackgroundService`, timer-driven (`CheckpointService`) | Periodic and not latency-critical; checkpoints every open file set (data **and** `.catalog`) with continued LSNs. A busy storage (active transaction) is skipped and retried next pass. |
-| MVCC version purge / vacuum | engine (`SqlVersionPurgeWorker`, documented stub) | `BackgroundService` (`DatabaseWorkerTimerService`) | Bursty, yieldy, low priority — will drain version chains via `IVersionStore.PurgeWriterAsync` and the oldest-active prune bound once the shared MVCC manager integrates with engine sessions; the SQL engine currently serializes at page grain and holds no version store, so the worker body is an inert stub keeping the inventory (and host mappings) stable. |
-| B+Tree maintenance (tombstone vacuum, page merges) | engine (`SqlIndexMaintenanceWorker`, documented stub — sanctioned by #902) | `BackgroundService`, throttled (`DatabaseWorkerTimerService`) | Same shape as version purge once the index layer grows compaction; throttled so maintenance never competes with foreground writes. |
-| Protocol endpoint accept loop | hosting | `BackgroundService` | Already live (`DatabaseServerHostService`): an async accept loop belongs on the pool. Starts last, drains first. |
-| Session idle sweep | — (server-internal) | not a host-service slot | Idle eviction is per-session `CancelAfter` timers inside the session pump; promoting it to a host service would add a slot with nothing to own. |
-| Deadlock detection | — (lock manager, synchronous) | not a host-service slot (today) | The lock manager detects cycles at acquire time (requester-closes-cycle victim policy) — there is no background scanner to schedule. A wait-for-graph scanner only becomes a service if lock acquisition ever moves to blocking-with-timeout; noted as a possible future row, not planned. |
+## Worker ownership — engine-owned, always (the claim handshake is gone)
 
-### Worker ownership — the claim handshake
+The #902 delivery (2026-07-12) let a host *claim* engine workers before engine
+start and drive them on its own execution menu (`TryClaim`/`Release`, per-kind
+slot options, four named slot services). The 2026-07-13 redesign **deleted that
+model**: `IDatabaseEngineWorker` is now observational (name, kind, cadence), the
+pump lives on the guided base for the engine's internal use, and the engine is
+the one and only scheduler of its loops, from creation to disposal.
 
-A worker must never run twice concurrently (engine self-scheduling *and* a host
-slot). The handoff is a **claim taken at composition time**:
+Why the reversal: R10 (engine self-sufficiency) already forced the worker
+*bodies* and their default scheduling into the engine — the claim handshake only
+added a second possible owner for the *pump*, and with it a two-owner protocol
+whose failure modes (claim races between host composition and engine start,
+disabled slots silently handing loops back, half-claimed inventories across
+restarts) each needed rules, tests, and documentation. No composition ever needed
+a different scheduler than the engine's own — the host's dedicated-thread slots
+were re-implementing exactly the threads the engine spawns for itself. One owner
+means a worker can never run twice, with no handshake to verify. The execution
+menu still matters — for the services this module *does* compose (endpoint on the
+pool) — but engine durability threading is the engine's internal affair.
 
-- `DatabaseApplication`'s constructor claims (`IDatabaseEngineWorker.TryClaim`) every
-  worker whose slot is enabled, *before* the engines start, and wraps each in the
-  configured execution-menu service.
-- `IDatabaseEngine.StartAsync` self-schedules only the workers still unclaimed —
-  embedded consumers (nobody claims anything) get every loop engine-side; a fully
-  mapped host runs every loop on its menu.
-- A **disabled slot** simply leaves the worker unclaimed, handing the loop back to
-  the engine's own scheduler — turning a slot off never loses durability work.
-- A **failed claim** (the composition root started the engine before composing the
-  application, so the engine already self-scheduled its workers) skips the slot for
-  that worker; behavior is identical, ownership just stayed engine-side.
-- Host claims are held for the composition's lifetime (slots do not release on
-  stop), so a host restart — engines start first, slots re-run their pumps — leaves
-  ownership stable. The engine releases its own claims when it stops.
+What survives for hosts: observability. `IDatabaseEngine.Workers` (name, kind,
+interval) and the engine's observational `State` (`Running`/`Faulted`/`Disposed`)
+are the surface a health endpoint (#168) reads; a worker fault flips the engine
+to `Faulted` without stopping service (durability self-help holds — see the Sql
+DESIGN.md).
 
 ## Why-this-not-that
 
-### The server runtime is a hosting concern (2026-07-12 fold)
+### The server machinery moved out — servers are per-model (2026-07-13, settled 2026-07-14)
 
-The wire-protocol server originally shipped as its own `Database.Server` project, and
-the **resource hosting-isolation rule (COHRES002)** — the hosting module may reference
-no same-area library except the area root — forced an awkward composition seam: this
-module could not name `IDatabaseServer`, so the endpoint `BackgroundService` adapter
-had to live *with the server* behind a public `DatabaseServer.CreateHostService(...)`
-factory that the composition root wired into the host generically.
+The wire-protocol server was folded INTO this module on 2026-07-12 (mirroring
+`Web.Server`→`Web.Hosting`). The 2026-07-13 redesign **half-unwound that fold**:
+the approved architecture makes servers per-model (`SqlDatabaseServer` fronting
+one `SqlDatabaseEngine`), and COHRES001 makes this module unreferenceable by
+area libraries — so server machinery living here is unreachable by exactly the
+packages that need it. The machinery briefly lived in a shared
+`Database.Server` base library above the root; on 2026-07-14 that library was
+judged premature abstraction from n=1 and folded into `Database.Sql`, where the
+SQL server's machinery is now internal and its design record lives
+(`Database.Sql/docs/DESIGN.md`, "The SQL server runtime"). The root's
+`IDatabaseServer` contract is the only area-wide server requirement. What the
+2026-07-12 fold got right is retained here: composing servers into a host
+process is this module's job — it wraps any `IDatabaseServer` in
+`DatabaseServerHostService`, registered last. This module references **no
+model package**: it composes through the root's `IDatabaseServer` seam alone,
+which is what keeps it transport-free (no `Connections` reference).
 
-The 2026-07-12 owner decision resolves the tension the other way: **the server runtime
-is part of the hosting concern** — it exists to put engines on the network, which is
-precisely what the standalone host is for — so `Database.Server` was folded into this
-module (mirroring the Web-area direction of merging `Web.Server` into `Web.Hosting`).
-Consequences:
+### One host service shape per server, plural servers
 
-- **COHRES002 exemption (sanctioned, per `deviations.md` + `resource-areas.md`).** The
-  merged module needs `Database.Protocol` (wire framing) and `Database.Security` (the
-  authenticator seam) as direct same-area references. Both are the *server's own
-  machinery*, not hosted features, and `Database.Protocol` cannot be aggregated into
-  the area root because it references the root. The csproj therefore declares
-  `CohesionHostingIsolationExemptions` for exactly those two assemblies.
-  `Database.Execution` and `Database.Types` are deliberately **not** direct references
-  — they arrive transitively through the sanctioned area-root reference
-  (root → Execution → Types), which COHRES002 permits.
-- **The cross-assembly endpoint seam is gone.** `DatabaseApplication` constructs the
-  internal `DatabaseServerHostService` directly from
-  `DatabaseApplicationOptions.Server`; `CreateHostService` was **internalized**
-  (removed from the public surface). `DatabaseServer.Create(...)` stays public as the
-  manual/custom composition path — a host that is not `DatabaseApplication` drives
-  `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle instead of wrapping an
-  `IHostService`.
-- **The server contract was promoted into the area root** (owner decision, later the
-  same day): `IDatabaseServer`, `IDatabaseServerSession`, and the `ProtocolVersion`
-  value type moved to `Assimalign.Cohesion.Database` — the Web area's shape
-  (`IWebApplicationServer` lives in the `Web` root). COHRES001 makes this module
-  unreferenceable by area libraries, so keeping the seam here would have made the
-  server invisible to quotas/health (#167/#168) and a future `Database.Testing`
-  factory. This module keeps the implementation (`DefaultDatabaseServer`, the session
-  pump) and the composition surface (`DatabaseServer.Create`, `DatabaseServerOptions`).
-  `ProtocolVersion.Current` stays with `Database.Protocol` as a static extension
-  member — the version claim lives with the wire implementation that makes it true.
+`IDatabaseApplicationContext.Servers` is plural — one server per model the
+application serves. Each registered server is wrapped in its own
+`DatabaseServerHostService`; they start in registration order and drain in
+reverse. The earlier singular `DatabaseApplicationOptions.Server` shape (one
+endpoint per application, enforced by an `AddServer`-throws-on-second rule)
+was superseded by the per-model server decision — plurality is structural now.
 
-### One server for five engines
+### The host drives servers, not engines
 
-The server owns everything that is true regardless of data model — accept loop,
-session limits, authentication handshake, frame pump, graceful drain — and delegates
-everything model-specific to the engine session behind `IDatabaseSession`. The
-alternative (a server per model) multiplies the security-critical surface with no
-semantic gain. Transport comes from `libraries/Connections` (`IConnectionListener`),
-so TCP/TLS/named-pipe/in-memory drivers are interchangeable; in-memory makes the
-server testable without sockets.
-
-### Composition seam
-
-`DatabaseServer.Create(options)` — the options carry the engines list and a
-**bound `IConnectionListener` instance**, not a listener factory: Connections
-drivers bind at construction, so a factory would add a layer that defers nothing,
-and passing the instance keeps ownership unambiguous — *the composition root creates
-and disposes the listener; the server only accepts from it*. Stop is signaled by
-cancelling the pending accept, never by disposing the listener.
-`options.Authenticator` defaults to `DatabaseAuthenticator.AllowAll`
-(`Database.Security`) — the MVP development posture, deliberately an explicit,
-discoverable object rather than hidden server behavior.
-
-### The model-agnostic execute path
-
-The server receives statement *text* and tuple-codec parameter bytes off the
-wire, but must never parse a model language (it references no `*.Language` or
-model package). The bridge is the **text-execute seam on the root contract**:
-`IDatabaseSession.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
-— each model's session translates text with its own parser (SQL:
-`SqlQueryRequest.FromSql`). The rejected alternative — the server building typed
-`QueryRequest`s — would couple the one shared front-end to every model's
-language package. Parameters decode with `DatabaseValueCodec`
-(`Database.Types`), one self-describing component per parameter; result rows
-encode the same way, one component per column, so both directions ride the one
-shared codec.
-
-### Worker slots schedule engine-owned work — they never own it (#902 delivered)
-
-Requirement R10 (the platform data layer) mandates **engine self-sufficiency**: an
-engine owns its durability whether embedded or hosted, so the host composition is
-composition-only. With #902 the slots stopped being placeholders:
-`WriteAheadFlushService`/`PageWriterService` drive the engine's claimed WAL
-group-commit flusher and dirty-page writer on dedicated threads, and
-`CheckpointService`/`DatabaseWorkerTimerService` tick the pooled rows — but the
-worker *bodies* live inside the engine (`Database.Sql`'s `Sql*Worker` types over the
-`IStorage.FlushPendingCommits`/`WriteBackDirtyPages`/`Checkpoint` seams), reached
-only through the root contract's `IDatabaseEngineWorker`. The slots are on by
-default; disabling one hands the loop back to the engine's own scheduler (see "Worker
-ownership" above), so no composition shape can lose durability work.
-
-### The host drives engine lifecycle through the root contract (#902)
-
-`IDatabaseEngine` now carries `StartAsync`/`StopAsync` (the #902 lifecycle seam), so
-the application registers one internal `DatabaseEngineHostService` per composed engine
-**first** — engines start before every worker slot and the endpoint, and stop last,
-after the endpoint has drained and the worker slots have quiesced, so the engine's own
-stop performs the final durable flush. Engine start is idempotent by contract, which
-keeps the pre-#902 composition style working: a composition root that starts an engine
-itself (to seed databases before the host runs) hands the host an already-running
-engine and the host's start is a no-op. This replaces the earlier posture ("engine
-lifecycle stays with the composition root") that existed only because the root
-contract had no lifecycle members.
-
-## Session state machine
-
-`Connected → Startup received → Authenticating → Ready ⇄ Executing → Terminated`.
-Guardrails baked into the options because they are DoS-critical (the HTTP/1.1 limits
-lesson, #791): unauthenticated connections are dropped after `AuthenticationTimeout`;
-`MaxSessions` bounds concurrency (rejections use the protocol `Unavailable` error);
-idle sessions are evicted; `StopAsync` drains within `ShutdownDrainTimeout` then aborts.
-
-Implementation decisions:
-
-- **Version negotiation:** an unknown *major* in `Startup` earns
-  `UnsupportedVersion` and a close; the server then speaks `ProtocolVersion.Current`
-  (minors are additive by the protocol's contract, so no per-minor branching yet).
-- **Database binding** resolves across the registered engines: already-open
-  databases first (`TryGetDatabase`), then an open attempt per engine; no match →
-  `DatabaseNotFound` and close.
-- **Authenticate exchange (MVP):** the challenge frame carries no payload (the
-  trust method); the client's response bytes pass to `IDatabaseAuthenticator`
-  as opaque evidence. Method-specific payload schemas arrive with real
-  authenticators.
-- **`MaxSessions` counts handshaking sessions too** — an unauthenticated
-  connection holds a slot, otherwise the cap would not bound resource use at
-  all. Over-limit connections get the `Unavailable` error frame immediately at
-  accept and never become sessions.
-- **Error taxonomy per exchange:** statement-level failures keep the session in
-  Ready — `DatabaseParseException` → `ParseFailure`, any other
-  `DatabaseException` → `ExecutionFailure` (an execution error is not a protocol
-  violation). Framing/order violations (`ProtocolException`, malformed parameter
-  components) → `ProtocolViolation` **and close**; anything unexpected →
-  `Internal` and close.
-- **Two-phase stop:** a *soft stop* token ends the accept loop and cancels reads
-  at frame boundaries (idle sessions close immediately, telling the peer
-  `Unavailable`); in-flight executions run on the session lifetime token and get
-  the full drain budget. When the budget lapses, the *hard abort* token cancels
-  executions and aborts connections. Session pumps own their errors — their
-  completion tasks never fault, so drain is a plain `WhenAll`.
+The pre-redesign application registered a per-engine lifecycle service first so
+engines started before everything and stopped last. With engines as data
+machines there is nothing to drive: an engine registered on the application
+(`DatabaseApplicationOptions.Engines`) is an **observational** entry on the
+context — the composition root that created it owns it. Durability-on-shutdown
+moved from "host stops engines last" to "composition root disposes engines after
+the host stops," which the Application executable's composition object does in
+dependency order (application → server → listener → engine).
 
 ## Configuration conventions
 
 `DatabaseHostConfiguration.FromEnvironment()` binds the environment-variable
-conventions a gateway injects when it launches the host — `COHESION_DATABASE_DATA_PATH`,
-`COHESION_DATABASE_ENDPOINT_PORT`, `COHESION_DATABASE_DURABILITY`. Binding lives here
-because the hosting module is the area's one Configuration seam; the bound values shape
-how the composition root builds the engine (data path, durability) and the listener
-(port). The `Database.ApplicationModel` resource sets the same variable names on its
-realized process, so the manifest side and the host side agree by convention (the two
+conventions a gateway injects when it launches the host —
+`COHESION_DATABASE_DATA_PATH`, `COHESION_DATABASE_ENDPOINT_PORT`,
+`COHESION_DATABASE_DURABILITY`. Binding lives here because the hosting module is
+the area's one Configuration seam; the bound values shape how the composition
+root builds the engine (data path, durability) and the listener (port). The
+`Database.ApplicationModel` resource sets the same variable names on its realized
+process, so the manifest side and the host side agree by convention (the two
 projects share no assembly).
+
+## The builder-first composition surface
+
+`DatabaseApplication.CreateBuilder()` is the composition entry point, following
+the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
+
+- **The root's `IDatabaseApplicationBuilder`** carries what model packages need:
+  engine registration (`AddEngine` — server-less, embedded registrations) and
+  server registration (`AddServer` — an instance, or a factory deferred to
+  `Build` that receives the **application context**, mirroring the Web area's
+  context-receiving factory). Model verbs like `Database.Sql`'s
+  `AddSqlDatabase(...)` / `AddSqlServer(...)` compose against this seam only, so
+  a model registers itself **without knowing the hosting layer** — registration
+  is dependency-free (values and options objects; no container).
+- **This module's `DatabaseApplicationBuilder`** implements the seam over a
+  `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
+  the hosting-only surface the root interface deliberately omits: additional
+  host services. Deferred server factories resolve at `Build()` in registration
+  order against the live context (instance registrations are wrapped as trivial
+  factories, so ordering is registration-faithful across both overloads); the
+  context wraps the live option lists, so a factory observes every registration
+  made before it — engines *and* earlier servers. `Build()` returns the concrete
+  `DatabaseApplication` (the guided richer signature; the interface member
+  forwards), which implements the root's `IDatabaseApplication` — `Context` +
+  start/stop, the Web shape.
+- Direct construction (`new DatabaseApplication(options)`) remains supported for
+  fully manual hosts; the builder is sugar over the same options object, never a
+  second composition model.
+
+The `Database.Application` executable is the proof-of-pattern consumer: its
+bootstrap registers the SQL engine through `AddSqlDatabase`, fronts it with
+`AddSqlServer` over the TCP listener, and parks the default-database provisioner
+on `builder.Options.Services`.
 
 ## Status and non-goals
 
-- No builder or DI container surface yet; construct `DatabaseApplication` with
-  `DatabaseApplicationOptions` directly. A `CreateBuilder` surface can follow the
-  `WebApplication` pattern when the resource matures.
+- No DI-container surface on the builder — registration stays values/options
+  only, per the area composition rules (`*.Hosting` remains the DI seam for
+  everything else).
 - No governance/quotas (#167) or health/readiness (#168) surfaces yet — separate
-  features.
-- No per-model message handling in the server — payload semantics belong to engines
-  and per-model clients.
-- No connection-level replication endpoints in the MVP (replication transport rides
-  its own feature); no transaction frames yet (explicit transaction control over the
-  wire lands with the protocol's `Transaction` payload schema).
-- No HTTP admin surface — that is the root `Database` project's private-Web concern,
-  deliberately separate from the wire protocol path.
-- Direct references: the area root, the COHRES002-exempted `Database.Protocol` +
-  `Database.Security` server machinery, and the non-area `Connections` + `Hosting`
-  foundations. Nothing else.
+  features (the health surface will read the engines' and servers' observational
+  contexts; see the area DESIGN.md next-iteration scoping).
+- No server machinery — servers are per-model and live inside the model
+  packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
+  through the root's `IDatabaseServer` seam.
+- No HTTP admin surface — that is the root `Database` project's private-Web
+  concern, deliberately separate from the wire protocol path.
+- Direct references: the area root and the non-area `Hosting` foundation.
+  Nothing else — no `Connections`, no `CohesionHostingIsolationExemptions`.
 
 ## AOT posture
 
-Static composition: the composition root hands the server its engine list; nothing is
-discovered at runtime. Value encoding is the shared runtime-type switch
-(`DatabaseValueCodec`) — no reflection.
+Static composition: the composition root hands the application its servers and
+engines; nothing is discovered at runtime. No reflection.

@@ -6,7 +6,15 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// Thrown when a transaction is aborted by the engine — by write-write conflict,
 /// serialization failure, or deadlock resolution — rather than by the caller.
 /// </summary>
-public class TransactionAbortedException : DatabaseException
+/// <remarks>
+/// The transactions package is a child root of the Database area and owns an
+/// independent exception root (area exception-scoping rule): it does not derive
+/// from <c>DatabaseException</c>. A model engine that surfaces an abort through
+/// the area's session contract wraps it in a <c>DatabaseException</c> at the
+/// model boundary — the same rule the engines already apply to
+/// <c>StorageException</c>.
+/// </remarks>
+public class TransactionAbortedException : Exception
 {
     /// <summary>
     /// Initializes a new <see cref="TransactionAbortedException"/>.

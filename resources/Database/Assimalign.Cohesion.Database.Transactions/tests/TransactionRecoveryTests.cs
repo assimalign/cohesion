@@ -118,4 +118,28 @@ public class TransactionRecoveryTests
         plan.Aborted.ShouldContain(transaction.Sequence);
         plan.Committed.ShouldBeEmpty();
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery: checkpoint actives classify across truncation")]
+    public void Analyze_CheckpointCarriesActives_ShouldClassifyTruncatedTransactions()
+    {
+        // Arrange: transaction 7 begins, a checkpoint truncates its begin record
+        // away but carries it as active; transaction 8 begins after and commits.
+        // A crash follows.
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+
+        journal.AppendBegin(7);
+        journal.Checkpoint([7L]);
+        journal.AppendBegin(8);
+        journal.EnsureDurable(journal.AppendCommit(8));
+
+        // Act
+        var plan = TransactionRecovery.Analyze(journal);
+
+        // Assert: 7 is seen through the checkpoint's active list — and, with no
+        // later commit record, classifies as aborted; 8 is committed.
+        plan.Aborted.ShouldContain(new TransactionSequence(7));
+        plan.Committed.ShouldContain(new TransactionSequence(8));
+        plan.MaxSequence.ShouldBe(new TransactionSequence(8));
+    }
 }

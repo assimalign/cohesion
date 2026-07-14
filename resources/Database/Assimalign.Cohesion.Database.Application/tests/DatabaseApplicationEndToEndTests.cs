@@ -228,13 +228,10 @@ public sealed class DatabaseApplicationEndToEndTests : IDisposable
             EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
         });
 
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
-        serverOptions.Engines.Add(engine);
-        IDatabaseServer server = DatabaseServer.Create(serverOptions);
+        SqlDatabaseServer server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
 
         var applicationOptions = new DatabaseApplicationOptions();
-        applicationOptions.Engines.Add(engine);
-        applicationOptions.Server = server;
+        applicationOptions.Servers.Add(server);
         var application = new DatabaseApplication(applicationOptions);
 
         await ((IHost)application).StartAsync(TestTimeout(60));

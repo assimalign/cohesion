@@ -21,6 +21,23 @@ Every frame is `u32 payload-length (big-endian) + u8 message-type + payload`. De
 
 `ProtocolVersion` (major.minor) travels in `Startup`. Minor versions are additive (new message types, new payload fields with defaults); major versions may change framing. Servers reject unknown majors with `UnsupportedVersion`. `ProtocolErrorCode` values are append-only and never renumbered — they are part of the contract clients program against.
 
+## A child root — no area dependency
+
+This package is a child root the area root aggregates (root → Protocol, never
+the reverse — the 2026-07-13 inversion; see the area DESIGN.md decision log), so
+anything that only needs to speak the wire — a diagnostic tool, an alternative
+client — takes this one assembly. Two consequences:
+
+- **`ProtocolVersion` lives here**, `Current` as a plain static property. The
+  struct spent a period in the area root (with `Current` grafted on from here as
+  a static extension member) only because this package then referenced the root,
+  making root → Protocol impossible. The inversion collapsed that split.
+- **`ProtocolException` inherits `Exception`, not `DatabaseException`** (the
+  repo's exception-scoping rule: keep exception inheritance local to the owning
+  package). Layers that own both vocabularies translate: the server session pump
+  maps it to the `ProtocolViolation` wire error in a dedicated handler; the
+  client core wraps it in `DatabaseClientException`.
+
 ## Non-goals
 
 - No transport here (TLS, sockets, pipes belong to `libraries/Connections` + the server runtime in `Database.Hosting`); `ProtocolFraming` gives stream-based reader/writer implementations any transport can wrap.

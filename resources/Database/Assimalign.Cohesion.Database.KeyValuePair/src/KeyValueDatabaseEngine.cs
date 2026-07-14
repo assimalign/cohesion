@@ -15,20 +15,19 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 {
     private readonly KeyValueDatabaseEngineOptions _options;
-    private EngineState _state;
+    private bool _disposed;
 
     private KeyValueDatabaseEngine(KeyValueDatabaseEngineOptions options)
     {
         _options = options;
         Name = options.EngineName ?? "keyvalue-engine";
-        _state = EngineState.Idle;
     }
 
     /// <inheritdoc />
     public string Name { get; }
 
     /// <inheritdoc />
-    public EngineState State => _state;
+    public EngineState State => _disposed ? EngineState.Disposed : EngineState.Running;
 
     /// <inheritdoc />
     public EngineModel Model => EngineModel.KeyValueStore;
@@ -46,27 +45,6 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
-
-    /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _state = EngineState.Running;
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (_state == EngineState.Running)
-        {
-            _state = EngineState.Stopped;
-        }
-
-        return Task.CompletedTask;
-    }
 
     /// <inheritdoc />
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
@@ -94,7 +72,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     public void Dispose()
     {
-        _state = EngineState.Stopped;
+        _disposed = true;
     }
 
     /// <inheritdoc />

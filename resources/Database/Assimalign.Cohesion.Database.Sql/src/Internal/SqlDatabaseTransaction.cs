@@ -4,102 +4,91 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
-/// Internal ACID transaction implementation that wraps a storage-level transaction:
-/// commit is acknowledged only after the write-ahead log is durable, and rollback
-/// restores every modified page to its pre-transaction image.
+/// Internal ACID transaction implementation binding the root's
+/// <c>IDatabaseTransaction</c> surface to an MVCC transaction context from the
+/// database's transaction manager (the engine owns both vocabularies — this is
+/// the translation boundary). Commit and rollback flow through the manager,
+/// whose journal-bound log owns the commit record and its durability await;
+/// rollback undoes the writer's stamps through the version store's ledger and
+/// releases its locks.
 /// </summary>
 internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
-    private TransactionState _state;
+    private readonly SqlTransactionCoordinator _coordinator;
+    private readonly ITransactionContext _context;
 
-    internal SqlDatabaseTransaction(TransactionId id, IStorageTransaction storageTransaction)
+    internal SqlDatabaseTransaction(SqlTransactionCoordinator coordinator, ITransactionContext context)
     {
-        Id = id;
-        StorageTransaction = storageTransaction;
-        _state = TransactionState.Active;
+        _coordinator = coordinator;
+        _context = context;
     }
 
     /// <inheritdoc />
-    public TransactionId Id { get; }
+    public TransactionId Id => _context.Id;
 
     /// <inheritdoc />
-    public TransactionState State => _state;
+    public TransactionState State => _context.State;
+
+    /// <inheritdoc />
+    public IsolationLevel IsolationLevel => _context.IsolationLevel;
 
     /// <summary>
-    /// Gets the storage-level transaction the executor mutates through.
+    /// Gets the MVCC transaction context statements execute under: the executor
+    /// stamps writes with its sequence and resolves reads through its snapshot
+    /// (re-captured per statement under <see cref="IsolationLevel.ReadCommitted"/>,
+    /// fixed at begin under <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
-    internal IStorageTransaction StorageTransaction { get; }
+    internal ITransactionContext Context => _context;
 
     /// <inheritdoc />
-    public ValueTask CommitAsync(CancellationToken cancellationToken = default)
+    public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
-        if (_state != TransactionState.Active)
+        if (_context.State != TransactionState.Active)
         {
-            throw new DatabaseException($"Cannot commit transaction in state '{_state}'.");
+            throw new DatabaseException($"Cannot commit transaction in state '{_context.State}'.");
         }
 
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Durable by contract: the storage transaction journals after images and
-            // returns only once the commit record is on stable storage (no-force —
-            // data pages flush lazily; recovery replays them).
-            StorageTransaction.Commit();
-
-            _state = TransactionState.Committed;
+            await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (TransactionDeadlockException exception)
         {
-            _state = TransactionState.Faulted;
-            throw;
+            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
         }
-        catch
+        catch (TransactionAbortedException exception)
         {
-            _state = TransactionState.Faulted;
-            throw;
+            // The area error policy: the engine translates the transaction
+            // kernel's independent exception root at the model boundary.
+            throw new DatabaseTransactionAbortedException(exception.Message, exception);
         }
-
-        return default;
     }
 
     /// <inheritdoc />
-    public ValueTask RollbackAsync(CancellationToken cancellationToken = default)
+    public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
-        if (_state != TransactionState.Active)
+        if (_context.State != TransactionState.Active)
         {
-            throw new DatabaseException($"Cannot rollback transaction in state '{_state}'.");
+            throw new DatabaseException($"Cannot rollback transaction in state '{_context.State}'.");
         }
 
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            StorageTransaction.Rollback();
-
-            _state = TransactionState.RolledBack;
+            await _coordinator.RollbackAsync(_context, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (TransactionAbortedException exception)
         {
-            _state = TransactionState.Faulted;
-            throw;
+            throw new DatabaseTransactionAbortedException(exception.Message, exception);
         }
-        catch
-        {
-            _state = TransactionState.Faulted;
-            throw;
-        }
-
-        return default;
     }
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (_state == TransactionState.Active)
+        if (_context.State == TransactionState.Active)
         {
             await RollbackAsync().ConfigureAwait(false);
         }

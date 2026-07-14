@@ -22,13 +22,16 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int tableRecordKind = 1;
     private const int counterRecordKind = 2;
     private const int indexRegistrationsKind = 3;
+    private const int recordSpaceFormatKind = 4;
 
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
+    private int _recordSpaceFormatVersion = 1;
     private (PageId PageId, int SlotIndex)? _counterLocation;
     private (PageId PageId, int SlotIndex)? _registrationsLocation;
+    private (PageId PageId, int SlotIndex)? _formatLocation;
     private IReadOnlyList<BTreeIndexRegistration> _registrations = Array.Empty<BTreeIndexRegistration>();
 
     private DefaultSqlCatalog(SqlStorage storage)
@@ -212,6 +215,41 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
+    /// <inheritdoc />
+    public int RecordSpaceFormatVersion
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _recordSpaceFormatVersion;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_sync)
+        {
+            var writer = new DatabaseKeyWriter();
+            writer.AppendInt32(recordSpaceFormatKind).AppendInt32(version);
+            byte[] record = writer.ToArray();
+
+            using (var transaction = _storage.BeginTransaction())
+            {
+                _formatLocation = UpsertRecord(transaction, _formatLocation, record);
+                transaction.Commit();
+            }
+
+            _recordSpaceFormatVersion = version;
+            return default;
+        }
+    }
+
     // ── Persistence ────────────────────────────────────────────────────
 
     private void Load()
@@ -251,6 +289,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 case indexRegistrationsKind:
                     _registrations = DecodeRegistrations(ref reader);
                     _registrationsLocation = (unit.PageId, unit.SlotIndex);
+                    break;
+
+                case recordSpaceFormatKind:
+                    _recordSpaceFormatVersion = reader.ReadInt32();
+                    _formatLocation = (unit.PageId, unit.SlotIndex);
                     break;
 
                 default:

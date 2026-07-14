@@ -25,6 +25,12 @@ internal sealed class DefaultTransactionContext : ITransactionContext
         State = TransactionState.Active;
     }
 
+    /// <summary>
+    /// Gets the manager that created this context, so a manager can reject a
+    /// context begun on a different manager instance.
+    /// </summary>
+    internal DefaultTransactionManager Manager => _manager;
+
     /// <inheritdoc />
     public TransactionId Id { get; }
 

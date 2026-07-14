@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database;
+namespace Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Represents the lifecycle state of a database transaction.

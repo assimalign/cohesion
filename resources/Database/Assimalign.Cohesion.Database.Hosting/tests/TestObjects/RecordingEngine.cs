@@ -6,46 +6,20 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
-/// A minimal <see cref="IDatabaseEngine"/> that records its lifecycle calls into a
-/// shared log so tests can assert start/stop ordering relative to other services.
+/// A minimal <see cref="IDatabaseEngine"/> — a data machine with no databases —
+/// for composition tests that only need an engine-shaped registration.
 /// </summary>
 internal sealed class RecordingEngine : IDatabaseEngine
 {
-    private readonly List<string> _log;
-    private readonly List<IDatabaseEngineWorker> _workers = new();
-    private EngineState _state = EngineState.Idle;
-
-    public RecordingEngine(List<string> log)
-    {
-        _log = log;
-    }
+    private bool _disposed;
 
     public string Name => "recording-engine";
 
-    public EngineState State => _state;
+    public EngineState State => _disposed ? EngineState.Disposed : EngineState.Running;
 
     public EngineModel Model => EngineModel.Sql;
 
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
-
-    /// <summary>
-    /// Adds a worker to the engine's inventory (before composing the application).
-    /// </summary>
-    public void AddWorker(IDatabaseEngineWorker worker) => _workers.Add(worker);
-
-    public Task StartAsync(CancellationToken cancellationToken = default)
-    {
-        _log.Add("engine:start");
-        _state = EngineState.Running;
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken = default)
-    {
-        _log.Add("engine:stop");
-        _state = EngineState.Stopped;
-        return Task.CompletedTask;
-    }
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
@@ -65,7 +39,14 @@ internal sealed class RecordingEngine : IDatabaseEngine
         return false;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _disposed = true;
+    }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

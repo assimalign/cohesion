@@ -362,6 +362,10 @@
 		<Project Path="Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
 	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql/" />
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql/docs/">
+		<File Path="Assimalign.Cohesion.Database.Sql/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Sql/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql/src/">
 		<Project Path="Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj" />
 	</Folder>

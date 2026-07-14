@@ -6,15 +6,20 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 
 - `ITransactionManager` — begin/commit/rollback lifecycle, sequence assignment, snapshot capture
 - `ITransactionContext` — the engine-internal state of one in-flight transaction
+- `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `IDatabaseTransaction` contract consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `ILockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
 - `ITransactionLog` — the WAL binding (storage owns the physical journal)
 - `IVersionStore` — the version-chain contract model storage layers implement
+- `TransactionAbortedException` — an independent exception root (inherits `Exception`, not `DatabaseException`)
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Database` (contract root: `TransactionId`, `TransactionState`, `DatabaseException`)
-- `Assimalign.Cohesion.Database.Storage` (journal/page substrate the implementations bind to)
+- `Assimalign.Cohesion.Database.Storage` (child-to-child: the journal/page substrate the implementations bind to)
+
+This package is a **child root** of the Database area: the area root
+(`Assimalign.Cohesion.Database`) references it — never the reverse — so the ACID
+substrate stays independently consumable.
 
 ## Consumers
 

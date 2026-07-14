@@ -20,7 +20,7 @@ internal sealed class DatabaseApplicationComposition : IAsyncDisposable
     internal DatabaseApplicationComposition(
         SqlDatabaseEngine engine,
         TcpConnectionListener listener,
-        IDatabaseServer server,
+        SqlDatabaseServer server,
         DatabaseApplication application)
     {
         Engine = engine;
@@ -35,8 +35,8 @@ internal sealed class DatabaseApplicationComposition : IAsyncDisposable
     /// <summary>Gets the bound TCP listener the endpoint accepts from.</summary>
     internal TcpConnectionListener Listener { get; }
 
-    /// <summary>Gets the wire-protocol server.</summary>
-    internal IDatabaseServer Server { get; }
+    /// <summary>Gets the SQL model's wire-protocol server fronting the engine.</summary>
+    internal SqlDatabaseServer Server { get; }
 
     /// <summary>Gets the hosting application composing the parts.</summary>
     internal DatabaseApplication Application { get; }

@@ -201,7 +201,7 @@ public class SqlClientTests
         await second.DisposeAsync();
 
         // Assert: only one server session ever existed — the pool reused it
-        harness.Server.Sessions.ShouldHaveSingleItem();
+        harness.Server.Context.Sessions.ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Options: creation validates settings and factory")]

@@ -47,7 +47,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
 
         if (definition.Kind != IndexKind.BTree)
         {
-            throw new DatabaseException($"Index kind {definition.Kind} is not supported yet; only BTree indexes exist in the MVP.");
+            throw new IndexException($"Index kind {definition.Kind} is not supported yet; only BTree indexes exist in the MVP.");
         }
 
         var storageTransaction = _options.TransactionSource.GetStorageTransaction(transaction);
@@ -58,7 +58,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
 
             if (_indexes.ContainsKey(key))
             {
-                throw new DatabaseException($"An index named '{definition.Name}' already exists on object {objectId}.");
+                throw new IndexException($"An index named '{definition.Name}' already exists on object {objectId}.");
             }
 
             long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction);
@@ -80,7 +80,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
         {
             if (!_indexes.Remove((objectId, name)))
             {
-                throw new DatabaseException($"No index named '{name}' exists on object {objectId}.");
+                throw new IndexException($"No index named '{name}' exists on object {objectId}.");
             }
         }
 

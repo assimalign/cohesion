@@ -37,9 +37,11 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
     }
 
     /// <summary>
-    /// Internal execution method that receives the active storage transaction.
+    /// Internal execution method that receives the statement's transaction
+    /// context: the MVCC context (write stamps, visibility snapshot) and the
+    /// paired storage bracket the mutations ride.
     /// </summary>
-    internal Task<QueryResult> ExecuteAsync(QueryRequest request, IStorageTransaction transaction, CancellationToken cancellationToken = default)
+    internal Task<QueryResult> ExecuteAsync(QueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -53,6 +55,6 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         var plan = planner.Plan(sqlRequest.Statement.SqlExpression);
 
         var executor = new SqlPlanExecutor(_storage, _catalog, sqlRequest.Parameters);
-        return executor.ExecuteAsync(plan, transaction, cancellationToken);
+        return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }

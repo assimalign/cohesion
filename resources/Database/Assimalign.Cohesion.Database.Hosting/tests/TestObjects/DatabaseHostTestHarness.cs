@@ -11,13 +11,14 @@ using Assimalign.Cohesion.Hosting;
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
-/// Composes a real hosted database — a live SQL engine + in-memory listener + wire
-/// server wrapped as the host's endpoint service — plus a client, so a test can start
-/// the host and drive a served round-trip without sockets.
+/// Composes a real hosted database — a live SQL engine fronted by a
+/// <see cref="SqlDatabaseServer"/> over the in-memory listener, wrapped by the
+/// application as its endpoint service — plus a client, so a test can start the
+/// host and drive a served round-trip without sockets.
 /// </summary>
 internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 {
-    private DatabaseHostTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, IDatabaseServer server, DatabaseApplication application, IDatabaseClient client)
+    private DatabaseHostTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, DatabaseApplication application, IDatabaseClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -30,7 +31,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 
     public InMemoryConnectionListener Listener { get; }
 
-    public IDatabaseServer Server { get; }
+    public SqlDatabaseServer Server { get; }
 
     public DatabaseApplication Application { get; }
 
@@ -38,27 +39,28 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 
     public const string DatabaseName = "app";
 
-    private bool _seeded;
-
     /// <summary>
-    /// Composes the full hosted stack without starting anything: the engine is handed
-    /// to the application unstarted, so the application claims the engine's workers at
-    /// composition time and drives the engine's lifecycle itself (the #902 model).
-    /// Seeding happens in <see cref="StartHostAsync"/>, once the host has started the
-    /// engine.
+    /// Composes the full hosted stack without starting the host. The engine is a
+    /// data machine — operational from creation — so seeding happens here, before
+    /// the application (and therefore the endpoint) ever starts.
     /// </summary>
-    public static Task<DatabaseHostTestHarness> CreateAsync(Action<DatabaseApplicationOptions>? configure = null)
+    public static async Task<DatabaseHostTestHarness> CreateAsync(Action<DatabaseApplicationOptions>? configure = null)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-host-e2e" });
 
+        var database = await engine.CreateDatabaseAsync(DatabaseName);
+
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100))");
+            await session.ExecuteAsync("INSERT INTO users (id, name) VALUES (1, 'ada'), (2, 'grace')");
+        }
+
         var listener = new InMemoryConnectionListener();
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
-        serverOptions.Engines.Add(engine);
-        var server = DatabaseServer.Create(serverOptions);
+        var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
 
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        options.Server = server;
+        options.Servers.Add(server);
         configure?.Invoke(options);
 
         var application = new DatabaseApplication(options);
@@ -69,26 +71,11 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
             ConnectionFactory = listener.CreateFactory(),
         });
 
-        return Task.FromResult(new DatabaseHostTestHarness(engine, listener, server, application, client));
+        return new DatabaseHostTestHarness(engine, listener, server, application, client);
     }
 
-    public async Task StartHostAsync(CancellationToken cancellationToken = default)
-    {
-        await ((IHost)Application).StartAsync(cancellationToken);
-
-        if (_seeded)
-        {
-            return;
-        }
-
-        _seeded = true;
-
-        var database = await Engine.CreateDatabaseAsync(DatabaseName, cancellationToken);
-
-        await using var session = await database.CreateSessionAsync(cancellationToken);
-        await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100))", cancellationToken: cancellationToken);
-        await session.ExecuteAsync("INSERT INTO users (id, name) VALUES (1, 'ada'), (2, 'grace')", cancellationToken: cancellationToken);
-    }
+    public Task StartHostAsync(CancellationToken cancellationToken = default)
+        => ((IHost)Application).StartAsync(cancellationToken);
 
     public Task StopHostAsync(CancellationToken cancellationToken = default)
         => ((IHost)Application).StopAsync(cancellationToken);

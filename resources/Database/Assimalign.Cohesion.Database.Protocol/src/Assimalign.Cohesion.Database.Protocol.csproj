@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
-	</ItemGroup>
+	<!--
+		A child root of the Database area: the area root (Assimalign.Cohesion.Database)
+		references THIS project, never the reverse, so the wire protocol stays an
+		independently consumable base component (client tooling can speak the protocol
+		without pulling in the area contracts).
+	-->
 </Project>

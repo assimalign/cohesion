@@ -9,16 +9,18 @@ using Xunit;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Hosting.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// End-to-end tests for the server runtime (#852): the session state machine,
-/// version negotiation, the execute exchange against a live SQL engine, and the
-/// DoS guardrails — all over the in-memory Connections driver.
+/// End-to-end tests for the SQL model's wire-protocol server (#852; Sql-internal
+/// machinery since the 2026-07-14 fold): the session state machine, version
+/// negotiation, the execute exchange against a live SQL engine, and the DoS
+/// guardrails — all over the in-memory Connections driver, through
+/// <see cref="SqlDatabaseServer"/> directly.
 /// </summary>
-public class DatabaseServerTests
+public class SqlDatabaseServerTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: startup/authenticate/ready reaches an authenticated session")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server handshake: startup/authenticate/ready reaches an authenticated session")]
     public async Task Handshake_WithCurrentVersion_ShouldReachReady()
     {
         // Arrange
@@ -29,13 +31,13 @@ public class DatabaseServerTests
         await client.HandshakeAsync(principal: "ada");
 
         // Assert
-        var session = harness.Server.Sessions.ShouldHaveSingleItem();
+        var session = harness.Server.Context.Sessions.ShouldHaveSingleItem();
         session.Principal.ShouldBe("ada");
         session.ProtocolVersion.ShouldBe(ProtocolVersion.Current);
         session.DatabaseSession.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: unknown protocol major is rejected with UnsupportedVersion")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server handshake: unknown protocol major is rejected with UnsupportedVersion")]
     public async Task Handshake_WithUnknownMajorVersion_ShouldRejectWithUnsupportedVersion()
     {
         // Arrange
@@ -53,7 +55,7 @@ public class DatabaseServerTests
         (await client.ReadAsync()).ShouldBeNull(); // the server closed the connection
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: unknown database is rejected with DatabaseNotFound")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server handshake: unknown database is rejected with DatabaseNotFound")]
     public async Task Handshake_WithUnknownDatabase_ShouldRejectWithDatabaseNotFound()
     {
         // Arrange
@@ -68,7 +70,7 @@ public class DatabaseServerTests
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.DatabaseNotFound);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Handshake: a rejecting authenticator yields AuthenticationFailed")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server handshake: a rejecting authenticator yields AuthenticationFailed")]
     public async Task Handshake_WithRejectingAuthenticator_ShouldFailAuthentication()
     {
         // Arrange
@@ -85,7 +87,7 @@ public class DatabaseServerTests
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.AuthenticationFailed);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: SELECT streams ResultHeader, rows, and ResultComplete")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server execute: SELECT streams ResultHeader, rows, and ResultComplete")]
     public async Task Execute_SelectStatement_ShouldStreamHeaderRowsAndComplete()
     {
         // Arrange
@@ -114,7 +116,7 @@ public class DatabaseServerTests
         ProtocolResultCompleteMessage.Decode(completeFrame.Payload.Span).AffectedCount.ShouldBe(-1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: statement results return the affected count")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server execute: statement results return the affected count")]
     public async Task Execute_InsertStatement_ShouldReturnAffectedCount()
     {
         // Arrange
@@ -130,7 +132,7 @@ public class DatabaseServerTests
         ProtocolResultCompleteMessage.Decode(frame.Payload.Span).AffectedCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: wire parameters decode and bind by bare name")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server execute: wire parameters decode and bind by bare name")]
     public async Task Execute_WithParameters_ShouldBindDecodedValues()
     {
         // Arrange
@@ -152,7 +154,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: parse failures report ParseFailure and keep the session alive")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server execute: parse failures report ParseFailure and keep the session alive")]
     public async Task Execute_InvalidSql_ShouldReportParseFailureAndKeepSessionAlive()
     {
         // Arrange
@@ -174,7 +176,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Execute: execution failures report ExecutionFailure and keep the session alive")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server execute: execution failures report ExecutionFailure and keep the session alive")]
     public async Task Execute_UnknownTable_ShouldReportExecutionFailureAndKeepSessionAlive()
     {
         // Arrange
@@ -189,13 +191,13 @@ public class DatabaseServerTests
         var errorFrame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(errorFrame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
 
-        harness.Server.Sessions.ShouldHaveSingleItem();
+        harness.Server.Context.Sessions.ShouldHaveSingleItem();
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users WHERE id = 1").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: connections beyond MaxSessions are rejected with Unavailable")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server guardrails: connections beyond MaxSessions are rejected with Unavailable")]
     public async Task Accept_BeyondMaxSessions_ShouldRejectWithUnavailable()
     {
         // Arrange
@@ -212,7 +214,7 @@ public class DatabaseServerTests
         (await second.ReadAsync()).ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: unauthenticated connections are dropped after the authentication timeout")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server guardrails: unauthenticated connections are dropped after the authentication timeout")]
     public async Task Handshake_WhenAuthenticationTimesOut_ShouldDropConnection()
     {
         // Arrange
@@ -224,10 +226,10 @@ public class DatabaseServerTests
 
         // Assert
         frame.ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Guardrails: idle sessions are evicted after the idle timeout")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server guardrails: idle sessions are evicted after the idle timeout")]
     public async Task ReadyLoop_WhenIdleTimeoutLapses_ShouldEvictSession()
     {
         // Arrange
@@ -241,10 +243,10 @@ public class DatabaseServerTests
         // Assert
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Liveness: ping frames answer with pong")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server liveness: ping frames answer with pong")]
     public async Task ReadyLoop_OnPing_ShouldAnswerPong()
     {
         // Arrange
@@ -259,7 +261,7 @@ public class DatabaseServerTests
         await client.ExpectAsync(ProtocolMessageType.Pong);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: terminate closes the session cleanly")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server lifecycle: terminate closes the session cleanly")]
     public async Task ReadyLoop_OnTerminate_ShouldCloseSession()
     {
         // Arrange
@@ -272,10 +274,10 @@ public class DatabaseServerTests
 
         // Assert
         (await client.ReadAsync()).ShouldBeNull();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: StopAsync drains idle sessions within the budget")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server lifecycle: StopAsync drains idle sessions within the budget")]
     public async Task StopAsync_WithIdleSessions_ShouldDrainGracefully()
     {
         // Arrange
@@ -291,7 +293,7 @@ public class DatabaseServerTests
         // Assert: the drain closed the idle session at the frame boundary — far
         // inside the budget — and told the client why.
         stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
-        harness.Server.Sessions.ShouldBeEmpty();
+        harness.Server.Context.Sessions.ShouldBeEmpty();
 
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);

@@ -89,6 +89,31 @@ public interface IStorage : IAsyncDisposable, IDisposable
     IStorageTransaction BeginTransaction();
 
     /// <summary>
+    /// Reserves the next transaction sequence from this storage's monotonic
+    /// sequence space without beginning a transaction. This is the seam an
+    /// MVCC transaction manager layered above the storage uses as its sequence
+    /// allocator, so logical (manager) and physical (storage) transactions share
+    /// one sequence namespace in the journal — a prerequisite for recovery
+    /// classification to be collision-free.
+    /// </summary>
+    /// <returns>The reserved sequence, unique within this storage instance.</returns>
+    long ReserveTransactionSequence();
+
+    /// <summary>
+    /// Begins a storage-level transaction that adopts a sequence previously
+    /// obtained from <see cref="ReserveTransactionSequence"/> — the physical
+    /// write-ahead bracket paired with a logical transaction that owns the same
+    /// sequence. Unlike <see cref="BeginTransaction()"/>, no begin record is
+    /// appended: the reserving caller's transaction log owns the lifecycle
+    /// records; the adopted bracket contributes page images and its commit or
+    /// rollback record under the shared sequence.
+    /// </summary>
+    /// <param name="sequence">The reserved sequence the transaction runs under.</param>
+    /// <returns>The new transaction scope.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="sequence"/> is not positive.</exception>
+    IStorageTransaction BeginTransaction(long sequence);
+
+    /// <summary>
     /// Pins a page for modification inside a transaction: acquires the page's write
     /// lock for the transaction and captures its before image on first touch, so the
     /// mutation is covered by the write-ahead log like any record operation. Used by
@@ -117,6 +142,17 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <exception cref="StorageTransactionException">A transaction is still active.</exception>
     void Checkpoint();
+
+    /// <summary>
+    /// Checkpoints the storage while logical (manager-level) transactions are in
+    /// flight above it: the truncating checkpoint record carries the given active
+    /// sequences, so recovery classification still sees them even though their
+    /// begin records were truncated. Storage-level transactions must still be
+    /// quiescent — the active-count interlock is unchanged.
+    /// </summary>
+    /// <param name="activeTransactionSequences">The logical transaction sequences still active above the storage.</param>
+    /// <exception cref="StorageTransactionException">A storage-level transaction is still active.</exception>
+    void Checkpoint(ReadOnlySpan<long> activeTransactionSequences);
 
     /// <summary>
     /// Performs one group-commit flush pass on behalf of a write-ahead flush worker:

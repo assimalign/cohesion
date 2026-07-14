@@ -8,21 +8,42 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
+using Assimalign.Cohesion.Database.Sql.Internal;
 
-namespace Assimalign.Cohesion.Database.Hosting.Internal;
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
-/// The default server runtime: an accept loop over the composed listener, a
-/// bounded session registry, and a two-phase stop (graceful drain within the
-/// budget, then abort).
+/// The SQL model's wire-protocol server: fronts one <see cref="SqlDatabaseEngine"/>
+/// on the network — accept loop over the composed listener, the session state
+/// machine and frame pump, the authentication/idle/session-limit guardrails, and
+/// the two-phase graceful drain — implementing the area root's
+/// <see cref="IDatabaseServer"/> contract directly.
 /// </summary>
-internal sealed class DefaultDatabaseServer : IDatabaseServer
+/// <remarks>
+/// Servers are per-model, and the root contract is the only area-wide requirement:
+/// every model ships its own <see cref="IDatabaseServer"/> implementation against
+/// <c>Connections</c> and the protocol child root, its own way (the shared
+/// <c>Database.Server</c> base was folded in here on 2026-07-14 — n=1 premature
+/// abstraction; see docs/DESIGN.md for the extraction trigger recorded for the
+/// second model server). This type is where SQL-specific wire behavior grows
+/// (typed relational payloads, SQL transaction frames) as the protocol's
+/// model-specific surface lands; today execution rides the model-agnostic
+/// text-execute seam on the root's <see cref="IDatabaseSession"/>. The server is
+/// created inert; <see cref="StartAsync"/> begins accepting,
+/// <see cref="StopAsync"/> drains within
+/// <see cref="SqlDatabaseServerOptions.ShutdownDrainTimeout"/> then aborts, and
+/// disposal stops the server. The composition root owns the listener and the
+/// engine; the server only accepts from the one and dispatches to the other.
+/// Compose one with <see cref="Create"/>, or through the <c>AddSqlServer(...)</c>
+/// builder verb.
+/// </remarks>
+public sealed class SqlDatabaseServer : IDatabaseServer
 {
-    private readonly DatabaseServerOptions _options;
-    private readonly IReadOnlyList<IDatabaseEngine> _engines;
+    private readonly SqlDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
     private readonly IDatabaseAuthenticator _authenticator;
-    private readonly ConcurrentDictionary<Guid, DatabaseServerSession> _sessions = new();
+    private readonly SqlDatabaseServerContext _context;
+    private readonly ConcurrentDictionary<Guid, SqlDatabaseServerSession> _sessions = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
     // close at the next frame boundary; hard abort cancels in-flight executions
@@ -35,19 +56,49 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
     private bool _isDisposed;
     private readonly object _lifecycleGate = new();
 
-    internal DefaultDatabaseServer(DatabaseServerOptions options)
+    private SqlDatabaseServer(SqlDatabaseEngine engine, SqlDatabaseServerOptions options)
     {
+        if (options.Listener is null)
+        {
+            throw new ArgumentException("A bound connection listener is required.", nameof(options));
+        }
+        if (options.MaxSessions <= 0)
+        {
+            throw new ArgumentException("The session limit must be positive.", nameof(options));
+        }
+
+        Engine = engine;
         _options = options;
-        _engines = [.. options.Engines];
-        _listener = options.Listener!;
+        _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
+        _context = new SqlDatabaseServerContext(this, engine);
     }
 
-    /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngine> Engines => _engines;
+    /// <summary>
+    /// Gets the SQL engine this server fronts (the typed counterpart of
+    /// <see cref="IDatabaseServerContext.Engine"/>).
+    /// </summary>
+    public SqlDatabaseEngine Engine { get; }
 
     /// <inheritdoc />
-    public IReadOnlyCollection<IDatabaseServerSession> Sessions => _sessions.Values.ToArray();
+    public IDatabaseServerContext Context => _context;
+
+    /// <summary>
+    /// Creates a SQL database server over the given engine and options. The server
+    /// is inert until <see cref="StartAsync"/> is called.
+    /// </summary>
+    /// <param name="engine">The SQL engine the server fronts. The composition root owns and disposes the engine.</param>
+    /// <param name="options">The composition options. Requires a bound <see cref="SqlDatabaseServerOptions.Listener"/>.</param>
+    /// <returns>The server.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
+    public static SqlDatabaseServer Create(SqlDatabaseEngine engine, SqlDatabaseServerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new SqlDatabaseServer(engine, options);
+    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken = default)
@@ -110,7 +161,7 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
         {
             _hardAbortSource!.Cancel();
 
-            foreach (DatabaseServerSession session in _sessions.Values)
+            foreach (SqlDatabaseServerSession session in _sessions.Values)
             {
                 session.Abort();
             }
@@ -134,6 +185,13 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
         _hardAbortSource?.Dispose();
     }
 
+    /// <summary>
+    /// A point-in-time snapshot of the sessions currently active on the server,
+    /// for the server context.
+    /// </summary>
+    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
+        => _sessions.Values.ToArray();
+
     private async Task AcceptLoopAsync(CancellationToken softStop, CancellationToken hardAbort)
     {
         while (!softStop.IsCancellationRequested)
@@ -150,7 +208,7 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
             }
             catch (ConnectionAbortedException)
             {
-                // The host disposed the listener out from under the server.
+                // The composition root disposed the listener out from under the server.
                 break;
             }
 
@@ -160,7 +218,7 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
                 continue;
             }
 
-            var session = new DatabaseServerSession(this, connection, _options, _engines, _authenticator);
+            var session = new SqlDatabaseServerSession(this, connection, _options, Engine, _authenticator);
 
             _sessions.TryAdd(session.Id, session);
             session.Start(softStop, hardAbort);
@@ -193,7 +251,7 @@ internal sealed class DefaultDatabaseServer : IDatabaseServer
         }
     }
 
-    internal void OnSessionCompleted(DatabaseServerSession session)
+    internal void OnSessionCompleted(SqlDatabaseServerSession session)
     {
         _sessions.TryRemove(session.Id, out _);
     }

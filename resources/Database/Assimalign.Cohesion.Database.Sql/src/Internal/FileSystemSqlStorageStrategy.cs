@@ -79,7 +79,10 @@ internal sealed class FileSystemSqlStorageStrategy : ISqlStorageStrategy
             FileAccess.ReadWrite,
             FileShare.Read);
 
-        return SqlStorage.Open(dataStream, journalStream, backupStream);
+        // Defer the open-time checkpoint: the engine's transaction coordinator
+        // analyzes the recovered journal (TransactionRecovery.Analyze) before the
+        // truncation destroys its lifecycle records, then checkpoints itself.
+        return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false);
     }
 
     /// <inheritdoc />

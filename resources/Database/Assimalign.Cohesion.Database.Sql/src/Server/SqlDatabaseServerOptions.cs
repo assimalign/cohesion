@@ -1,26 +1,26 @@
 using System;
-using System.Collections.Generic;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Security;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
-/// Options controlling the database server front-end.
+/// Options controlling the SQL database server front-end: the bound transport
+/// listener, the authenticator, and the DoS guardrails.
 /// </summary>
-public sealed class DatabaseServerOptions
+/// <remarks>
+/// The options deliberately carry no engine: servers are per-model and the
+/// composition root supplies the single engine directly
+/// (<see cref="SqlDatabaseServer.Create"/>, or the <c>AddSqlServer(engine, configure)</c>
+/// builder verb).
+/// </remarks>
+public sealed class SqlDatabaseServerOptions
 {
     /// <summary>
-    /// Gets the engines the server dispatches sessions to. The host registers its
-    /// engines here before creating the server; nothing is discovered at runtime.
-    /// </summary>
-    public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
-
-    /// <summary>
     /// Gets or sets the bound transport listener the server accepts connections
-    /// from. The host composes the listener (TCP, named pipe, in-memory, …) and
-    /// retains ownership — the server never disposes it.
+    /// from. The composition root composes the listener (TCP, named pipe,
+    /// in-memory, …) and retains ownership — the server never disposes it.
     /// </summary>
     public IConnectionListener? Listener { get; set; }
 

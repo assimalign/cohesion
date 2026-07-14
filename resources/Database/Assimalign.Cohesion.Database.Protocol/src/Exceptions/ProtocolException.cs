@@ -6,7 +6,14 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// Thrown when incoming bytes violate the wire protocol: bad framing, an
 /// oversized length prefix, or an out-of-order message.
 /// </summary>
-public class ProtocolException : DatabaseException
+/// <remarks>
+/// The protocol package is a child root of the Database area and owns an
+/// independent exception root (area exception-scoping rule): it does not derive
+/// from <c>DatabaseException</c>, so consumers of the protocol alone never load
+/// the area contracts, and layers that own both vocabularies (the server session
+/// pump, the client core) map protocol violations explicitly.
+/// </remarks>
+public class ProtocolException : Exception
 {
     /// <summary>
     /// Initializes a new <see cref="ProtocolException"/>.

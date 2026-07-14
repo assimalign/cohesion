@@ -1,39 +1,127 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Encodes table rows as typed records: the owning table's object id followed by
-/// one self-describing component per column, in catalog column order. The object-id
-/// prefix is what lets multiple tables share one record space — scans filter by it.
+/// Encodes table rows as MVCC-stamped typed records: a fixed 16-byte version
+/// header — the writer and deleter <see cref="TransactionSequence"/> stamps, the
+/// B+Tree leaf-entry design adopted for the record space — followed by the
+/// owning table's object id and one self-describing component per column, in
+/// catalog column order. The object-id prefix is what lets multiple tables share
+/// one record space (scans filter by it); the fixed-width stamp header is what
+/// makes tombstoning an in-place, same-length update (a deleter stamp never
+/// relocates a record) and keeps ADD COLUMN's O(1) null-tail decode intact
+/// (stamps sit in front of the tuple, never after the columns).
 /// </summary>
 internal static class SqlRowCodec
 {
-    internal static byte[] Encode(ulong objectId, IReadOnlyList<SqlCatalogColumn> columns, object?[] values)
+    /// <summary>
+    /// The current record-space format version, persisted in the catalog: 2 =
+    /// stamped records (this codec); 1 = the pre-MVCC unstamped layout, upgraded
+    /// in place when a version-1 database is opened.
+    /// </summary>
+    internal const int RecordSpaceFormatVersion = 2;
+
+    /// <summary>
+    /// The size of the fixed version-stamp header preceding the tuple payload.
+    /// </summary>
+    internal const int StampHeaderSize = 16;
+
+    internal static byte[] Encode(ulong objectId, IReadOnlyList<SqlCatalogColumn> columns, object?[] values, TransactionSequence writer)
     {
-        var writer = new DatabaseKeyWriter();
-        writer.AppendInt64((long)objectId);
+        var writerCodec = new DatabaseKeyWriter();
+        writerCodec.AppendInt64((long)objectId);
 
         for (int i = 0; i < columns.Count; i++)
         {
-            AppendValue(writer, columns[i].Type.Type, values[i]);
+            AppendValue(writerCodec, columns[i].Type.Type, values[i]);
         }
 
-        return writer.ToArray();
+        byte[] payload = writerCodec.ToArray();
+        var record = new byte[StampHeaderSize + payload.Length];
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(0, 8), writer.Value);
+        // Deleter starts at zero (no visible delete); bytes are already zeroed.
+        payload.CopyTo(record.AsSpan(StampHeaderSize));
+        return record;
     }
 
     /// <summary>
-    /// Decodes a record when it belongs to the expected table; returns null when the
-    /// record belongs to a different object (or predates the table's newest columns —
-    /// missing trailing columns read as nulls, which is how ADD COLUMN stays O(1)).
+    /// Reads the version stamps from a stamped record.
     /// </summary>
-    internal static object?[]? TryDecode(ReadOnlySpan<byte> record, ulong objectId, int columnCount)
+    internal static (TransactionSequence Writer, TransactionSequence Deleter) ReadStamps(ReadOnlySpan<byte> record)
     {
-        var reader = new DatabaseKeyReader(record);
+        return (
+            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(0, 8))),
+            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(8, 8))));
+    }
+
+    /// <summary>
+    /// Returns a same-length copy of a stamped record with the deleter stamp set —
+    /// the tombstone write. Same length means the tombstone always rewrites in
+    /// place: a delete can never relocate a record.
+    /// </summary>
+    internal static byte[] WithDeleter(ReadOnlySpan<byte> record, TransactionSequence deleter)
+    {
+        var tombstoned = record.ToArray();
+        BinaryPrimitives.WriteUInt64LittleEndian(tombstoned.AsSpan(8, 8), deleter.Value);
+        return tombstoned;
+    }
+
+    /// <summary>
+    /// Returns a same-length copy of a stamped record with the deleter stamp
+    /// cleared — the logical undo of a tombstone.
+    /// </summary>
+    internal static byte[] WithoutDeleter(ReadOnlySpan<byte> record)
+    {
+        var restored = record.ToArray();
+        restored.AsSpan(8, 8).Clear();
+        return restored;
+    }
+
+    /// <summary>
+    /// Prepends a zeroed stamp header to a pre-MVCC (format-version-1) record —
+    /// the in-place migration write. Writer zero reads as visible to every
+    /// snapshot (it precedes every assigned sequence) and deleter zero is "not
+    /// deleted", so migrated rows behave exactly as committed bootstrap data.
+    /// </summary>
+    internal static byte[] UpgradeUnstamped(ReadOnlySpan<byte> record)
+    {
+        var upgraded = new byte[StampHeaderSize + record.Length];
+        record.CopyTo(upgraded.AsSpan(StampHeaderSize));
+        return upgraded;
+    }
+
+    /// <summary>
+    /// Decodes a stamped record when it belongs to the expected table; returns
+    /// null when the record belongs to a different object or is too short to
+    /// carry a stamp header. Missing trailing columns read as nulls, which is how
+    /// ADD COLUMN stays O(1). The version stamps are returned alongside the
+    /// values — visibility is the caller's decision, made against its snapshot.
+    /// </summary>
+    internal static object?[]? TryDecode(
+        ReadOnlySpan<byte> record,
+        ulong objectId,
+        int columnCount,
+        out TransactionSequence writer,
+        out TransactionSequence deleter)
+    {
+        writer = default;
+        deleter = default;
+
+        if (record.Length < StampHeaderSize)
+        {
+            return null;
+        }
+
+        (writer, deleter) = ReadStamps(record);
+
+        var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
 
         if ((ulong)reader.ReadInt64() != objectId)
         {

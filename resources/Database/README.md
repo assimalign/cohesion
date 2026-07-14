@@ -12,13 +12,13 @@ In the repo's L1/L2/L3 model (see `docs/DELIVERY_ROADMAP.md`), this area is **L3
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException` |
-| `Assimalign.Cohesion.Database.Storage` | Pages, buffer pool, free-space map, journal (WAL), recovery, backup |
-| `Assimalign.Cohesion.Database.Transactions` | MVCC snapshots, isolation levels, lock manager, transaction log seam |
-| `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors |
-| `Assimalign.Cohesion.Database.Types` | Shared scalar type system: identity, comparison/collation, binary encoding |
-| `Assimalign.Cohesion.Database.Execution` | Query request/result families, execution pipeline contracts |
-| `Assimalign.Cohesion.Database.Language` | Shared lexer/parser/diagnostics infrastructure for the model languages |
+| `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException`, and the application-composition seam (`IDatabaseApplicationBuilder`/`IDatabaseApplication` — model packages register engines here without knowing the hosting layer) — **rolls up the child roots** (references `Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
+| `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
+| `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
+| `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
+| `Assimalign.Cohesion.Database.Execution` | Child root — query request/result families, execution pipeline contracts |
+| `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser/diagnostics infrastructure for the model languages |
 | `Assimalign.Cohesion.Database.Memory` | In-memory storage strategy (tests, embedded scenarios) |
 
 ### Model engines
@@ -27,7 +27,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 | Model | Root project | Notes |
 |---|---|---|
-| SQL | `Assimalign.Cohesion.Database.Sql` | Parser is substantial; declared-dialect contract pending |
+| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine and the model's wire-protocol server (`SqlDatabaseServer`); declared dialect in `Sql.Language` |
 | Documents | `Assimalign.Cohesion.Database.Documents` | OQL-based language contract |
 | Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
 | Blob | `Assimalign.Cohesion.Database.Blob` | API-driven; no `.Language` project |
@@ -38,21 +38,21 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database.Protocol` | Wire protocol frames and message contracts (shared client/server) |
+| `Assimalign.Cohesion.Database.Protocol` | Child root — wire protocol frames and message contracts (shared client/server), `ProtocolVersion` |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client |
-| `Assimalign.Cohesion.Database.Security` | AuthN/AuthZ contracts (principals, roles, permissions) |
+| `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
-| `Assimalign.Cohesion.Database.Governance` | Quotas, tenancy boundaries, audit events |
-| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; owns the server runtime — network front-end, sessions, auth handshake, frame pump (`Database.Server` folded in 2026-07-12) |
+| `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
+| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); composition-only — wraps composed `IDatabaseServer` instances as endpoint host services (servers are per-model, implemented inside the model packages — `SqlDatabaseServer` in `Database.Sql`) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
-| `Assimalign.Cohesion.Database.Application` | The standalone host **executable** — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption) |
+| `Assimalign.Cohesion.Database.Application` | **Interim:** the standalone host executable — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption). **Target design (pinned, #906):** the manifest-generation project SDK consumers load — build tasks code-gen the application manifest, `Database.ApplicationModel` surfaces it to the gateway (the `<Area>.Application` convention, `.claude/rules/resource-areas.md`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
 
 ## Dependencies on other areas
 
 - `libraries/Core` — foundational primitives (everywhere)
 - `libraries/Hosting` — host lifecycle + per-service execution menu (`Database.Hosting`)
-- `libraries/Connections` — transport drivers for the server runtime (`Database.Hosting`)
+- `libraries/Connections` — transport drivers for the per-model servers (`Database.Sql`'s `SqlDatabaseServer`, and every future model's server)
 - `libraries/ApplicationModel` — orchestration contracts (`Database.ApplicationModel` only)
 - `resources/Web` — private implementation detail of the root project (HTTP admin surface); hidden from consumers via `CohesionPrivateProjectReference`
 
