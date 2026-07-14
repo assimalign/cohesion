@@ -10,10 +10,9 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<!-- Composition acceptance: the host runs a real SQL engine fronted by the
-		     SQL model's server (SqlDatabaseServer over the Database.Server base)
+		     SQL model's server (SqlDatabaseServer, implemented inside Database.Sql)
 		     on the in-memory driver, driven end-to-end by a client (tests are
 		     exempt from the area layering rules). -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

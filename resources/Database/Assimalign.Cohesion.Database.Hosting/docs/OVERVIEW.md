@@ -7,8 +7,9 @@ subclass that composes the resource's units of work as hosted services on the
 per-service execution menu, and the one DI/Configuration/Logging seam for the
 area. Composition-only: it wraps the composed per-model wire-protocol servers
 (`IDatabaseServer`) generically as endpoint host services — the server machinery
-itself lives in `Assimalign.Cohesion.Database.Server`, and engines are
-self-sufficient data machines this module never drives (see `docs/DESIGN.md`).
+itself lives inside each model package (the SQL model's `SqlDatabaseServer` in
+`Assimalign.Cohesion.Database.Sql`), and engines are self-sufficient data
+machines this module never drives (see `docs/DESIGN.md`).
 
 ## Current Evaluation
 

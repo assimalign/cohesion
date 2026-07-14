@@ -4,19 +4,16 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Sql;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// A live SQL engine + in-memory listener + running server, with a seeded
-/// <c>users</c> table, for end-to-end protocol tests without sockets. The server
-/// is a minimal <see cref="DatabaseServer"/> derivative fronting the one engine —
-/// the per-model shape.
+/// A live SQL engine + in-memory listener + running <see cref="SqlDatabaseServer"/>,
+/// with a seeded <c>users</c> table, for end-to-end protocol tests without sockets.
 /// </summary>
 internal sealed class ServerTestHarness : IAsyncDisposable
 {
-    private ServerTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, TestDatabaseServer server)
+    private ServerTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server)
     {
         Engine = engine;
         Listener = listener;
@@ -27,11 +24,11 @@ internal sealed class ServerTestHarness : IAsyncDisposable
 
     public InMemoryConnectionListener Listener { get; }
 
-    public TestDatabaseServer Server { get; }
+    public SqlDatabaseServer Server { get; }
 
     public const string DatabaseName = "app";
 
-    public static async Task<ServerTestHarness> StartAsync(Action<DatabaseServerOptions>? configure = null)
+    public static async Task<ServerTestHarness> StartAsync(Action<SqlDatabaseServerOptions>? configure = null)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-e2e" });
 
@@ -44,11 +41,11 @@ internal sealed class ServerTestHarness : IAsyncDisposable
         }
 
         var listener = new InMemoryConnectionListener();
-        var options = new DatabaseServerOptions { Listener = listener };
+        var options = new SqlDatabaseServerOptions { Listener = listener };
 
         configure?.Invoke(options);
 
-        var server = new TestDatabaseServer(engine, options);
+        var server = SqlDatabaseServer.Create(engine, options);
         await server.StartAsync();
 
         return new ServerTestHarness(engine, listener, server);

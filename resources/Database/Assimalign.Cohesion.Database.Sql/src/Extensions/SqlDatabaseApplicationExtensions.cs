@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.Database.Server;
-
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
@@ -52,20 +50,20 @@ public static class SqlDatabaseApplicationExtensions
         /// serves.
         /// </summary>
         /// <param name="engine">The SQL engine the server fronts — typically the return of <c>AddSqlDatabase</c>, or an engine the composition root created itself. The composition root owns and disposes the engine.</param>
-        /// <param name="configure">Configures the server options; must supply the bound <see cref="DatabaseServerOptions.Listener"/> (the composition root owns the listener).</param>
+        /// <param name="configure">Configures the server options; must supply the bound <see cref="SqlDatabaseServerOptions.Listener"/> (the composition root owns the listener).</param>
         /// <returns>
         /// The registered <see cref="SqlDatabaseServer"/> (the Web convention of
         /// returning the feature's own composition object).
         /// </returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/>, <paramref name="engine"/>, or <paramref name="configure"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">The configured options carry no listener or a non-positive session limit.</exception>
-        public SqlDatabaseServer AddSqlServer(SqlDatabaseEngine engine, Action<DatabaseServerOptions> configure)
+        public SqlDatabaseServer AddSqlServer(SqlDatabaseEngine engine, Action<SqlDatabaseServerOptions> configure)
         {
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(engine);
             ArgumentNullException.ThrowIfNull(configure);
 
-            DatabaseServerOptions options = new();
+            SqlDatabaseServerOptions options = new();
             configure.Invoke(options);
 
             SqlDatabaseServer server = SqlDatabaseServer.Create(engine, options);

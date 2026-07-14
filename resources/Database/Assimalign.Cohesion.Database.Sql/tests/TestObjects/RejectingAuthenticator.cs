@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Security;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// An authenticator that rejects every principal, for handshake-failure tests.

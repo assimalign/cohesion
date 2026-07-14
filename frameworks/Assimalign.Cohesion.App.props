@@ -226,20 +226,20 @@
              closure, so the framework must deliver it. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
-        <!-- Service surface: wire protocol, the shared server base (per-model
-             servers derive from Database.Server; resurrected 2026-07-13 after the
-             2026-07-12 fold into Database.Hosting - COHRES001 means model servers
-             cannot derive from a base living in the hosting module), client core,
-             security, the embedded facade, and the composition-only hosting module. -->
+        <!-- Service surface: wire protocol, client core, security, the embedded
+             facade, and the composition-only hosting module. Servers are per-model
+             and ship inside their model package (the SQL model's SqlDatabaseServer
+             lives in Database.Sql; the shared Database.Server base was folded in
+             there 2026-07-14 - the root contract is the only area-wide server
+             requirement). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Server" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
 
-        <!-- The SQL model family (the MVP engine): engine, dialect, catalog, model
-             storage, and the typed client. -->
+        <!-- The SQL model family (the MVP engine): engine + wire-protocol server,
+             dialect, catalog, model storage, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />

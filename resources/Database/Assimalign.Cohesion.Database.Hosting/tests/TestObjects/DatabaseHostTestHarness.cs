@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Hosting;
-using Assimalign.Cohesion.Database.Server;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
 
@@ -58,7 +57,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
         }
 
         var listener = new InMemoryConnectionListener();
-        var server = SqlDatabaseServer.Create(engine, new DatabaseServerOptions { Listener = listener });
+        var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
 
         var options = new DatabaseApplicationOptions();
         options.Servers.Add(server);

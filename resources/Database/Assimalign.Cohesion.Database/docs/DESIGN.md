@@ -145,19 +145,30 @@ surface. Child roots never reference the root.
   handshake: a worker can never run twice because exactly one engine-internal
   scheduler exists. Workers remain synchronous by design — every body is
   storage I/O (fsync, page writes, checkpoint), which has no async fast path.
-- **Server *contracts* live here; the server *machinery* lives in
-  `Database.Server`; servers are per-model** (owner decision, 2026-07-13;
-  extends the 2026-07-12 decision that put the contracts here). A server fronts
-  exactly **one** engine — `IDatabaseServerContext.Engine` is singular — so
-  model-specific wire behavior has a home (`SqlDatabaseServer`), while
-  everything model-agnostic (session state machine, framing, guardrails,
-  drain) ships as the guided abstract base `DatabaseServer` in the shared
-  `Assimalign.Cohesion.Database.Server` library *above* this root. The
-  contracts stay here for the same COHRES001 reason as before: feature
-  libraries (quotas #167, health #168, a future `Database.Testing`) must be
-  able to name the server without referencing any runtime. The context shape
-  (`Context` = engine + sessions) mirrors the application context pattern —
-  observational composition on a context, lifecycle on the owning object.
+- **Server *contracts* live here — and they are the only area-wide server
+  requirement; the machinery is per-model, inside each model package** (owner
+  decision, 2026-07-14; refines 2026-07-13's per-model decision and 2026-07-12's
+  decision that put the contracts here). A server fronts exactly **one**
+  engine — `IDatabaseServerContext.Engine` is singular — so model-specific wire
+  behavior has a home. Each model implements
+  `IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession` directly,
+  against `Connections` and the `Database.Protocol` child root (both reachable
+  through this root), its own way: the SQL model's machinery (session state
+  machine, framing, guardrails, two-phase drain) is internal to
+  `Assimalign.Cohesion.Database.Sql` behind `SqlDatabaseServer`. The rejected
+  alternative — the shared `Database.Server` guided base that briefly existed
+  (2026-07-13 → 2026-07-14) — was abstraction from n=1: with one model server
+  built, the "shared" machinery was simply the SQL server's machinery, and the
+  future servers (Blob streaming, KV binary command paths) are expected to
+  diverge from its execute pump. The recorded extraction trigger: when the
+  second model server is built, extract the then-proven common core (predicted:
+  session table + guardrails + drain, not the execute pump) into a shared
+  library, with evidence. The contracts stay here for the same COHRES001 reason
+  as before: feature libraries (quotas #167, health #168, a future
+  `Database.Testing`) must be able to name the server without referencing any
+  runtime. The context shape (`Context` = engine + sessions) mirrors the
+  application context pattern — observational composition on a context,
+  lifecycle on the owning object.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
   live here so **model packages register their engines and servers without
@@ -243,8 +254,8 @@ Contracts, enums, and value objects only — no reflection, no serialization.
 
 ## Non-goals
 
-- No connection/network concepts (that is the server machinery in
-  `Database.Server`, per-model servers in the model packages, and
+- No connection/network concepts (that is the per-model server machinery in
+  the model packages — `SqlDatabaseServer` in `Database.Sql` — and
   `Database.Client`).
 - No DI or configuration surface (that is `Database.Hosting`'s seam alone).
 - No model-specific request or result types — models subclass the

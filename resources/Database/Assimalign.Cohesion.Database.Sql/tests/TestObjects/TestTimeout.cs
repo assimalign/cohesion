@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Server.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// Bounded cancellation tokens so a hung exchange fails the test instead of the

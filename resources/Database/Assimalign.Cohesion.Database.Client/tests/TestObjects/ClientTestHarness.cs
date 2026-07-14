@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Server;
 using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Client.Tests;
@@ -33,7 +32,7 @@ internal sealed class ClientTestHarness : IAsyncDisposable
     public const string DatabaseName = "app";
 
     public static async Task<ClientTestHarness> StartAsync(
-        Action<DatabaseServerOptions>? configureServer = null,
+        Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-client-e2e" });
@@ -47,7 +46,7 @@ internal sealed class ClientTestHarness : IAsyncDisposable
         }
 
         var listener = new InMemoryConnectionListener();
-        var serverOptions = new DatabaseServerOptions { Listener = listener };
+        var serverOptions = new SqlDatabaseServerOptions { Listener = listener };
 
         configureServer?.Invoke(serverOptions);
 

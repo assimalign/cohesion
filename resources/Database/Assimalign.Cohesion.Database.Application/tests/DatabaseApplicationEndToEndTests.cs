@@ -13,7 +13,6 @@ using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Application.Internal;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Hosting;
-using Assimalign.Cohesion.Database.Server;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Hosting;
@@ -229,7 +228,7 @@ public sealed class DatabaseApplicationEndToEndTests : IDisposable
             EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
         });
 
-        SqlDatabaseServer server = SqlDatabaseServer.Create(engine, new DatabaseServerOptions { Listener = listener });
+        SqlDatabaseServer server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
 
         var applicationOptions = new DatabaseApplicationOptions();
         applicationOptions.Servers.Add(server);

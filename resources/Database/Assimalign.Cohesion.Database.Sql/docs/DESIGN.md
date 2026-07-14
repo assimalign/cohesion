@@ -181,18 +181,126 @@ Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
 loop, so cadence is engine configuration; observers read it through
 `IDatabaseEngineWorker.Interval`.
 
-## The per-model server (`SqlDatabaseServer`)
+## The SQL server runtime (`SqlDatabaseServer`)
 
-The SQL model ships its own wire-protocol server: `SqlDatabaseServer :
-DatabaseServer` (the guided base in `Assimalign.Cohesion.Database.Server` — a
-feature-to-feature reference, COHRES-legal), fronting exactly one
-`SqlDatabaseEngine` (`Create(engine, options)`). Servers are per-model by
-design: this type is where SQL-specific wire behavior grows (typed relational
-payloads, SQL transaction frames) as the protocol's model-specific surface
-lands; today it adds the typed `Engine` accessor and the composition seam, and
-execution rides the base's model-agnostic text-execute path. "Running" lives
-here — the engine underneath has no lifecycle; the server starts and stops
-around it.
+The SQL model ships its own wire-protocol server: `SqlDatabaseServer`, a sealed
+implementation of the area root's `IDatabaseServer` contract fronting exactly
+one `SqlDatabaseEngine` (`Create(engine, options)`, options in
+`SqlDatabaseServerOptions`). Servers are per-model by design: this type is
+where SQL-specific wire behavior grows (typed relational payloads, SQL
+transaction frames) as the protocol's model-specific surface lands; today
+execution rides the model-agnostic text-execute seam on the root's
+`IDatabaseSession`. "Running" lives here — the engine underneath has no
+lifecycle; the server starts and stops around it.
+
+### Why the machinery is Sql-internal (2026-07-14, owner decision)
+
+The server machinery — accept loop, session state machine and frame pump,
+guardrails, two-phase drain — lives **inside this package** (`Server/` for the
+public surface, `Internal/` for the pump and context), not in a shared library.
+The shared `Assimalign.Cohesion.Database.Server` base this server briefly
+derived from was **premature abstraction from n=1**: only one model server
+existed, and the future model servers are expected to diverge from the
+SQL-shaped execute pump (Blob wants streaming, not header/row/complete framing;
+KV wants binary command paths, not statement text). The root contracts
+(`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`) are the
+**only area-wide requirement** — every model implements them its own way
+against `Connections` and the `Database.Protocol` child root (via the root's
+rollup). With no external derivers by design, the guided abstract base lost its
+reason to exist and was merged into the sealed `SqlDatabaseServer` rather than
+kept as an internal base: an internal abstract class with exactly one
+same-assembly deriver is ceremony.
+
+**Extraction trigger (recorded intent):** when the **second** model server is
+built, extract the then-*proven* common core — predicted: the session table,
+the guardrails (session limit / authentication timeout / idle eviction), and
+the two-phase drain, **not** the execute pump — into a shared library, with the
+second implementation as evidence of what is actually common. Model #2's
+implementer extracts instead of copy-pasting.
+
+### Composition seam
+
+`SqlDatabaseServer.Create(engine, options)` — or the `AddSqlServer(engine,
+configure)` builder verb — composes a server. The options carry a **bound
+`IConnectionListener` instance**, not a listener factory: Connections drivers
+bind at construction, so a factory would add a layer that defers nothing, and
+passing the instance keeps ownership unambiguous — *the composition root
+creates and disposes the listener; the server only accepts from it*. Stop is
+signaled by cancelling the pending accept, never by disposing the listener.
+`options.Authenticator` defaults to `DatabaseAuthenticator.AllowAll`
+(`Database.Security`) — the MVP development posture, deliberately an explicit,
+discoverable object rather than hidden server behavior. The engine is likewise
+owned by the composition root: engines are data machines (create → use →
+dispose), and the server never disposes its engine.
+
+### The text-execute path
+
+The server receives statement *text* and tuple-codec parameter bytes off the
+wire; the bridge to the engine is the **text-execute seam on the root
+contract** —
+`IDatabaseSession.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
+— which `SqlDatabaseSession` implements with the model's own parser
+(`SqlQueryRequest.FromSql`). Parameters decode with `DatabaseValueCodec`
+(`Database.Types`), one self-describing component per parameter; result rows
+encode the same way, one component per column, so both directions ride the one
+shared codec the client also speaks.
+
+### Session state machine
+
+`Connected → Startup received → Authenticating → Ready ⇄ Executing → Terminated`.
+Guardrails baked into the options because they are DoS-critical (the HTTP/1.1
+limits lesson, #791): unauthenticated connections are dropped after
+`AuthenticationTimeout`; `MaxSessions` bounds concurrency (rejections use the
+protocol `Unavailable` error); idle sessions are evicted; `StopAsync` drains
+within `ShutdownDrainTimeout` then aborts.
+
+Implementation decisions (carried over from the server's prior homes — this
+record moves with the machinery):
+
+- **Version negotiation:** an unknown *major* in `Startup` earns
+  `UnsupportedVersion` and a close; the server then speaks
+  `ProtocolVersion.Current` (minors are additive by the protocol's contract, so
+  no per-minor branching yet).
+- **Database binding** resolves on the server's one engine: already-open
+  databases first (`TryGetDatabase`), then an open attempt; no match →
+  `DatabaseNotFound` and close. (The pre-per-model server probed a *list* of
+  engines in registration order; one engine per server removed that ambiguity.)
+- **Authenticate exchange (MVP):** the challenge frame carries no payload (the
+  trust method); the client's response bytes pass to `IDatabaseAuthenticator`
+  as opaque evidence. Method-specific payload schemas arrive with real
+  authenticators.
+- **`MaxSessions` counts handshaking sessions too** — an unauthenticated
+  connection holds a slot, otherwise the cap would not bound resource use at
+  all. Over-limit connections get the `Unavailable` error frame immediately at
+  accept and never become sessions.
+- **Error taxonomy per exchange:** statement-level failures keep the session in
+  Ready — `DatabaseParseException` → `ParseFailure`, any other
+  `DatabaseException` → `ExecutionFailure` (an execution error is not a protocol
+  violation). Framing/order violations (`ProtocolException`, malformed parameter
+  components) → `ProtocolViolation` **and close**; anything unexpected →
+  `Internal` and close. A child-root exception that escapes raw (for example a
+  `StorageException` the engine failed to wrap) reaches the wire as `Internal`
+  and closes the session — the engine's model boundary is where wrapping into
+  `DatabaseException` belongs.
+- **Two-phase stop:** a *soft stop* token ends the accept loop and cancels reads
+  at frame boundaries (idle sessions close immediately, telling the peer
+  `Unavailable`); in-flight executions run on the session lifetime token and get
+  the full drain budget. When the budget lapses, the *hard abort* token cancels
+  executions and aborts connections. Session pumps own their errors — their
+  completion tasks never fault, so drain is a plain `WhenAll`.
+
+The server layer defines no exception root of its own: wire failures are the
+protocol's (`ProtocolException`, mapped to wire error codes as above), and
+engine failures are the area root's (`DatabaseException` family). Configuration
+misuse (no listener, non-positive session limit, null engine) throws argument
+exceptions at creation.
+
+Server non-goals: no host-service adapter (`Database.Hosting` wraps
+`IDatabaseServer` generically through the root seam); no connection-level
+replication endpoints; no transaction frames yet (explicit transaction control
+over the wire lands with the protocol's `Transaction` payload schema); no
+TLS/transport policy — transports come bound from `libraries/Connections`
+drivers, and the composition root owns them.
 
 ## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
 
@@ -207,7 +315,7 @@ hosting module; COHRES001 stays intact — the same rule that puts
   convention of returning the feature's own composition object), so a
   composition root can seed or provision databases, or front the engine with a
   server, before the application starts.
-- `AddSqlServer(SqlDatabaseEngine, Action<DatabaseServerOptions>)` creates and
+- `AddSqlServer(SqlDatabaseEngine, Action<SqlDatabaseServerOptions>)` creates and
   registers a `SqlDatabaseServer` fronting the given engine and returns it. The
   verb composes eagerly — a per-model server needs only its one engine, already
   in hand, so the deferred context-receiving `AddServer` overload exists for

@@ -9,7 +9,8 @@ shell — and, since the 2026-07-13 redesign, it is **composition-only in the
 strictest sense**: it wraps composed `IDatabaseServer` instances generically as
 endpoint host services, runs any additional services the composition root adds,
 and implements the root's application-builder seam. It owns no server machinery
-(that is `Database.Server` plus the per-model servers), no engine lifecycle
+(servers are per-model, implemented inside the model packages — the SQL model's
+`SqlDatabaseServer` lives in `Database.Sql`), no engine lifecycle
 (engines are data machines — operational from creation, disposed by their
 composition root), and no worker scheduling (engines own their loops
 unconditionally). Its references shrank accordingly: the area root plus the
@@ -74,23 +75,24 @@ DESIGN.md).
 
 ## Why-this-not-that
 
-### The server machinery moved out — per-model servers cannot derive from Hosting (2026-07-13)
+### The server machinery moved out — servers are per-model (2026-07-13, settled 2026-07-14)
 
 The wire-protocol server was folded INTO this module on 2026-07-12 (mirroring
 `Web.Server`→`Web.Hosting`). The 2026-07-13 redesign **half-unwound that fold**:
 the approved architecture makes servers per-model (`SqlDatabaseServer` fronting
-one `SqlDatabaseEngine`), and a per-model server must derive from the shared
-base — but COHRES001 makes this module unreferenceable by area libraries, so a
-base class here is underivable by exactly the packages that need it. The generic
-machinery (session state machine and pump, framing, auth/idle/session
-guardrails, two-phase drain) moved to the resurrected
-`Assimalign.Cohesion.Database.Server` library above the root, where its design
-record now lives (`Database.Server/docs/DESIGN.md`). What the fold got right is
-retained here: composing servers into a host process is this module's job — it
-wraps any `IDatabaseServer` in `DatabaseServerHostService`, registered last.
-This module deliberately does **not** reference `Database.Server`: it composes
-through the root's `IDatabaseServer` seam alone, which is what keeps it
-transport-free (no `Connections` reference).
+one `SqlDatabaseEngine`), and COHRES001 makes this module unreferenceable by
+area libraries — so server machinery living here is unreachable by exactly the
+packages that need it. The machinery briefly lived in a shared
+`Database.Server` base library above the root; on 2026-07-14 that library was
+judged premature abstraction from n=1 and folded into `Database.Sql`, where the
+SQL server's machinery is now internal and its design record lives
+(`Database.Sql/docs/DESIGN.md`, "The SQL server runtime"). The root's
+`IDatabaseServer` contract is the only area-wide server requirement. What the
+2026-07-12 fold got right is retained here: composing servers into a host
+process is this module's job — it wraps any `IDatabaseServer` in
+`DatabaseServerHostService`, registered last. This module references **no
+model package**: it composes through the root's `IDatabaseServer` seam alone,
+which is what keeps it transport-free (no `Connections` reference).
 
 ### One host service shape per server, plural servers
 
@@ -165,8 +167,9 @@ on `builder.Options.Services`.
 - No governance/quotas (#167) or health/readiness (#168) surfaces yet — separate
   features (the health surface will read the engines' and servers' observational
   contexts; see the area DESIGN.md next-iteration scoping).
-- No server machinery — `Database.Server` owns it; per-model servers own the
-  model-specific wire surface.
+- No server machinery — servers are per-model and live inside the model
+  packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
+  through the root's `IDatabaseServer` seam.
 - No HTTP admin surface — that is the root `Database` project's private-Web
   concern, deliberately separate from the wire protocol path.
 - Direct references: the area root and the non-area `Hosting` foundation.

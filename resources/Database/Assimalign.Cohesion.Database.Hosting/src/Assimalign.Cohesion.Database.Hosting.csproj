@@ -2,9 +2,9 @@
 	<!--
 		Composition-only, COHRES002-clean: the hosting module references only the
 		area root inside the area, plus the non-area Hosting foundation. The server
-		runtime lives in Assimalign.Cohesion.Database.Server (shared server
-		infrastructure above the root, so per-model servers can derive from it);
-		this module composes IDatabaseServer instances generically as host services
+		runtime is per-model and lives inside each model package (the SQL model's
+		SqlDatabaseServer in Assimalign.Cohesion.Database.Sql); this module composes
+		IDatabaseServer instances generically as host services through the root seam
 		and needs no transport (Connections) or wire (Protocol) knowledge at all.
 	-->
 	<ItemGroup>

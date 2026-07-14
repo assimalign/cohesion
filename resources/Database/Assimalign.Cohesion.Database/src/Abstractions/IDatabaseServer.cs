@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Database;
 /// <remarks>
 /// Servers are <b>per-model</b>: each fronts exactly one engine (see
 /// <see cref="IDatabaseServerContext.Engine"/>) so model-specific wire behavior has
-/// a home, while the generic machinery — session state machine, framing, guardrails,
-/// two-phase drain — ships in the shared <c>Assimalign.Cohesion.Database.Server</c>
-/// base class every model server derives from. "Running" lives here, not on the
+/// a home. This contract is the only area-wide server requirement — every model
+/// implements it its own way, against <c>Connections</c> and the protocol child
+/// root, inside its model package (the SQL model's <c>SqlDatabaseServer</c> in
+/// <c>Assimalign.Cohesion.Database.Sql</c>). "Running" lives here, not on the
 /// engine: an engine is a data machine (create → use → dispose), and the server is
 /// the thing that starts and stops. An <see cref="IDatabaseApplication"/> composes
 /// servers generically as host services; an embedded or custom host drives

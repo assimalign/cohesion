@@ -5,8 +5,8 @@ every engine implements and every consumer programs against —
 `IDatabaseEngine` (a data machine managing logical databases), `IDatabase` (a
 logical database), `IDatabaseSession` (scoped execution context), and
 `IDatabaseTransaction` (explicit ACID scope) — plus the server seam
-(`IDatabaseServer`, `IDatabaseServerContext`, `IDatabaseServerSession`; the
-machinery lives in `Database.Server`, per-model servers in the model packages),
+(`IDatabaseServer`, `IDatabaseServerContext`, `IDatabaseServerSession`; servers
+are per-model, each implemented inside its model package),
 the application seam (`IDatabaseApplication`, `IDatabaseApplicationContext`,
 `IDatabaseApplicationBuilder`), the area's exception root (`DatabaseException`,
 `DatabaseParseException`), and shared value objects (`DatabaseName`,
@@ -27,8 +27,9 @@ the whole base surface — including child-owned vocabulary the contracts speak
 - **Server contracts** — `IDatabaseServer` (start/stop lifecycle — "running"
   lives on the server, never the engine) with its observational
   `IDatabaseServerContext` (the one engine it fronts + active sessions).
-  Servers are per-model; the shared base is `Database.Server`'s
-  `DatabaseServer`.
+  Servers are per-model and these contracts are the only area-wide
+  requirement — each model implements them inside its model package
+  (`SqlDatabaseServer` in `Database.Sql`).
 - **Application composition seam** — `IDatabaseApplicationBuilder` /
   `IDatabaseApplication` / `IDatabaseApplicationContext`: model packages
   register their engines and servers against this root seam (e.g.
@@ -55,8 +56,8 @@ from the package dependency list).
 ## Consumers
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
-implement the contracts; `Database.Server`'s base (and each model's server on
-top of it) pumps wire-protocol frames into sessions; `Database.Client` mirrors
-results on the caller side; `Database.Hosting` composes servers into a host.
+implement the contracts; each model's server (`SqlDatabaseServer`, …) pumps
+wire-protocol frames into sessions; `Database.Client` mirrors results on the
+caller side; `Database.Hosting` composes servers into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.

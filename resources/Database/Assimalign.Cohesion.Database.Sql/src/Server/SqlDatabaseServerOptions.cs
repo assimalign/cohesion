@@ -3,19 +3,19 @@ using System;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Security;
 
-namespace Assimalign.Cohesion.Database.Server;
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
-/// Options controlling a database server front-end: the bound transport listener,
-/// the authenticator, and the DoS guardrails.
+/// Options controlling the SQL database server front-end: the bound transport
+/// listener, the authenticator, and the DoS guardrails.
 /// </summary>
 /// <remarks>
-/// The options deliberately carry no engine: servers are per-model and the derived
-/// server supplies its single engine to the <see cref="DatabaseServer"/> base
-/// (for example <c>SqlDatabaseServer.Create(engine, options)</c> in
-/// <c>Assimalign.Cohesion.Database.Sql</c>).
+/// The options deliberately carry no engine: servers are per-model and the
+/// composition root supplies the single engine directly
+/// (<see cref="SqlDatabaseServer.Create"/>, or the <c>AddSqlServer(engine, configure)</c>
+/// builder verb).
 /// </remarks>
-public sealed class DatabaseServerOptions
+public sealed class SqlDatabaseServerOptions
 {
     /// <summary>
     /// Gets or sets the bound transport listener the server accepts connections

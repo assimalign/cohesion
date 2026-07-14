@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Server.Internal;
+namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// One server-side session pump: drives the protocol state machine
@@ -18,11 +18,11 @@ namespace Assimalign.Cohesion.Database.Server.Internal;
 /// over a single connection and delegates statement execution to the bound
 /// engine session's text-execute seam.
 /// </summary>
-internal sealed class DatabaseServerSession : IDatabaseServerSession
+internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
 {
-    private readonly DatabaseServer _server;
+    private readonly SqlDatabaseServer _server;
     private readonly IConnection _connection;
-    private readonly DatabaseServerOptions _options;
+    private readonly SqlDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
@@ -32,10 +32,10 @@ internal sealed class DatabaseServerSession : IDatabaseServerSession
     private IDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
-    internal DatabaseServerSession(
-        DatabaseServer server,
+    internal SqlDatabaseServerSession(
+        SqlDatabaseServer server,
         IConnection connection,
-        DatabaseServerOptions options,
+        SqlDatabaseServerOptions options,
         IDatabaseEngine engine,
         IDatabaseAuthenticator authenticator)
     {
@@ -99,7 +99,7 @@ internal sealed class DatabaseServerSession : IDatabaseServerSession
         // Yield so Start returns immediately and registration completes before frames flow.
         await Task.Yield();
 
-        CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((DatabaseServerSession)state!).Abort(), this);
+        CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((SqlDatabaseServerSession)state!).Abort(), this);
 
         Stream stream = _connection.AsStream();
         _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);

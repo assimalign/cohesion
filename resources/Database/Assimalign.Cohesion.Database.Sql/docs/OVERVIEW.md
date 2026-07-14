@@ -23,6 +23,11 @@ shared storage, with DDL flowing through the relational catalog
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
+- **The wire-protocol server** — `SqlDatabaseServer` (+ `SqlDatabaseServerOptions`)
+  fronts one engine on a bound `Connections` listener: session state machine,
+  authentication/idle/session-limit guardrails, two-phase graceful drain.
+  Servers are per-model; the machinery is internal to this package (see
+  DESIGN.md for the 2026-07-14 fold decision and the extraction trigger).
 
 ## Usage
 
@@ -47,7 +52,8 @@ The model's builder verbs compose against the area root's
 `IDatabaseApplicationBuilder` seam (no hosting reference — the verbs ship here,
 per the area builder pattern). `AddSqlDatabase` registers the engine;
 `AddSqlServer` fronts it with the SQL model's wire-protocol server
-(`SqlDatabaseServer`, derived from the `Database.Server` guided base):
+(`SqlDatabaseServer` — implemented in this package; servers are per-model and
+the root's `IDatabaseServer` contract is the only area-wide requirement):
 
 ```csharp
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>

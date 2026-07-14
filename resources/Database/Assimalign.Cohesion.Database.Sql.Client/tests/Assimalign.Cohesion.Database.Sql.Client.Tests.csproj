@@ -10,9 +10,8 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<!-- E2E acceptance: the typed client over the SQL model's server
-		     (SqlDatabaseServer over the Database.Server base) + a live SQL engine on
-		     the in-memory Connections driver (tests are exempt from area layering). -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
+		     (SqlDatabaseServer, implemented inside Database.Sql) + a live SQL engine
+		     on the in-memory Connections driver (tests are exempt from area layering). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
