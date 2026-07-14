@@ -128,6 +128,18 @@ Per-model satellite projects follow one matrix: `.Language` (where a language ex
 
 Crash/recovery test suites (kill the process mid-commit, replay, verify) are the acceptance bar for R1 — per-model correctness tests build on a shared crash-harness in the kernel.
 
+**The three transaction layers.** The area deliberately has three transaction contracts, one per layer — they are not redundant names for one thing:
+
+| Contract | Lives in | What it is | Lifetime |
+|---|---|---|---|
+| `IDatabaseTransaction` | `Database` (root) | The **caller's ACID bracket** a session hands out: `Id`, `IsolationLevel`, `CommitAsync`/`RollbackAsync` | one per user transaction |
+| `ITransactionContext` | `Database.Transactions` | The **logical transaction**: sequence, snapshot, lock scope, version visibility | 1:1 with the caller's bracket (the model engine binds them) |
+| `IStorageTransaction` | `Database.Storage` | The **physical WAL bracket**: pages touched, journaled mutations, page-image undo | **many per logical transaction** (per-statement brackets since the MVCC integration, §3.8) |
+
+How one `UPDATE` flows through them: the session's `IDatabaseTransaction` is bound to an MVCC `ITransactionContext` (snapshot captured, sequence allocated from the storage counter); the statement takes its row lock, then opens a *short* `IStorageTransaction` that journals only that statement's page mutations and inner-commits **non-durably**; the caller's `CommitAsync` writes one logical commit record and awaits durability once. Rollback never touches the physical layer — it is a logical undo of version stamps through the record-space version store. Crash recovery composes the same way: storage recovery replays the physical layer (page images), then transaction recovery classifies the logical layer (committed writers stand; unproven writers are scrubbed).
+
+The 1:N shape is why the physical and logical contracts cannot merge (the ARIES-style physical/logical split): a logical transaction spans many storage brackets, acknowledges durability once at the logical layer, and rolls back logically while its physical brackets stay committed. It is also why `Database.Transactions` stays a separate child root from `Database.Storage`: the reference is one-way and thin (only the journal-bound `TransactionLog` touches Storage; locks/snapshots/deadlock detection know nothing about pages), storage-only consumers exist (`Indexing`'s page surface; append-heavy models may want brackets with no MVCC), and each model engine *binds* the same concurrency machinery differently rather than reimplementing it. Watch item: Storage currently knows only two small logical-transaction facts (the shared sequence counter it allocates from, and in-flight sequences carried in checkpoint records) — if that back-channel ever grows into Storage making isolation-aware decisions, revisit the split.
+
 ### 3.7 The platform data layer (embedded consumption)
 
 Other Cohesion resources consume this area in one of two ways:
