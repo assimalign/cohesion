@@ -45,6 +45,15 @@ The platform runs in two modes, matching Cohesion's identity:
 - **Cache model is not in the MVP.** The `Database.Cache.*` projects remain (coherence/eviction is a real, distinct model) but all Cache work is deferred behind KeyValuePair.
 - **No query optimizer sophistication.** MVP planners are rule-based (predicate pushdown, index selection); cost-based optimization is a later feature with its own epic.
 
+### 2.4 Standing design principles (owner direction, 2026-07-14)
+
+These are permanent commitments, not MVP scoping — features that contradict them need the owner's explicit sign-off, not a convenient exception.
+
+- **Code-first is the prime directive.** Databases are declared and provisioned by application code — the composition path (engine API at composition time, the manifest/SDK experience) — never by server administration. Consequence: **the wire protocol deliberately carries no database-management verbs** (no `CREATE DATABASE`/`DROP DATABASE` on the wire); a client connects to a database its deployment already declared. The Application executable's before-accept provisioning is the *intended shape* of this principle, not a stopgap.
+- **The database is the maximal scope of a statement.** Session statement surfaces (DDL and DML alike) are bounded by the database the session is bound to; there are no server/cluster-level statements and there will not be. Why: the recurring industry failure mode where application databases and ETL/reporting databases intertwine on one server — separation of concerns erodes, "additive" becomes indistinguishable from "functionally needed," and the operational service bogs down under analytical weight. Scoping the statement surface to the database makes that entanglement structurally inexpressible.
+- **Identity is database-scoped.** Authentication and authorization attach to the database, not the server — there are no server-level principals granted across databases. The rejected pattern is the SQL Server-style login-vs-user split: a second principal directory layered on top of the real one, managed forever in parallel. The wire startup already binds `(database, principal)` in one handshake — that is deliberate and stays. Direction for #177 and the `Database.Security` child root: principal stores and authenticator resolution are per-database.
+- **External integration happens through explicit hooks, not shared databases.** Warehouses, ETL, and reporting tools will integrate by tapping purpose-built engine seams (future direction: change-feed/CDC-style hooks on the engines) — never by pointing analytical workloads at operational databases. The hooks are the sanctioned path that keeps the separation principle real when integration pressure arrives. (Future epic; no contracts pre-built.)
+
 ## 3. Architecture
 
 ### 3.1 Layering

@@ -73,10 +73,11 @@ is what the gateway E2E launches) until that issue lands.
   disposes the engine, quiescing its workers and flushing durably before exit. `ProcessExit` alone was rejected: it races the runtime's
   teardown; the signal registration pre-empts default termination cleanly on all
   platforms.
-- **The host provisions a default database (`app`).** The wire protocol has no
-  CREATE DATABASE verb (database provisioning is a deployment concern in the MVP),
-  so a fresh server process with zero databases would be unusable — no client
-  could bind anything. An internal `DefaultDatabaseProvisioner` host service runs
+- **The host provisions a default database (`app`).** The wire protocol carries no
+  database-management verbs **by standing design principle** (code-first
+  provisioning — area DESIGN §2.4: databases are declared by the deployment, never
+  created by clients over the wire), so a fresh server process must provision its
+  declared databases before accepting. An internal `DefaultDatabaseProvisioner` host service runs
   before the endpoint accepts (services start ahead of the servers): it opens
   `app` when its files exist (restart) and creates it on first launch. The name is a convention
   for now; a `COHESION_DATABASE_NAME` binding (mirrored by a
