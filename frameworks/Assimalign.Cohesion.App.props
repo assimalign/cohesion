@@ -250,11 +250,12 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
 
         <!-- The KeyValuePair model family (the second model - the kernel-generality
-             proof): engine + wire-protocol server, model storage, and the minimal
-             catalog. The typed client joins when it ships. -->
+             proof): engine + wire-protocol server, model storage, the minimal
+             catalog, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
         <!-- Orchestration manifest (declarative plane; references no runtime). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.ApplicationModel" />

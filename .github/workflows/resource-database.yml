@@ -45,6 +45,7 @@ jobs:
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Storage',
             'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
+            'Assimalign.Cohesion.Database.KeyValuePair.Client',
             'Assimalign.Cohesion.Database.ApplicationModel'
         ]
     steps:

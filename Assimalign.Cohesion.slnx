@@ -1614,6 +1614,10 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/Assimalign.Cohesion.Database.KeyValuePair.Catalog.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/Assimalign.Cohesion.Database.KeyValuePair.Client.csproj" />
 	</Folder>

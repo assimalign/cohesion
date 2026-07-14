@@ -303,6 +303,10 @@
 		<Project Path="Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/Assimalign.Cohesion.Database.KeyValuePair.Catalog.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/" />
+	<Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/">
+		<File Path="Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.KeyValuePair.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/">
 		<Project Path="Assimalign.Cohesion.Database.KeyValuePair.Client/src/Assimalign.Cohesion.Database.KeyValuePair.Client.csproj" />
 	</Folder>
