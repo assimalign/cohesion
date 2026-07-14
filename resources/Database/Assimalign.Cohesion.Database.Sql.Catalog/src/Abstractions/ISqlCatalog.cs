@@ -96,4 +96,22 @@ public interface ISqlCatalog
     /// </summary>
     /// <returns>The stored registrations, empty when none were saved.</returns>
     IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations();
+
+    /// <summary>
+    /// Gets the record-space format version of the database's data storage: 1 =
+    /// the pre-MVCC unstamped row layout (the value reported when no marker is
+    /// persisted), 2 = MVCC-stamped records. The catalog is the marker's home
+    /// because rows are not self-describing across format changes — the engine
+    /// reads this at open and upgrades a version-1 record space in place.
+    /// </summary>
+    int RecordSpaceFormatVersion { get; }
+
+    /// <summary>
+    /// Persists the record-space format version. Self-committing, like every
+    /// catalog write; called by the engine after a record-space upgrade (or at
+    /// database creation, when the space is born on the current format).
+    /// </summary>
+    /// <param name="version">The format version to persist.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default);
 }

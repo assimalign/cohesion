@@ -157,11 +157,24 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
             var storage = ConfigureStorage(_strategy.CreateStorage(name));
             var catalogStorage = ConfigureStorage(_strategy.CreateStorage(name + CatalogSuffix));
-            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
-            _databases[name] = database;
-            RebuildStorageSnapshotLocked();
 
-            return new ValueTask<IDatabase>(database);
+            // Publish the storages to the worker snapshot BEFORE constructing the
+            // instance: instance construction itself commits (recovery checkpoint,
+            // record-space format marker), and under grouped durability those
+            // commits need the flush worker to see the storages or they wait out
+            // the whole self-help window.
+            PublishStorageSnapshotLocked(storage, catalogStorage);
+
+            try
+            {
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
+                _databases[name] = database;
+                return new ValueTask<IDatabase>(database);
+            }
+            finally
+            {
+                RebuildStorageSnapshotLocked();
+            }
         }
     }
 
@@ -191,11 +204,22 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             var catalogStorage = ConfigureStorage(_strategy.StorageExists(name + CatalogSuffix)
                 ? _strategy.OpenStorage(name + CatalogSuffix)
                 : _strategy.CreateStorage(name + CatalogSuffix));
-            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);
-            _databases[name] = database;
-            RebuildStorageSnapshotLocked();
 
-            return new ValueTask<IDatabase>(database);
+            // See CreateDatabaseAsync: instance construction commits (recovery
+            // checkpoint, record-space upgrade), so the flush worker must see the
+            // storages first under grouped durability.
+            PublishStorageSnapshotLocked(storage, catalogStorage);
+
+            try
+            {
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);
+                _databases[name] = database;
+                return new ValueTask<IDatabase>(database);
+            }
+            finally
+            {
+                RebuildStorageSnapshotLocked();
+            }
         }
     }
 
@@ -337,6 +361,22 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         storage.GroupCommitWindow = _options.GroupCommitWindow;
         storage.OnCommitPending = _signalCommitPending;
         return storage;
+    }
+
+    /// <summary>
+    /// Publishes a provisional storage snapshot containing the open databases'
+    /// storages plus the given not-yet-registered ones — called before instance
+    /// construction so the flush/write-back workers can serve commits the
+    /// construction itself performs.
+    /// </summary>
+    private void PublishStorageSnapshotLocked(SqlStorage storage, SqlStorage catalogStorage)
+    {
+        var current = _storageSnapshot;
+        var storages = new SqlStorage[current.Length + 2];
+        current.CopyTo(storages, 0);
+        storages[^2] = storage;
+        storages[^1] = catalogStorage;
+        Volatile.Write(ref _storageSnapshot, storages);
     }
 
     /// <summary>

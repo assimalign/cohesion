@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -213,7 +214,9 @@ internal sealed class SqlPlanExecutor
                 }
             }
 
-            _storage.InsertRow(statement.StorageTransaction, SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values));
+            _storage.InsertRow(
+                statement.StorageTransaction,
+                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence));
             affected++;
         }
 
@@ -243,18 +246,15 @@ internal sealed class SqlPlanExecutor
                 updated[ordinal] = CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
             }
 
-            byte[] record = SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated);
-
-            try
-            {
-                _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, record);
-            }
-            catch (SlottedPageException)
-            {
-                // The row outgrew its page: relocate it.
-                _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
-                _storage.InsertRow(statement.StorageTransaction, record);
-            }
+            // MVCC update = version chain in the record space: tombstone the old
+            // version in place (same-length write — never relocates) and insert
+            // the new version, both stamped with this transaction's sequence. A
+            // snapshot that admits the sequence sees the new version and treats
+            // the old as deleted; one that does not sees only the old.
+            TombstoneVersion(statement, pageId, slotIndex);
+            _storage.InsertRow(
+                statement.StorageTransaction,
+                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence));
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
@@ -275,10 +275,24 @@ internal sealed class SqlPlanExecutor
 
         foreach (var (pageId, slotIndex) in targets)
         {
-            _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
+            // Tombstone, not slot removal: older snapshots must keep seeing the
+            // row until the purge worker reclaims versions below every live
+            // snapshot's horizon.
+            TombstoneVersion(statement, pageId, slotIndex);
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
+    }
+
+    /// <summary>
+    /// Stamps the record's deleter with the statement's transaction sequence —
+    /// the same-length in-place tombstone write.
+    /// </summary>
+    private void TombstoneVersion(SqlStatementContext statement, PageId pageId, int slotIndex)
+    {
+        var current = _storage.ReadRow(pageId, slotIndex);
+        byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
+        _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, tombstoned);
     }
 
     // ── DDL ────────────────────────────────────────────────────────────
@@ -317,18 +331,21 @@ internal sealed class SqlPlanExecutor
             }
         }
 
-        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
+        // The rewrite walks EVERY stored version — visible or not — because the
+        // whole record space must stay decodable on the new positional layout;
+        // stamps are preserved so visibility is unchanged by the DDL.
+        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)>();
         if (droppedOrdinal >= 0)
         {
-            foreach (var (location, values) in Scan(before, statement, cancellationToken))
+            foreach (var (location, values, writer, deleter) in ScanVersions(before, cancellationToken))
             {
-                targets.Add((location.PageId, location.SlotIndex, values));
+                targets.Add((location.PageId, location.SlotIndex, values, writer, deleter));
             }
         }
 
         var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
 
-        foreach (var (pageId, slotIndex, values) in targets)
+        foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
         {
             var spliced = new object?[values.Length - 1];
             for (int i = 0, j = 0; i < values.Length; i++)
@@ -339,7 +356,12 @@ internal sealed class SqlPlanExecutor
                 }
             }
 
-            byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced);
+            byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
+
+            if (deleter != TransactionSequence.None)
+            {
+                record = SqlRowCodec.WithDeleter(record, deleter);
+            }
 
             try
             {
@@ -368,17 +390,47 @@ internal sealed class SqlPlanExecutor
 
     // ── Scan + coercion helpers ────────────────────────────────────────
 
+    /// <summary>
+    /// Scans the table's visible row versions through the statement's snapshot:
+    /// a version is visible when its writer is admitted and its deleter (when
+    /// stamped) is not — a visible tombstone reads as absence. Exactly one
+    /// version of a logical row is visible per snapshot by construction: an
+    /// update stamps the old version's deleter with the same sequence that wrote
+    /// the new version.
+    /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Scan(
         SqlCatalogTable table,
         SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        // The statement's snapshot travels with every scan; row-level visibility
-        // filtering against it lands with the record-space version stamps (area
-        // DESIGN §3.8 step 2 — the snapshot is captured per statement here so
-        // ReadCommitted refresh semantics are already correct).
-        _ = statement.Snapshot;
+        var snapshot = statement.Snapshot;
 
+        foreach (var version in ScanVersions(table, cancellationToken))
+        {
+            if (!snapshot.IsVisible(version.Writer))
+            {
+                continue;
+            }
+
+            if (version.Deleter != TransactionSequence.None && snapshot.IsVisible(version.Deleter))
+            {
+                continue; // a visible tombstone reads as absence
+            }
+
+            yield return (version.Location, version.Values);
+        }
+    }
+
+    /// <summary>
+    /// Scans every stored version of the table's rows — visible or not — with
+    /// its stamps. DDL row rewrites use this: the whole record space must stay
+    /// decodable across a layout change, so tombstoned and concurrent versions
+    /// rewrite too, stamps preserved.
+    /// </summary>
+    private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)> ScanVersions(
+        SqlCatalogTable table,
+        CancellationToken cancellationToken)
+    {
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())
@@ -386,11 +438,11 @@ internal sealed class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = SqlRowCodec.TryDecode(unit.Data.Span, table.ObjectId, table.Columns.Count);
+            var values = SqlRowCodec.TryDecode(unit.Data.Span, table.ObjectId, table.Columns.Count, out var writer, out var deleter);
 
             if (values is not null)
             {
-                yield return ((unit.PageId, unit.SlotIndex), values);
+                yield return ((unit.PageId, unit.SlotIndex), values, writer, deleter);
             }
         }
     }

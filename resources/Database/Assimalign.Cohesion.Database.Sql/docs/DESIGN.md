@@ -13,10 +13,39 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   is deliberately thin — a cost-based planner replaces the binding internals
   later without changing the executor seam (#178's plan-stage requirement, MVP
   shape).
-- **Scans filter by object id.** Rows encode with the shared tuple codec (#854),
-  prefixed by the owning table's object id; all tables of a database share one
-  record space and scans decode-and-filter. Per-object page chains are a later
-  storage feature; the row format doesn't change for it.
+- **Row format: MVCC stamps + object-id-prefixed tuple (record-space format
+  version 2).** Every data record is `[writer u64][deleter u64]` — a fixed
+  16-byte version-stamp header, the B+Tree leaf-entry design adopted for the
+  record space — followed by the shared tuple codec payload (#854): the owning
+  table's object id, then one self-describing component per column. Why a fixed
+  binary prefix and not tuple components (the rejected alternative): (a) stamps
+  in front never disturb ADD COLUMN's O(1) null-tail decode, which depends on
+  missing components being *trailing*; (b) fixed width makes tombstoning a
+  same-length in-place write — a delete can never relocate a record; (c) stamp
+  reads don't pay tuple-decode costs on the scan hot path. All tables of a
+  database share one record space and scans decode-and-filter by the object-id
+  prefix. Per-object page chains are a later storage feature; the row format
+  doesn't change for it.
+- **Scans are snapshot-visible.** Every scan filters through the statement's
+  snapshot: a version is visible when `IsVisible(writer)` and its deleter — when
+  stamped — is *not* admitted (a visible tombstone reads as absence). Updates
+  write version chains in the record space itself: tombstone the old version in
+  place, insert the new one, both stamped with the writing transaction's
+  sequence — so exactly one version of a logical row is visible per snapshot by
+  construction, versions are WAL-covered like all record writes (restart keeps
+  them correct for free), and aborted stamps revert physically with the page
+  images. Deletes tombstone (older snapshots keep the row until the purge
+  worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
+  walk *every* stored version, visible or not, preserving stamps.
+- **Migration rule (record-space format version, catalog-persisted).** The
+  catalog stores the record-space format version (kind-4 record): 1 = the
+  pre-MVCC unstamped layout, 2 = stamped. A version-1 database upgrades in
+  place at open — every record gains a zeroed stamp header (writer 0 =
+  committed bootstrap data, visible to every snapshot) under one storage
+  transaction, marker written after. The upgrade is idempotent across the
+  two-storage crash window because a version-1 record always begins with the
+  tuple codec's nonzero Int64 tag byte, so an already-stamped record (16 zero
+  bytes in front) is provably upgraded and skipped on replay.
 - **Schema evolution:** `ADD COLUMN` is O(1) — missing trailing components decode
   as null; `DROP COLUMN` rewrites the table's rows (positional records), inside
   the caller's transaction.
@@ -46,8 +75,6 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   `context.Snapshot` exactly once per statement); `Serializable` is **rejected**
   until conflict detection exists (never run weaker than requested). Kernel
   aborts surface wrapped in the root's `DatabaseTransactionAbortedException`.
-  Concurrent readers still get **no snapshot filtering** of scans (they can
-  observe uncommitted page state) until §3.8 step 2 lands row version stamps.
   On every database open the coordinator runs `TransactionRecovery.Analyze`
   over the recovered journal (the storage strategy defers the open-time
   checkpoint for exactly this) and drives `IVersionStore.PurgeWriterAsync` for
@@ -169,11 +196,17 @@ four independently shippable steps:
    recovery analysis, and the `OldestActive` prune bound are properties of one
    database's journal and record space; a per-engine manager would couple
    unrelated databases' snapshot horizons.
-2. **Row versions + visibility (#908, next):** rows in the shared record space
-   grow writer/deleter `TransactionSequence` stamps (the B+Tree leaf-entry
-   design is the precedent — tombstone deletes, aborted stamps reverting via
-   page images); scans filter through `TransactionSnapshot.IsVisible`, closing
-   the dirty-read window.
+2. **Row versions + visibility — delivered (#908):** rows in the shared record
+   space carry writer/deleter `TransactionSequence` stamps (the B+Tree
+   leaf-entry design — tombstone deletes, aborted stamps reverting via page
+   images); scans filter through `TransactionSnapshot.IsVisible`, closing the
+   dirty-read window. **Version-layout decision:** chains live *in the record
+   space itself* (update = tombstone old + insert new) rather than copying old
+   versions out to a side store — in-space versions are WAL-covered, so restart
+   visibility is correct by construction, no stable row identity is needed
+   (the rejected copy-out design required one to key chains across record
+   relocation), and the purge worker reclaims dead versions where they lie.
+   See "Row format" and "Migration rule" under the execution model.
 3. **Row-grain write conflicts (#909):** exclusive hashed-key locks via
    `ILockManager` (the B+Tree uniqueness-lock precedent) replace page conflicts
    as the user-visible surface; deadlock victims surface as
@@ -186,9 +219,9 @@ four independently shippable steps:
 
 Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, secondary-index
 usage in plans (the B+Tree infrastructure exists — planner adoption is the next
-SQL feature), row-level MVCC visibility of scans (§3.8 step 2 — see "The MVCC
-integration" above; the session binding itself is delivered), `Serializable`
-isolation (rejected at begin), and cost-based optimization.
+SQL feature), `Serializable` isolation (rejected at begin), and cost-based
+optimization. (Row-level MVCC visibility was a non-goal of the first engine cut
+and is now delivered — see "The MVCC integration" above.)
 
 ## AOT posture
 
