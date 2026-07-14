@@ -33,18 +33,18 @@ internal sealed class SqlPlanExecutor
         _parameters = parameters;
     }
 
-    internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, IStorageTransaction transaction, CancellationToken cancellationToken)
+    internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         switch (plan)
         {
             case SqlSelectPlan select:
-                return ExecuteSelect(select, cancellationToken);
+                return ExecuteSelect(select, statement, cancellationToken);
             case SqlInsertPlan insert:
-                return ExecuteInsert(insert, transaction);
+                return ExecuteInsert(insert, statement);
             case SqlUpdatePlan update:
-                return ExecuteUpdate(update, transaction, cancellationToken);
+                return ExecuteUpdate(update, statement, cancellationToken);
             case SqlDeletePlan delete:
-                return ExecuteDelete(delete, transaction, cancellationToken);
+                return ExecuteDelete(delete, statement, cancellationToken);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
@@ -53,7 +53,7 @@ internal sealed class SqlPlanExecutor
                 await _catalog.AddColumnAsync(addColumn.Schema, addColumn.Name, addColumn.Column, cancellationToken).ConfigureAwait(false);
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             case SqlDropColumnPlan dropColumn:
-                return await ExecuteDropColumnAsync(dropColumn, transaction, cancellationToken).ConfigureAwait(false);
+                return await ExecuteDropColumnAsync(dropColumn, statement, cancellationToken).ConfigureAwait(false);
             default:
                 throw new DatabaseException($"Plan {plan.GetType().Name} is not executable.");
         }
@@ -61,12 +61,12 @@ internal sealed class SqlPlanExecutor
 
     // ── SELECT ─────────────────────────────────────────────────────────
 
-    private QueryResult ExecuteSelect(SqlSelectPlan plan, CancellationToken cancellationToken)
+    private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var matches = new List<object?[]>();
 
-        foreach (var (_, values) in Scan(plan.Table, cancellationToken))
+        foreach (var (_, values) in Scan(plan.Table, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
@@ -188,7 +188,7 @@ internal sealed class SqlPlanExecutor
 
     // ── DML ────────────────────────────────────────────────────────────
 
-    private QueryResult ExecuteInsert(SqlInsertPlan plan, IStorageTransaction transaction)
+    private QueryResult ExecuteInsert(SqlInsertPlan plan, SqlStatementContext statement)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         long affected = 0;
@@ -213,19 +213,19 @@ internal sealed class SqlPlanExecutor
                 }
             }
 
-            _storage.InsertRow(transaction, SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values));
+            _storage.InsertRow(statement.StorageTransaction, SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values));
             affected++;
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, affected);
     }
 
-    private QueryResult ExecuteUpdate(SqlUpdatePlan plan, IStorageTransaction transaction, CancellationToken cancellationToken)
+    private QueryResult ExecuteUpdate(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
-        foreach (var (location, values) in Scan(plan.Table, cancellationToken))
+        foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
@@ -247,25 +247,25 @@ internal sealed class SqlPlanExecutor
 
             try
             {
-                _storage.UpdateRow(transaction, pageId, slotIndex, record);
+                _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, record);
             }
             catch (SlottedPageException)
             {
                 // The row outgrew its page: relocate it.
-                _storage.DeleteRow(transaction, pageId, slotIndex);
-                _storage.InsertRow(transaction, record);
+                _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
+                _storage.InsertRow(statement.StorageTransaction, record);
             }
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
     }
 
-    private QueryResult ExecuteDelete(SqlDeletePlan plan, IStorageTransaction transaction, CancellationToken cancellationToken)
+    private QueryResult ExecuteDelete(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var targets = new List<(PageId PageId, int SlotIndex)>();
 
-        foreach (var (location, values) in Scan(plan.Table, cancellationToken))
+        foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
@@ -275,7 +275,7 @@ internal sealed class SqlPlanExecutor
 
         foreach (var (pageId, slotIndex) in targets)
         {
-            _storage.DeleteRow(transaction, pageId, slotIndex);
+            _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
@@ -300,7 +300,7 @@ internal sealed class SqlPlanExecutor
     /// every stored row (ADD COLUMN, by contrast, is O(1): missing trailing
     /// components decode as null).
     /// </summary>
-    private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, IStorageTransaction transaction, CancellationToken cancellationToken)
+    private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
         {
@@ -320,7 +320,7 @@ internal sealed class SqlPlanExecutor
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
         if (droppedOrdinal >= 0)
         {
-            foreach (var (location, values) in Scan(before, cancellationToken))
+            foreach (var (location, values) in Scan(before, statement, cancellationToken))
             {
                 targets.Add((location.PageId, location.SlotIndex, values));
             }
@@ -343,12 +343,12 @@ internal sealed class SqlPlanExecutor
 
             try
             {
-                _storage.UpdateRow(transaction, pageId, slotIndex, record);
+                _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, record);
             }
             catch (SlottedPageException)
             {
-                _storage.DeleteRow(transaction, pageId, slotIndex);
-                _storage.InsertRow(transaction, record);
+                _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
+                _storage.InsertRow(statement.StorageTransaction, record);
             }
         }
 
@@ -370,8 +370,15 @@ internal sealed class SqlPlanExecutor
 
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Scan(
         SqlCatalogTable table,
+        SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
+        // The statement's snapshot travels with every scan; row-level visibility
+        // filtering against it lands with the record-space version stamps (area
+        // DESIGN §3.8 step 2 — the snapshot is captured per statement here so
+        // ReadCommitted refresh semantics are already correct).
+        _ = statement.Snapshot;
+
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())

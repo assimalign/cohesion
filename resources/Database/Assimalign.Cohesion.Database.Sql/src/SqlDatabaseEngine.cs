@@ -39,6 +39,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly ISqlStorageStrategy _strategy;
 
     private SqlStorage[] _storageSnapshot = [];
+    private SqlDatabaseInstance[] _instanceSnapshot = [];
     private Exception? _workerFault;
     private bool _disposed;
 
@@ -118,6 +119,14 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     internal SqlStorage[] GetStorageSnapshot() => Volatile.Read(ref _storageSnapshot);
 
     /// <summary>
+    /// Gets a point-in-time snapshot of every open database instance, for
+    /// workers that operate through the per-database transaction coordinator
+    /// (checkpointing, version purge). Same racing-a-drop tolerance as
+    /// <see cref="GetStorageSnapshot"/>.
+    /// </summary>
+    internal SqlDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
+
+    /// <summary>
     /// Creates a new SQL database engine from options. The engine is operational —
     /// background workers running — when this method returns.
     /// </summary>
@@ -182,7 +191,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             var catalogStorage = ConfigureStorage(_strategy.StorageExists(name + CatalogSuffix)
                 ? _strategy.OpenStorage(name + CatalogSuffix)
                 : _strategy.CreateStorage(name + CatalogSuffix));
-            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
+            var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);
             _databases[name] = database;
             RebuildStorageSnapshotLocked();
 
@@ -280,6 +289,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             }
             _databases.Clear();
             _storageSnapshot = [];
+            _instanceSnapshot = [];
         }
 
         _workerStopSource.Dispose();
@@ -304,6 +314,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             snapshot = [.. _databases.Values];
             _databases.Clear();
             _storageSnapshot = [];
+            _instanceSnapshot = [];
         }
 
         foreach (var database in snapshot)
@@ -335,16 +346,20 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private void RebuildStorageSnapshotLocked()
     {
         var storages = new SqlStorage[_databases.Count * 2];
+        var instances = new SqlDatabaseInstance[_databases.Count];
         int index = 0;
+        int instanceIndex = 0;
 
         foreach (var database in _databases.Values)
         {
             var instance = (SqlDatabaseInstance)database;
             storages[index++] = instance.DataStorage;
             storages[index++] = instance.CatalogStorage;
+            instances[instanceIndex++] = instance;
         }
 
         Volatile.Write(ref _storageSnapshot, storages);
+        Volatile.Write(ref _instanceSnapshot, instances);
     }
 
     /// <summary>

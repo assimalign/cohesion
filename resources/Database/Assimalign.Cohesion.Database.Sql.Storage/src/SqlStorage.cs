@@ -80,11 +80,18 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">The storage stream for the data file (<c>.dat</c>).</param>
     /// <param name="journal">The storage stream for the journal file (<c>.log</c>).</param>
     /// <param name="backup">The storage stream for the backup file (<c>.bak</c>).</param>
+    /// <param name="checkpointOnOpen">
+    /// When true (the default), a journal with records is checkpointed (truncated)
+    /// after recovery. The SQL engine passes false so it can run
+    /// transaction-recovery analysis over the recovered journal — classification
+    /// reads lifecycle records the truncation would destroy — and checkpoints
+    /// itself afterwards.
+    /// </param>
     /// <returns>A <see cref="SqlStorage"/> loaded from the streams.</returns>
-    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup)
+    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = true)
     {
         var storage = new SqlStorage(data, journal, backup);
-        storage.OpenExisting();
+        storage.OpenExisting(checkpointOnOpen);
         return storage;
     }
 
@@ -94,11 +101,20 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">The data stream (<c>.dat</c>).</param>
     /// <param name="journal">The journal stream (<c>.log</c>).</param>
     /// <param name="backup">The backup stream (<c>.bak</c>).</param>
+    /// <param name="checkpointOnOpen">When true (the default), a journal with records is checkpointed after recovery; see the primary overload.</param>
     /// <returns>A <see cref="SqlStorage"/> loaded from the streams.</returns>
-    public static SqlStorage Open(System.IO.Stream data, System.IO.Stream journal, System.IO.Stream backup)
+    public static SqlStorage Open(System.IO.Stream data, System.IO.Stream journal, System.IO.Stream backup, bool checkpointOnOpen = true)
     {
-        return Open(new StorageStream(data), new StorageStream(journal), new StorageStream(backup));
+        return Open(new StorageStream(data), new StorageStream(journal), new StorageStream(backup), checkpointOnOpen);
     }
+
+    /// <summary>
+    /// Gets the write-ahead journal, for the engine's transaction coordinator: the
+    /// manager's journal-bound transaction log and open-time recovery analysis
+    /// (<c>TransactionRecovery.Analyze</c>) both ride the same journal the storage
+    /// brackets write page images to.
+    /// </summary>
+    internal IStorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>
     /// Inserts a row with auto-commit semantics (a single-operation durable transaction).

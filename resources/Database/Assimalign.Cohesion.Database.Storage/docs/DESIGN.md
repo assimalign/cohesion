@@ -118,6 +118,39 @@ sequence — GUID identity belongs to the transaction layer above.
    conflict surface without ever weakening the invariant that makes page-image
    logging correct.
 
+### The physical/logical bracket interplay (MVCC layering rules)
+
+The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
+engine) added three storage-side rules that keep the logical layer sound:
+
+- **One sequence namespace.** `IStorage.ReserveTransactionSequence()` +
+  `IStorage.BeginTransaction(long sequence)` let an engine's transaction manager
+  allocate from the storage's own counter and pair each logical transaction with
+  a bracket that *adopts the same sequence*. The bracket's commit record then
+  proves the logical transaction at recovery — there is no window in which page
+  images are committed under one sequence while the logical outcome hangs on
+  another, and internally sequenced brackets (catalog self-commits, auto-commit
+  record operations) can never collide with manager-assigned sequences. An
+  adopted bracket appends **no begin record** — the reserving caller's
+  transaction log owns lifecycle records; the bracket contributes page images
+  and its commit/rollback record.
+- **The sequence floor.** The file header persists the storage's high-water
+  transaction sequence (`LastTransactionSequence`, updated on every header
+  write). On open, sequence assignment resumes above `max(journal-max, floor)`:
+  a checkpoint truncates the journal — the only other sequence witness — while
+  MVCC row stamps persist in data pages, so a recycled sequence would corrupt
+  snapshot visibility. Files written before the field read zero, a safe floor
+  (they predate row stamps).
+- **Checkpoints carry logical actives; the open-time checkpoint is deferrable.**
+  `Checkpoint(ReadOnlySpan<long>)` embeds in-flight *logical* sequences in the
+  truncating checkpoint record (their begin records are being destroyed;
+  `TransactionRecovery.Analyze` reads them back so an unproven sequence still
+  classifies as aborted). Storage-level brackets must still be quiescent — the
+  active-count interlock is unchanged, and logical actives are the caller's to
+  supply because storage cannot see above its own layer. Symmetrically,
+  `OpenExisting(checkpointOnOpen: false)` lets an engine analyze the recovered
+  journal *before* the truncation destroys the records classification reads.
+
 Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
 they make recovery a pure idempotent overwrite with no operation replay logic, which
 is the property the crash suites verify. Deltas are a measured-need optimization that

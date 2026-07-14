@@ -112,10 +112,27 @@ public unsafe struct StorageFileHeader
     public long LastCheckpointLsn;
 
     /// <summary>
+    /// The highest transaction sequence assigned by this storage as of the last
+    /// header update, or zero for files written before the field existed. On open
+    /// this is the floor for new sequence assignment alongside the journal's
+    /// highest observed sequence: a checkpoint truncates the journal, and MVCC
+    /// row stamps persist in data pages, so sequences must never restart across
+    /// reopen once row versions carry them (a recycled sequence would corrupt
+    /// snapshot visibility).
+    /// </summary>
+    /// <remarks>
+    /// Carved from the front of the former reserved block; files written before
+    /// the field read zero here, which is a safe floor — they predate row
+    /// version stamps.
+    /// </remarks>
+    [FieldOffset(216)]
+    public long LastTransactionSequence;
+
+    /// <summary>
     /// Reserved bytes for future use.
     /// </summary>
-    [FieldOffset(216)]
-    public fixed byte Reserved[40];
+    [FieldOffset(224)]
+    public fixed byte Reserved[32];
 
     /// <summary>
     /// The expected magic number value for valid Cohesion storage files.

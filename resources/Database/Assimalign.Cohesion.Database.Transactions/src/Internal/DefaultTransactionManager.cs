@@ -17,16 +17,22 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     private readonly ITransactionLog _log;
     private readonly ILockManager _lockManager;
     private readonly IVersionStore _versionStore;
+    private readonly Func<TransactionSequence>? _sequenceAllocator;
     private readonly Dictionary<ulong, DefaultTransactionContext> _active = new();
     private readonly object _sync = new();
     private ulong _lastSequence;
     private bool _disposed;
 
-    internal DefaultTransactionManager(ITransactionLog log, ILockManager lockManager, IVersionStore versionStore)
+    internal DefaultTransactionManager(
+        ITransactionLog log,
+        ILockManager lockManager,
+        IVersionStore versionStore,
+        Func<TransactionSequence>? sequenceAllocator = null)
     {
         _log = log;
         _lockManager = lockManager;
         _versionStore = versionStore;
+        _sequenceAllocator = sequenceAllocator;
     }
 
     /// <inheritdoc />
@@ -67,7 +73,23 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
         lock (_sync)
         {
-            ulong sequence = ++_lastSequence;
+            // Sequence assignment and active-table insertion are atomic under the
+            // begin lock: a snapshot captured by any other transaction either sees
+            // this sequence in the active set or was taken before it existed —
+            // there is no window in which an in-flight writer reads as committed.
+            // An external allocator (an engine sharing the storage sequence space)
+            // is invoked inside the same lock for the same reason; sequences it
+            // hands out to non-manager consumers never stamp row versions, so the
+            // snapshot maximum below stays a correct visibility bound.
+            ulong sequence = _sequenceAllocator is null
+                ? ++_lastSequence
+                : _sequenceAllocator().Value;
+
+            if (sequence > _lastSequence)
+            {
+                _lastSequence = sequence;
+            }
+
             var snapshot = CaptureSnapshotLocked(new TransactionSequence(sequence));
             context = new DefaultTransactionContext(
                 this, TransactionId.NewId(), new TransactionSequence(sequence), isolationLevel, snapshot);
@@ -226,7 +248,7 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         ArgumentNullException.ThrowIfNull(context);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (context is not DefaultTransactionContext owned)
+        if (context is not DefaultTransactionContext owned || !ReferenceEquals(owned.Manager, this))
         {
             throw new TransactionAbortedException("The transaction context was not created by this manager.");
         }

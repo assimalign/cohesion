@@ -9,9 +9,9 @@ using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Tests for the isolation-level seam on the root session contract: the requested
-/// level is carried on the transaction (the surface the MVCC session binding will
-/// honor per-level), the default is Snapshot, and transactions begun at any level
-/// resolve correctly today (the engine executes conservatively at page grain).
+/// level rides an MVCC transaction context on the database's transaction manager,
+/// the default is Snapshot, and Serializable is rejected (no serialization-conflict
+/// detection yet — the engine must never run weaker than requested).
 /// </summary>
 public sealed class SqlTransactionIsolationTests
 {
@@ -39,7 +39,6 @@ public sealed class SqlTransactionIsolationTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Isolation: A requested level is carried on the transaction and commits resolve")]
     [InlineData(IsolationLevel.ReadCommitted)]
     [InlineData(IsolationLevel.Snapshot)]
-    [InlineData(IsolationLevel.Serializable)]
     public async Task BeginTransactionAsync_WithLevel_ShouldCarryLevelAndResolve(IsolationLevel isolationLevel)
     {
         // Arrange
@@ -52,10 +51,25 @@ public sealed class SqlTransactionIsolationTests
         await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)");
         await transaction.CommitAsync();
 
-        // Assert: the level rode the transaction and the commit resolved (the
-        // engine executes conservatively at page grain today — never weaker than
-        // requested).
+        // Assert: the level rode the transaction and the commit resolved through
+        // the MVCC transaction manager.
         transaction.IsolationLevel.ShouldBe(isolationLevel);
         transaction.State.ShouldBe(TransactionState.Committed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Isolation: Serializable is rejected until conflict detection exists")]
+    public async Task BeginTransactionAsync_Serializable_ShouldBeRejected()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "iso-serializable" });
+        await using var session = await CreateSessionAsync(engine);
+
+        // Act + Assert: the engine has no serialization-conflict detection, and
+        // the root contract forbids running a transaction weaker than requested —
+        // so the request is rejected rather than silently downgraded.
+        var exception = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.BeginTransactionAsync(IsolationLevel.Serializable));
+
+        exception.Message.ShouldContain("Serializable");
     }
 }

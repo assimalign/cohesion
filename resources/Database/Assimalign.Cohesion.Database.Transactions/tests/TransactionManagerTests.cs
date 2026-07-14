@@ -201,6 +201,53 @@ public class TransactionManagerTests
         manager.OldestActive.ShouldBeGreaterThan(second.Sequence);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Sequence allocator: An external allocator assigns sequences and snapshots stay correct")]
+    public async Task Begin_WithExternalSequenceAllocator_ShouldAssignFromAllocatorAndKeepSnapshotsCorrect()
+    {
+        // Arrange: an external counter standing in for a storage's sequence space,
+        // pre-advanced past values the manager never saw (a storage-side bracket).
+        ulong counter = 10;
+        var manager = TransactionManager.Create(
+            TransactionLog.CreateInMemory(),
+            LockManager.Create(),
+            VersionStore.CreateInMemory(),
+            () => new TransactionSequence(++counter));
+        await using var _ = manager;
+
+        // Act
+        var first = await manager.BeginAsync();
+        var second = await manager.BeginAsync();
+
+        // Assert: sequences come from the allocator, and the second snapshot
+        // treats the first as in-flight (invisible) while admitting everything
+        // the allocator handed out before the manager existed.
+        first.Sequence.Value.ShouldBe(11UL);
+        second.Sequence.Value.ShouldBe(12UL);
+        second.Snapshot.IsVisible(first.Sequence).ShouldBeFalse();
+        second.Snapshot.IsVisible(new TransactionSequence(5)).ShouldBeTrue();
+
+        await manager.CommitAsync(first);
+        await manager.CommitAsync(second);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Ownership: A context from another manager is rejected as aborted")]
+    public async Task Commit_ContextFromAnotherManager_ShouldThrowTransactionAborted()
+    {
+        // Arrange
+        var (managerA, _, _) = CreateKernel();
+        var (managerB, _, _) = CreateKernel();
+        await using var _ = managerA;
+        await using var __ = managerB;
+
+        var foreign = await managerB.BeginAsync();
+
+        // Act + Assert
+        await Should.ThrowAsync<TransactionAbortedException>(async () =>
+            await managerA.CommitAsync(foreign));
+
+        await managerB.RollbackAsync(foreign);
+    }
+
     private sealed class FailingCommitLog : ITransactionLog
     {
         public ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default) => default;

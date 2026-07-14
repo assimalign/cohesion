@@ -44,14 +44,31 @@ Note the deliberate simplification: a version whose writer *aborted* below `mini
 
 ## The manager implementation
 
-`TransactionManager.Create(log, lockManager, versionStore)` returns the default
-manager. Lifecycle ordering encodes the write-ahead rule: commit appends the commit
-record and awaits durability *while the transaction is still in the active table* —
-no snapshot can observe it as committed before its record is on stable storage; only
-then does it leave the table and release its locks as a set. A commit whose record
-cannot be made durable aborts (versions purged, locks released, state `Faulted`) and
-surfaces `TransactionAbortedException`. `OldestActive` is the pruning bound:
-`min(active)` or `lastAssigned + 1` when idle.
+`TransactionManager.Create(log, lockManager, versionStore, sequenceAllocator?)`
+returns the default manager. Lifecycle ordering encodes the write-ahead rule: commit
+appends the commit record and awaits durability *while the transaction is still in
+the active table* — no snapshot can observe it as committed before its record is on
+stable storage; only then does it leave the table and release its locks as a set. A
+commit whose record cannot be made durable aborts (versions purged, locks released,
+state `Faulted`) and surfaces `TransactionAbortedException`. `OldestActive` is the
+pruning bound: `min(active)` or `lastAssigned + 1` when idle. A manager rejects a
+context begun on a different manager instance (identity check, not just type check).
+
+**The sequence allocator (why an external hook and not a seed).** An engine that
+pairs manager transactions with storage brackets passes the storage's own
+allocator (`IStorage.ReserveTransactionSequence`) so both layers share **one
+sequence namespace** — the paired bracket adopts the manager's sequence, its
+commit record proves the logical transaction at recovery, and internally
+sequenced storage brackets can never collide with manager assignments. The
+alternative — seeding the manager once at open and letting two counters run —
+was rejected because any storage-side allocation after the seed (an auto-commit
+record bracket) reintroduces collisions. The allocator is invoked *inside* the
+manager's begin lock, atomically with active-table insertion, which is what
+keeps snapshot capture race-free: another transaction's snapshot either sees
+the new sequence in the active set or was taken before it existed. Sequences
+the allocator hands to non-manager consumers never stamp row versions, so the
+snapshot maximum (`lastSeen + 1`) remains a correct visibility bound even when
+it trails the storage counter.
 
 ## The lock manager implementation
 
@@ -71,30 +88,35 @@ Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error and throws nothing.
 
-## Next iteration — binding engine sessions to the manager (scoped, not yet true)
+## The engine binding (first adopter: the SQL engine)
 
-Today **no engine uses this manager**: the SQL engine isolates through
-`Database.Storage`'s page-grain single-writer transactions, and this package's
-snapshots/locks/version stores run only under their own tests — the area's
-recorded *isolation split-brain* (design: `resources/Database/DESIGN.md` §3.8;
-work items under #862). The integration keeps this package exactly as shaped:
+The area's recorded *isolation split-brain* — a complete MVCC manager no engine
+used — closed with the SQL engine's session binding (area DESIGN.md §3.8;
+work items under #862). The integration kept this package exactly as shaped:
 
 - The **model engine session** binds the root's `IDatabaseTransaction` to an
-  `ITransactionContext` from an engine-level `ITransactionManager` — the
-  binding lives above both vocabularies, per this document's "child root"
-  section; nothing here learns about the area contracts.
-- The root's isolation-level seam (`IDatabaseSession.BeginTransactionAsync(IsolationLevel, …)`,
-  landed 2026-07-13) plumbs this package's `IsolationLevel` enum end-to-end;
-  the manager's existing per-level semantics (`ReadCommitted` per-access
-  refresh, `Snapshot` fixed at begin) become engine behavior at binding time.
-- Engines adopt `IVersionStore` for row versions, `ILockManager` for row-grain
-  write conflicts (hashed-key exclusive locks — the B+Tree uniqueness
-  precedent), and activate `PurgeWriterAsync` + the `OldestActive` prune bound
-  from their version-purge workers. Recovery drives `PurgeWriterAsync` from
-  `TransactionRecovery.Analyze` for unproven sequences — the contract member
-  exists for exactly this.
-- Storage transactions remain the physical WAL bracket beneath the manager;
-  `IStorageTransactionSource` (in `Database.Indexing`) is the pairing seam.
+  `ITransactionContext` from a per-database `ITransactionManager` — the binding
+  lives above both vocabularies (`SqlTransactionCoordinator` in `Database.Sql`),
+  per this document's "child root" section; nothing here learned about the area
+  contracts. Kernel aborts cross the model boundary wrapped in the root's
+  `DatabaseTransactionAbortedException`.
+- The root's isolation-level seam plumbs this package's `IsolationLevel` enum
+  end-to-end: the manager's per-level semantics (`ReadCommitted` per-access
+  refresh, `Snapshot` fixed at begin) are engine behavior now. `Serializable`
+  is rejected by the SQL engine until serialization-conflict detection exists —
+  the contract forbids running weaker than requested.
+- The engine's transaction log is journal-bound to its storage's WAL; the
+  sequence allocator (above) unifies the sequence namespace, and the paired
+  storage bracket (adopting the manager's sequence via
+  `IStorage.BeginTransaction(long)`) is the physical WAL bracket beneath the
+  manager. `IStorageTransactionSource` (in `Database.Indexing`) is the pairing
+  seam the engine's coordinator implements. Recovery drives `PurgeWriterAsync`
+  from `TransactionRecovery.Analyze` for unproven sequences at every database
+  open — and `Analyze` reads the active-sequence list out of checkpoint records,
+  so classification survives journal truncation beneath in-flight transactions.
+- Still ahead in the §3.8 sequence: row version stamps + snapshot-visible scans
+  (#908), row-grain write conflicts through `ILockManager` (#909), and
+  version-purge worker activation (#910).
 
 ## Non-goals
 

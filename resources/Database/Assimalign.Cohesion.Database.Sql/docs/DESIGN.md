@@ -29,16 +29,32 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
-- **Transactions.** A session's explicit transaction wraps a storage transaction:
-  commit is durable via the WAL (no data-page force), rollback restores page
-  images in memory. Statements outside a transaction auto-commit. DDL flows to
-  the catalog, which self-commits on its own storage (see the catalog DESIGN.md
-  for why DDL-in-DML is out of MVP scope). The root's isolation-level seam is
-  implemented carry-only for now: the requested `IsolationLevel` rides
-  `SqlDatabaseTransaction` (default `Snapshot`), and execution is conservative —
-  writers serialize at page grain, which is stronger than any level's write
-  behavior, while concurrent readers get **no snapshot filtering** yet (they can
-  observe uncommitted page state — the area's isolation split-brain; see below).
+- **Transactions (MVCC session binding, §3.8 step 1).** Every statement —
+  explicit transaction or auto-commit — runs under an `ITransactionContext`
+  from the database's transaction manager, paired one-to-one with a storage
+  bracket that **adopts the manager's sequence** (one namespace: the bracket's
+  commit record proves the logical transaction at recovery). The per-database
+  `SqlTransactionCoordinator` owns the composition (manager + lock manager +
+  version store + journal-bound log) and implements `IStorageTransactionSource`,
+  the pairing seam. Commit/rollback flow through the *manager*: its journal-bound
+  log resolves the paired bracket, so after-images precede the commit record and
+  the durability await honors the engine's grouped/synchronous policy; rollback
+  restores page images and purges the writer from the version store. Auto-commit
+  statements ride a one-statement manager transaction, so visibility semantics
+  never fork. Isolation: `Snapshot` (default) fixes the statement snapshot at
+  begin, `ReadCommitted` re-captures per statement (the statement scope captures
+  `context.Snapshot` exactly once per statement); `Serializable` is **rejected**
+  until conflict detection exists (never run weaker than requested). Kernel
+  aborts surface wrapped in the root's `DatabaseTransactionAbortedException`.
+  Concurrent readers still get **no snapshot filtering** of scans (they can
+  observe uncommitted page state) until §3.8 step 2 lands row version stamps.
+  On every database open the coordinator runs `TransactionRecovery.Analyze`
+  over the recovered journal (the storage strategy defers the open-time
+  checkpoint for exactly this) and drives `IVersionStore.PurgeWriterAsync` for
+  every unproven sequence; the checkpoint worker checkpoints data storages
+  *through the coordinator*, so truncating checkpoint records carry in-flight
+  logical sequences. DDL flows to the catalog, which self-commits on its own
+  storage (see the catalog DESIGN.md for why DDL-in-DML is out of MVP scope).
 - **Two file sets per database:** `<name>` (data) and `<name>.catalog` — both via
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
@@ -65,7 +81,11 @@ a drop):
   pass (`PageWriteBackInterval`/`PageWriteBackBatchSize`).
 - **`SqlCheckpointWorker`** — checkpoints **both** file sets of every open database
   per pass (`CheckpointInterval`); a busy storage (`StorageTransactionException`) is
-  skipped and retried next pass.
+  skipped and retried next pass. The data file set checkpoints **through the
+  database's transaction coordinator**, so the truncating checkpoint record
+  carries every in-flight logical transaction's sequence (recovery
+  classification survives truncation); the catalog file set has no logical
+  transactions above it and checkpoints directly.
 - **`SqlVersionPurgeWorker` / `SqlIndexMaintenanceWorker`** — documented stubs: the
   engine serializes at page grain (no MVCC version store) and the index layer has no
   compaction yet. They keep the inventory — and any host mapping over it — stable;
@@ -132,27 +152,33 @@ particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged.
 
-## Next iteration — MVCC session binding (scoped under #862)
+## The MVCC integration (scoped under #862)
 
 The engine is the first adopter of the area's transaction-integration design
 (`resources/Database/DESIGN.md` §3.8), which closes the isolation split-brain in
 four independently shippable steps:
 
-1. **Binding:** `SqlDatabaseSession` begins an `ITransactionContext` on an
-   engine-level `TransactionManager` alongside the storage transaction, paired
-   through `IStorageTransactionSource`; commit/rollback flow through the manager
+1. **Binding — delivered (#907):** `SqlDatabaseSession` begins an
+   `ITransactionContext` on the database's transaction manager alongside the
+   storage bracket (one shared sequence), paired through the coordinator's
+   `IStorageTransactionSource`; commit/rollback flow through the manager
    (journal-bound log), the storage transaction stays the physical WAL bracket.
-   The carried `IsolationLevel` becomes real per-level snapshot semantics.
-2. **Row versions + visibility:** rows in the shared record space grow
-   writer/deleter `TransactionSequence` stamps (the B+Tree leaf-entry design is
-   the precedent — tombstone deletes, aborted stamps reverting via page images);
-   scans filter through `TransactionSnapshot.IsVisible`, closing the dirty-read
-   window.
-3. **Row-grain write conflicts:** exclusive hashed-key locks via `ILockManager`
-   (the B+Tree uniqueness-lock precedent) replace page conflicts as the
-   user-visible surface; deadlock victims surface as `DatabaseException`-wrapped
-   `TransactionDeadlockException` at the model boundary.
-4. **Version purge:** `SqlVersionPurgeWorker`'s stub body becomes
+   The carried `IsolationLevel` is real per-level snapshot semantics — see
+   "Transactions" under the execution model. **Scope decision:** the MVCC
+   composition is per **database**, not per engine — the journal binding,
+   recovery analysis, and the `OldestActive` prune bound are properties of one
+   database's journal and record space; a per-engine manager would couple
+   unrelated databases' snapshot horizons.
+2. **Row versions + visibility (#908, next):** rows in the shared record space
+   grow writer/deleter `TransactionSequence` stamps (the B+Tree leaf-entry
+   design is the precedent — tombstone deletes, aborted stamps reverting via
+   page images); scans filter through `TransactionSnapshot.IsVisible`, closing
+   the dirty-read window.
+3. **Row-grain write conflicts (#909):** exclusive hashed-key locks via
+   `ILockManager` (the B+Tree uniqueness-lock precedent) replace page conflicts
+   as the user-visible surface; deadlock victims surface as
+   `DatabaseException`-wrapped aborts at the model boundary.
+4. **Version purge (#910):** `SqlVersionPurgeWorker`'s stub body becomes
    `IVersionStore.PurgeWriterAsync` + the `OldestActive` prune bound — the
    worker slot was kept in the inventory precisely so this lands seam-stable.
 
@@ -160,8 +186,9 @@ four independently shippable steps:
 
 Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, secondary-index
 usage in plans (the B+Tree infrastructure exists — planner adoption is the next
-SQL feature), row-level MVCC visibility (page-grain today — see "Next iteration"
-above), and cost-based optimization.
+SQL feature), row-level MVCC visibility of scans (§3.8 step 2 — see "The MVCC
+integration" above; the session binding itself is delivered), `Serializable`
+isolation (rejected at begin), and cost-based optimization.
 
 ## AOT posture
 

@@ -38,7 +38,7 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
     /// <inheritdoc />
     public override void RunIteration(CancellationToken cancellationToken)
     {
-        foreach (SqlStorage storage in _engine.GetStorageSnapshot())
+        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -47,7 +47,13 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
 
             try
             {
-                storage.Checkpoint();
+                // The data storage checkpoints through the transaction
+                // coordinator: the truncating checkpoint record carries every
+                // in-flight logical transaction's sequence, so recovery
+                // classification survives the truncation. The catalog storage
+                // has no logical transactions above it and checkpoints directly.
+                database.CheckpointDataStorage();
+                database.CatalogStorage.Checkpoint();
             }
             catch (StorageTransactionException)
             {

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Transactions;
@@ -31,6 +32,36 @@ public static class TransactionRecovery
 
         foreach (var record in journal.ReadAll())
         {
+            // A checkpoint record's payload lists the transaction sequences that
+            // were still active when the journal was truncated — their begin
+            // records were dropped by the truncation, so the checkpoint is their
+            // classification anchor: an active sequence with no later commit
+            // record is aborted, exactly as if its begin record survived.
+            if (record.Type == JournalRecordType.Checkpoint)
+            {
+                var payload = record.Payload.Span;
+
+                for (int offset = 0; offset + sizeof(long) <= payload.Length; offset += sizeof(long))
+                {
+                    long active = BinaryPrimitives.ReadInt64LittleEndian(payload.Slice(offset, sizeof(long)));
+
+                    if (active <= 0)
+                    {
+                        continue;
+                    }
+
+                    var activeSequence = new TransactionSequence((ulong)active);
+                    seen.Add(activeSequence);
+
+                    if (activeSequence.Value > maxSequence)
+                    {
+                        maxSequence = activeSequence.Value;
+                    }
+                }
+
+                continue;
+            }
+
             if (record.TransactionSequence <= 0)
             {
                 continue;

@@ -174,15 +174,24 @@ public abstract class Storage : IStorage
     /// <summary>
     /// Opens an existing storage file set: validates the file header, replays the
     /// write-ahead log (redo committed work, undo uncommitted work), reconstructs the
-    /// free-space map from page headers, and checkpoints so the journal starts clean.
+    /// free-space map from page headers, and — unless the caller defers it —
+    /// checkpoints so the journal starts clean.
     /// </summary>
+    /// <param name="checkpointOnOpen">
+    /// When true (the default), a journal with records is checkpointed (truncated)
+    /// once recovery completes. An engine that must analyze the recovered journal
+    /// first — transaction-recovery classification reads lifecycle records the
+    /// truncation would destroy — passes false and checkpoints itself afterwards.
+    /// </param>
     /// <exception cref="StorageCorruptionException">The file header page fails checksum verification.</exception>
     /// <exception cref="StorageIOException">The file header is not a valid Cohesion storage header.</exception>
-    protected unsafe void OpenExisting()
+    protected unsafe void OpenExisting(bool checkpointOnOpen = true)
     {
         var headerBuffer = new byte[Page.Size];
         Data.ReadPage((PageId)0L, headerBuffer);
         PageChecksum.Verify(headerBuffer, (PageId)0L);
+
+        long sequenceFloor;
 
         fixed (byte* ptr = headerBuffer)
         {
@@ -214,6 +223,8 @@ public abstract class Storage : IStorage
             _name = nameLen > 0
                 ? (Name)Encoding.UTF8.GetString(nameBytes, 0, nameLen)
                 : (Name)"";
+
+            sequenceFloor = header->LastTransactionSequence;
         }
 
         // Recover before anything reads pages: redo committed changes that never
@@ -221,7 +232,12 @@ public abstract class Storage : IStorage
         _journal = new StreamJournal(Journal, leaveOpen: true);
         _bufferPool.WriteAheadGate = lsn => _journal.EnsureDurable(lsn);
         bool journalHadRecords = _journal.LastLsn > 0;
-        _nextTransactionSequence = StorageRecovery.Run(Data, _journal);
+
+        // Sequence assignment resumes above both the journal's highest observed
+        // sequence and the header floor persisted at the last checkpoint — the
+        // journal alone is insufficient because checkpoints truncate it while row
+        // version stamps persist in data pages.
+        _nextTransactionSequence = Math.Max(StorageRecovery.Run(Data, _journal), sequenceFloor);
 
         // Rebuild the free-space map and locate the last data page in one pass over
         // the on-disk page headers. The stream length is the source of truth for the
@@ -262,7 +278,7 @@ public abstract class Storage : IStorage
         _currentWritePageId = lastDataPage;
 
         // Everything the journal described is now in the data file; start it clean.
-        if (journalHadRecords)
+        if (journalHadRecords && checkpointOnOpen)
         {
             Checkpoint();
         }
@@ -292,6 +308,49 @@ public abstract class Storage : IStorage
     }
 
     /// <inheritdoc />
+    public long ReserveTransactionSequence()
+    {
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        lock (_transactionLock)
+        {
+            return ++_nextTransactionSequence;
+        }
+    }
+
+    /// <inheritdoc />
+    public IStorageTransaction BeginTransaction(long sequence)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sequence);
+
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        lock (_transactionLock)
+        {
+            // Adopted sequences normally come from ReserveTransactionSequence, but
+            // keep the counter monotonic even for a caller that minted its own —
+            // a later internally assigned sequence must never collide.
+            if (sequence > _nextTransactionSequence)
+            {
+                _nextTransactionSequence = sequence;
+            }
+
+            _activeTransactionCount++;
+        }
+
+        // Deliberately no begin record: the reserving caller's transaction log owns
+        // the lifecycle records (see IStorage.BeginTransaction(long)); page images
+        // journaled by this bracket carry the sequence, which is all recovery needs.
+        return new StorageTransaction(this, sequence);
+    }
+
+    /// <inheritdoc />
     public IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId)
     {
         var owner = ValidateTransaction(transaction);
@@ -317,7 +376,10 @@ public abstract class Storage : IStorage
     }
 
     /// <inheritdoc />
-    public void Checkpoint()
+    public void Checkpoint() => Checkpoint(ReadOnlySpan<long>.Empty);
+
+    /// <inheritdoc />
+    public void Checkpoint(ReadOnlySpan<long> activeTransactionSequences)
     {
         // The whole checkpoint runs under the transaction lock: BeginTransaction
         // increments the active count under the same lock, so no transaction can
@@ -334,7 +396,7 @@ public abstract class Storage : IStorage
             UpdateFileHeader();
             _pageManager?.FlushAll();
             Data.FlushDurable();
-            long? checkpointLsn = _journal?.Checkpoint(ReadOnlySpan<long>.Empty);
+            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences);
 
             if (checkpointLsn is not null)
             {
@@ -864,11 +926,26 @@ public abstract class Storage : IStorage
             return;
         }
 
+        long lastSequence;
+        lock (_transactionLock)
+        {
+            lastSequence = _nextTransactionSequence;
+        }
+
         using var handle = _pageManager.GetPage((PageId)0L);
         var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
         header->TotalPageCount = _pageManager.PageCount;
         header->FreePageCount = _pageManager.FreePageCount;
         header->ModifiedAtUtcTicks = DateTime.UtcNow.Ticks;
+
+        // The sequence floor: after a checkpoint truncates the journal, this is
+        // what keeps sequence assignment monotonic across reopen (row version
+        // stamps persist in data pages and must never see a recycled sequence).
+        if (lastSequence > header->LastTransactionSequence)
+        {
+            header->LastTransactionSequence = lastSequence;
+        }
+
         handle.MarkDirty();
     }
 }
