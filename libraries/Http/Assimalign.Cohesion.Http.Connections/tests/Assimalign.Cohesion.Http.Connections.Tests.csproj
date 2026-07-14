@@ -13,6 +13,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.InterimResponses" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+		<!-- Test-only: proves the Content-Digest verifier's lazy verify-on-read path against the real
+		     h2 frame pump and flow-controlled body pipe (#876). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.DigestFields" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionPackageReference Include="coverlet.collector" />

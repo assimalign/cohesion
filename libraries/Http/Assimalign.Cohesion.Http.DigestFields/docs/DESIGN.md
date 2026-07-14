@@ -97,40 +97,74 @@ reflection" mandate literally:
    untouched (nothing this library can verify).
 2. A malformed `Content-Digest` → **fail closed**: throw `HttpRequestRejectedException(400)`. RFC
    9530 §2 lets a recipient either ignore or reject; an *operator-installed verifier* should not
-   silently accept a field it cannot parse.
-3. Otherwise read the (already-materialized) body in full, verify it against every supported digest
-   with constant-time comparison (`CryptographicOperations.FixedTimeEquals`), and either reject a
-   mismatch with `HttpRequestRejectedException(400)` or return a replay stream so the application
-   still observes the body.
+   silently accept a field it cannot parse. Parsing is CPU-only, so this pre-dispatch rejection
+   holds on **every** protocol.
+3. Otherwise verify — in one of two modes, chosen by `context.Version`.
 
-Why **eager buffer-and-replay** rather than a lazy verify-on-read wrapper: on HTTP/1.1 the transport
-already materializes the request body into a `MemoryStream` **before** `AfterRequestBody` runs (and
-catches `HttpRequestRejectedException` on its parse path, ahead of dispatch). Reading it there is
-therefore CPU-only — it adds no wire wait — and lets the rejection happen **before the application
-runs**, so the transport answers a real, deterministic `400` and closes the connection. A lazy
-wrapper would only discover the mismatch mid-application-read, after dispatch, where there is no
-transport-answered status today. The cost is one transient extra copy of the body, bounded by the
-`HttpConnectionListenerLimits.MaxRequestBodySize` cap the request-limits package enforces.
+### Two verification modes, chosen by where the verdict is affordable
 
-Two ordering/coverage notes:
+**Eager buffer-and-replay (HTTP/1.1, HTTP/3).** The hook reads the body in full, verifies against
+every supported digest with constant-time comparison (`CryptographicOperations.FixedTimeEquals`),
+and either rejects a mismatch with `HttpRequestRejectedException(400)` or returns a replay stream
+(`HttpDigestReplayStream`) so the application still observes the body. The rejection happens
+**before the application runs**, so the transport answers a real, deterministic `400` (h1) or
+resets the request stream (h3) with no application involvement. The in-hook full read is free
+exactly there: h3 hands the hook a fully received body (drained before header decode), and the h1
+parse path is its own body reader — the post-#810 streamed body is pulled from the wire by the
+same logical flow that runs the hook, and the peer needs nothing from the server to keep sending
+(the `Expect: 100-continue` solicitation is emitted by the body stream's own first read). The cost
+is one transient extra copy of the body, bounded by the request-limits cap on h1.
 
-- **Register the verifier first**, before any content-decoding interceptor. `Content-Digest` is
-  taken over the message content *as received* (post-content-coding, on the wire), so it must be
-  verified against the raw body before a decompression wrapper transforms it.
-- **All three protocols run the seam, but the eager full read is only safe where the body is
-  already received.** As of #819 the h1 parser and the h2/h3 context-construction sites all
-  invoke the request-parse hooks. h1 and h3 hand `AfterRequestBody` a fully received body, so the
-  verifier's in-hook full read is CPU-only there. On h2, however, the hooks run on the
-  connection's single frame pump and the body may still be **arriving** under flow-control
-  backpressure — an in-hook blocking read of a still-incomplete body would stall the very pump
-  that feeds it (the hook contract's CPU-only rule exists for exactly this). The eager
-  buffer-and-replay verifier is therefore correct for h1/h3 today; verifying h2 streamed bodies
-  needs a lazy verify-on-read wrapper (or verification at body completion) and is tracked as
-  follow-up work rather than papered over here.
+**Lazy verify-on-read (HTTP/2 — and, defensively, any version not proven eager-safe).** On h2 the
+parse hooks run on the connection's **single frame pump** and the body is a live
+`Http2RequestBodyStream` that may still be arriving under flow-control backpressure (#750): an
+in-hook read would wait for DATA frames only the blocked pump can deliver, deadlocking every
+multiplexed stream on the connection. So the hook stays CPU-only — it wraps the body in
+`HttpDigestVerifyingStream` and reads nothing. The wrapper feeds every octet the application reads
+into one BCL `IncrementalHash` per supported digest entry (zero double-buffering; the only copy of
+the body is the flow-control-bounded pipe the transport already owns) and resolves the verdict on
+the **terminal read** — the read that observes end-of-body:
 
-The replay stream (`HttpDigestReplayStream`) owns the original body it replaced and disposes it when
-the exchange disposes the stream chain, honoring the seam's "a wrapper owns the stream it wraps"
-contract.
+- **Match** → the terminal read returns `0`; the application saw a normal body end-to-end.
+- **Mismatch** → the terminal read throws `HttpContentDigestMismatchException` (naming the first
+  failing algorithm in field order), and every subsequent read rethrows it — the failure is
+  sticky, so a consumer that swallows it once cannot go on treating the stream as verified.
+
+The mode switch is deliberately an allow-list (`Http11`/`Http30` eager, everything else lazy):
+eager is an *optimization* that must be proven safe per protocol, while lazy is safe everywhere
+because the hook performs no I/O. An unknown future version therefore degrades to correctness,
+not to a deadlock.
+
+### Mid-stream rejection semantics (the lazy path's contract)
+
+Once the application has begun consuming a streamed body, a digest mismatch can no longer become
+a clean pre-dispatch `400` — the content was already observed and the exchange is running. The
+contract, per the seam's layering rule (interceptors are wiring; aborting is an application-layer
+act):
+
+- The typed failure surfaces **on the terminal body read** (`HttpContentDigestMismatchException`,
+  `HttpErrorCode.ReadingError`), never earlier — the verdict does not exist until every content
+  octet has been hashed.
+- The application (or the hosting layer that installed the verifier) must treat the body as
+  corrupt, discard anything derived from it, and abort the exchange via `IHttpContext.Cancel`.
+  The transport answers the abort with its per-exchange reset — on h2, `RST_STREAM(CANCEL)` from
+  the exchange abort path — instead of writing a response. There is deliberately no
+  transport-automatic abort: the seam has no abort verb, and the application may prefer to answer
+  (e.g. `422`) rather than reset.
+- **A body the application never drains is never verified.** Lazy verification can only cover
+  what is consumed; a handler that responds without reading to end-of-body has waived
+  verification for the unread remainder. Operators who need an unconditional verdict must drain
+  the body (h2) or rely on the eager protocols.
+
+Both wrapper streams own the body they replace and dispose it when the exchange disposes the
+stream chain, honoring the seam's "a wrapper owns the stream it wraps" contract
+(`HttpDigestVerifyingStream` also disposes its running hashes at verdict or disposal, whichever
+comes first).
+
+One ordering note applies to both modes: **register the verifier first**, before any
+content-decoding interceptor. `Content-Digest` is taken over the message content *as received*
+(post-content-coding, on the wire), so it must be verified against the raw body before a
+decompression wrapper transforms it.
 
 ## Response stamping and Want-* honoring
 
@@ -158,8 +192,9 @@ When those land, `Repr-Digest` verification is a drop-in on the same value model
 No reflection, no runtime codegen. Hashing is BCL `IncrementalHash` over fixed `HashAlgorithmName`
 values; comparison is `CryptographicOperations.FixedTimeEquals`; parsing reuses core's span-based
 structured-fields parser. The value objects are readonly structs over a single array; the
-interceptor is one small allocation per verified request (only when a `Content-Digest` is present
-and verifiable).
+interceptor allocates only for a verified request (a `Content-Digest` present and verifiable):
+one transient body copy plus the replay stream on the eager path, or the verifying wrapper plus
+one `IncrementalHash` per supported entry — and **no body copy at all** — on the lazy path.
 
 ## Non-goals and honest gaps
 

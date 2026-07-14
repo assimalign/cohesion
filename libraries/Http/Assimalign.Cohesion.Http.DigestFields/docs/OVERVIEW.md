@@ -17,8 +17,12 @@ request verifier.
   parse but never used (RFC 9530 §5).
 - **Server verification:** `HttpDigestFields.CreateContentDigestVerifier()` returns an
   `IHttpExchangeInterceptor` the composition root registers on its listener; it verifies an inbound
-  `Content-Digest` against the request body and rejects a mismatch (or a malformed field) with
-  `400 Bad Request` before dispatch.
+  `Content-Digest` against the request body. On HTTP/1.1 and HTTP/3 verification is eager and a
+  mismatch is rejected with `400 Bad Request` before dispatch; on HTTP/2 (whose body streams in
+  under flow control after dispatch) it is lazy — the body is hashed incrementally as the
+  application reads, and a mismatch surfaces as `HttpContentDigestMismatchException` on the
+  terminal body read, after which the application aborts the exchange (`IHttpContext.Cancel` →
+  `RST_STREAM`). A malformed field is a pre-dispatch `400` on every protocol.
 - **Response stamping:** `IHttpResponse.SetContentDigest(...)` computes and stamps `Content-Digest`,
   honoring the request's `Want-Content-Digest` preference ordering; `HttpContentDigester` is the
   incremental "hash as you write" primitive for the trailer-borne streamed case.
@@ -38,4 +42,5 @@ if (HttpDigestField.TryParse(headerValue, out var field) &&
 ```
 
 See `docs/DESIGN.md` for the placement rationale (consumer of the structured-fields toolkit), the
-eager buffer-and-replay verification model, and the Content-Digest vs Repr-Digest scope.
+two verification modes (eager buffer-and-replay vs. lazy verify-on-read) and the mid-stream
+rejection semantics, and the Content-Digest vs Repr-Digest scope.
