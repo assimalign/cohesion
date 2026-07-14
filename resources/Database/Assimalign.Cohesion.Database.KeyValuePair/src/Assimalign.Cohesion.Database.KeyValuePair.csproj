@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+		<!-- Direct (not just transitive via KeyValuePair.Storage): the engine's public
+		     options surface exposes StorageCommitDurability and its workers drive the
+		     IStorage worker seams. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

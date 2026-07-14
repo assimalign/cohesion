@@ -14,6 +14,6 @@
 		<Content Include="xunit.runner.json" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
 	</ItemGroup>
 </Project>
