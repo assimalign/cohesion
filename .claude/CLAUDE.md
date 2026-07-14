@@ -28,13 +28,3 @@ pwsh installer/scripts/Install-Local.ps1    # dev loop: pack all SDKs + framewor
 ```
 
 Outputs land in `_out/packages/` and `_out/dotnet/sdk/`. In a **fresh worktree**, build `build/Tasks` first — per-project builds fail with MSB4062 until the build tasks exist.
-
-## graphify knowledge graph
-
-The repo has a code knowledge graph at `graphify-out/` (machine-local build artifact; only `GRAPH_REPORT.md` is tracked). Machines that ran `graphify hook install` get automatic post-commit graph refreshes.
-
-- For codebase questions, run `graphify query "<question>"` first when `graphify-out/graph.json` exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for a focused node — these return scoped subgraphs far smaller than raw grep output.
-- **In a linked worktree without `graphify-out/graph.json`:** run `pwsh .claude/scripts/Initialize-GraphifyWorktree.ps1` once (it junctions the main checkout's graph in), then query normally. Do this automatically the first time a codebase question comes up; don't ask.
-- Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when query/path/explain don't surface enough context.
-- If the graphify post-commit hook is installed (this machine's default), graph maintenance is automatic — run `graphify update .` manually only when uncommitted changes must be reflected. Without the hook, run it after committing code. On Windows set `$env:GRAPHIFY_MAX_WORKERS = 1` first.
-- If `graphify` isn't available on this machine, fall back to normal code search — the graph is an accelerator, not a gate.

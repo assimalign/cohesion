@@ -10,14 +10,6 @@
 .claude/settings.json
 CLAUDE.local.md
 
-# graphify knowledge graph: the graph itself (graph.json, cache/, manifest,
-# dated backups) is a machine-local build artifact - regenerable from source
-# with zero LLM cost. Only the readable report is tracked. The pattern must be
-# graphify-out/* (not bare graphify-out): negations can't re-include files
-# inside a directory that is itself ignored.
-graphify-out/*
-!graphify-out/GRAPH_REPORT.md
-
 .dotnet-cli-home
 .codex-temp
 
