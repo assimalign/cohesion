@@ -71,6 +71,31 @@ Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error and throws nothing.
 
+## Next iteration — binding engine sessions to the manager (scoped, not yet true)
+
+Today **no engine uses this manager**: the SQL engine isolates through
+`Database.Storage`'s page-grain single-writer transactions, and this package's
+snapshots/locks/version stores run only under their own tests — the area's
+recorded *isolation split-brain* (design: `resources/Database/DESIGN.md` §3.8;
+work items under #862). The integration keeps this package exactly as shaped:
+
+- The **model engine session** binds the root's `IDatabaseTransaction` to an
+  `ITransactionContext` from an engine-level `ITransactionManager` — the
+  binding lives above both vocabularies, per this document's "child root"
+  section; nothing here learns about the area contracts.
+- The root's isolation-level seam (`IDatabaseSession.BeginTransactionAsync(IsolationLevel, …)`,
+  landed 2026-07-13) plumbs this package's `IsolationLevel` enum end-to-end;
+  the manager's existing per-level semantics (`ReadCommitted` per-access
+  refresh, `Snapshot` fixed at begin) become engine behavior at binding time.
+- Engines adopt `IVersionStore` for row versions, `ILockManager` for row-grain
+  write conflicts (hashed-key exclusive locks — the B+Tree uniqueness
+  precedent), and activate `PurgeWriterAsync` + the `OldestActive` prune bound
+  from their version-purge workers. Recovery drives `PurgeWriterAsync` from
+  `TransactionRecovery.Analyze` for unproven sequences — the contract member
+  exists for exactly this.
+- Storage transactions remain the physical WAL bracket beneath the manager;
+  `IStorageTransactionSource` (in `Database.Indexing`) is the pairing seam.
+
 ## Non-goals
 
 - No distributed transactions / two-phase commit — single-node ACID first.

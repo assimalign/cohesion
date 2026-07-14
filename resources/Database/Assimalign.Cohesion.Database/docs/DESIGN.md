@@ -98,6 +98,21 @@ surface. Child roots never reference the root.
   requests — would couple the one shared network front-end to every model and
   violate the area's composition rules. Each model implements the text seam with
   its own parser (`SqlDatabaseSession` → `SqlQueryRequest.FromSql`).
+- **The isolation-level seam consumes the Transactions child's enum directly**
+  (2026-07-13, with the MVCC-integration design — area DESIGN.md §3.8).
+  `IDatabaseSession.BeginTransactionAsync(IsolationLevel, …)` and
+  `IDatabaseTransaction.IsolationLevel` speak `Database.Transactions`'
+  `IsolationLevel` — the same pattern as `TransactionId`/`TransactionState`:
+  post-inversion, the root consumes child vocabulary rather than duplicating
+  it. The rejected alternative — a root-owned isolation enum mapped onto the
+  child's — would create two vocabularies for one concept and a translation
+  layer with no owner. The contract deliberately allows engines to run
+  *stronger* than requested (the SQL engine's page-grain serialization today),
+  never weaker, so the seam could land ahead of the MVCC session binding
+  without lying about semantics. No speculative MVCC contracts were added to
+  the root: the manager's contracts already live in the Transactions child
+  root, and the binding is a model-engine concern (the design doc explains the
+  placement).
 - **`DatabaseParseException` as a first-class error category.** Parse failures
   and execution failures have different wire error codes (`ParseFailure` vs
   `ExecutionFailure`) and different caller responses (fix the text vs inspect

@@ -16,10 +16,11 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
     private TransactionState _state;
 
-    internal SqlDatabaseTransaction(TransactionId id, IStorageTransaction storageTransaction)
+    internal SqlDatabaseTransaction(TransactionId id, IStorageTransaction storageTransaction, IsolationLevel isolationLevel = IsolationLevel.Snapshot)
     {
         Id = id;
         StorageTransaction = storageTransaction;
+        IsolationLevel = isolationLevel;
         _state = TransactionState.Active;
     }
 
@@ -28,6 +29,16 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 
     /// <inheritdoc />
     public TransactionState State => _state;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Carried for the contract; the engine currently executes every level
+    /// conservatively — writers serialize at page grain through the storage
+    /// transaction, which is stronger than any requested level's write behavior.
+    /// Per-level snapshot visibility lands with the MVCC session binding (see the
+    /// transaction-integration design in <c>resources/Database/DESIGN.md</c>).
+    /// </remarks>
+    public IsolationLevel IsolationLevel { get; }
 
     /// <summary>
     /// Gets the storage-level transaction the executor mutates through.

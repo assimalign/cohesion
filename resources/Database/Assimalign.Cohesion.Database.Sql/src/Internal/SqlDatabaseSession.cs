@@ -40,6 +40,16 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
     /// <inheritdoc />
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The requested level is carried on the transaction; execution is
+    /// conservative — writers serialize at page grain through the storage
+    /// transaction (stronger than any level's write behavior). Per-level snapshot
+    /// visibility arrives with the MVCC session binding.
+    /// </remarks>
+    public ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
         cancellationToken.ThrowIfCancellationRequested();
@@ -49,7 +59,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
-        _transaction = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction());
+        _transaction = new SqlDatabaseTransaction(TransactionId.NewId(), _storage.BeginTransaction(), isolationLevel);
 
         return new ValueTask<IDatabaseTransaction>(_transaction);
     }

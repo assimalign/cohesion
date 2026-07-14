@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -33,12 +34,32 @@ public interface IDatabaseSession : IAsyncDisposable
     IDatabaseTransaction? CurrentTransaction { get; }
 
     /// <summary>
-    /// Begins an explicit ACID transaction within this session.
+    /// Begins an explicit ACID transaction within this session, at the default
+    /// isolation level (<see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A new transaction instance.</returns>
     /// <exception cref="DatabaseException">Thrown when a transaction is already active.</exception>
     ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Begins an explicit ACID transaction within this session at the requested
+    /// isolation level.
+    /// </summary>
+    /// <param name="isolationLevel">The isolation level the transaction executes under (the <c>Database.Transactions</c> vocabulary the root consumes through its child-root reference).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A new transaction instance.</returns>
+    /// <exception cref="DatabaseException">Thrown when a transaction is already active, or when the engine does not support <paramref name="isolationLevel"/>.</exception>
+    /// <remarks>
+    /// The requested level is carried on the returned transaction
+    /// (<see cref="IDatabaseTransaction.IsolationLevel"/>). An engine may honor a
+    /// request conservatively by running at a <em>stronger</em> level than asked —
+    /// the SQL engine currently serializes writers at page grain, for example —
+    /// but must never run weaker than requested. Per-level MVCC snapshot
+    /// semantics land with the engines' MVCC session binding (the
+    /// transaction-integration design in <c>resources/Database/DESIGN.md</c>).
+    /// </remarks>
+    ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Executes a query request against the database.

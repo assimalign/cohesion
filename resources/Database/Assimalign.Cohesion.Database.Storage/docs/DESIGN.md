@@ -110,7 +110,13 @@ sequence — GUID identity belongs to the transaction layer above.
 5. **Page-level single-writer.** A page touched by an active transaction is
    write-locked to it (conflicts throw rather than wait). Record-level concurrency is
    `Database.Transactions`' job above this layer; full-image logging is only correct
-   because two transactions can never interleave on one page.
+   because two transactions can never interleave on one page. This division is
+   permanent in the MVCC integration design (area DESIGN.md §3.8): storage
+   transactions remain the **physical WAL bracket** — the MVCC manager layers
+   row-grain snapshots/locks *above* them (paired per transaction via
+   `IStorageTransactionSource`), and page locks stop being the user-visible
+   conflict surface without ever weakening the invariant that makes page-image
+   logging correct.
 
 Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
 they make recovery a pure idempotent overwrite with no operation replay logic, which
