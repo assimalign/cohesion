@@ -1,46 +1,33 @@
 # Assimalign.Cohesion.Web — Overview
 
 The Web area root: the pipeline and composition abstractions every Web library builds
-against, plus the small set of middleware that is foundational to the rest of the
-pipeline rather than a feature of its own.
+against. It is contracts-first and feature-free by design.
 
 ## Scope
 
-- **Pipeline contracts** — `IWebApplication`, `IWebApplicationBuilder`,
-  `IWebApplicationPipeline` / `IWebApplicationPipelineBuilder`,
-  `IWebApplicationMiddleware`, the `WebApplicationMiddleware` delegate, and
-  `IWebApplicationServer`. Feature libraries (`Assimalign.Cohesion.Web.<Feature>`)
-  compose against these seams; the runtime module (`Assimalign.Cohesion.Web.Hosting`)
-  implements them. See `resources/Web/README.md` for the area dependency rule that keeps
-  those two directions apart.
-- **Forwarded-headers resolution** — the first-position middleware that resolves the
-  effective client address/scheme/host behind proxies under an explicit trust model
-  (`UseForwardedHeaders`, `ForwardedHeadersOptions`, the `ForwardedHeaders` header
-  selection). It consumes the RFC 7239 / `X-Forwarded-*` parsing primitives from
-  `Assimalign.Cohesion.Http` and publishes results as the `IHttpForwardedFeature`
-  defined there. It lives in the root — not a feature package — because nearly every
-  other pipeline concern (CORS, authentication, cookie policy, redirects, logging)
-  consumes its output.
+- **Application/builder contracts** — `IWebApplication`, `IWebApplicationBuilder`,
+  `IWebApplicationContext`, and the server seam `IWebApplicationServer`.
+- **The middleware-first pipeline** — `IWebApplicationPipeline`,
+  `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, the
+  `WebApplicationMiddleware` delegate, and the inline `Use(...)` adapter sugar in
+  `WebApplicationExtensions`.
+
+Feature libraries (`Assimalign.Cohesion.Web.<Feature>`) reference this root and ship
+their own `Add<Feature>`/`Use<Feature>` verbs against these seams; the runtime module
+(`Assimalign.Cohesion.Web.Hosting`) implements the contracts. The build-enforced
+hosting-isolation rule that keeps those two directions apart is documented in
+`resources/Web/README.md`.
 
 ## Dependencies
 
 `Assimalign.Cohesion.Http` only. The root deliberately has no DI, configuration, or
-logging references — composition integration is `Web.Hosting`'s job.
+logging references — composition integration is `Web.Hosting`'s job — and it absorbs no
+feature models, so referencing it never drags a feature surface along.
 
 ## Usage
 
-```csharp
-app.UseForwardedHeaders(options =>
-{
-    options.Headers = ForwardedHeaders.XForwarded;              // what the proxy manages
-    options.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));   // who is allowed to forward
-    options.ForwardLimit = 2;                                    // how deep the chain may go
-});
-// ...every identity-consuming middleware follows...
-```
-
-`UseForwardedHeaders` must be the **first** middleware registered — see the ordering
-contract in [DESIGN.md](DESIGN.md). Downstream code reads the resolved identity through
-`context.EffectiveScheme` / `context.EffectiveHost` / `context.EffectiveRemoteIp` /
-`context.EffectiveRemoteEndPoint` (or the `IHttpForwardedFeature` directly); the raw
-request headers and wire-level scheme/host/connection surfaces are never mutated.
+Applications rarely reference this package directly: `Sdk.Web` delivers the whole
+family through the `App.Web` shared framework, and feature verbs (for example
+`UseRouting` from `Web.Routing` or `UseForwardedHeaders` from `Web.ForwardedHeaders`)
+compose against the `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder` seams
+defined here.

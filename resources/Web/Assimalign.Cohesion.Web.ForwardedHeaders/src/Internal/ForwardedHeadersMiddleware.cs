@@ -1,8 +1,9 @@
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web;
 
-namespace Assimalign.Cohesion.Web.Internal;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 
 /// <summary>
 /// The forwarded-headers middleware: runs the trust-model resolution for the exchange

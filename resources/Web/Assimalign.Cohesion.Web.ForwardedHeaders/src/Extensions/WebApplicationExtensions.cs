@@ -1,11 +1,12 @@
 using System;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Internal;
+using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders;
 
-public static partial class WebApplicationExtensions
+public static class WebApplicationExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
@@ -36,7 +37,7 @@ public static partial class WebApplicationExtensions
         /// <param name="configure">Configures the trust model. <see cref="ForwardedHeadersOptions.Headers"/> must select at least one header.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Thrown when the configured <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaders.None"/> or a trust list contains a null entry.</exception>
+        /// <exception cref="ArgumentException">Thrown when the configured <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaderNames.None"/> or a trust list contains a null entry.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the configured <see cref="ForwardedHeadersOptions.ForwardLimit"/> is less than 1.</exception>
         public IWebApplicationPipelineBuilder UseForwardedHeaders(Action<ForwardedHeadersOptions> configure)
         {
@@ -57,7 +58,7 @@ public static partial class WebApplicationExtensions
         /// <param name="options">The trust-model options. Validated and snapshotted at composition time.</param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">Thrown when <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaders.None"/> or a trust list contains a null entry.</exception>
+        /// <exception cref="ArgumentException">Thrown when <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaderNames.None"/> or a trust list contains a null entry.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when <see cref="ForwardedHeadersOptions.ForwardLimit"/> is less than 1.</exception>
         public IWebApplicationPipelineBuilder UseForwardedHeaders(ForwardedHeadersOptions options)
         {

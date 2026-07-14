@@ -6,10 +6,10 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Internal;
-using Assimalign.Cohesion.Web.Tests.TestObjects;
+using Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
+using Assimalign.Cohesion.Web.ForwardedHeaders.Tests.TestObjects;
 
-namespace Assimalign.Cohesion.Web.Tests;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Tests;
 
 /// <summary>
 /// Unit coverage for the trust-model walk: rightmost-first evaluation, the
@@ -25,7 +25,7 @@ public class ForwardedHeadersResolverTests
     {
         var options = new ForwardedHeadersOptions
         {
-            Headers = ForwardedHeaders.All,
+            Headers = ForwardedHeaderNames.All,
             ForwardLimit = null,
         };
         configure?.Invoke(options);
@@ -58,7 +58,7 @@ public class ForwardedHeadersResolverTests
         return headers;
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A single X-Forwarded-For hop from a trusted peer should become the effective client")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A single X-Forwarded-For hop from a trusted peer should become the effective client")]
     public void Resolve_SingleHopFromTrustedPeer_ShouldApplyEntry()
     {
         // Arrange
@@ -75,7 +75,7 @@ public class ForwardedHeadersResolverTests
         feature.OriginalRemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Headers from an untrusted direct peer should be ignored entirely (spoofing defense)")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Headers from an untrusted direct peer should be ignored entirely (spoofing defense)")]
     public void Resolve_UntrustedDirectPeer_ShouldIgnoreAllHeaders()
     {
         // Arrange — the direct peer is a public address outside every trust list, i.e. a
@@ -97,7 +97,7 @@ public class ForwardedHeadersResolverTests
         feature.Host.Value.ShouldBe("real.example");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A null transport remote endpoint should never be trusted")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A null transport remote endpoint should never be trusted")]
     public void Resolve_NullRemoteEndPoint_ShouldIgnoreAllHeaders()
     {
         // Arrange
@@ -112,7 +112,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteEndPoint.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A trusted multi-hop chain should walk rightmost-first to the outermost client")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A trusted multi-hop chain should walk rightmost-first to the outermost client")]
     public void Resolve_TrustedChain_ShouldWalkToOutermostClient()
     {
         // Arrange — loopback hands over 10.0.0.2's entry, 10.0.0.2 (trusted via the
@@ -128,7 +128,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.9"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: The walk should stop at the first untrusted intermediate hop")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: The walk should stop at the first untrusted intermediate hop")]
     public void Resolve_UntrustedIntermediateHop_ShouldStopWalk()
     {
         // Arrange — 203.0.113.50 is not in any trust list, so the entry it vouches for
@@ -144,7 +144,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.50"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: ForwardLimit should cap accepted hops at the nearest entries")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: ForwardLimit should cap accepted hops at the nearest entries")]
     public void Resolve_ForwardLimit_ShouldCapAcceptedHops()
     {
         // Arrange — everything is trusted; the limit alone stops the walk.
@@ -163,13 +163,13 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("10.0.0.3"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: The default ForwardLimit should accept exactly one hop")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: The default ForwardLimit should accept exactly one hop")]
     public void Resolve_DefaultForwardLimit_ShouldAcceptOneHop()
     {
         // Arrange — defaults: ForwardLimit = 1.
         var resolver = new ForwardedHeadersResolver(new ForwardedHeadersOptions
         {
-            Headers = ForwardedHeaders.XForwardedFor,
+            Headers = ForwardedHeaderNames.XForwardedFor,
         });
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 127.0.0.1");
 
@@ -181,7 +181,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Loopback);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A malformed X-Forwarded-For entry should stop the walk before applying that hop")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A malformed X-Forwarded-For entry should stop the walk before applying that hop")]
     public void Resolve_MalformedEntryMidChain_ShouldStopBeforeApplyingIt()
     {
         // Arrange
@@ -196,7 +196,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("10.0.0.2"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A malformed nearest X-Forwarded-For entry should resolve nothing")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A malformed nearest X-Forwarded-For entry should resolve nothing")]
     public void Resolve_MalformedNearestEntry_ShouldResolveNothing()
     {
         // Arrange
@@ -211,7 +211,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Bare and bracketed IPv6 entries should both resolve, brackets carrying the port")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Bare and bracketed IPv6 entries should both resolve, brackets carrying the port")]
     public void Resolve_IPv6Entries_ShouldResolveWithAndWithoutBrackets()
     {
         // Arrange
@@ -229,7 +229,7 @@ public class ForwardedHeadersResolverTests
         bracketed.RemotePort.ShouldBe(4711);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: IPv4-mapped IPv6 addresses should normalize for trust checks and results")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: IPv4-mapped IPv6 addresses should normalize for trust checks and results")]
     public void Resolve_IPv4MappedEntries_ShouldNormalizeToIPv4()
     {
         // Arrange — the intermediate hop arrives in mapped form but the trust network is
@@ -245,7 +245,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.9"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An 'unknown' entry should count as a hop but stop the walk without changing the client")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An 'unknown' entry should count as a hop but stop the walk without changing the client")]
     public void Resolve_UnknownEntry_ShouldStopWalkWithoutAdvancingClient()
     {
         // Arrange
@@ -261,7 +261,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("10.0.0.2"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Proto and host entries should apply per accepted hop, deepest accepted entry winning")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Proto and host entries should apply per accepted hop, deepest accepted entry winning")]
     public void Resolve_ProtoAndHostChain_ShouldApplyDeepestAcceptedEntry()
     {
         // Arrange — two trusted hops; the deeper (client-side) values must win.
@@ -279,12 +279,12 @@ public class ForwardedHeadersResolverTests
         feature.Host.Value.ShouldBe("public.example");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Without an X-Forwarded-For chain, proto/host should apply at most one hop deep")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Without an X-Forwarded-For chain, proto/host should apply at most one hop deep")]
     public void Resolve_ProtoWithoutForChain_ShouldApplySingleHopOnly()
     {
         // Arrange — no address chain exists, so even an unlimited ForwardLimit cannot
         // vouch for entries beyond the one appended by the direct peer.
-        var resolver = CreateResolver(o => o.Headers = ForwardedHeaders.XForwardedProto);
+        var resolver = CreateResolver(o => o.Headers = ForwardedHeaderNames.XForwardedProto);
         var headers = CreateHeaders(xForwardedProto: "https, http", xForwardedFor: "203.0.113.9");
 
         // Act
@@ -296,7 +296,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Asymmetric X-Forwarded-* lists should apply values only at depths where entries exist")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Asymmetric X-Forwarded-* lists should apply values only at depths where entries exist")]
     public void Resolve_AsymmetricLists_ShouldApplyValuesWhereEntriesExist()
     {
         // Arrange — two address hops but only one proto entry: the proto belongs to the
@@ -313,7 +313,7 @@ public class ForwardedHeadersResolverTests
         feature.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An invalid proto value should stop the walk before applying the hop")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An invalid proto value should stop the walk before applying the hop")]
     public void Resolve_InvalidProtoValue_ShouldStopBeforeApplyingHop()
     {
         // Arrange
@@ -329,7 +329,7 @@ public class ForwardedHeadersResolverTests
         feature.Scheme.ShouldBe(HttpScheme.Http);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An implausible host value should stop the walk before applying the hop")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An implausible host value should stop the walk before applying the hop")]
     public void Resolve_ImplausibleHostValue_ShouldStopBeforeApplyingHop()
     {
         // Arrange — a host smuggling a path separator must not reach downstream URL logic.
@@ -344,12 +344,12 @@ public class ForwardedHeadersResolverTests
         feature.Host.Value.ShouldBe("safe.example");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: Only selected headers should be honored (header-name selection)")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Only selected headers should be honored (header-name selection)")]
     public void Resolve_UnselectedHeaders_ShouldBeIgnored()
     {
         // Arrange — only X-Forwarded-Proto is honored; the present X-Forwarded-For and
         // X-Forwarded-Host must not influence the result.
-        var resolver = CreateResolver(o => o.Headers = ForwardedHeaders.XForwardedProto);
+        var resolver = CreateResolver(o => o.Headers = ForwardedHeaderNames.XForwardedProto);
         var headers = CreateHeaders(
             xForwardedFor: "203.0.113.9",
             xForwardedProto: "https",
@@ -364,11 +364,11 @@ public class ForwardedHeadersResolverTests
         feature.Host.Value.ShouldBe("h");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A trusted RFC 7239 element should apply for, proto, and host as one unit")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A trusted RFC 7239 element should apply for, proto, and host as one unit")]
     public void Resolve_ForwardedElement_ShouldApplyAllValues()
     {
         // Arrange
-        var resolver = CreateResolver(o => o.Headers = ForwardedHeaders.Forwarded);
+        var resolver = CreateResolver(o => o.Headers = ForwardedHeaderNames.Forwarded);
         var headers = CreateHeaders(forwarded: "for=\"[2001:db8::1]:4711\";proto=https;host=api.example.com");
 
         // Act
@@ -384,13 +384,13 @@ public class ForwardedHeadersResolverTests
         feature.OriginalHost.Value.ShouldBe("internal");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An RFC 7239 chain should walk rightmost-first under the same trust boundary")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An RFC 7239 chain should walk rightmost-first under the same trust boundary")]
     public void Resolve_ForwardedChain_ShouldWalkRightmostFirst()
     {
         // Arrange
         var resolver = CreateResolver(o =>
         {
-            o.Headers = ForwardedHeaders.Forwarded;
+            o.Headers = ForwardedHeaderNames.Forwarded;
             o.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));
         });
         var headers = CreateHeaders(forwarded: "for=203.0.113.9;proto=https, for=10.0.0.2");
@@ -404,13 +404,13 @@ public class ForwardedHeadersResolverTests
         feature.Scheme.ShouldBe(HttpScheme.Https);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An obfuscated RFC 7239 'for' should apply the hop's other values and stop the walk")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An obfuscated RFC 7239 'for' should apply the hop's other values and stop the walk")]
     public void Resolve_ObfuscatedForwardedNode_ShouldApplyValuesAndStop()
     {
         // Arrange — the proxy hides the upstream identity but still asserts the scheme.
         var resolver = CreateResolver(o =>
         {
-            o.Headers = ForwardedHeaders.Forwarded;
+            o.Headers = ForwardedHeaderNames.Forwarded;
             o.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));
         });
         var headers = CreateHeaders(forwarded: "for=203.0.113.9, for=_hidden;proto=https");
@@ -426,7 +426,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A present-but-malformed Forwarded header should resolve nothing and never fall back")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A present-but-malformed Forwarded header should resolve nothing and never fall back")]
     public void Resolve_MalformedForwardedHeader_ShouldPoisonResolution()
     {
         // Arrange — both families selected and present; the RFC header is malformed. A
@@ -443,7 +443,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: When both families are present and selected, RFC 7239 should win")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: When both families are present and selected, RFC 7239 should win")]
     public void Resolve_BothFamiliesPresent_ShouldPreferForwarded()
     {
         // Arrange
@@ -458,11 +458,11 @@ public class ForwardedHeadersResolverTests
         feature.TrustedHopCount.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: An unselected Forwarded header should leave the legacy family in charge")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: An unselected Forwarded header should leave the legacy family in charge")]
     public void Resolve_ForwardedNotSelected_ShouldUseLegacyFamily()
     {
         // Arrange
-        var resolver = CreateResolver(o => o.Headers = ForwardedHeaders.XForwarded);
+        var resolver = CreateResolver(o => o.Headers = ForwardedHeaderNames.XForwarded);
         var headers = CreateHeaders(forwarded: "for=203.0.113.9", xForwardedFor: "203.0.113.77");
 
         // Act
@@ -472,7 +472,7 @@ public class ForwardedHeadersResolverTests
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.77"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A non-IP transport peer should be trusted only while TrustLocalTransports is set")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A non-IP transport peer should be trusted only while TrustLocalTransports is set")]
     public void Resolve_NonIpTransportPeer_ShouldHonorTrustLocalTransports()
     {
         // Arrange — the same exchange over a machine-local (non-IP) transport endpoint.
@@ -492,7 +492,7 @@ public class ForwardedHeadersResolverTests
         ignored.RemoteEndPoint.ShouldBe(localRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: A DnsEndPoint peer should never be trusted")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A DnsEndPoint peer should never be trusted")]
     public void Resolve_DnsEndPointPeer_ShouldNeverBeTrusted()
     {
         // Arrange — a DnsEndPoint neither names an IP nor proves a machine-local transport.
@@ -506,7 +506,7 @@ public class ForwardedHeadersResolverTests
         feature.TrustedHopCount.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolve: No forwarding headers should yield the wire values with zero hops")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: No forwarding headers should yield the wire values with zero hops")]
     public void Resolve_NoHeaders_ShouldReturnWireValues()
     {
         // Arrange
@@ -526,23 +526,23 @@ public class ForwardedHeadersResolverTests
         feature.OriginalRemoteEndPoint.ShouldBe(LoopbackRemote);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolver: Options should be snapshotted at construction, not read per request")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolver: Options should be snapshotted at construction, not read per request")]
     public void Resolver_OptionsMutatedAfterConstruction_ShouldNotAffectResolution()
     {
         // Arrange
-        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaders.XForwardedFor, ForwardLimit = null };
+        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaderNames.XForwardedFor, ForwardLimit = null };
         var resolver = new ForwardedHeadersResolver(options);
 
         // Act — widen the trust boundary after the snapshot was taken.
         options.KnownProxies.Add(IPAddress.Parse("198.51.100.7"));
-        options.Headers = ForwardedHeaders.None;
+        options.Headers = ForwardedHeaderNames.None;
         var feature = resolver.Resolve(UntrustedRemote, CreateHeaders(xForwardedFor: "203.0.113.9"), HttpScheme.Http, new HttpHost("h"));
 
         // Assert — the late-added proxy is not trusted by the composed resolver.
         feature.TrustedHopCount.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolver: Construction should reject an empty header selection")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolver: Construction should reject an empty header selection")]
     public void Resolver_HeadersNone_ShouldThrow()
     {
         // Arrange
@@ -552,21 +552,21 @@ public class ForwardedHeadersResolverTests
         Should.Throw<ArgumentException>(() => new ForwardedHeadersResolver(options));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolver: Construction should reject a ForwardLimit below one")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolver: Construction should reject a ForwardLimit below one")]
     public void Resolver_ForwardLimitBelowOne_ShouldThrow()
     {
         // Arrange
-        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaders.All, ForwardLimit = 0 };
+        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaderNames.All, ForwardLimit = 0 };
 
         // Act / Assert
         Should.Throw<ArgumentOutOfRangeException>(() => new ForwardedHeadersResolver(options));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Resolver: Construction should reject a null KnownProxies entry")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolver: Construction should reject a null KnownProxies entry")]
     public void Resolver_NullKnownProxyEntry_ShouldThrow()
     {
         // Arrange
-        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaders.All };
+        var options = new ForwardedHeadersOptions { Headers = ForwardedHeaderNames.All };
         options.KnownProxies.Add(null!);
 
         // Act / Assert

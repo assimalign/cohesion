@@ -4,7 +4,7 @@ using System.Net;
 
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web.Internal;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 
 /// <summary>
 /// Applies the forwarded-headers trust model to one exchange: walks the forwarded chain
@@ -44,7 +44,7 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// </remarks>
 internal sealed class ForwardedHeadersResolver
 {
-    private readonly ForwardedHeaders _headers;
+    private readonly ForwardedHeaderNames _headers;
     private readonly int? _forwardLimit;
     private readonly IPAddress[] _knownProxies;
     private readonly IPNetwork[] _knownNetworks;
@@ -58,7 +58,7 @@ internal sealed class ForwardedHeadersResolver
     /// <param name="options">The trust-model options.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaders.None"/>,
+    /// <see cref="ForwardedHeadersOptions.Headers"/> is <see cref="ForwardedHeaderNames.None"/>,
     /// or a trust list contains a <see langword="null"/> entry.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -68,7 +68,7 @@ internal sealed class ForwardedHeadersResolver
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (options.Headers == ForwardedHeaders.None)
+        if (options.Headers == ForwardedHeaderNames.None)
         {
             throw new ArgumentException(
                 $"{nameof(ForwardedHeadersOptions.Headers)} must select at least one forwarding header. " +
@@ -137,7 +137,7 @@ internal sealed class ForwardedHeadersResolver
             Anchor = remoteEndPoint,
         };
 
-        if ((_headers & ForwardedHeaders.Forwarded) != 0
+        if ((_headers & ForwardedHeaderNames.Forwarded) != 0
             && headers.TryGetValue(HttpHeaderKey.Forwarded, out HttpHeaderValue forwarded))
         {
             // RFC 7239 is present and honored — it is the exclusive source for this
@@ -224,13 +224,13 @@ internal sealed class ForwardedHeadersResolver
         HttpForwardedValues protoValues = default;
         HttpForwardedValues hostValues = default;
 
-        bool hasFor = (_headers & ForwardedHeaders.XForwardedFor) != 0
+        bool hasFor = (_headers & ForwardedHeaderNames.XForwardedFor) != 0
             && headers.TryGetValue(HttpHeaderKey.XForwardedFor, out HttpHeaderValue forHeader)
             && HttpForwardedValues.TryParse(forHeader, out forValues);
-        bool hasProto = (_headers & ForwardedHeaders.XForwardedProto) != 0
+        bool hasProto = (_headers & ForwardedHeaderNames.XForwardedProto) != 0
             && headers.TryGetValue(HttpHeaderKey.XForwardedProto, out HttpHeaderValue protoHeader)
             && HttpForwardedValues.TryParse(protoHeader, out protoValues);
-        bool hasHost = (_headers & ForwardedHeaders.XForwardedHost) != 0
+        bool hasHost = (_headers & ForwardedHeaderNames.XForwardedHost) != 0
             && headers.TryGetValue(HttpHeaderKey.XForwardedHost, out HttpHeaderValue hostHeader)
             && HttpForwardedValues.TryParse(hostHeader, out hostValues);
 

@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders;
 
 /// <summary>
 /// Selects which proxy-forwarding headers the forwarded-headers middleware honors.
@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Web;
 /// </para>
 /// </remarks>
 [Flags]
-public enum ForwardedHeaders
+public enum ForwardedHeaderNames
 {
     /// <summary>
     /// No headers are honored. The middleware rejects this value at composition time —

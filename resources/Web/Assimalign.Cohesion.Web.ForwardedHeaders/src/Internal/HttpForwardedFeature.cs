@@ -2,7 +2,7 @@ using System.Net;
 
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web.Internal;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 
 /// <summary>
 /// The <see cref="IHttpForwardedFeature"/> the forwarded-headers middleware attaches to

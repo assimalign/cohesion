@@ -10,6 +10,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
 	</ItemGroup>
 </Project>

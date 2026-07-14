@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 
-namespace Assimalign.Cohesion.Web.Tests.TestObjects;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Tests.TestObjects;
 
 /// <summary>
 /// A non-IP transport endpoint standing in for the Unix-domain-socket / named-pipe /

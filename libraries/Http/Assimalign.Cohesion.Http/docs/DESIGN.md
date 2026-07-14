@@ -975,23 +975,19 @@ job (be a correct, total function over hostile input). This mirrors the
 established seam/feature taxonomy: protocol value objects in core, policy in
 the layer that composes them.
 
-### The effective-identity contract and read convention
+### The effective-identity contract lives in `Http.Forwarded`, not here
 
-The *output* contract of that trust evaluation does live here:
-`IHttpForwardedFeature` (effective scheme/host/remote endpoint, the original
-wire values, and the accepted-hop count) plus the feature-first read convention
-in `HttpContextForwardedExtensions` — `context.EffectiveScheme`,
-`EffectiveHost`, `EffectiveRemoteIp`, `EffectiveRemoteEndPoint`, each falling
-back to the wire value when no feature is attached. Placement is deliberate:
-consumers *below* the Web area (session partitioning in `Http.Sessions`,
-rate-limit keys, access logging) can reference the Http core but must never
-reference an L3 resource, so the contract's home is the core even though its
-producer is the Web middleware. The wire surfaces stay get-only and unmutated
-by design — `IHttpRequest.Scheme`/`Host` and `IHttpContext.ConnectionInfo`
-always report what the transport saw, and proxy-aware code opts into the
-effective view through the feature. A producer attaches the feature on every
-exchange it processes (zero hops when nothing resolved), so `Effective*` reads
-are uniform behind it; without a producer they are exactly the wire values.
+The *output* contract of that trust evaluation — `IHttpForwardedFeature`
+(effective scheme/host/remote endpoint, the original wire values, the
+accepted-hop count) and the feature-first `Effective*` read convention on
+`IHttpContext` — ships as its own layered package,
+`Assimalign.Cohesion.Http.Forwarded`, following the same separation that keeps
+`Http.Sessions`/`Http.Cookies`/`Http.Forms` out of the core: per-concern
+feature contracts are opt-in assemblies extending the `Assimalign.Cohesion.Http`
+namespace, and the core's surface stays protocol-only. That package's
+`docs/DESIGN.md` records the read-convention decision (feature-first with wire
+fallback; the get-only wire surfaces are never mutated); its producer is the
+`Assimalign.Cohesion.Web.ForwardedHeaders` middleware.
 
 ### The surface
 
@@ -1083,9 +1079,11 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
 
 - **The trust model.** `KnownProxies`/`KnownNetworks`/`ForwardLimit` and the
   walk that applies them belong to the #778 middleware in
-  `Assimalign.Cohesion.Web`, not here — this library defines the
-  `IHttpForwardedFeature` contract that middleware fulfills, and nothing ever
-  mutates the wire-level request/connection state.
+  `Assimalign.Cohesion.Web.ForwardedHeaders`, not here.
+- **The effective-identity feature contract.** `IHttpForwardedFeature` and the
+  `Effective*` read convention are the layered `Assimalign.Cohesion.Http.Forwarded`
+  package (see above) — the core stays protocol-only, and nothing ever mutates
+  the wire-level request/connection state.
 - **Interpreting `X-Forwarded-For` entries as addresses.** `HttpForwardedValues`
   is a faithful ordered list; turning an entry into an `IPAddress` (and deciding
   whether to trust it) is the consumer's call via `HttpForwardedNode`.

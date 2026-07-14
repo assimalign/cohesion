@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Web.Testing;
 using NetHttpStatusCode = System.Net.HttpStatusCode;
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
-namespace Assimalign.Cohesion.Web.Tests;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders.Tests;
 
 /// <summary>
 /// Full-pipeline coverage for the forwarded-headers middleware over the in-memory
@@ -69,7 +69,7 @@ public class ForwardedHeadersMiddlewareTests
         return await response.Content.ReadAsStringAsync(cancellationToken);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: A trusted chain should resolve the effective client end to end")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: A trusted chain should resolve the effective client end to end")]
     public async Task Pipeline_TrustedChain_ShouldResolveEffectiveClient()
     {
         // Arrange — first hop vouched by the local transport, second by KnownNetworks.
@@ -78,7 +78,7 @@ public class ForwardedHeadersMiddlewareTests
 
         ComposeEchoApplication(factory, options =>
         {
-            options.Headers = ForwardedHeaders.XForwarded;
+            options.Headers = ForwardedHeaderNames.XForwarded;
             options.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));
             options.ForwardLimit = null;
         });
@@ -95,7 +95,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("Https|public.example|203.0.113.9|0|2|Http");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: An untrusted transport peer should leave the wire identity untouched (spoofing defense)")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: An untrusted transport peer should leave the wire identity untouched (spoofing defense)")]
     public async Task Pipeline_UntrustedTransportPeer_ShouldIgnoreForwardingHeaders()
     {
         // Arrange — hardened trust model: the (non-IP) in-memory peer is not trusted, so
@@ -105,7 +105,7 @@ public class ForwardedHeadersMiddlewareTests
 
         ComposeEchoApplication(factory, options =>
         {
-            options.Headers = ForwardedHeaders.All;
+            options.Headers = ForwardedHeaderNames.All;
             options.TrustLocalTransports = false;
         });
 
@@ -123,7 +123,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("Http|localhost|none|0|0|Http");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: ForwardLimit should truncate the walk at the nearest hops")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: ForwardLimit should truncate the walk at the nearest hops")]
     public async Task Pipeline_ForwardLimit_ShouldTruncateWalk()
     {
         // Arrange — the default ForwardLimit of 1 accepts only the proxy-appended entry.
@@ -132,7 +132,7 @@ public class ForwardedHeadersMiddlewareTests
 
         ComposeEchoApplication(factory, options =>
         {
-            options.Headers = ForwardedHeaders.XForwardedFor;
+            options.Headers = ForwardedHeaderNames.XForwardedFor;
             options.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));
         });
 
@@ -146,14 +146,14 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("Http|localhost|10.0.0.2|0|1|Http");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: A trusted RFC 7239 element should resolve for, proto, and host together")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: A trusted RFC 7239 element should resolve for, proto, and host together")]
     public async Task Pipeline_ForwardedElement_ShouldResolveAllValues()
     {
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaders.Forwarded);
+        ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaderNames.Forwarded);
 
         using HttpClient client = factory.CreateClient();
 
@@ -165,7 +165,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("Https|api.example.com|2001:db8::1|4711|1|Http");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: A malformed Forwarded header should resolve nothing, even with a valid legacy header present")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: A malformed Forwarded header should resolve nothing, even with a valid legacy header present")]
     public async Task Pipeline_MalformedForwardedHeader_ShouldResolveNothing()
     {
         // Arrange — both families honored; the RFC header is present but malformed, so
@@ -173,7 +173,7 @@ public class ForwardedHeadersMiddlewareTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaders.All);
+        ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaderNames.All);
 
         using HttpClient client = factory.CreateClient();
 
@@ -186,7 +186,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("Http|localhost|none|0|0|Http");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: Raw request headers should pass through unmutated")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: Raw request headers should pass through unmutated")]
     public async Task Pipeline_ResolvedExchange_ShouldNotMutateRawHeaders()
     {
         // Arrange — the middleware surfaces identity via the feature only; downstream
@@ -195,7 +195,7 @@ public class ForwardedHeadersMiddlewareTests
         await using WebApplicationTestFactory factory = new();
 
         WebApplication app = factory.Application;
-        app.UseForwardedHeaders(options => options.Headers = ForwardedHeaders.XForwarded);
+        app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
         app.Use(async (context, next) =>
         {
             string payload = string.Join('|',
@@ -219,7 +219,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("203.0.113.9|https|Http|Https");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: Without the middleware, the Effective* members should fall back to wire values")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: Without the middleware, the Effective* members should fall back to wire values")]
     public async Task Pipeline_WithoutMiddleware_EffectiveMembersShouldFallBackToWireValues()
     {
         // Arrange — no forwarded-headers middleware registered at all.
@@ -250,7 +250,7 @@ public class ForwardedHeadersMiddlewareTests
         payload.ShouldBe("no-feature|Http|localhost|none");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web] - Pipeline: Composing with ForwardedHeaders.None should fail fast at build time")]
+    [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Pipeline: Composing with ForwardedHeaderNames.None should fail fast at build time")]
     public async Task Pipeline_HeadersNone_ShouldThrowAtCompositionTime()
     {
         // Arrange

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Net;
 
-namespace Assimalign.Cohesion.Web;
+namespace Assimalign.Cohesion.Web.ForwardedHeaders;
 
 /// <summary>
 /// The explicit trust model for the forwarded-headers middleware: which forwarding
@@ -27,11 +27,11 @@ public sealed class ForwardedHeadersOptions
 {
     /// <summary>
     /// Gets or sets the forwarding headers to honor. Defaults to
-    /// <see cref="ForwardedHeaders.None"/>; an explicit selection is required &#8212; enable
-    /// exactly the headers your trusted proxy manages (see <see cref="ForwardedHeaders"/>
+    /// <see cref="ForwardedHeaderNames.None"/>; an explicit selection is required &#8212; enable
+    /// exactly the headers your trusted proxy manages (see <see cref="ForwardedHeaderNames"/>
     /// for why honoring an unmanaged header is spoofable).
     /// </summary>
-    public ForwardedHeaders Headers { get; set; } = ForwardedHeaders.None;
+    public ForwardedHeaderNames Headers { get; set; } = ForwardedHeaderNames.None;
 
     /// <summary>
     /// Gets or sets the maximum number of forwarded hops to accept, or

@@ -16,9 +16,9 @@ namespace Assimalign.Cohesion.Http;
 /// <c>Forwarded</c> header or the de-facto <c>X-Forwarded-For</c>/<c>-Proto</c>/<c>-Host</c>
 /// headers &#8212; attacker-writable input that must pass a trust model before it is
 /// believed. This feature is the <em>output</em> of that evaluation: a producer (the
-/// forwarded-headers middleware in <c>Assimalign.Cohesion.Web</c>) walks the forwarded
-/// chain rightmost-first through the hops it trusts and attaches the result to
-/// <see cref="IHttpContext.Features"/>, one instance per exchange.
+/// forwarded-headers middleware in <c>Assimalign.Cohesion.Web.ForwardedHeaders</c>)
+/// walks the forwarded chain rightmost-first through the hops it trusts and attaches
+/// the result to <see cref="IHttpContext.Features"/>, one instance per exchange.
 /// </para>
 /// <para>
 /// The wire-level surfaces are deliberately get-only and are <em>never</em> mutated:
