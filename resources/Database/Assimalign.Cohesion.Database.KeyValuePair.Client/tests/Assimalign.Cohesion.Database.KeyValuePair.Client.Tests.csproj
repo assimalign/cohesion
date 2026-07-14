@@ -20,5 +20,10 @@
 		     Connections driver (tests are exempt from area layering). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- The TCP wire E2E composes the application builder-first (engine + server
+		     verbs on the root builder, DatabaseApplication.CreateBuilder from Hosting)
+		     over real TCP loopback (tests are exempt from area layering). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 </Project>

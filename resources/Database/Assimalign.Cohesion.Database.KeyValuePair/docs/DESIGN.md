@@ -162,14 +162,14 @@ boundary, never leaked raw.
 `KeyValueRecordCodec` are near-verbatim adaptations of their SQL counterparts:
 the per-database MVCC composition proved model-agnostic in mechanics but has no
 kernel home yet, so the second model paid a copy. Extracting it is filed work —
-the generality report row carries the item numbers. The copies are deliberate
+#918 (the area generality report §3.10 carries the evidence). The copies are deliberate
 (hacking a premature kernel package into shape mid-bring-up would have risked
 the SQL engine's stability for a refactor the third model can validate instead).
 
 ## Non-goals (current cut)
 
 - **TTL/expiration** — the area model table lists TTL for this model; it is
-  deferred (filed work), and the surface was deliberately shipped without
+  deferred (#919), and the surface was deliberately shipped without
   `ExpiresAt` so etag semantics landed clean first.
 - Named key spaces (multiple ordered key spaces per database) — the catalog
   reserves the concept; the engine currently owns one implicit key space.
