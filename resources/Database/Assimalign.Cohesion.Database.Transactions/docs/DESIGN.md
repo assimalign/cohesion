@@ -125,7 +125,12 @@ work items under #862). The integration kept this package exactly as shaped:
   (exclusive locks on row identity, intent locks at table grain for DDL — the
   B+Tree uniqueness precedent generalized), and deadlock victims cross the
   model boundary as the root's `DatabaseTransactionDeadlockException`.
-- Still ahead in the §3.8 sequence: version-purge worker activation (#910).
+- The engine's version-purge worker drives the reclamation duties on its own
+  timer (#910): `PurgeWriterAsync` retries for aborted writers whose inline
+  undo failed, and `PruneAsync` below the safe snapshot bound — the minimum
+  snapshot floor across open transactions, not `OldestActive` alone, which
+  can trail a live snapshot's view (see the Sql DESIGN.md for the recorded
+  bound decision). With that, all four §3.8 steps are implemented.
 
 ## Non-goals
 

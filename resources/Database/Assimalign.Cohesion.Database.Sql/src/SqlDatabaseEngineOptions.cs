@@ -50,8 +50,10 @@ public sealed class SqlDatabaseEngineOptions
     public int PageWriteBackBatchSize { get; set; } = 16;
 
     /// <summary>
-    /// Gets or sets the cadence of the engine's maintenance workers (version purge
-    /// and index maintenance — currently documented stubs, see docs/DESIGN.md).
+    /// Gets or sets the cadence of the engine's maintenance workers: the MVCC
+    /// version purge (aborted-writer undo retries and physical reclamation of
+    /// versions below the oldest snapshot bound) and index maintenance
+    /// (currently a documented stub — see docs/DESIGN.md).
     /// </summary>
     public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromSeconds(60);
 

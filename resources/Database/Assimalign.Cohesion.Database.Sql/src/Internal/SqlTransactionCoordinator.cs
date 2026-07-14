@@ -60,6 +60,7 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
     private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
     private readonly Dictionary<ulong, ITransactionContext> _openContexts = new();
     private readonly object _sync = new();
+    private TransactionSequence _recoveredSequenceFloor;
 
     internal SqlTransactionCoordinator(SqlStorage storage)
     {
@@ -281,6 +282,12 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
 
         _versionStore.ScrubRecovered(plan.Aborted);
 
+        // Anchor the prune bound above every pre-restart stamp: the fresh
+        // manager has assigned nothing yet, so its idle oldest-active bound
+        // trails the storage's sequence namespace — a reserved sequence is a
+        // proven ceiling over every stamp the record space can carry.
+        _recoveredSequenceFloor = new TransactionSequence((ulong)_storage.ReserveTransactionSequence());
+
         // Analysis is done; start the journal clean (the deferred open-time
         // checkpoint — see ISqlStorageStrategy.OpenStorage). No logical
         // transactions exist yet, so the active list is empty.
@@ -338,6 +345,14 @@ internal sealed class SqlTransactionCoordinator : IStorageTransactionSource, IAs
     private TransactionSequence GetSafePruneBound()
     {
         var bound = _manager.OldestActive;
+
+        // After a reopen the fresh manager's idle bound trails the storage's
+        // sequence namespace; the recovered floor is a proven ceiling over
+        // every pre-restart stamp.
+        if (_recoveredSequenceFloor > bound)
+        {
+            bound = _recoveredSequenceFloor;
+        }
 
         foreach (var context in GetOpenContexts())
         {

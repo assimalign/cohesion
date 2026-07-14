@@ -148,10 +148,22 @@ a drop):
   carries every in-flight logical transaction's sequence (recovery
   classification survives truncation); the catalog file set has no logical
   transactions above it and checkpoints directly.
-- **`SqlVersionPurgeWorker` / `SqlIndexMaintenanceWorker`** — documented stubs: the
-  engine serializes at page grain (no MVCC version store) and the index layer has no
-  compaction yet. They keep the inventory — and any host mapping over it — stable;
-  the bodies fill in when those integrations land, without touching the seam.
+- **`SqlVersionPurgeWorker`** — **live** (#910): per pass, per open database, it
+  retries the logical undo of any aborted writer whose rollback-time purge
+  failed (`IVersionStore.PurgeWriterAsync`) and physically reclaims versions no
+  snapshot can reach (`IVersionStore.PruneAsync` below the safe prune bound —
+  the minimum snapshot floor of every open transaction, anchored above the
+  recovered sequence namespace after a reopen, or the manager's oldest-active
+  bound when idle; the manager's bound alone would let a live pinned snapshot
+  lose a version it can still read). Cadence: `MaintenanceInterval`. A pass
+  failure flips the engine to `Faulted` without stopping service — unpurged
+  versions cost space, never consistency. The stub-era seam was untouched, as
+  designed: activation changed the worker body and nothing else.
+- **`SqlIndexMaintenanceWorker`** — the one remaining documented stub
+  (sanctioned by #902): the index layer has no compaction to drive yet. It
+  keeps the inventory — and any observer over it — stable; the throttled
+  maintenance body fills in when index compaction lands, without touching the
+  seam.
 
 **Lifecycle (create → use → dispose):** the worker threads live exactly as long
 as the engine. Disposal signals the pumps, joins the threads *before* closing
@@ -251,9 +263,15 @@ four independently shippable steps:
    writers via table-grain intent locks. See "Write statements execute in two
    phases" under the execution model for the bracket/gate mechanics and the
    recorded page-conflict fallback decision.
-4. **Version purge (#910):** `SqlVersionPurgeWorker`'s stub body becomes
-   `IVersionStore.PurgeWriterAsync` + the `OldestActive` prune bound — the
-   worker slot was kept in the inventory precisely so this lands seam-stable.
+4. **Version purge — delivered (#910):** `SqlVersionPurgeWorker`'s body is
+   real — aborted-writer undo retries plus physical reclamation below the safe
+   prune bound; the worker slot was kept in the inventory precisely so this
+   landed seam-stable (it did: the activation touched the body and nothing
+   else). **Bound decision:** the prune bound is the minimum snapshot floor of
+   every open transaction — never a statement-local view, and deliberately
+   stricter than the issue's advisory `OldestActive` alone, which can reclaim
+   a version a live snapshot with an older minimum still needs (the
+   pinned-snapshot test is the proof).
 
 ## Non-goals (current cut)
 
