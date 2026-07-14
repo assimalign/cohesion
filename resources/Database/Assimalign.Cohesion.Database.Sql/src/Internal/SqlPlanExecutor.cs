@@ -81,7 +81,10 @@ internal sealed class SqlPlanExecutor
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var matches = new List<object?[]>();
 
-        foreach (var (_, values) in Scan(plan.Table, statement, cancellationToken))
+        // The access path narrows the candidate set; the full WHERE stays the
+        // residual predicate for both paths, so seek results are equivalent to
+        // scan results by construction.
+        foreach (var (_, values) in EnumerateRows(plan, statement, cancellationToken))
         {
             if (evaluator.Matches(plan.Where, values))
             {
@@ -955,7 +958,197 @@ internal sealed class SqlPlanExecutor
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
-    // ── Scan + coercion helpers ────────────────────────────────────────
+    // ── Scan / seek + coercion helpers ─────────────────────────────────
+
+    /// <summary>
+    /// Enumerates the SELECT's candidate rows through its access path: an index
+    /// seek drives a B+Tree cursor with the statement snapshot; everything else
+    /// is the per-object scan. A seek whose index is not attached (torn-state
+    /// defense) falls back to the scan — the residual predicate makes the
+    /// fallback invisible except in cost.
+    /// </summary>
+    private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> EnumerateRows(
+        SqlSelectPlan plan,
+        SqlStatementContext statement,
+        CancellationToken cancellationToken)
+    {
+        if (plan.Access is SqlIndexSeekPath seek &&
+            _indexManager.TryGetIndex(plan.Table.ObjectId, seek.Index.Name, out var index))
+        {
+            statement.Metrics.AccessPath = $"seek:{seek.Index.Name}";
+            return SeekRows(plan.Table, seek, index, statement, cancellationToken);
+        }
+
+        statement.Metrics.AccessPath = "scan";
+        return Scan(plan.Table, statement, cancellationToken);
+    }
+
+    /// <summary>
+    /// Drives an index seek: materializes the visible entries in the seek's key
+    /// range through the STATEMENT snapshot (the same snapshot the equivalent
+    /// scan filters through — the equivalence anchor), fetches each entry's row
+    /// version, and re-checks the row's stamps against the same snapshot
+    /// (defense in depth: entries mirror row stamps by the maintenance
+    /// discipline, so a divergence is a bug this filter contains rather than
+    /// surfaces).
+    /// </summary>
+    private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> SeekRows(
+        SqlCatalogTable table,
+        SqlIndexSeekPath seek,
+        IIndex index,
+        SqlStatementContext statement,
+        CancellationToken cancellationToken)
+    {
+        var range = BuildSeekRange(table, seek);
+        var snapshot = statement.Snapshot;
+
+        // The cursor materializes under the tree's read latch; synchronous
+        // drain is the in-process fast path.
+        var cursor = index.OpenCursor(snapshot, range);
+
+        try
+        {
+            while (cursor.MoveNextAsync(cancellationToken).AsTask().GetAwaiter().GetResult())
+            {
+                statement.Metrics.RecordsExamined++;
+
+                var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
+
+                ReadOnlyMemory<byte> record;
+                try
+                {
+                    record = _storage.ReadRow(pageId, slotIndex);
+                }
+                catch (StorageException)
+                {
+                    continue; // reclaimed beneath an invisible entry: skip
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    continue;
+                }
+
+                var values = SqlRowCodec.TryDecode(record.Span, table.ObjectId, table.Columns.Count, out var writer, out var deleter);
+
+                if (values is null)
+                {
+                    continue;
+                }
+
+                if (!snapshot.IsVisible(writer))
+                {
+                    continue;
+                }
+
+                if (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))
+                {
+                    continue;
+                }
+
+                yield return ((pageId, slotIndex), values);
+            }
+        }
+        finally
+        {
+            cursor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+    }
+
+    /// <summary>
+    /// Encodes the seek's key range: the equality prefix (encoded exactly like
+    /// the maintenance path encodes keys), extended by the optional range bounds
+    /// on the next key column. Prefix semantics ride the codec's
+    /// order-preservation: every composite key starting with prefix P sorts in
+    /// [P, successor(P)), where successor increments the last non-0xFF byte.
+    /// </summary>
+    private static IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
+    {
+        var prefixWriter = new DatabaseKeyWriter();
+
+        for (int i = 0; i < seek.EqualityValues.Count; i++)
+        {
+            int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
+            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i]);
+        }
+
+        byte[] prefix = prefixWriter.ToArray();
+
+        if (seek.Lower is null && seek.Upper is null)
+        {
+            return new IndexKeyRange(
+                new IndexKey(prefix),
+                PrefixSuccessor(prefix) is { } successor ? new IndexKey(successor) : null,
+                IsStartInclusive: true,
+                IsEndInclusive: false);
+        }
+
+        int rangeOrdinal = FindColumnOrdinal(table, seek.Index.ColumnNames[seek.EqualityValues.Count]);
+        var rangeType = table.Columns[rangeOrdinal].Type.Type;
+
+        IndexKey? start = seek.EqualityValues.Count > 0 ? new IndexKey(prefix) : null;
+        bool startInclusive = true;
+        IndexKey? end = seek.EqualityValues.Count > 0 && PrefixSuccessor(prefix) is { } prefixEnd ? new IndexKey(prefixEnd) : null;
+        bool endInclusive = false;
+
+        if (seek.Lower is { } lower)
+        {
+            byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value);
+
+            // Exclusive lower: skip every composite key whose range component
+            // equals the bound — start at the bound's prefix successor.
+            start = lower.Inclusive
+                ? new IndexKey(lowerKey)
+                : PrefixSuccessor(lowerKey) is { } lowerSuccessor ? new IndexKey(lowerSuccessor) : null;
+            startInclusive = true;
+        }
+
+        if (seek.Upper is { } upper)
+        {
+            byte[] upperKey = AppendComponent(prefix, rangeType, upper.Value);
+
+            // Inclusive upper: admit every composite key whose range component
+            // equals the bound — end (exclusively) at the bound's successor.
+            end = upper.Inclusive
+                ? PrefixSuccessor(upperKey) is { } upperSuccessor ? new IndexKey(upperSuccessor) : null
+                : new IndexKey(upperKey);
+            endInclusive = false;
+        }
+
+        return new IndexKeyRange(start, end, startInclusive, endInclusive);
+    }
+
+    private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value)
+    {
+        var writer = new DatabaseKeyWriter();
+        SqlRowCodec.AppendValue(writer, type, value);
+        byte[] component = writer.ToArray();
+
+        var combined = new byte[prefix.Length + component.Length];
+        prefix.CopyTo(combined, 0);
+        component.CopyTo(combined, prefix.Length);
+        return combined;
+    }
+
+    /// <summary>
+    /// Computes the smallest byte string greater than every string with the
+    /// given prefix, or null when none exists (an all-0xFF prefix): increment
+    /// the last non-0xFF byte and truncate behind it.
+    /// </summary>
+    private static byte[]? PrefixSuccessor(byte[] prefix)
+    {
+        for (int i = prefix.Length - 1; i >= 0; i--)
+        {
+            if (prefix[i] != 0xFF)
+            {
+                var successor = new byte[i + 1];
+                prefix.AsSpan(0, i + 1).CopyTo(successor);
+                successor[i]++;
+                return successor;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Scans the table's visible row versions through the statement's snapshot:
@@ -972,7 +1165,7 @@ internal sealed class SqlPlanExecutor
     {
         var snapshot = statement.Snapshot;
 
-        foreach (var version in ScanVersions(table, cancellationToken))
+        foreach (var version in ScanVersions(table, cancellationToken, statement.Metrics))
         {
             if (!snapshot.IsVisible(version.Writer))
             {
@@ -998,7 +1191,8 @@ internal sealed class SqlPlanExecutor
     /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)> ScanVersions(
         SqlCatalogTable table,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SqlStatementMetrics? metrics = null)
     {
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
@@ -1011,6 +1205,11 @@ internal sealed class SqlPlanExecutor
 
             if (values is not null)
             {
+                if (metrics is not null)
+                {
+                    metrics.RecordsExamined++;
+                }
+
                 yield return ((unit.PageId, unit.SlotIndex), values, writer, deleter);
             }
         }

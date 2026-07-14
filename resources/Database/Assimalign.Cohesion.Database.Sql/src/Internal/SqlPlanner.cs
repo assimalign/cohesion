@@ -130,7 +130,323 @@ internal sealed class SqlPlanner
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            isCountStar);
+            isCountStar,
+            SelectAccessPath(table, select.Where));
+    }
+
+    // ── Access-path selection (rule-based, by design) ──────────────────
+
+    /// <summary>
+    /// Picks the SELECT's access path: an index seek when the WHERE clause has
+    /// sargable predicates on an index's leading key columns, the per-object
+    /// scan otherwise. Selection is rule-based (the MVP planner's contract —
+    /// no cost model): the index with the longest equality prefix wins; ties
+    /// prefer a usable range bound, then uniqueness, then name (deterministic).
+    /// The full WHERE always remains the residual predicate, so a wrong-looking
+    /// choice can cost performance but never correctness.
+    /// </summary>
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where)
+    {
+        if (where is null)
+        {
+            return SqlScanPath.Instance;
+        }
+
+        var indexes = _catalog.GetIndexes(table.ObjectId);
+
+        if (indexes.Count == 0)
+        {
+            return SqlScanPath.Instance;
+        }
+
+        // Top-level AND conjuncts → per-column sargable predicates.
+        var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
+        CollectSargablePredicates(table, where, predicates);
+
+        if (predicates.Count == 0)
+        {
+            return SqlScanPath.Instance;
+        }
+
+        SqlIndexSeekPath? best = null;
+        int bestPrefix = -1;
+        bool bestHasRange = false;
+
+        foreach (var index in indexes.OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var seek = TryBuildSeek(table, index, predicates, out int prefixLength, out bool hasRange);
+
+            if (seek is null)
+            {
+                continue;
+            }
+
+            bool better =
+                prefixLength > bestPrefix
+                || (prefixLength == bestPrefix && hasRange && !bestHasRange)
+                || (prefixLength == bestPrefix && hasRange == bestHasRange && index.IsUnique && best is { Index.IsUnique: false });
+
+            if (better)
+            {
+                best = seek;
+                bestPrefix = prefixLength;
+                bestHasRange = hasRange;
+            }
+        }
+
+        return (SqlAccessPath?)best ?? SqlScanPath.Instance;
+    }
+
+    /// <summary>
+    /// Builds a seek over one index from the collected predicates: the longest
+    /// equality prefix over the leading key columns, plus range bounds on the
+    /// following key column when its type's evaluator order provably matches the
+    /// codec's byte order. Returns null when the index contributes nothing.
+    /// </summary>
+    private static SqlIndexSeekPath? TryBuildSeek(
+        SqlCatalogTable table,
+        SqlCatalogIndex index,
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
+        out int prefixLength,
+        out bool hasRange)
+    {
+        prefixLength = 0;
+        hasRange = false;
+
+        var equalityValues = new List<object?>();
+
+        foreach (string columnName in index.ColumnNames)
+        {
+            int ordinal = FindColumnOrdinal(table, columnName);
+
+            if (!predicates.TryGetValue(ordinal, out var columnPredicates))
+            {
+                break;
+            }
+
+            object? equality = null;
+            bool hasEquality = false;
+
+            foreach (var (op, value) in columnPredicates)
+            {
+                if (op == SqlBinaryOperator.Equal)
+                {
+                    equality = value;
+                    hasEquality = true;
+                    break;
+                }
+            }
+
+            if (!hasEquality)
+            {
+                // No equality on this key column: a range bound here ends the seek.
+                if (IsRangeSargable(table.Columns[ordinal].Type.Type))
+                {
+                    SqlSeekBound? lower = null;
+                    SqlSeekBound? upper = null;
+
+                    foreach (var (op, value) in columnPredicates)
+                    {
+                        switch (op)
+                        {
+                            case SqlBinaryOperator.GreaterThan:
+                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: false), isLower: true);
+                                break;
+                            case SqlBinaryOperator.GreaterOrEqual:
+                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: true), isLower: true);
+                                break;
+                            case SqlBinaryOperator.LessThan:
+                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: false), isLower: false);
+                                break;
+                            case SqlBinaryOperator.LessOrEqual:
+                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: true), isLower: false);
+                                break;
+                        }
+                    }
+
+                    if (lower is not null || upper is not null)
+                    {
+                        prefixLength = equalityValues.Count;
+                        hasRange = true;
+                        return new SqlIndexSeekPath(index, equalityValues, lower, upper);
+                    }
+                }
+
+                break;
+            }
+
+            equalityValues.Add(equality);
+        }
+
+        if (equalityValues.Count == 0)
+        {
+            return null;
+        }
+
+        prefixLength = equalityValues.Count;
+        return new SqlIndexSeekPath(index, equalityValues, Lower: null, Upper: null);
+    }
+
+    /// <summary>
+    /// Keeps the tighter of two candidate bounds (the residual predicate makes
+    /// either choice correct; tighter just reads fewer entries).
+    /// </summary>
+    private static SqlSeekBound? Tighter(SqlSeekBound? current, SqlSeekBound candidate, bool isLower)
+    {
+        if (current is null || current.Value.Value is null || candidate.Value is null)
+        {
+            return candidate;
+        }
+
+        int comparison = SqlExpressionEvaluator.Compare(candidate.Value, current.Value.Value);
+        bool candidateTighter = isLower ? comparison > 0 : comparison < 0;
+        return candidateTighter ? candidate : current;
+    }
+
+    /// <summary>
+    /// Walks the WHERE clause's top-level AND conjuncts and collects sargable
+    /// comparisons: <c>column op comparand</c> (either side) where the comparand
+    /// is plan-time evaluable (no column references), non-null, and coercible to
+    /// the column's storage type, plus <c>column BETWEEN low AND high</c> as its
+    /// two bounds. Everything else is left to the residual predicate.
+    /// </summary>
+    private void CollectSargablePredicates(
+        SqlCatalogTable table,
+        SqlExpression expression,
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
+    {
+        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
+        {
+            CollectSargablePredicates(table, conjunction.Left, predicates);
+            CollectSargablePredicates(table, conjunction.Right, predicates);
+            return;
+        }
+
+        if (expression is SqlBetweenExpression { IsNegated: false } between &&
+            between.Operand is SqlColumnReferenceExpression betweenColumn)
+        {
+            TryAddPredicate(table, betweenColumn, SqlBinaryOperator.GreaterOrEqual, between.Low, predicates);
+            TryAddPredicate(table, betweenColumn, SqlBinaryOperator.LessOrEqual, between.High, predicates);
+            return;
+        }
+
+        if (expression is not SqlBinaryExpression binary)
+        {
+            return;
+        }
+
+        switch (binary.Operator)
+        {
+            case SqlBinaryOperator.Equal:
+            case SqlBinaryOperator.LessThan:
+            case SqlBinaryOperator.LessOrEqual:
+            case SqlBinaryOperator.GreaterThan:
+            case SqlBinaryOperator.GreaterOrEqual:
+                break;
+            default:
+                return;
+        }
+
+        if (binary.Left is SqlColumnReferenceExpression leftColumn)
+        {
+            TryAddPredicate(table, leftColumn, binary.Operator, binary.Right, predicates);
+        }
+        else if (binary.Right is SqlColumnReferenceExpression rightColumn)
+        {
+            TryAddPredicate(table, rightColumn, Flip(binary.Operator), binary.Left, predicates);
+        }
+    }
+
+    private static SqlBinaryOperator Flip(SqlBinaryOperator op) => op switch
+    {
+        SqlBinaryOperator.LessThan => SqlBinaryOperator.GreaterThan,
+        SqlBinaryOperator.LessOrEqual => SqlBinaryOperator.GreaterOrEqual,
+        SqlBinaryOperator.GreaterThan => SqlBinaryOperator.LessThan,
+        SqlBinaryOperator.GreaterOrEqual => SqlBinaryOperator.LessOrEqual,
+        _ => op,
+    };
+
+    private void TryAddPredicate(
+        SqlCatalogTable table,
+        SqlColumnReferenceExpression column,
+        SqlBinaryOperator op,
+        SqlExpression comparand,
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
+    {
+        if (ReferencesAnyColumn(comparand))
+        {
+            return;
+        }
+
+        int ordinal;
+        try
+        {
+            ordinal = new SqlExpressionEvaluator(table.Columns, _parameters).ResolveColumn(column);
+        }
+        catch (DatabaseException)
+        {
+            return; // resolution errors belong to validation, not access-path selection
+        }
+
+        object? value;
+        try
+        {
+            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters)
+                .Evaluate(comparand, Array.Empty<object?>());
+            value = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
+        }
+        catch (DatabaseException)
+        {
+            return; // not plan-time evaluable, or not coercible: leave it to the residual
+        }
+
+        if (value is null)
+        {
+            // A null comparand can never satisfy a comparison (SQL three-valued
+            // logic); the scan's residual evaluation yields the same empty
+            // result without special-casing keys.
+            return;
+        }
+
+        if (op != SqlBinaryOperator.Equal && !IsRangeSargable(table.Columns[ordinal].Type.Type))
+        {
+            return;
+        }
+
+        if (!predicates.TryGetValue(ordinal, out var list))
+        {
+            list = new List<(SqlBinaryOperator, object?)>();
+            predicates[ordinal] = list;
+        }
+
+        list.Add((op, value));
+    }
+
+    /// <summary>
+    /// The range-sargability type matrix: range seeks are restricted to types
+    /// whose evaluator comparison order provably equals the key codec's byte
+    /// order. Strings are equality-only — <c>Collation.Binary</c> orders by
+    /// code point, which diverges from ordinal UTF-16 comparison for astral
+    /// planes (the #854 lesson) — and so are Guid/binary/json.
+    /// </summary>
+    private static bool IsRangeSargable(DatabaseType type) => type switch
+    {
+        DatabaseType.Boolean
+            or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
+            or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal
+            or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime
+            or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan => true,
+        _ => false,
+    };
+
+    private static bool ReferencesAnyColumn(SqlExpression expression)
+    {
+        if (expression is SqlColumnReferenceExpression)
+        {
+            return true;
+        }
+
+        return Children(expression).Any(ReferencesAnyColumn);
     }
 
     private SqlInsertPlan PlanInsert(SqlInsertExpression insert)

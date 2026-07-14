@@ -12,7 +12,43 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   subqueries, aggregates beyond a lone `COUNT(*)`, `INSERT ... SELECT`). The IR
   is deliberately thin — a cost-based planner replaces the binding internals
   later without changing the executor seam (#178's plan-stage requirement, MVP
-  shape).
+  shape). That promise paid out with index adoption: the IR gained exactly one
+  node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
+  executor seam did not move.
+- **Access-path selection (rule-based; no cost model — the MVP planner
+  contract).** The planner flattens the WHERE clause's top-level `AND`
+  conjuncts into per-column sargable predicates — `column op comparand` where
+  the comparand is plan-time evaluable (literal/parameter, no column
+  references), non-null, and coercible to the column's storage type; `BETWEEN`
+  contributes its two bounds — then picks the index with the **longest
+  equality prefix** over its leading key columns (ties prefer a usable range
+  bound, then uniqueness, then name — deterministic), extended by range bounds
+  on the next key column. **Range sargability is a type matrix**: only types
+  whose evaluator comparison order provably equals the key codec's byte order
+  (integers, decimal, floats, boolean, temporal types) get range seeks;
+  strings are equality-only (`Collation.Binary` is code-point order, which
+  diverges from ordinal UTF-16 comparison for astral planes — the #854
+  lesson), as are Guid/binary/json. Everything else — `OR` at the top level,
+  computed columns, column-to-column comparisons, null comparands — falls
+  back to the per-object scan. **The full WHERE always remains the residual
+  predicate**, re-evaluated on every fetched row, so access-path selection
+  can cost performance but never correctness. SELECT only in this cut;
+  UPDATE/DELETE target collection still scans (recorded follow-up).
+- **Seek execution is snapshot-anchored.** The executor drives the B+Tree
+  cursor through the **statement snapshot** (the `IIndex.OpenCursor(snapshot,
+  …)` overload — the same snapshot the equivalent scan filters through, which
+  is the equivalence anchor under ReadCommitted's per-statement re-capture),
+  unpacks each visible entry's packed row location, fetches the row, and
+  re-checks the row's stamps against the same snapshot (defense in depth:
+  entries mirror row stamps by the maintenance discipline, so a divergence is
+  a bug this filter contains rather than surfaces; a dangling entry under an
+  invisible stamp is skipped, never fetched wrongly). Prefix ranges ride the
+  codec's order preservation: every composite key starting with prefix `P`
+  sorts in `[P, successor(P))`; bound inclusivity maps to prefix-successor
+  arithmetic on the encoded component. Per-statement observability
+  (`SqlStatementMetrics`: access path + records examined) is the behavioral
+  proof surface — the planner suite asserts an indexed equality seek examines
+  O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
   chains (record-space format version 3).** Every data record is
   `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
@@ -464,12 +500,13 @@ four independently shippable steps:
 
 ## Non-goals (current cut)
 
-Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, secondary-index
-usage in plans (maintenance and DDL are delivered — planner seek adoption is
-the immediately-following feature), `Serializable` isolation (rejected at
-begin), and cost-based optimization. (Row-level MVCC visibility and secondary
-indexes themselves were non-goals of earlier cuts and are now delivered; see
-"The MVCC integration" and "Secondary indexes" above.)
+Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, `Serializable`
+isolation (rejected at begin), cost-based optimization (selection stays
+rule-based), index seeks for UPDATE/DELETE target collection, and index-only
+result production (a seek always fetches the row). (Row-level MVCC visibility
+and secondary indexes — DDL, write-path maintenance, and planner seek
+adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
+integration", "Secondary indexes", and the access-path bullets above.)
 
 ## AOT posture
 

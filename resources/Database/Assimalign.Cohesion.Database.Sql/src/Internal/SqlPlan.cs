@@ -28,7 +28,43 @@ internal sealed record SqlSelectPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    bool IsCountStar) : SqlPlan;
+    bool IsCountStar,
+    SqlAccessPath Access) : SqlPlan;
+
+/// <summary>
+/// How a SELECT reaches its table's rows — the seek node the thin IR gained when
+/// the planner adopted secondary indexes. A closed family: the executor drives
+/// exactly these shapes and nothing else.
+/// </summary>
+internal abstract record SqlAccessPath;
+
+/// <summary>The per-object table scan (the fallback for everything non-sargable).</summary>
+internal sealed record SqlScanPath : SqlAccessPath
+{
+    internal static SqlScanPath Instance { get; } = new();
+}
+
+/// <summary>
+/// An index seek: an equality prefix over the index's leading key columns
+/// (plan-time-evaluated, storage-coerced values) plus an optional range bound on
+/// the next key column. The full WHERE stays the residual predicate — a seek only
+/// narrows the candidate set, so re-evaluating everything keeps seek results
+/// exactly equivalent to the scan they replace.
+/// </summary>
+/// <param name="Index">The chosen index's catalog description.</param>
+/// <param name="EqualityValues">The equality prefix values, one per leading key column, coerced to storage types.</param>
+/// <param name="Lower">The optional lower bound on the key column after the prefix.</param>
+/// <param name="Upper">The optional upper bound on the key column after the prefix.</param>
+internal sealed record SqlIndexSeekPath(
+    SqlCatalogIndex Index,
+    IReadOnlyList<object?> EqualityValues,
+    SqlSeekBound? Lower,
+    SqlSeekBound? Upper) : SqlAccessPath;
+
+/// <summary>One endpoint of a seek's range component.</summary>
+/// <param name="Value">The bound's value, coerced to the key column's storage type.</param>
+/// <param name="Inclusive">Whether the bound itself is included.</param>
+internal readonly record struct SqlSeekBound(object? Value, bool Inclusive);
 
 internal sealed record SqlInsertPlan(
     SqlCatalogTable Table,
