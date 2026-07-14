@@ -136,6 +136,26 @@ public readonly unsafe struct Page
         set => ((Header*)Pointer)->OverflowSize = value;
     }
 
+    /// <summary>
+    /// Gets or sets the identity of the object (table, collection, container) whose
+    /// records this page holds — the per-object record-chain tag. Zero means the
+    /// page belongs to the shared, untagged record space (the pre-chain layout, and
+    /// the layout metadata-style consumers keep using).
+    /// </summary>
+    /// <remarks>
+    /// The owner tag is model-agnostic: the storage layer never interprets it beyond
+    /// grouping data pages into per-owner chains for scoped iteration and release.
+    /// Files written before the tag existed read zero here (the field occupies
+    /// previously reserved header bytes), which is exactly the shared-space meaning.
+    /// </remarks>
+    public ulong OwnerId
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ((Header*)Pointer)->OwnerId;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => ((Header*)Pointer)->OwnerId = value;
+    }
+
     #endregion
 
     /// <summary>
@@ -229,9 +249,16 @@ public readonly unsafe struct Page
         public fixed byte Mac[16];
 
         /// <summary>
-        /// Reserved for future use (32 bytes).
+        /// Identity of the object whose records this page holds (8 bytes); zero for
+        /// the shared, untagged record space. Drives per-object record chains.
         /// </summary>
         [FieldOffset(64)]
-        public fixed byte Reserved[32];
+        public ulong OwnerId;
+
+        /// <summary>
+        /// Reserved for future use (24 bytes).
+        /// </summary>
+        [FieldOffset(72)]
+        public fixed byte Reserved[24];
     }
 }

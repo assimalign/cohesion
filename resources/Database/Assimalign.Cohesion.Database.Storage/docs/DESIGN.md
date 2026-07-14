@@ -19,7 +19,8 @@ the journal only — there are no side files.
 - **8 KiB pages, 96-byte header.** The header layout (`Page.Header`) is an explicit
   struct persisted on disk, so field offsets are a wire contract: id (0), LSN (8),
   checksum (16), flags (20), type (21), slot count (22), free-data end (24), overflow
-  size (28), then reserved nonce/MAC space for encryption at rest (32–63).
+  size (28), reserved nonce/MAC space for encryption at rest (32–63), then the
+  owner tag (64) driving per-owner record chains (72–95 reserved).
 - **`PageType.Free` is zero — deliberately.** A zero-initialized page reads as free,
   and `FreePage` re-stamps freed pages with `Free`, which is what lets the free-space
   map be *reconstructed from page headers* on open instead of being persisted as a
@@ -81,6 +82,40 @@ storage — row, document, KV entry, node/edge record — is "a variable-length 
 sequence addressed by (page, slot)". Records above `SlottedPage.MaxRecordSize` are
 rejected at the API boundary; multi-page records ride overflow pages (a later feature —
 the flags and page type are reserved).
+
+### Per-owner record chains
+
+Data pages carry an 8-byte **owner tag** in the page header (offset 64, taken from
+the reserved area; zero = the shared, untagged space, which is also what pre-tag
+files read — no format flag needed). The tag is model-agnostic: storage never
+interprets it beyond grouping. `InsertRecord(transaction, ownerId, data)` lands the
+record on the owner's current write page (allocating and tagging a new page when
+needed), `GetUnitIterator(ownerId)` iterates only the owner's pages, and
+`GetOwnerPages(ownerId)` exposes the chain. This is what turns a model's
+"scan one object" from O(storage) into O(object) — the SQL engine passes table
+object ids, so a table scan stops decoding the whole database.
+
+- **The directory is in-memory only, page headers are the truth.** The per-owner
+  page directory is rebuilt on open by the same header scan that rebuilds the
+  free-space map (no extra I/O) and maintained at allocation/free time. A persisted
+  directory could drift from reality; headers cannot (the FSM precedent).
+- **Owner tags are WAL-covered like all page bytes.** A fresh chain page is tagged
+  *before* its first-touch before-image is captured, so a rolled-back allocation
+  restores an empty page still belonging to the chain — a safe leak the owner's
+  next insert reuses.
+- **Chain release (`FreeOwnerPages`) is transactional with commit-deferred
+  reuse.** Each page is retyped `Free` under the transaction (before-image
+  covered — rollback and crash recovery restore the chain bytes), but the pages
+  re-enter the free-space map and leave the directory only when the transaction
+  **commits**. Freeing eagerly would let the allocator hand a page to a new owner
+  while the release could still roll back — the rollback's before-image would then
+  resurrect old content over live data. Deferral makes that impossible.
+- **Why release is O(pages), not O(1).** Full-page-image logging prices a
+  transactional free at one page touch per page (before-image + after-image in the
+  journal). A directory-level O(1) release needs a persisted allocation structure
+  (the reserved bitmap-FSM page type) so freeing can be a metadata write; until
+  that lands, chains keep releases proportional to the object, which is already
+  incomparably better than the previous permanent leak.
 
 ## The journal (write-ahead log)
 

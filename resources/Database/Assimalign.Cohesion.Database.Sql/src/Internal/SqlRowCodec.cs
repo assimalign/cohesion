@@ -22,11 +22,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal static class SqlRowCodec
 {
     /// <summary>
-    /// The current record-space format version, persisted in the catalog: 2 =
-    /// stamped records (this codec); 1 = the pre-MVCC unstamped layout, upgraded
-    /// in place when a version-1 database is opened.
+    /// The current record-space format version, persisted in the catalog: 3 =
+    /// stamped records in per-object page chains (rows live on pages tagged with
+    /// their table's object id); 2 = stamped records in the shared page stream;
+    /// 1 = the pre-MVCC unstamped layout. Older versions upgrade in place when the
+    /// database is opened — stamps first (1 → 2), then chain relocation (2 → 3).
+    /// The record byte layout itself is unchanged since version 2.
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 2;
+    internal const int RecordSpaceFormatVersion = 3;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

@@ -249,7 +249,7 @@ internal sealed class SqlPlanExecutor
         {
             foreach (byte[] row in rows)
             {
-                var (pageId, slotIndex) = _storage.InsertRow(bracket, row);
+                var (pageId, slotIndex) = _storage.InsertRow(bracket, plan.Table.ObjectId, row);
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, pageId, slotIndex);
             }
 
@@ -299,7 +299,7 @@ internal sealed class SqlPlanExecutor
                 // insert the new version, both stamped with this transaction's
                 // sequence.
                 TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
-                var location = _storage.InsertRow(bracket, newVersion);
+                var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, location.PageId, location.SlotIndex);
             }
 
@@ -488,7 +488,7 @@ internal sealed class SqlPlanExecutor
                 catch (SlottedPageException)
                 {
                     _storage.DeleteRow(bracket, pageId, slotIndex);
-                    _storage.InsertRow(bracket, record);
+                    _storage.InsertRow(bracket, updated.ObjectId, record);
                 }
             }
 
@@ -516,7 +516,19 @@ internal sealed class SqlPlanExecutor
             statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+
+        // Release the table's record chain: per-object pages make the drop a
+        // page-directory walk instead of a garbage legacy. Rides the statement
+        // bracket like every DDL row effect (DROP COLUMN's rewrite precedent) —
+        // the catalog entry itself is already self-committed, so the release is
+        // not undone by rolling back the enclosing transaction; a crash before
+        // the bracket proves out restores the pages as an unreachable, safely
+        // leaked chain (the catalog no longer references the object).
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        {
+            _storage.FreeOwnerPages(bracket, table.ObjectId);
+            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -568,13 +580,15 @@ internal sealed class SqlPlanExecutor
     /// Scans every stored version of the table's rows — visible or not — with
     /// its stamps. DDL row rewrites use this: the whole record space must stay
     /// decodable across a layout change, so tombstoned and concurrent versions
-    /// rewrite too, stamps preserved.
+    /// rewrite too, stamps preserved. The scan is scoped to the table's record
+    /// chain (per-object pages), so its cost is O(table), not O(database); the
+    /// object-id prefix filter below stays as defense in depth.
     /// </summary>
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)> ScanVersions(
         SqlCatalogTable table,
         CancellationToken cancellationToken)
     {
-        using var iterator = _storage.GetUnitIterator();
+        using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())
         {

@@ -418,6 +418,10 @@
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/">
 		<File Path="Assimalign.Cohesion.Database.Sql.Storage/README.md" />
 	</Folder>
+	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/docs/">
+		<File Path="Assimalign.Cohesion.Database.Sql.Storage/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Sql.Storage/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Database/Assimalign.Cohesion.Database.Sql.Storage/src/">
 		<Project Path="Assimalign.Cohesion.Database.Sql.Storage/src/Assimalign.Cohesion.Database.Sql.Storage.csproj" />
 	</Folder>

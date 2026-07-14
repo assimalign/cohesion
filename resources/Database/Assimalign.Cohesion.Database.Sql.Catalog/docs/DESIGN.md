@@ -39,12 +39,14 @@ two questions for the planner: *what objects exist* (with stable identities) and
   points (checkpoint/shutdown).
 - **The record-space format version lives here** (kind-4 record,
   `RecordSpaceFormatVersion`): data rows are not self-describing across layout
-  changes — a stamped (MVCC, version 2) record and an unstamped (version 1)
-  record cannot be told apart record-by-record — so the database-grain marker
-  is catalog metadata, read by the engine at open to decide whether the record
-  space needs the in-place stamp upgrade. Absent marker reads as version 1
-  (pre-marker databases); the engine writes version 2 after upgrading (or at
-  creation, when the space is born stamped).
+  changes — a stamped (MVCC, version ≥ 2) record and an unstamped (version 1)
+  record cannot be told apart record-by-record, and version 2 vs 3 (shared page
+  stream vs per-object page chains) is a page-placement property no record
+  carries — so the database-grain marker is catalog metadata, read by the
+  engine at open to decide which in-place upgrade stages to run. Absent marker
+  reads as version 1 (pre-marker databases); the engine writes the current
+  version (3) after upgrading (or at creation, when the space is born on the
+  current format).
 
 ## Error model
 
