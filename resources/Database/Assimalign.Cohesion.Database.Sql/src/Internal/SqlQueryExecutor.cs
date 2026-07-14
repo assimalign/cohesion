@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -19,11 +20,13 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
+    private readonly IIndexManager _indexManager;
 
-    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog)
+    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager)
     {
         _storage = storage;
         _catalog = catalog;
+        _indexManager = indexManager;
     }
 
     /// <summary>
@@ -54,7 +57,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         var planner = new SqlPlanner(_catalog, sqlRequest.Parameters);
         var plan = planner.Plan(sqlRequest.Statement.SqlExpression);
 
-        var executor = new SqlPlanExecutor(_storage, _catalog, sqlRequest.Parameters);
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, sqlRequest.Parameters);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }

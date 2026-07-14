@@ -12,6 +12,7 @@ internal sealed class StorageTransaction : IStorageTransaction
 {
     private readonly Storage _owner;
     private readonly Dictionary<long, byte[]> _beforeImages = new();
+    private List<(long PageId, ulong OwnerId)>? _pendingFrees;
     private bool _active = true;
 
     internal StorageTransaction(Storage owner, long sequence)
@@ -41,6 +42,19 @@ internal sealed class StorageTransaction : IStorageTransaction
     /// Records the before image of a page on first touch.
     /// </summary>
     internal void RecordBeforeImage(long pageId, byte[] image) => _beforeImages.Add(pageId, image);
+
+    /// <summary>
+    /// Gets the pages this transaction has released, with the owner chain each one
+    /// belonged to. The free-space map and owner directory are updated from this
+    /// list at commit — never before — so a rollback restores the chain untouched.
+    /// </summary>
+    internal IReadOnlyList<(long PageId, ulong OwnerId)>? PendingFrees => _pendingFrees;
+
+    /// <summary>
+    /// Registers a page release to apply when the transaction commits.
+    /// </summary>
+    internal void RegisterPendingFree(long pageId, ulong ownerId)
+        => (_pendingFrees ??= new List<(long, ulong)>()).Add((pageId, ownerId));
 
     /// <inheritdoc />
     public void Commit() => Commit(awaitDurability: true);

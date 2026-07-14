@@ -47,6 +47,11 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
 
             try
             {
+                // Re-export the index registrations first when they drifted —
+                // root page ids change on splits, and the checkpoint pass is the
+                // engine's persistence point for re-attachment metadata.
+                database.SaveIndexRegistrationsIfChanged();
+
                 // The data storage checkpoints through the transaction
                 // coordinator: the truncating checkpoint record carries every
                 // in-flight logical transaction's sequence, so recovery

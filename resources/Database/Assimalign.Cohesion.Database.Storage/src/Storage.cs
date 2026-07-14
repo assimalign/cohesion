@@ -41,13 +41,21 @@ public abstract class Storage : IStorage
     private readonly Dictionary<long, long> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
     private readonly StorageGroupCommitGate _groupCommitGate = new();
+
+    // Per-owner record chains: which data pages belong to which owner, and each
+    // owner's current write page. Rebuilt from page headers on open (the same scan
+    // that rebuilds the free-space map); maintained on allocation and commit-time
+    // frees. Guarded by _ownerLock — page headers on disk stay the source of truth.
+    private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
+    private readonly Dictionary<ulong, PageId> _currentWritePages = new();
+    private readonly object _ownerLock = new();
+
     private StoragePageManager? _pageManager;
     private StreamJournal? _journal;
     private long _nextTransactionSequence;
     private int _activeTransactionCount;
     private StorageId _id;
     private Name _name;
-    private PageId? _currentWritePageId;
     private bool _disposed;
 
     /// <summary>
@@ -160,12 +168,13 @@ public abstract class Storage : IStorage
             headerHandle.MarkDirty();
         }
 
-        // Allocate first data page (page 1)
+        // Allocate first data page (page 1) — the shared (owner-zero) space's
+        // initial write page.
         var dataHandle = _pageManager.AllocatePage(PageType.Data);
         var slotted = new SlottedPage(dataHandle.Page);
         slotted.Initialize();
         dataHandle.MarkDirty();
-        _currentWritePageId = dataHandle.Id;
+        RegisterOwnerPage(0, dataHandle.Id);
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
@@ -239,24 +248,27 @@ public abstract class Storage : IStorage
         // version stamps persist in data pages.
         _nextTransactionSequence = Math.Max(StorageRecovery.Run(Data, _journal), sequenceFloor);
 
-        // Rebuild the free-space map and locate the last data page in one pass over
-        // the on-disk page headers. The stream length is the source of truth for the
-        // page count (the file header trails it if the process stopped between an
-        // allocation and the next header update).
+        // Rebuild the free-space map and the per-owner page directory in one pass
+        // over the on-disk page headers. The stream length is the source of truth
+        // for the page count (the file header trails it if the process stopped
+        // between an allocation and the next header update). Page headers are also
+        // the single source of truth for chain membership — there is no persisted
+        // directory to drift from reality (the free-space-map precedent).
         _freeSpaceMap.MarkAllocated((PageId)0L);
 
         long pageCount = Data.Length / Page.Size;
         var pageHeader = new byte[Page.HeaderSize];
-        PageId? lastDataPage = null;
 
         for (long i = 1; i < pageCount; i++)
         {
             Data.ReadPageHeader((PageId)i, pageHeader);
 
             PageType type;
+            ulong pageOwner;
             fixed (byte* headerPtr = pageHeader)
             {
                 type = ((Page.Header*)headerPtr)->Type;
+                pageOwner = ((Page.Header*)headerPtr)->OwnerId;
             }
 
             if (type == PageType.Free)
@@ -269,13 +281,14 @@ public abstract class Storage : IStorage
 
                 if (type == PageType.Data)
                 {
-                    lastDataPage = (PageId)i;
+                    // Ascending scan: the last page seen per owner becomes that
+                    // owner's current write page.
+                    RegisterOwnerPage(pageOwner, (PageId)i);
                 }
             }
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap);
-        _currentWritePageId = lastDataPage;
 
         // Everything the journal described is now in the data file; start it clean.
         if (journalHadRecords && checkpointOnOpen)
@@ -431,15 +444,30 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Inserts a record within a storage transaction. Automatically allocates a new
-    /// data page if the current page is full.
+    /// Inserts a record into the shared (owner-zero) record space within a storage
+    /// transaction. Automatically allocates a new data page if the current page is full.
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
-    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ReadOnlySpan<byte> data)
+    protected (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ReadOnlySpan<byte> data)
+        => InsertRecord(transaction, 0, data);
+
+    /// <summary>
+    /// Inserts a record into the specified owner's record chain within a storage
+    /// transaction: the record lands on the owner's current write page (a new page
+    /// is allocated and tagged with the owner when needed), so scans scoped to the
+    /// owner touch only its own pages.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owner whose chain receives the record; zero is the shared space.</param>
+    /// <param name="data">The record data to insert.</param>
+    /// <returns>The page identifier and slot index where the record was stored.</returns>
+    /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
 
@@ -452,20 +480,26 @@ public abstract class Storage : IStorage
         IStoragePageHandle handle;
         SlottedPage slotted;
 
-        // The current write page may have been freed since the last insert.
-        if (_currentWritePageId is null || !_freeSpaceMap.IsAllocated(_currentWritePageId.Value))
+        PageId? currentWritePage;
+        lock (_ownerLock)
         {
-            handle = AllocateDataPage(owner, out slotted);
+            currentWritePage = _currentWritePages.TryGetValue(ownerId, out var current) ? current : null;
+        }
+
+        // The current write page may have been freed since the last insert.
+        if (currentWritePage is null || !_freeSpaceMap.IsAllocated(currentWritePage.Value))
+        {
+            handle = AllocateDataPage(owner, ownerId, out slotted);
         }
         else
         {
-            handle = TouchPage(owner, _currentWritePageId.Value);
+            handle = TouchPage(owner, currentWritePage.Value);
             slotted = new SlottedPage(handle.Page);
 
-            if (!slotted.CanFit(data.Length))
+            if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != ownerId || !slotted.CanFit(data.Length))
             {
                 handle.Dispose();
-                handle = AllocateDataPage(owner, out slotted);
+                handle = AllocateDataPage(owner, ownerId, out slotted);
             }
         }
 
@@ -618,6 +652,129 @@ public abstract class Storage : IStorage
         return new StorageUnitIterator(_pageManager!, _freeSpaceMap);
     }
 
+    /// <inheritdoc />
+    public IStorageUnitIterator GetUnitIterator(ulong ownerId)
+    {
+        return new StorageUnitIterator(_pageManager!, _freeSpaceMap, SnapshotOwnerPages(ownerId), ownerId);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<PageId> GetOwnerPages(ulong ownerId)
+    {
+        long[] pages = SnapshotOwnerPages(ownerId);
+        var result = new PageId[pages.Length];
+
+        for (int i = 0; i < pages.Length; i++)
+        {
+            result[i] = (PageId)pages[i];
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public unsafe int FreeOwnerPages(IStorageTransaction transaction, ulong ownerId)
+    {
+        var owner = ValidateTransaction(transaction);
+        long[] pages = SnapshotOwnerPages(ownerId);
+
+        foreach (long pageId in pages)
+        {
+            // Retype under the transaction: the before-image covers the whole page
+            // (records included), so rollback and crash recovery restore the chain;
+            // a committed release replays as a Free page and the open-time header
+            // scan rebuilds both the free-space map and the directory accordingly.
+            using var handle = TouchPage(owner, (PageId)pageId);
+            var page = handle.Page;
+            page.AsBodySpan().Clear();
+            page.Type = PageType.Free;
+            page.OwnerId = 0;
+
+            var slotted = new SlottedPage(page);
+            slotted.Initialize();
+
+            handle.MarkDirty();
+            owner.RegisterPendingFree(pageId, ownerId);
+        }
+
+        return pages.Length;
+    }
+
+    /// <summary>
+    /// Records a data page as belonging to an owner's chain and makes it the
+    /// owner's current write page.
+    /// </summary>
+    private void RegisterOwnerPage(ulong ownerId, PageId pageId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_ownerPages.TryGetValue(ownerId, out var pages))
+            {
+                pages = new SortedSet<long>();
+                _ownerPages[ownerId] = pages;
+            }
+
+            pages.Add((long)pageId);
+            _currentWritePages[ownerId] = pageId;
+        }
+    }
+
+    /// <summary>
+    /// Snapshots an owner's page ids in ascending order.
+    /// </summary>
+    private long[] SnapshotOwnerPages(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_ownerPages.TryGetValue(ownerId, out var pages) || pages.Count == 0)
+            {
+                return Array.Empty<long>();
+            }
+
+            var snapshot = new long[pages.Count];
+            pages.CopyTo(snapshot);
+            return snapshot;
+        }
+    }
+
+    /// <summary>
+    /// Applies a committed transaction's page releases: the pages return to the
+    /// free-space map and leave the owner directory. Deferred to commit so the
+    /// allocator can never hand out a page whose release might still roll back.
+    /// </summary>
+    private void ApplyPendingFrees(StorageTransaction transaction)
+    {
+        var pendingFrees = transaction.PendingFrees;
+
+        if (pendingFrees is null)
+        {
+            return;
+        }
+
+        lock (_ownerLock)
+        {
+            foreach (var (pageId, ownerId) in pendingFrees)
+            {
+                if (_ownerPages.TryGetValue(ownerId, out var pages))
+                {
+                    pages.Remove(pageId);
+
+                    if (pages.Count == 0)
+                    {
+                        _ownerPages.Remove(ownerId);
+                    }
+                }
+
+                if (_currentWritePages.TryGetValue(ownerId, out var current) && (long)current == pageId)
+                {
+                    _currentWritePages.Remove(ownerId);
+                }
+
+                _freeSpaceMap.Free((PageId)pageId);
+            }
+        }
+    }
+
     /// <summary>
     /// Commits a storage transaction: appends after images of every touched page and
     /// a commit record, then — unless the caller owns durability through a later
@@ -662,6 +819,10 @@ public abstract class Storage : IStorage
         {
             _journal.EnsureDurable(commitLsn);
         }
+
+        // Page releases become effective only now that the commit record exists:
+        // the freed pages re-enter the allocator and leave their owner chains.
+        ApplyPendingFrees(transaction);
 
         ReleasePageWriteLocks(transaction);
     }
@@ -812,11 +973,12 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Allocates and initializes a fresh data page inside a transaction. The before
-    /// image captures the freshly initialized (empty) page: rollback restores an
-    /// allocated-but-empty page rather than deallocating — a safe leak.
+    /// Allocates and initializes a fresh data page for an owner's chain inside a
+    /// transaction. The owner tag is stamped before the before-image is captured, so
+    /// rollback restores an allocated-but-empty page still belonging to the chain —
+    /// a safe leak the owner's next insert reuses.
     /// </summary>
-    private IStoragePageHandle AllocateDataPage(StorageTransaction transaction, out SlottedPage slotted)
+    private IStoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
     {
         var handle = _pageManager!.AllocatePage(PageType.Data);
 
@@ -824,7 +986,11 @@ public abstract class Storage : IStorage
         {
             slotted = new SlottedPage(handle.Page);
             slotted.Initialize();
-            _currentWritePageId = handle.Id;
+
+            var page = handle.Page;
+            page.OwnerId = ownerId;
+
+            RegisterOwnerPage(ownerId, handle.Id);
             RegisterTouch(transaction, handle);
             return handle;
         }

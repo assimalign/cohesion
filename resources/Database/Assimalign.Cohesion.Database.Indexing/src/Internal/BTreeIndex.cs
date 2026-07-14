@@ -85,11 +85,14 @@ internal sealed class BTreeIndex : IIndex
 
         // Unique keys arbitrate concurrent writers through the lock manager before
         // touching the tree: the winner proceeds, others block or deadlock-abort.
+        // (IndexKey.Hash is the published lock identity, so writers that must not
+        // wait here — statements inside an apply gate — pre-acquire the same
+        // resource in their lock phase and re-enter for free.)
         if (IsUnique && _lockManager is not null)
         {
             await _lockManager.AcquireAsync(
                 transaction.Sequence,
-                LockResource.Entry(_objectId, HashKey(key.Encoded.Span)),
+                LockResource.Entry(_objectId, key.Hash()),
                 LockMode.Exclusive,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -110,7 +113,7 @@ internal sealed class BTreeIndex : IIndex
                 throw new IndexUniqueViolationException(Name, key);
             }
 
-            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value);
+            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value, 0);
         }
         finally
         {
@@ -131,7 +134,7 @@ internal sealed class BTreeIndex : IIndex
         {
             await _lockManager.AcquireAsync(
                 transaction.Sequence,
-                LockResource.Entry(_objectId, HashKey(key.Encoded.Span)),
+                LockResource.Entry(_objectId, key.Hash()),
                 LockMode.Exclusive,
                 cancellationToken).ConfigureAwait(false);
         }
@@ -197,8 +200,14 @@ internal sealed class BTreeIndex : IIndex
     public IIndexCursor OpenCursor(ITransactionContext transaction, IndexKeyRange range, bool reverse = false)
     {
         ArgumentNullException.ThrowIfNull(transaction);
+        return OpenCursor(transaction.Snapshot, range, reverse);
+    }
 
-        var snapshot = transaction.Snapshot;
+    /// <inheritdoc />
+    public IIndexCursor OpenCursor(TransactionSnapshot snapshot, IndexKeyRange range, bool reverse = false)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         var results = new List<(byte[] Key, ulong EntryReference)>();
 
         _latch.EnterReadLock();
@@ -217,6 +226,208 @@ internal sealed class BTreeIndex : IIndex
         }
 
         return new BTreeCursor(results);
+    }
+
+    /// <inheritdoc />
+    public ValueTask InsertVersionAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (key.Length > BTreeNode.MaxKeyLength)
+        {
+            throw new IndexException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
+        }
+
+        _latch.EnterWriteLock();
+        try
+        {
+            InsertCore(transaction, key.Encoded.Span, entryReference, writer.Value, deleter.Value);
+        }
+        finally
+        {
+            _latch.ExitWriteLock();
+        }
+
+        return default;
+    }
+
+    /// <inheritdoc />
+    public ValueTask EraseAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _latch.EnterWriteLock();
+        try
+        {
+            long leafId = DescendToLeaf(key.Encoded.Span, null);
+
+            while (leafId >= 0)
+            {
+                long nextLeaf;
+
+                using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+                {
+                    var node = new BTreeNode(handle.Page.AsBodySpan());
+                    nextLeaf = node.NextLeaf;
+
+                    for (int index = node.FindLowerBound(key.Encoded.Span); index < node.EntryCount; index++)
+                    {
+                        if (!node.GetKey(index).SequenceEqual(key.Encoded.Span))
+                        {
+                            return default; // walked past the key: nothing to erase
+                        }
+
+                        if (node.GetEntryReference(index) != entryReference || node.GetWriter(index) != writer.Value)
+                        {
+                            continue;
+                        }
+
+                        using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                        var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                        writableNode.RemoveLeafEntry(index);
+                        writable.MarkDirty();
+                        return default;
+                    }
+                }
+
+                leafId = nextLeaf; // equal keys may continue on the next leaf
+            }
+        }
+        finally
+        {
+            _latch.ExitWriteLock();
+        }
+
+        return default;
+    }
+
+    /// <inheritdoc />
+    public ValueTask ClearDeleterAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _latch.EnterWriteLock();
+        try
+        {
+            long leafId = DescendToLeaf(key.Encoded.Span, null);
+
+            while (leafId >= 0)
+            {
+                long nextLeaf;
+
+                using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+                {
+                    var node = new BTreeNode(handle.Page.AsBodySpan());
+                    nextLeaf = node.NextLeaf;
+
+                    for (int index = node.FindLowerBound(key.Encoded.Span); index < node.EntryCount; index++)
+                    {
+                        if (!node.GetKey(index).SequenceEqual(key.Encoded.Span))
+                        {
+                            return default; // walked past the key: nothing to restore
+                        }
+
+                        if (node.GetEntryReference(index) != entryReference || node.GetDeleter(index) != deleter.Value)
+                        {
+                            continue;
+                        }
+
+                        using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                        var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                        writableNode.SetDeleter(index, 0);
+                        writable.MarkDirty();
+                        return default;
+                    }
+                }
+
+                leafId = nextLeaf;
+            }
+        }
+        finally
+        {
+            _latch.ExitWriteLock();
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Walks every leaf once, physically removing entries written by any of the
+    /// given writers and clearing tombstones they stamped — the open-time
+    /// aborted-writer purge (see <see cref="IIndexManager.PurgeWritersAsync"/>).
+    /// </summary>
+    internal long PurgeWriters(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
+    {
+        long purged = 0;
+
+        _latch.EnterWriteLock();
+        try
+        {
+            long leafId = DescendToLeftmostLeaf();
+
+            while (leafId >= 0)
+            {
+                long nextLeaf;
+
+                using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+                {
+                    var node = new BTreeNode(handle.Page.AsBodySpan());
+                    nextLeaf = node.NextLeaf;
+
+                    IStoragePageHandle? writable = null;
+                    try
+                    {
+                        for (int index = 0; index < node.EntryCount;)
+                        {
+                            bool remove = writers.Contains(new TransactionSequence(node.GetWriter(index)));
+                            ulong deleter = node.GetDeleter(index);
+                            bool restore = !remove && deleter != 0 && writers.Contains(new TransactionSequence(deleter));
+
+                            if (!remove && !restore)
+                            {
+                                index++;
+                                continue;
+                            }
+
+                            if (writable is null)
+                            {
+                                writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
+                                node = new BTreeNode(writable.Page.AsBodySpan());
+                            }
+
+                            if (remove)
+                            {
+                                node.RemoveLeafEntry(index); // do not advance: entries shifted left
+                            }
+                            else
+                            {
+                                node.SetDeleter(index, 0);
+                                index++;
+                            }
+
+                            purged++;
+                        }
+
+                        writable?.MarkDirty();
+                    }
+                    finally
+                    {
+                        writable?.Dispose();
+                    }
+                }
+
+                leafId = nextLeaf;
+            }
+        }
+        finally
+        {
+            _latch.ExitWriteLock();
+        }
+
+        return purged;
     }
 
     private void CollectVisible(TransactionSnapshot snapshot, IndexKeyRange range, List<(byte[] Key, ulong EntryReference)> results)
@@ -317,7 +528,7 @@ internal sealed class BTreeIndex : IIndex
         return deleter == 0 || !snapshot.IsVisible(new TransactionSequence(deleter));
     }
 
-    private void InsertCore(IStorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer)
+    private void InsertCore(IStorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
     {
         while (true)
         {
@@ -332,7 +543,7 @@ internal sealed class BTreeIndex : IIndex
                 {
                     using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
                     var writableNode = new BTreeNode(writable.Page.AsBodySpan());
-                    writableNode.InsertLeafEntry(writableNode.FindLowerBound(key), key, entryReference, writer, 0);
+                    writableNode.InsertLeafEntry(writableNode.FindLowerBound(key), key, entryReference, writer, deleter);
                     writable.MarkDirty();
                     return;
                 }
@@ -548,17 +759,4 @@ internal sealed class BTreeIndex : IIndex
         }
     }
 
-    private static ulong HashKey(ReadOnlySpan<byte> key)
-    {
-        // FNV-1a: stable, allocation-free. A collision only over-locks (two keys
-        // sharing one lock), which is safe.
-        ulong hash = 14695981039346656037UL;
-
-        foreach (byte value in key)
-        {
-            hash = (hash ^ value) * 1099511628211UL;
-        }
-
-        return hash;
-    }
 }

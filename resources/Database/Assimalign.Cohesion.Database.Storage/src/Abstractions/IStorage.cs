@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
@@ -80,6 +81,37 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// </remarks>
     /// <returns>A new storage unit iterator.</returns>
     IStorageUnitIterator GetUnitIterator();
+
+    /// <summary>
+    /// Gets an iterator scoped to one owner's record chain: only data pages tagged
+    /// with <paramref name="ownerId"/> are visited, so a scan of one object touches
+    /// O(object) pages instead of O(storage). Owner zero iterates the shared,
+    /// untagged record space.
+    /// </summary>
+    /// <param name="ownerId">The owner whose pages to scan.</param>
+    /// <returns>A new storage unit iterator over the owner's pages.</returns>
+    IStorageUnitIterator GetUnitIterator(ulong ownerId);
+
+    /// <summary>
+    /// Gets a point-in-time snapshot of the data pages currently belonging to the
+    /// specified owner's record chain, in ascending page order.
+    /// </summary>
+    /// <param name="ownerId">The owner whose pages to list.</param>
+    /// <returns>The owner's data pages; empty when the owner holds none.</returns>
+    IReadOnlyList<PageId> GetOwnerPages(ulong ownerId);
+
+    /// <summary>
+    /// Releases every data page of the specified owner's record chain inside a
+    /// transaction: each page is retyped <see cref="PageType.Free"/> under the
+    /// write-ahead log (before-image covered — a rollback restores the chain), and
+    /// the pages return to the free-space map when the transaction commits, never
+    /// before, so an in-flight release can never be reallocated.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owner whose chain to release.</param>
+    /// <returns>The number of pages released.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
+    int FreeOwnerPages(IStorageTransaction transaction, ulong ownerId);
 
     /// <summary>
     /// Begins a storage-level transaction: the unit of atomicity and durability for

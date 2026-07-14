@@ -12,20 +12,61 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   subqueries, aggregates beyond a lone `COUNT(*)`, `INSERT ... SELECT`). The IR
   is deliberately thin — a cost-based planner replaces the binding internals
   later without changing the executor seam (#178's plan-stage requirement, MVP
-  shape).
-- **Row format: MVCC stamps + object-id-prefixed tuple (record-space format
-  version 2).** Every data record is `[writer u64][deleter u64]` — a fixed
-  16-byte version-stamp header, the B+Tree leaf-entry design adopted for the
-  record space — followed by the shared tuple codec payload (#854): the owning
-  table's object id, then one self-describing component per column. Why a fixed
-  binary prefix and not tuple components (the rejected alternative): (a) stamps
-  in front never disturb ADD COLUMN's O(1) null-tail decode, which depends on
-  missing components being *trailing*; (b) fixed width makes tombstoning a
-  same-length in-place write — a delete can never relocate a record; (c) stamp
-  reads don't pay tuple-decode costs on the scan hot path. All tables of a
-  database share one record space and scans decode-and-filter by the object-id
-  prefix. Per-object page chains are a later storage feature; the row format
-  doesn't change for it.
+  shape). That promise paid out with index adoption: the IR gained exactly one
+  node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
+  executor seam did not move.
+- **Access-path selection (rule-based; no cost model — the MVP planner
+  contract).** The planner flattens the WHERE clause's top-level `AND`
+  conjuncts into per-column sargable predicates — `column op comparand` where
+  the comparand is plan-time evaluable (literal/parameter, no column
+  references), non-null, and coercible to the column's storage type; `BETWEEN`
+  contributes its two bounds — then picks the index with the **longest
+  equality prefix** over its leading key columns (ties prefer a usable range
+  bound, then uniqueness, then name — deterministic), extended by range bounds
+  on the next key column. **Range sargability is a type matrix**: only types
+  whose evaluator comparison order provably equals the key codec's byte order
+  (integers, decimal, floats, boolean, temporal types) get range seeks;
+  strings are equality-only (`Collation.Binary` is code-point order, which
+  diverges from ordinal UTF-16 comparison for astral planes — the #854
+  lesson), as are Guid/binary/json. Everything else — `OR` at the top level,
+  computed columns, column-to-column comparisons, null comparands — falls
+  back to the per-object scan. **The full WHERE always remains the residual
+  predicate**, re-evaluated on every fetched row, so access-path selection
+  can cost performance but never correctness. SELECT only in this cut;
+  UPDATE/DELETE target collection still scans (recorded follow-up).
+- **Seek execution is snapshot-anchored.** The executor drives the B+Tree
+  cursor through the **statement snapshot** (the `IIndex.OpenCursor(snapshot,
+  …)` overload — the same snapshot the equivalent scan filters through, which
+  is the equivalence anchor under ReadCommitted's per-statement re-capture),
+  unpacks each visible entry's packed row location, fetches the row, and
+  re-checks the row's stamps against the same snapshot (defense in depth:
+  entries mirror row stamps by the maintenance discipline, so a divergence is
+  a bug this filter contains rather than surfaces; a dangling entry under an
+  invisible stamp is skipped, never fetched wrongly). Prefix ranges ride the
+  codec's order preservation: every composite key starting with prefix `P`
+  sorts in `[P, successor(P))`; bound inclusivity maps to prefix-successor
+  arithmetic on the encoded component. Per-statement observability
+  (`SqlStatementMetrics`: access path + records examined) is the behavioral
+  proof surface — the planner suite asserts an indexed equality seek examines
+  O(matches) records while the equivalent scan examines O(table).
+- **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
+  chains (record-space format version 3).** Every data record is
+  `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
+  B+Tree leaf-entry design adopted for the record space — followed by the
+  shared tuple codec payload (#854): the owning table's object id, then one
+  self-describing component per column. Why a fixed binary prefix and not
+  tuple components (the rejected alternative): (a) stamps in front never
+  disturb ADD COLUMN's O(1) null-tail decode, which depends on missing
+  components being *trailing*; (b) fixed width makes tombstoning a same-length
+  in-place write — a delete can never relocate a record; (c) stamp reads don't
+  pay tuple-decode costs on the scan hot path. Since format version 3 the
+  tables of a database still share one record *space* but not one page
+  stream: rows land on pages tagged with their table's object id (the storage
+  layer's per-owner chains), so **a table scan touches only its own table's
+  pages** — O(table), not O(database) — and `DROP TABLE` releases the
+  table's whole chain back to the allocator (transactionally, inside the
+  statement bracket; the record-byte layout is unchanged from version 2, and
+  the object-id prefix stays as defense in depth and upgrade detection).
 - **Scans are snapshot-visible.** Every scan filters through the statement's
   snapshot: a version is visible when `IsVisible(writer)` and its deleter — when
   stamped — is *not* admitted (a visible tombstone reads as absence). Updates
@@ -39,13 +80,24 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   walk *every* stored version, visible or not, preserving stamps.
 - **Migration rule (record-space format version, catalog-persisted).** The
   catalog stores the record-space format version (kind-4 record): 1 = the
-  pre-MVCC unstamped layout, 2 = stamped. A version-1 database upgrades in
-  place at open — every record gains a zeroed stamp header (writer 0 =
-  committed bootstrap data, visible to every snapshot) under one storage
-  transaction, marker written after. The upgrade is idempotent across the
-  two-storage crash window because a version-1 record always begins with the
-  tuple codec's nonzero Int64 tag byte, so an already-stamped record (16 zero
-  bytes in front) is provably upgraded and skipped on replay.
+  pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream, 3 =
+  stamped rows in per-object page chains. Older databases upgrade in place at
+  open, stage by stage, marker written after both stages so each is
+  idempotent across the two-storage crash window: (1 → 2) every record gains
+  a zeroed stamp header (writer 0 = committed bootstrap data, visible to
+  every snapshot) under one storage transaction — idempotent because a
+  version-1 record always begins with the tuple codec's nonzero Int64 tag
+  byte, so an already-stamped record is provably upgraded and skipped on
+  replay; (2 → 3) rows relocate from the shared (owner-zero) pages into their
+  table's chain, stamps preserved verbatim (visibility unchanged), the
+  emptied shared pages released, and rows whose object id no longer exists in
+  the catalog (residue of pre-chain DROP TABLEs) dropped rather than moved —
+  idempotent because the stage reads only owner-zero pages and a moved record
+  lives on an owner-tagged page. Relocation changes row locations, which is
+  safe at upgrade time: nothing persistent references locations (the
+  version-store ledger dies with the process; index entries reference
+  locations only from format 3 onward, and a version-2 database cannot have
+  SQL indexes).
 - **Schema evolution:** `ADD COLUMN` is O(1) — missing trailing components decode
   as null; `DROP COLUMN` rewrites the table's rows (positional records), inside
   the caller's transaction.
@@ -112,14 +164,79 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
   statement end either way, so the gate costs only intra-database physical
   apply parallelism — which page-grain single-writer never had — while
   concurrent appliers reintroduce unbounded retry loops and page-vs-row wait
-  cycles the lock manager cannot see. Revisit when per-object page chains
-  land. SELECT statements take no locks and no bracket: readers never block
+  cycles the lock manager cannot see. Revisited when per-object page chains
+  landed (format version 3): chains remove data-page conflicts *between
+  tables*, but writer statements still share the current write page within a
+  table, the free-space map, and journal append ordering — the gate stays,
+  and a per-object relaxation remains a measured-need follow-up, not a
+  default. SELECT statements take no locks and no bracket: readers never block
   writers, and physical read/write interleaving is unchanged from the
   page-grain engine (a known storage-layer constraint, not widened by this
   design).
 - **Two file sets per database:** `<name>` (data) and `<name>.catalog` — both via
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
+
+## Secondary indexes
+
+`CREATE [UNIQUE] INDEX` / `DROP INDEX` are end-to-end: dialect (the DIALECT.md
+matrix), plan nodes, catalog metadata, and B+Tree trees through
+`Database.Indexing`'s manager — **on the same database file set** (index pages
+ride the data storage's transactional page surface; no new file assets). The
+engine is the Indexing child root's first real consumer; the split of duties is
+unchanged: the tree is physical, the catalog owns persistence (schema
+description + exported registrations), the engine binds them.
+
+- **DDL flow.** CREATE INDEX takes the table's Exclusive lock (DDL-blocking
+  build — in-flight writers finish first, Indexing's documented no-online-rebuild
+  posture), builds inside one gated **durably committed** bracket (the
+  self-committing DDL posture: the catalog record commits independently and must
+  never describe a tree a crash could revert), walks **every stored version** and
+  inserts entries carrying the version's original writer/deleter stamps — so
+  snapshots older than the index read exactly what the row scan shows them —
+  then persists metadata + registrations in **one catalog self-commit** (the two
+  must never tear: a registration without a description is an unused tree; a
+  description without a registration would promise uniqueness no tree enforces).
+  Crash windows leave only orphaned tree pages — safe leaks, never a
+  half-attached index. DROP INDEX inverts the order (catalog first — the
+  authoritative drop — then the in-memory directory) under the same lock; DROP
+  TABLE drops its indexes' metadata/registrations atomically with the table
+  record and DROP COLUMN on an indexed column is rejected (drop the index
+  first — entries key on the column's values).
+- **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
+  adds entries stamped with the writer's sequence; DELETE stamps entry deleters
+  (tombstones — old snapshots keep seeing them); UPDATE tombstones the
+  old-location entries and inserts new-location entries, the index image of the
+  in-space version chain. Every effect is recorded in the version-store ledger,
+  so **logical rollback undoes index stamps through the ledger** (physical erase
+  of aborted inserts, deleter-clear of aborted tombstones — the Indexing
+  `EraseAsync`/`ClearDeleterAsync` undo surfaces), and the open-time recovery
+  scrub purges unproven writers out of every tree in one walk
+  (`IIndexManager.PurgeWritersAsync`, driven by the same
+  `TransactionRecovery.Analyze` classification that scrubs the record space).
+  The ledger route was chosen for live rollback (surgical, O(transaction
+  effects)) and the tree walk for open-time scrub (the ledger dies with the
+  process) — both end in the same physical operations.
+- **The lock-ordering rule** (uniform across INSERT/UPDATE/DELETE so cycles stay
+  detectable and rare): phase one acquires the table IntentExclusive lock, then
+  row Exclusive locks sorted by packed location, then **unique-index key locks
+  sorted by key hash** (`IndexKey.Hash`, the same FNV-1a identity the B+Tree
+  locks internally). Inside the apply gate the B+Tree re-acquires the key lock
+  as a same-owner re-grant that completes synchronously — **no lock wait can
+  ever occur while the gate is held** (a wait there would be invisible to
+  deadlock detection). Non-unique indexes take no key locks. Key locks and row
+  locks share the `LockResource.Entry` space; a hash/location collision only
+  over-locks, and the class ordering keeps acquisition globally consistent.
+- **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
+  lock** (never snapshot visibility — write skew; the recorded #851 lesson).
+  Violations surface as the area root's `DatabaseException` at the model
+  boundary (`IndexUniqueViolationException` translated — the child-root error
+  policy); the statement's bracket has rolled back, the session stays usable.
+  Unique keys treat nulls as values (stricter than ANSI; consistent with the
+  codec's nulls-first ordering — documented dialect decision).
+- **Registrations re-export at persistence points** (root page ids drift on
+  splits): index DDL itself, each checkpoint pass, and instance disposal — each
+  compares against the stored set first, so an idle checkpoint writes nothing.
 
 ## Engine-owned background workers
 
@@ -383,11 +500,13 @@ four independently shippable steps:
 
 ## Non-goals (current cut)
 
-Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, secondary-index
-usage in plans (the B+Tree infrastructure exists — planner adoption is the next
-SQL feature), `Serializable` isolation (rejected at begin), and cost-based
-optimization. (Row-level MVCC visibility was a non-goal of the first engine cut
-and is now delivered — see "The MVCC integration" above.)
+Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, `Serializable`
+isolation (rejected at begin), cost-based optimization (selection stays
+rule-based), index seeks for UPDATE/DELETE target collection, and index-only
+result production (a seek always fetches the row). (Row-level MVCC visibility
+and secondary indexes — DDL, write-path maintenance, and planner seek
+adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
+integration", "Secondary indexes", and the access-path bullets above.)
 
 ## AOT posture
 

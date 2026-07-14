@@ -91,7 +91,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("CREATE", StringComparison.OrdinalIgnoreCase))
             {
-                expression = ParseCreateTable(ref lexer);
+                expression = ParseCreate(ref lexer);
             }
             else if (keyword.Equals("ALTER", StringComparison.OrdinalIgnoreCase))
             {
@@ -99,7 +99,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("DROP", StringComparison.OrdinalIgnoreCase))
             {
-                expression = ParseDropTable(ref lexer);
+                expression = ParseDrop(ref lexer);
             }
             else
             {

@@ -18,6 +18,7 @@ internal readonly struct SqlStatementContext
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
+        Metrics = new SqlStatementMetrics();
     }
 
     /// <summary>
@@ -34,4 +35,10 @@ internal readonly struct SqlStatementContext
     /// Gets the visibility snapshot for the whole statement.
     /// </summary>
     internal TransactionSnapshot Snapshot { get; }
+
+    /// <summary>
+    /// Gets the statement's execution observability (access path, records
+    /// examined) — the session exposes the last statement's instance to tests.
+    /// </summary>
+    internal SqlStatementMetrics Metrics { get; }
 }

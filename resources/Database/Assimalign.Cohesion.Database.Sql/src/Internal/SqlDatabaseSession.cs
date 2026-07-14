@@ -20,6 +20,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     private readonly SqlQueryExecutor _executor;
 
     private SqlDatabaseTransaction? _transaction;
+    private SqlStatementMetrics? _lastStatementMetrics;
     private SessionState _state;
 
     internal SqlDatabaseSession(ISqlDatabase database, SqlTransactionCoordinator coordinator, SqlQueryExecutor executor)
@@ -38,6 +39,12 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
     /// <inheritdoc />
     public IDatabaseTransaction? CurrentTransaction => _transaction;
+
+    /// <summary>
+    /// Gets the previous statement's execution observability (access path,
+    /// records examined) — the behavioral proof surface access-path tests read.
+    /// </summary>
+    internal SqlStatementMetrics? LastStatementMetrics => _lastStatementMetrics;
 
     /// <inheritdoc />
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
@@ -87,6 +94,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
             var scope = new SqlStatementContext(_transaction.Context, _coordinator);
+            _lastStatementMetrics = scope.Metrics;
 
             try
             {
@@ -112,6 +120,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator);
+            _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;

@@ -138,6 +138,21 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
+    /// Inserts a row into the specified owner's record chain within a storage
+    /// transaction. The SQL engine passes the owning table's object id, giving each
+    /// table per-object page locality: scans scoped to the table touch only its own
+    /// pages.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owning table's object id; zero is the shared space.</param>
+    /// <param name="row">The serialized row bytes.</param>
+    /// <returns>The page and slot location where the row was written.</returns>
+    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> row)
+    {
+        return InsertRecord(transaction, ownerId, row);
+    }
+
+    /// <summary>
     /// Reads a row from the specified page and slot.
     /// </summary>
     /// <param name="pageId">The page containing the row.</param>

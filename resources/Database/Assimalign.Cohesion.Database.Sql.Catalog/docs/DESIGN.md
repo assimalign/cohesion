@@ -37,14 +37,29 @@ two questions for the planner: *what objects exist* (with stable identities) and
   exported `BTreeIndexRegistration` set and hands it back for re-attachment on
   open. Root page ids drift on splits; the engine re-saves at its persistence
   points (checkpoint/shutdown).
+- **Index descriptions are schema metadata, one record per index (kind 5)** —
+  `SqlCatalogIndex`: name (unique per table, case-insensitive), owning table
+  object id, ordered key columns, uniqueness. The description is deliberately
+  separate from the physical registration: the description is stable while root
+  page ids drift, and the planner needs columns/uniqueness the registration
+  doesn't carry. **Description and registration writes are atomic** —
+  `CreateIndexAsync`/`DropIndexAsync` take the registration set and persist both
+  records in one self-committing transaction, because a crash must never leave a
+  description promising an index no tree backs (an unenforced UNIQUE) or a
+  registration re-attaching a tree no statement can reach. `DropTableAsync`
+  removes the table's descriptions and registrations the same way. Guards:
+  dropping an indexed column is rejected (entries key on its values); index
+  columns must exist at creation.
 - **The record-space format version lives here** (kind-4 record,
   `RecordSpaceFormatVersion`): data rows are not self-describing across layout
-  changes — a stamped (MVCC, version 2) record and an unstamped (version 1)
-  record cannot be told apart record-by-record — so the database-grain marker
-  is catalog metadata, read by the engine at open to decide whether the record
-  space needs the in-place stamp upgrade. Absent marker reads as version 1
-  (pre-marker databases); the engine writes version 2 after upgrading (or at
-  creation, when the space is born stamped).
+  changes — a stamped (MVCC, version ≥ 2) record and an unstamped (version 1)
+  record cannot be told apart record-by-record, and version 2 vs 3 (shared page
+  stream vs per-object page chains) is a page-placement property no record
+  carries — so the database-grain marker is catalog metadata, read by the
+  engine at open to decide which in-place upgrade stages to run. Absent marker
+  reads as version 1 (pre-marker databases); the engine writes the current
+  version (3) after upgrading (or at creation, when the space is born on the
+  current format).
 
 ## Error model
 

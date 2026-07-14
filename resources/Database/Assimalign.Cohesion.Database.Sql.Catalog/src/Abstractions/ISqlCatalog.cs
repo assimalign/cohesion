@@ -84,6 +84,48 @@ public interface ISqlCatalog
     ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets the secondary indexes declared on a table.
+    /// </summary>
+    /// <param name="tableObjectId">The table's object identity.</param>
+    /// <returns>The table's index descriptions; empty when it has none.</returns>
+    IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong tableObjectId);
+
+    /// <summary>
+    /// Finds an index by owning table and name (case-insensitive).
+    /// </summary>
+    /// <param name="tableObjectId">The table's object identity.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="index">When this method returns true, the index description.</param>
+    /// <returns>True when the index exists; otherwise false.</returns>
+    bool TryGetIndex(ulong tableObjectId, string name, out SqlCatalogIndex index);
+
+    /// <summary>
+    /// Creates an index description and persists the given physical registrations
+    /// in the same self-committing catalog transaction — the schema description and
+    /// the tree registration must never tear apart across a crash (a registration
+    /// without a description is an unused tree; a description without a
+    /// registration would promise uniqueness no tree enforces).
+    /// </summary>
+    /// <param name="index">The index description to persist.</param>
+    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The created index description.</returns>
+    /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
+    ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Drops an index description and persists the given physical registrations in
+    /// the same self-committing catalog transaction (see
+    /// <see cref="CreateIndexAsync"/> for why the two writes are atomic).
+    /// </summary>
+    /// <param name="tableObjectId">The table's object identity.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="registrations">The full registration set to persist alongside (replaces the stored set).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <exception cref="SqlCatalogException">The index does not exist.</exception>
+    ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Persists the physical index registrations exported by the index manager, so
     /// indexes re-attach when the database reopens.
     /// </summary>
