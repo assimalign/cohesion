@@ -31,7 +31,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | Documents | `Assimalign.Cohesion.Database.Documents` | OQL-based language contract |
 | Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
 | Blob | `Assimalign.Cohesion.Database.Blob` | API-driven; no `.Language` project |
-| KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | Protocol-verb commands; no `.Language` project |
+| KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | **Delivered** — ordered key space on the shared kernel (index-primary composition, etag CAS) and the model's wire-protocol server (`KeyValueDatabaseServer`); command grammar in `docs/COMMANDS.md`; no `.Language` project |
 | Cache | `Assimalign.Cohesion.Database.Cache` | Post-MVP; deferred behind KeyValuePair |
 
 ### Service surface, hosting, orchestration
@@ -40,10 +40,11 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 |---|---|
 | `Assimalign.Cohesion.Database.Protocol` | Child root — wire protocol frames and message contracts (shared client/server), `ProtocolVersion` |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client |
+| `Assimalign.Cohesion.Database.Server` | The shared server core (extracted 2026-07-14 when the second model server fired the recorded trigger): the guided `DatabaseServer` base — accept loop, session pump, guardrails, two-phase drain — every per-model server derives from |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
-| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); composition-only — wraps composed `IDatabaseServer` instances as endpoint host services (servers are per-model, implemented inside the model packages — `SqlDatabaseServer` in `Database.Sql`) |
+| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); composition-only — wraps composed `IDatabaseServer` instances as endpoint host services (servers are per-model, implemented inside the model packages over the `Database.Server` core — `SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`) |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
 | `Assimalign.Cohesion.Database.Application` | **Interim:** the standalone host executable — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption). **Target design (pinned, #906):** the manifest-generation project SDK consumers load — build tasks code-gen the application manifest, `Database.ApplicationModel` surfaces it to the gateway (the `<Area>.Application` convention, `.claude/rules/resource-areas.md`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |

@@ -18,9 +18,10 @@ jobs:
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
-        # transitively. The as-yet source-less model scaffolds (Documents/Graph/
-        # KeyValuePair/Blob/Cache) and the post-MVP contract shells (Governance,
-        # Replication, Sql.Replication, Sql.Security, Memory) are excluded until they ship.
+        # transitively. The as-yet source-less model scaffolds (Documents/Graph/Blob/
+        # Cache, plus KeyValuePair.Replication/.Security) and the post-MVP contract
+        # shells (Governance, Replication, Sql.Replication, Sql.Security, Memory) are
+        # excluded until they ship.
         projects: [
             'Assimalign.Cohesion.Database',
             'Assimalign.Cohesion.Database.Application',
@@ -33,6 +34,7 @@ jobs:
             'Assimalign.Cohesion.Database.Protocol',
             'Assimalign.Cohesion.Database.Security',
             'Assimalign.Cohesion.Database.Client',
+            'Assimalign.Cohesion.Database.Server',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Hosting',
             'Assimalign.Cohesion.Database.Sql',
@@ -40,6 +42,9 @@ jobs:
             'Assimalign.Cohesion.Database.Sql.Catalog',
             'Assimalign.Cohesion.Database.Sql.Storage',
             'Assimalign.Cohesion.Database.Sql.Client',
+            'Assimalign.Cohesion.Database.KeyValuePair',
+            'Assimalign.Cohesion.Database.KeyValuePair.Storage',
+            'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
             'Assimalign.Cohesion.Database.ApplicationModel'
         ]
     steps:

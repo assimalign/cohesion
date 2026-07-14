@@ -14,9 +14,9 @@
 		<Content Include="xunit.runner.json" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
-		<!-- The KeyValueDatabaseServer wire suite runs over the in-memory
-		     Connections driver. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
+		<!-- The suite drives the shared core over the in-memory Connections driver
+		     with a FAKE model engine (model independence is the point). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
 </Project>

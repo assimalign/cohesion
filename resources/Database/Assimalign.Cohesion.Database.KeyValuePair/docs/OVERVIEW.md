@@ -26,6 +26,10 @@ keys order by unsigned lexicographic byte comparison.
 - The text command grammar (`GET`/`PUT`/`DELETE`/`EXISTS`/`SCAN`) — the contract
   in [COMMANDS.md](COMMANDS.md), parsed by the session's text-execute seam so the
   wire protocol's Execute message serves the model with zero protocol changes.
+- `KeyValueDatabaseServer` (+ `KeyValueDatabaseServerOptions`) — the model's
+  wire-protocol server, a thin derivation of the shared server core
+  (`Assimalign.Cohesion.Database.Server`); the second model server, whose
+  construction fired the area's recorded extraction trigger (see DESIGN.md).
 
 ## Dependencies
 

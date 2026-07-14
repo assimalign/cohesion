@@ -24,10 +24,10 @@ shared storage, with DDL flowing through the relational catalog
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
 - **The wire-protocol server** — `SqlDatabaseServer` (+ `SqlDatabaseServerOptions`)
-  fronts one engine on a bound `Connections` listener: session state machine,
-  authentication/idle/session-limit guardrails, two-phase graceful drain.
-  Servers are per-model; the machinery is internal to this package (see
-  DESIGN.md for the 2026-07-14 fold decision and the extraction trigger).
+  fronts one engine on a bound `Connections` listener, deriving the session
+  state machine, guardrails, and two-phase drain from the shared server core
+  (`Assimalign.Cohesion.Database.Server` — extracted 2026-07-14 when the second
+  model server fired the recorded trigger; see DESIGN.md).
 
 ## Usage
 
@@ -52,8 +52,9 @@ The model's builder verbs compose against the area root's
 `IDatabaseApplicationBuilder` seam (no hosting reference — the verbs ship here,
 per the area builder pattern). `AddSqlDatabase` registers the engine;
 `AddSqlServer` fronts it with the SQL model's wire-protocol server
-(`SqlDatabaseServer` — implemented in this package; servers are per-model and
-the root's `IDatabaseServer` contract is the only area-wide requirement):
+(`SqlDatabaseServer` — a thin derivation of the shared server core; servers are
+per-model and the root's `IDatabaseServer` contract is the only area-wide
+requirement):
 
 ```csharp
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>

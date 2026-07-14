@@ -106,6 +106,22 @@ for no expressiveness gain over named binary parameters; it remains open as a
 measured-need optimization, not a default. The grammar is a contract: parser,
 COMMANDS.md, and the corpus tests change together (the DIALECT.md precedent).
 
+## The key-value server runtime (`KeyValueDatabaseServer`)
+
+The model ships its own wire-protocol server — the **second model server**, the
+one whose construction fired the area's recorded server-core extraction trigger
+(2026-07-14). `KeyValueDatabaseServer` is a sealed derivation of the shared
+server core's guided base (`Assimalign.Cohesion.Database.Server`'s
+`DatabaseServer`), fronting exactly one `KeyValueDatabaseEngine`
+(`Create(engine, options)`, options in
+`KeyValueDatabaseServerOptions : DatabaseServerOptions`). It adds **no pump
+behavior**: the command grammar travels the protocol's existing Execute message
+into the root's text-execute seam, and the model's result sets ride the generic
+result framing — which is precisely the evidence that made the extraction's
+scope larger than predicted (the shared core's docs/DESIGN.md carries the
+prediction-vs-evidence record). Model-specific wire surface (binary command
+frames, if measurement ever demands them) would grow here.
+
 ## Engine-owned background workers
 
 The same five-worker inventory as the SQL engine, spawned at creation on

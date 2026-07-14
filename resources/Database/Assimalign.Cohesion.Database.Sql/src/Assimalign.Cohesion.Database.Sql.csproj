@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
-		<!-- Transport listeners/connections for the SQL model's wire-protocol server
-		     (SqlDatabaseServer is implemented in this package — servers are per-model
-		     and the root contract is the only area-wide requirement; Protocol and
-		     Security arrive transitively through the root's child-root rollup). -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<!-- The shared server core: SqlDatabaseServer derives from its guided base
+		     (servers are per-model; the machinery was extracted from this package on
+		     2026-07-14 when the second model server fired the recorded extraction
+		     trigger). Connections arrives transitively through it. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
