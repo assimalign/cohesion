@@ -86,11 +86,18 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         // Inside an explicit transaction, the statement rides its context.
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
-            var scope = new SqlStatementContext(_transaction.Context, _transaction.StorageTransaction);
+            var scope = new SqlStatementContext(_transaction.Context, _coordinator);
 
             try
             {
                 return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TransactionDeadlockException exception)
+            {
+                // The requester-closes-cycle victim: the statement failed and is
+                // retryable by construction — roll the transaction back and
+                // re-attempt. The session stays usable.
+                throw new DatabaseTransactionDeadlockException(exception.Message, exception);
             }
             catch (TransactionAbortedException exception)
             {
@@ -104,10 +111,19 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         try
         {
-            var scope = new SqlStatementContext(context, _coordinator.GetStorageTransaction(context));
+            var scope = new SqlStatementContext(context, _coordinator);
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
+        }
+        catch (TransactionDeadlockException exception)
+        {
+            if (context.State == TransactionState.Active)
+            {
+                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
         }
         catch (TransactionAbortedException exception)
         {

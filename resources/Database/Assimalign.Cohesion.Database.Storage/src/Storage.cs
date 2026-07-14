@@ -620,9 +620,10 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Commits a storage transaction: appends after images of every touched page and
-    /// a commit record, then makes the journal durable before returning.
+    /// a commit record, then — unless the caller owns durability through a later
+    /// record — makes the journal durable before returning.
     /// </summary>
-    internal unsafe void CommitTransaction(StorageTransaction transaction)
+    internal unsafe void CommitTransaction(StorageTransaction transaction, bool awaitDurability = true)
     {
         // Deterministic page order keeps the journal replayable and testable.
         var pageIds = new List<long>(transaction.BeforeImages.Keys);
@@ -645,7 +646,12 @@ public abstract class Storage : IStorage
 
         long commitLsn = _journal!.AppendCommit(transaction.Sequence);
 
-        if (CommitDurability == StorageCommitDurability.Grouped)
+        if (!awaitDurability)
+        {
+            // The caller's own later commit record owns durability (the journal
+            // is ordered); the write-ahead gate still covers any stolen page.
+        }
+        else if (CommitDurability == StorageCommitDurability.Grouped)
         {
             // Ride the group-commit gate: wait (bounded) for the flush worker's
             // shared durable flush, self-helping inline if it does not come. The

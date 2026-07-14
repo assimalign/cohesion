@@ -26,25 +26,29 @@ public sealed class SqlMvccBindingTests
         return (database, session);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - MVCC binding: An explicit transaction pairs a manager context with a storage bracket under one sequence")]
-    public async Task BeginTransactionAsync_Explicit_ShouldPairContextAndBracketUnderOneSequence()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - MVCC binding: An explicit transaction runs on a manager context; statement brackets never outlive their statement")]
+    public async Task BeginTransactionAsync_Explicit_ShouldRunOnManagerContext()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "mvcc-pairing" });
         var (database, session) = await CreateSessionAsync(engine, "pairing-db");
         await using var _ = session;
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
 
         // Act
         var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
 
-        // Assert: one paired transaction, and the physical bracket adopted the
-        // logical context's sequence (the single-namespace invariant recovery
-        // classification depends on).
-        database.Coordinator.PairedTransactionCount.ShouldBe(1);
-        transaction.StorageTransaction.Sequence.ShouldBe((long)transaction.Context.Sequence.Value);
+        // Assert: the transaction is a live manager context, and physical
+        // brackets are per statement — none is held between statements (page
+        // locks never outlive a statement), including after writes.
+        transaction.Context.State.ShouldBe(TransactionState.Active);
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)");
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
 
         await transaction.CommitAsync();
-        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.Committed);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - MVCC binding: Auto-commit statements ride a one-statement manager transaction")]

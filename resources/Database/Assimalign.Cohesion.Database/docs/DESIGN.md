@@ -192,8 +192,14 @@ the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown
 `DatabaseException`s), the client core (`DatabaseClientException`,
 `SqlClientException`), the server, and `Database.Embedded`.
-`DatabaseParseException` is the only semantic subtype the root itself defines,
-because the parse-vs-execute distinction is part of the session contract.
+The root defines three semantic subtypes, each because the distinction is part
+of the session contract: `DatabaseParseException` (fix-the-text vs.
+fix-the-data — the wire's `ParseFailure`), and the retryable-abort pair
+`DatabaseTransactionAbortedException` / `DatabaseTransactionDeadlockException`
+(the model-boundary surface of the transaction kernel's aborts: a write-write
+conflict or deadlock victim is retryable by construction, and in-process
+consumers deserve to catch that kind precisely rather than parse messages; on
+the wire both remain `ExecutionFailure` with a precise message).
 
 **Child roots own independent exception roots** — `StorageException`,
 `DatabaseTypeException`, `QueryExecutionException`, `ProtocolException`,

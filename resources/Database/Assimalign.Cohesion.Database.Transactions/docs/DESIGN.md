@@ -106,17 +106,26 @@ work items under #862). The integration kept this package exactly as shaped:
   is rejected by the SQL engine until serialization-conflict detection exists —
   the contract forbids running weaker than requested.
 - The engine's transaction log is journal-bound to its storage's WAL; the
-  sequence allocator (above) unifies the sequence namespace, and the paired
-  storage bracket (adopting the manager's sequence via
-  `IStorage.BeginTransaction(long)`) is the physical WAL bracket beneath the
-  manager. `IStorageTransactionSource` (in `Database.Indexing`) is the pairing
-  seam the engine's coordinator implements. Recovery drives `PurgeWriterAsync`
-  from `TransactionRecovery.Analyze` for unproven sequences at every database
-  open — and `Analyze` reads the active-sequence list out of checkpoint records,
-  so classification survives journal truncation beneath in-flight transactions.
-- Still ahead in the §3.8 sequence: row version stamps + snapshot-visible scans
-  (#908), row-grain write conflicts through `ILockManager` (#909), and
-  version-purge worker activation (#910).
+  sequence allocator (above) unifies the sequence namespace, and per-statement
+  storage brackets are the physical WAL brackets beneath the manager (their
+  commit records ride the same journal; the manager's commit record owns
+  durability through journal ordering). `IStorageTransactionSource` (in
+  `Database.Indexing`) is the pairing seam the engine's coordinator implements —
+  resolving a context's current statement bracket. Recovery drives the
+  version store's aborted-writer purge from `TransactionRecovery.Analyze` at
+  every database open — and `Analyze` reads the active-sequence list out of
+  checkpoint records, so classification survives journal truncation beneath
+  in-flight transactions.
+- The engine implements `IVersionStore` over its own record space (the
+  contract's intended shape — the in-memory store remains for tests and
+  embedded working state): row versions live in data pages as stamped records,
+  and the store is the *ledger* of each writer's effects, which is what makes
+  `PurgeWriterAsync` a physical logical-undo and `PruneAsync` a physical
+  space reclamation. `ILockManager` arbitrates row-grain write conflicts
+  (exclusive locks on row identity, intent locks at table grain for DDL — the
+  B+Tree uniqueness precedent generalized), and deadlock victims cross the
+  model boundary as the root's `DatabaseTransactionDeadlockException`.
+- Still ahead in the §3.8 sequence: version-purge worker activation (#910).
 
 ## Non-goals
 

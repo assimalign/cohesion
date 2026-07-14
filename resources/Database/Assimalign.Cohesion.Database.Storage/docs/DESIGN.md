@@ -150,6 +150,16 @@ engine) added three storage-side rules that keep the logical layer sound:
   supply because storage cannot see above its own layer. Symmetrically,
   `OpenExisting(checkpointOnOpen: false)` lets an engine analyze the recovered
   journal *before* the truncation destroys the records classification reads.
+- **Inner brackets may commit non-durably.** `Commit(awaitDurability: false)`
+  appends the same records (after images + commit record) without the durable
+  flush — for per-statement physical brackets whose durability is owned by the
+  outer logical transaction's commit record: the journal is ordered, so
+  flushing the later record makes the earlier ones durable first, and a crash
+  before that leaves the bracket unproven — its pages undone by recovery —
+  which is exactly the outer transaction's abort semantics. The write-ahead
+  gate protects stolen pages regardless of the flag; the flag never weakens
+  the rule that an *acknowledged* commit is durable, because acknowledgment
+  belongs to the outer commit.
 
 Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
 they make recovery a pure idempotent overwrite with no operation replay logic, which

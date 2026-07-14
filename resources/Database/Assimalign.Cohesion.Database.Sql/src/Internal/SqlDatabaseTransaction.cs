@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -12,10 +11,9 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <c>IDatabaseTransaction</c> surface to an MVCC transaction context from the
 /// database's transaction manager (the engine owns both vocabularies — this is
 /// the translation boundary). Commit and rollback flow through the manager,
-/// whose journal-bound log drives the paired storage bracket: commit is
-/// acknowledged only after the write-ahead log is durable, rollback restores
-/// every modified page to its pre-transaction image and purges the writer from
-/// the version store.
+/// whose journal-bound log owns the commit record and its durability await;
+/// rollback undoes the writer's stamps through the version store's ledger and
+/// releases its locks.
 /// </summary>
 internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
@@ -45,13 +43,6 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     /// </summary>
     internal ITransactionContext Context => _context;
 
-    /// <summary>
-    /// Gets the storage-level transaction the executor mutates through — the
-    /// physical write-ahead bracket paired with <see cref="Context"/> under one
-    /// shared sequence.
-    /// </summary>
-    internal IStorageTransaction StorageTransaction => _coordinator.GetStorageTransaction(_context);
-
     /// <inheritdoc />
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
@@ -63,6 +54,10 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
         try
         {
             await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TransactionDeadlockException exception)
+        {
+            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
         }
         catch (TransactionAbortedException exception)
         {

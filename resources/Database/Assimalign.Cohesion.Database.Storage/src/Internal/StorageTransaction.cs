@@ -43,10 +43,13 @@ internal sealed class StorageTransaction : IStorageTransaction
     internal void RecordBeforeImage(long pageId, byte[] image) => _beforeImages.Add(pageId, image);
 
     /// <inheritdoc />
-    public void Commit()
+    public void Commit() => Commit(awaitDurability: true);
+
+    /// <inheritdoc />
+    public void Commit(bool awaitDurability)
     {
         ThrowIfCompleted();
-        _owner.CommitTransaction(this);
+        _owner.CommitTransaction(this, awaitDurability);
         _active = false;
     }
 

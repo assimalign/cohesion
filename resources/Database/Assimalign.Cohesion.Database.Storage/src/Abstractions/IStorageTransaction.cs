@@ -49,6 +49,20 @@ public interface IStorageTransaction : IDisposable
     void Commit();
 
     /// <summary>
+    /// Commits the transaction, optionally without awaiting durability. A
+    /// non-durable commit appends the same records (after images + commit
+    /// record) but returns before they are flushed — for inner physical brackets
+    /// whose durability is owned by an outer logical commit: the journal is
+    /// ordered, so making any later record durable makes these durable first,
+    /// and a crash before that leaves the bracket unproven (its pages are undone
+    /// by recovery), which is exactly the outer transaction's abort semantics.
+    /// The write-ahead gate still protects stolen pages regardless.
+    /// </summary>
+    /// <param name="awaitDurability">False to skip the durable flush; true is equivalent to <see cref="Commit()"/>.</param>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    void Commit(bool awaitDurability);
+
+    /// <summary>
     /// Rolls the transaction back: restores every modified page to its before image
     /// in the buffer pool and journals a rollback record.
     /// </summary>

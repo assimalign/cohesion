@@ -16,7 +16,8 @@ namespace Assimalign.Cohesion.Database;
 /// their boundary per the area error policy, so sessions and wire clients observe
 /// a <see cref="DatabaseException"/>-derived type (an <c>ExecutionFailure</c> on
 /// the wire) while in-process consumers can catch the abort kind precisely and
-/// retry.
+/// retry. Deadlock victims surface as the derived
+/// <see cref="DatabaseTransactionDeadlockException"/>.
 /// </remarks>
 public class DatabaseTransactionAbortedException : DatabaseException
 {

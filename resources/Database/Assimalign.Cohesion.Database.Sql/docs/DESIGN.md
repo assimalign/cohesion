@@ -58,30 +58,65 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
-- **Transactions (MVCC session binding, §3.8 step 1).** Every statement —
-  explicit transaction or auto-commit — runs under an `ITransactionContext`
-  from the database's transaction manager, paired one-to-one with a storage
-  bracket that **adopts the manager's sequence** (one namespace: the bracket's
-  commit record proves the logical transaction at recovery). The per-database
-  `SqlTransactionCoordinator` owns the composition (manager + lock manager +
-  version store + journal-bound log) and implements `IStorageTransactionSource`,
-  the pairing seam. Commit/rollback flow through the *manager*: its journal-bound
-  log resolves the paired bracket, so after-images precede the commit record and
-  the durability await honors the engine's grouped/synchronous policy; rollback
-  restores page images and purges the writer from the version store. Auto-commit
-  statements ride a one-statement manager transaction, so visibility semantics
-  never fork. Isolation: `Snapshot` (default) fixes the statement snapshot at
-  begin, `ReadCommitted` re-captures per statement (the statement scope captures
-  `context.Snapshot` exactly once per statement); `Serializable` is **rejected**
-  until conflict detection exists (never run weaker than requested). Kernel
-  aborts surface wrapped in the root's `DatabaseTransactionAbortedException`.
-  On every database open the coordinator runs `TransactionRecovery.Analyze`
-  over the recovered journal (the storage strategy defers the open-time
-  checkpoint for exactly this) and drives `IVersionStore.PurgeWriterAsync` for
-  every unproven sequence; the checkpoint worker checkpoints data storages
-  *through the coordinator*, so truncating checkpoint records carry in-flight
-  logical sequences. DDL flows to the catalog, which self-commits on its own
-  storage (see the catalog DESIGN.md for why DDL-in-DML is out of MVP scope).
+- **Transactions (MVCC session binding, §3.8).** Every statement — explicit
+  transaction or auto-commit — runs under an `ITransactionContext` from the
+  database's transaction manager, whose sequences come from the storage's own
+  counter (one namespace). The per-database `SqlTransactionCoordinator` owns
+  the composition (manager + lock manager + record-space version store +
+  journal-bound log) and implements `IStorageTransactionSource` — the pairing
+  seam now resolves a context's *current statement bracket*. Commit flows
+  through the manager: its journal-bound log appends the commit record and
+  awaits durability (which, by journal ordering, also covers every statement
+  bracket the transaction committed non-durably); rollback is **logical** —
+  the version store's ledger physically undoes the writer's stamps before its
+  locks release. Auto-commit statements ride a one-statement manager
+  transaction, so visibility semantics never fork. Isolation: `Snapshot`
+  (default) fixes the statement snapshot at begin, `ReadCommitted` re-captures
+  per statement; `Serializable` is **rejected** until conflict detection
+  exists (never run weaker than requested). Kernel aborts surface wrapped in
+  the root's `DatabaseTransactionAbortedException` (deadlock victims:
+  `DatabaseTransactionDeadlockException` — retryable by construction, an
+  `ExecutionFailure` on the wire, session stays usable). On every database
+  open the coordinator runs `TransactionRecovery.Analyze` over the recovered
+  journal (the storage strategy defers the open-time checkpoint for exactly
+  this) and scrubs every unproven writer's stamps out of the record space —
+  the open-time bulk form of `IVersionStore.PurgeWriterAsync`, one pass
+  instead of one scan per writer because the in-memory ledger died with the
+  process; the checkpoint worker checkpoints data storages *through the
+  coordinator*, so truncating checkpoint records carry in-flight logical
+  sequences. DDL flows to the catalog, which self-commits on its own storage
+  (see the catalog DESIGN.md for why DDL-in-DML is out of MVP scope), and
+  interlocks with row writers through table-grain intent locks (below).
+- **Write statements execute in two phases; the physical bracket is per
+  statement (§3.8's migration path).** Phase one — no physical bracket: scan
+  through the statement snapshot, collect targets, acquire an IntentExclusive
+  table lock and an Exclusive lock per target row through the lock manager
+  (asynchronous waits, cancellation-honoring; deadlocks detected here,
+  requester-closes-cycle). **Lock-key scheme:** row locks key on
+  `LockResource.Entry(objectId, packed page/slot location)` — the same packed
+  identity the version-store ledger uses, and the same `LockResource` space
+  the B+Tree's hashed key locks live in, so index and row locks cannot alias.
+  Phase two — the coordinator's **apply gate** (one writer statement applies
+  at a time per database): open the statement's storage bracket, **re-validate
+  every target against its current stamps** (the latest-state check under the
+  exclusive lock — the B+Tree uniqueness-discipline precedent; a snapshot-only
+  check would admit write skew), apply, and commit the bracket *non-durably*
+  (the transaction's commit record owns durability through journal ordering; a
+  statement-level failure still rolls the bracket back physically). A target
+  tombstoned by a concurrently *committed* transaction fails the statement
+  with the retryable conflict — **first-updater-wins**; under `ReadCommitted`
+  this is deliberately stricter than PostgreSQL's re-evaluation (the statement
+  aborts rather than re-targeting the new version — retry is the policy).
+  **Why the apply gate and not concurrent appliers with page-conflict retry
+  (the recorded page-conflict fallback decision):** page locks release at
+  statement end either way, so the gate costs only intra-database physical
+  apply parallelism — which page-grain single-writer never had — while
+  concurrent appliers reintroduce unbounded retry loops and page-vs-row wait
+  cycles the lock manager cannot see. Revisit when per-object page chains
+  land. SELECT statements take no locks and no bracket: readers never block
+  writers, and physical read/write interleaving is unchanged from the
+  page-grain engine (a known storage-layer constraint, not widened by this
+  design).
 - **Two file sets per database:** `<name>` (data) and `<name>.catalog` — both via
   the engine's storage strategy, so file-backed and in-memory composition stays
   symmetric.
@@ -207,10 +242,15 @@ four independently shippable steps:
    (the rejected copy-out design required one to key chains across record
    relocation), and the purge worker reclaims dead versions where they lie.
    See "Row format" and "Migration rule" under the execution model.
-3. **Row-grain write conflicts (#909):** exclusive hashed-key locks via
-   `ILockManager` (the B+Tree uniqueness-lock precedent) replace page conflicts
-   as the user-visible surface; deadlock victims surface as
-   `DatabaseException`-wrapped aborts at the model boundary.
+3. **Row-grain write conflicts — delivered (#909):** exclusive row locks via
+   `ILockManager` (the B+Tree uniqueness-lock precedent) replaced page
+   conflicts as the user-visible surface — concurrent writers to disjoint rows
+   of one table (and one page) both commit; same-row writers wait, then
+   resolve first-updater-wins; deadlock victims surface as the root's
+   retryable `DatabaseTransactionDeadlockException`; DDL interlocks with row
+   writers via table-grain intent locks. See "Write statements execute in two
+   phases" under the execution model for the bracket/gate mechanics and the
+   recorded page-conflict fallback decision.
 4. **Version purge (#910):** `SqlVersionPurgeWorker`'s stub body becomes
    `IVersionStore.PurgeWriterAsync` + the `OldestActive` prune bound — the
    worker slot was kept in the inventory precisely so this lands seam-stable.

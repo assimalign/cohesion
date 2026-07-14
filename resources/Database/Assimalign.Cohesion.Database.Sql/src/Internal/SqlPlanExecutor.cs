@@ -41,16 +41,17 @@ internal sealed class SqlPlanExecutor
             case SqlSelectPlan select:
                 return ExecuteSelect(select, statement, cancellationToken);
             case SqlInsertPlan insert:
-                return ExecuteInsert(insert, statement);
+                return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
             case SqlUpdatePlan update:
-                return ExecuteUpdate(update, statement, cancellationToken);
+                return await ExecuteUpdateAsync(update, statement, cancellationToken).ConfigureAwait(false);
             case SqlDeletePlan delete:
-                return ExecuteDelete(delete, statement, cancellationToken);
+                return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
-                return await ExecuteDropTableAsync(drop, cancellationToken).ConfigureAwait(false);
+                return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
+                await AcquireObjectLockAsync(statement, addColumn.Schema, addColumn.Name, LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 await _catalog.AddColumnAsync(addColumn.Schema, addColumn.Name, addColumn.Column, cancellationToken).ConfigureAwait(false);
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             case SqlDropColumnPlan dropColumn:
@@ -188,11 +189,33 @@ internal sealed class SqlPlanExecutor
     }
 
     // ── DML ────────────────────────────────────────────────────────────
+    //
+    // Write statements execute in two phases (area DESIGN §3.8 step 3):
+    //
+    //   Phase 1 (no physical bracket): scan through the statement snapshot,
+    //   collect targets, and acquire locks through the lock manager — an
+    //   IntentExclusive lock on the table, then an Exclusive lock per target
+    //   row (keyed by the version's packed location, the same identity the
+    //   version-store ledger uses). Lock waits are asynchronous, honor the
+    //   session's cancellation token, and are where deadlocks are detected
+    //   (the requester whose wait would close a cycle aborts).
+    //
+    //   Phase 2 (the coordinator's gated apply bracket): re-validate each
+    //   target against its CURRENT stamps — the latest-state check under the
+    //   exclusive lock, the B+Tree uniqueness-discipline precedent; a
+    //   snapshot-only check here would admit write skew. A target tombstoned
+    //   by a concurrently COMMITTED transaction fails the statement with a
+    //   retryable write-write conflict (first-updater-wins); a tombstone from
+    //   a transaction that rolled back was already cleared by its undo before
+    //   its locks released, so the re-validation passes. Then apply: inserts
+    //   and new update-versions stamp the writer, tombstones stamp the
+    //   deleter, and every effect is recorded in the version-store ledger so
+    //   rollback can undo it logically.
 
-    private QueryResult ExecuteInsert(SqlInsertPlan plan, SqlStatementContext statement)
+    private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
-        long affected = 0;
+        var rows = new List<byte[]>();
 
         foreach (var valueRow in plan.Rows)
         {
@@ -214,16 +237,27 @@ internal sealed class SqlPlanExecutor
                 }
             }
 
-            _storage.InsertRow(
-                statement.StorageTransaction,
-                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence));
-            affected++;
+            rows.Add(SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence));
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, affected);
+        // Inserts need no row locks (the rows do not exist yet); the intent
+        // lock coordinates with table-grain DDL.
+        await statement.Coordinator.LockManager.AcquireAsync(
+            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        {
+            foreach (byte[] row in rows)
+            {
+                var (pageId, slotIndex) = _storage.InsertRow(bracket, row);
+                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, pageId, slotIndex);
+            }
+
+            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private QueryResult ExecuteUpdate(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
@@ -236,6 +270,8 @@ internal sealed class SqlPlanExecutor
             }
         }
 
+        var replacements = new List<(PageId PageId, int SlotIndex, byte[] NewVersion)>(targets.Count);
+
         foreach (var (pageId, slotIndex, values) in targets)
         {
             var updated = (object?[])values.Clone();
@@ -246,21 +282,32 @@ internal sealed class SqlPlanExecutor
                 updated[ordinal] = CoerceForColumn(evaluator.Evaluate(expression, values), plan.Table.Columns[ordinal]);
             }
 
-            // MVCC update = version chain in the record space: tombstone the old
-            // version in place (same-length write — never relocates) and insert
-            // the new version, both stamped with this transaction's sequence. A
-            // snapshot that admits the sequence sees the new version and treats
-            // the old as deleted; one that does not sees only the old.
-            TombstoneVersion(statement, pageId, slotIndex);
-            _storage.InsertRow(
-                statement.StorageTransaction,
-                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence));
+            replacements.Add((pageId, slotIndex,
+                SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence)));
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
+
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        {
+            foreach (var (pageId, slotIndex, newVersion) in replacements)
+            {
+                EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
+
+                // MVCC update = version chain in the record space: tombstone the
+                // old version in place (same-length write — never relocates) and
+                // insert the new version, both stamped with this transaction's
+                // sequence.
+                TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+                var location = _storage.InsertRow(bracket, newVersion);
+                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, location.PageId, location.SlotIndex);
+            }
+
+            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, replacements.Count);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private QueryResult ExecuteDelete(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private async Task<QueryResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var targets = new List<(PageId PageId, int SlotIndex)>();
@@ -273,26 +320,89 @@ internal sealed class SqlPlanExecutor
             }
         }
 
-        foreach (var (pageId, slotIndex) in targets)
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets, cancellationToken).ConfigureAwait(false);
+
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
         {
-            // Tombstone, not slot removal: older snapshots must keep seeing the
-            // row until the purge worker reclaims versions below every live
-            // snapshot's horizon.
-            TombstoneVersion(statement, pageId, slotIndex);
+            foreach (var (pageId, slotIndex) in targets)
+            {
+                EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
+
+                // Tombstone, not slot removal: older snapshots must keep seeing
+                // the row until the purge worker reclaims versions below every
+                // live snapshot's horizon.
+                TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+            }
+
+            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, targets.Count);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Phase-one lock acquisition for a write statement: IntentExclusive on the
+    /// table, then Exclusive per target row in deterministic (location) order.
+    /// Locks belong to the transaction and release as a set at commit/rollback
+    /// (two-phase locking); deadlocks surface here as the lock manager's
+    /// requester-closes-cycle abort.
+    /// </summary>
+    private static async ValueTask AcquireRowWriteLocksAsync(
+        SqlStatementContext statement,
+        ulong objectId,
+        List<(PageId PageId, int SlotIndex)> targets,
+        CancellationToken cancellationToken)
+    {
+        var locks = statement.Coordinator.LockManager;
+        var owner = statement.Transaction.Sequence;
+
+        await locks.AcquireAsync(owner, LockResource.Object(objectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+
+        var keys = targets.ConvertAll(target => SqlRecordLocation.Pack(target.PageId, target.SlotIndex));
+        keys.Sort();
+
+        foreach (ulong key in keys)
+        {
+            await locks.AcquireAsync(owner, LockResource.Entry(objectId, key), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The latest-state check under the exclusive row lock: a target tombstoned
+    /// by a concurrently committed transaction fails the statement with a
+    /// retryable write-write conflict — first-updater-wins. (A snapshot
+    /// visibility check alone would admit write skew; this is the B+Tree
+    /// uniqueness-discipline precedent applied to row updates.)
+    /// </summary>
+    /// <exception cref="TransactionAbortedException">The row was modified by a concurrently committed transaction.</exception>
+    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
+    {
+        var record = _storage.ReadRow(pageId, slotIndex);
+
+        if (record.Length < SqlRowCodec.StampHeaderSize)
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': the target row version was reclaimed by a concurrent transaction. Retry the transaction.");
         }
 
-        return new SqlQueryResult(QueryResultStatus.Success, targets.Count);
+        var (_, deleter) = SqlRowCodec.ReadStamps(record.Span);
+
+        if (deleter != TransactionSequence.None && deleter != self)
+        {
+            throw new TransactionAbortedException(
+                $"Write-write conflict on '{table.Schema}.{table.Name}': the row was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+        }
     }
 
     /// <summary>
     /// Stamps the record's deleter with the statement's transaction sequence —
-    /// the same-length in-place tombstone write.
+    /// the same-length in-place tombstone write — and records it in the
+    /// version-store ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(SqlStatementContext statement, PageId pageId, int slotIndex)
+    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, ulong objectId, PageId pageId, int slotIndex)
     {
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
-        _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, tombstoned);
+        _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
+        statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, objectId, pageId, slotIndex);
     }
 
     // ── DDL ────────────────────────────────────────────────────────────
@@ -312,7 +422,10 @@ internal sealed class SqlPlanExecutor
     /// Drops a column and rewrites the table's rows to the new positional layout —
     /// row records are positional, so removing a middle column requires splicing
     /// every stored row (ADD COLUMN, by contrast, is O(1): missing trailing
-    /// components decode as null).
+    /// components decode as null). Runs under the table's Exclusive lock: the
+    /// intent-lock matrix makes the rewrite wait for in-flight row writers (and
+    /// them for it), so no writer's uncommitted version can be rewritten from
+    /// under it.
     /// </summary>
     private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -320,6 +433,9 @@ internal sealed class SqlPlanExecutor
         {
             throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' does not exist.");
         }
+
+        await statement.Coordinator.LockManager.AcquireAsync(
+            statement.Transaction.Sequence, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         int droppedOrdinal = -1;
         for (int i = 0; i < before.Columns.Count; i++)
@@ -345,47 +461,74 @@ internal sealed class SqlPlanExecutor
 
         var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
 
-        foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
+        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
         {
-            var spliced = new object?[values.Length - 1];
-            for (int i = 0, j = 0; i < values.Length; i++)
+            foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
             {
-                if (i != droppedOrdinal)
+                var spliced = new object?[values.Length - 1];
+                for (int i = 0, j = 0; i < values.Length; i++)
                 {
-                    spliced[j++] = values[i];
+                    if (i != droppedOrdinal)
+                    {
+                        spliced[j++] = values[i];
+                    }
+                }
+
+                byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
+
+                if (deleter != TransactionSequence.None)
+                {
+                    record = SqlRowCodec.WithDeleter(record, deleter);
+                }
+
+                try
+                {
+                    _storage.UpdateRow(bracket, pageId, slotIndex, record);
+                }
+                catch (SlottedPageException)
+                {
+                    _storage.DeleteRow(bracket, pageId, slotIndex);
+                    _storage.InsertRow(bracket, record);
                 }
             }
 
-            byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
-
-            if (deleter != TransactionSequence.None)
-            {
-                record = SqlRowCodec.WithDeleter(record, deleter);
-            }
-
-            try
-            {
-                _storage.UpdateRow(statement.StorageTransaction, pageId, slotIndex, record);
-            }
-            catch (SlottedPageException)
-            {
-                _storage.DeleteRow(statement.StorageTransaction, pageId, slotIndex);
-                _storage.InsertRow(statement.StorageTransaction, record);
-            }
-        }
-
-        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, CancellationToken cancellationToken)
+    private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if (plan.IfExists && !_catalog.TryGetTable(plan.Schema, plan.Name, out _))
+        if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var table))
         {
+            if (plan.IfExists)
+            {
+                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            }
+
+            await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
+        // The DDL-vs-writer interlock: an Exclusive table lock waits for every
+        // in-flight row writer (IntentExclusive holders) to finish before the
+        // table is dropped — and blocks new ones until this transaction ends.
+        await statement.Coordinator.LockManager.AcquireAsync(
+            statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
         await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+    }
+
+    /// <summary>
+    /// Acquires a table-grain lock for a DDL statement by schema-qualified name.
+    /// </summary>
+    private async ValueTask AcquireObjectLockAsync(SqlStatementContext statement, string schema, string name, LockMode mode, CancellationToken cancellationToken)
+    {
+        if (_catalog.TryGetTable(schema, name, out var table))
+        {
+            await statement.Coordinator.LockManager.AcquireAsync(
+                statement.Transaction.Sequence, LockResource.Object(table.ObjectId), mode, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     // ── Scan + coercion helpers ────────────────────────────────────────
