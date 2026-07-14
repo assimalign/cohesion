@@ -73,6 +73,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.Query` | RFC 10008 QUERY server rules: request Content-Type validation / Accept-Query negotiation (400/415/406), method-preserving redirect helpers (307/308, 303), conditional QUERY (304/412) |
 | `Assimalign.Cohesion.Web.Authentication` / `.Cookie` / `.Bearer` | Scheme model + builder surface, and the handler packages that graft their scheme verbs onto it |
 | `Assimalign.Cohesion.Web.Authorization` | Authorization contracts (in design) |
+| `Assimalign.Cohesion.Web.ForwardedHeaders` | First-position forwarded-headers middleware (`UseForwardedHeaders`): proxy trust model over the core `Http` parsing primitives, publishing the `Http.Forwarded` effective-identity feature |
 | `Assimalign.Cohesion.Web.CookiePolicy` / `.Cors` / `.Forms` / `.Sessions` / `.Health` | Request-pipeline feature libraries over their `Http.*` counterparts |
 | `Assimalign.Cohesion.Web.StaticFiles` | Static file serving over an `IFileSystem` mount: conditional GET, single byte ranges, default documents, content-type mapping, precompressed `.br`/`.gz` negotiation |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |

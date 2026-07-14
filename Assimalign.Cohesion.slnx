@@ -840,6 +840,19 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/tests/Assimalign.Cohesion.Http.Forwarded.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
@@ -1979,6 +1992,10 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 	</Folder>
@@ -2055,6 +2072,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Forms/tests/Assimalign.Cohesion.Web.Forms.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/src/Assimalign.Cohesion.Web.ForwardedHeaders.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/tests/Assimalign.Cohesion.Web.ForwardedHeaders.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Health/README.md" />

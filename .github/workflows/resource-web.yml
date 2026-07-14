@@ -29,6 +29,7 @@ jobs:
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',
             'Assimalign.Cohesion.Web.Forms',
+            'Assimalign.Cohesion.Web.ForwardedHeaders',
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.Hosting',
             'Assimalign.Cohesion.Web.ProblemDetails',

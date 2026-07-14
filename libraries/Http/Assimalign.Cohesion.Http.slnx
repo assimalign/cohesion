@@ -114,6 +114,19 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Forwarded/">
+		<File Path="Assimalign.Cohesion.Http.Forwarded/README.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Forwarded/docs/">
+		<File Path="Assimalign.Cohesion.Http.Forwarded/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Http.Forwarded/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Forwarded/src/">
+		<Project Path="Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
+	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.Forwarded/tests/">
+		<Project Path="Assimalign.Cohesion.Http.Forwarded/tests/Assimalign.Cohesion.Http.Forwarded.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.InterimResponses/" />
 	<Folder Name="/Http/Assimalign.Cohesion.Http.InterimResponses/docs/">
 		<File Path="Assimalign.Cohesion.Http.InterimResponses/docs/DESIGN.md" />
