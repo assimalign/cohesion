@@ -1,16 +1,16 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Server.Internal;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
-/// The shared server core's <see cref="IDatabaseServerContext"/>: the one engine
+/// The key-value server's <see cref="IDatabaseServerContext"/>: the one engine
 /// the server fronts and a live view of its active sessions.
 /// </summary>
-internal sealed class DatabaseServerContext : IDatabaseServerContext
+internal sealed class KeyValueDatabaseServerContext : IDatabaseServerContext
 {
-    private readonly DatabaseServer _server;
+    private readonly KeyValueDatabaseServer _server;
 
-    internal DatabaseServerContext(DatabaseServer server, IDatabaseEngine engine)
+    internal KeyValueDatabaseServerContext(KeyValueDatabaseServer server, IDatabaseEngine engine)
     {
         _server = server;
         Engine = engine;

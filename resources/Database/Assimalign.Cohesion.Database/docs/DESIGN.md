@@ -146,23 +146,23 @@ surface. Child roots never reference the root.
   scheduler exists. Workers remain synchronous by design — every body is
   storage I/O (fsync, page writes, checkpoint), which has no async fast path.
 - **Server *contracts* live here — and they are the only area-wide server
-  requirement; servers are per-model, deriving from the shared proven core**
-  (owner decision 2026-07-14, refined the same day when the second model server
-  fired the recorded extraction trigger). A server fronts exactly **one**
-  engine — `IDatabaseServerContext.Engine` is singular — so model-specific wire
-  behavior has a home. Each model ships its own
+  requirement; servers are per-model, each model package carrying its own copy
+  of the server machinery** (owner decision 2026-07-14, settled on review of
+  the second model server's extraction evidence). A server fronts exactly
+  **one** engine — `IDatabaseServerContext.Engine` is singular — so
+  model-specific wire behavior has a home. Each model ships its own
   `IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`
-  implementation in its model package; since the extraction, the **proven**
-  common machinery (accept loop, session state machine and frame pump,
-  guardrails, two-phase drain) lives in `Assimalign.Cohesion.Database.Server`
-  as the guided base both `SqlDatabaseServer` and `KeyValueDatabaseServer`
-  derive from. The placement history is deliberate evidence discipline: the
-  shared base that briefly existed at n=1 (2026-07-13 → 2026-07-14) was folded
-  into `Database.Sql` as premature abstraction, with the trigger recorded —
-  extract on the second model server, with evidence. The evidence (building
-  `KeyValueDatabaseServer`) exceeded the prediction: the execute pump proved
-  common too, because model #2 rides this root's text-execute seam
-  (`Database.Server/docs/DESIGN.md` carries the prediction-vs-evidence table).
+  implementation in its model package (`SqlDatabaseServer` in `Database.Sql`,
+  `KeyValueDatabaseServer` in `Database.KeyValuePair`), with the machinery
+  (accept loop, session state machine and frame pump, guardrails, two-phase
+  drain) internal to that package. The placement history is deliberate
+  evidence discipline: the shared base that briefly existed at n=1 was folded
+  into `Database.Sql` with an extraction trigger recorded; the second model
+  server fired it and the proven core was extracted into a shared
+  `Database.Server` — and the owner then reviewed that evidence and chose
+  per-model duplication anyway (model independence over shared code; drift
+  cost accepted; wire parity held by the protocol contract and per-model E2Es —
+  the preserved prediction-vs-evidence table lives in the area DESIGN §3.10).
   The contracts stay here for the same COHRES001 reason as before: feature
   libraries (quotas #167, health #168, a future `Database.Testing`) must be
   able to name the server without referencing any runtime. The context shape

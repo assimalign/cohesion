@@ -82,20 +82,21 @@ The wire-protocol server was folded INTO this module on 2026-07-12 (mirroring
 the approved architecture makes servers per-model (`SqlDatabaseServer` fronting
 one `SqlDatabaseEngine`), and COHRES001 makes this module unreferenceable by
 area libraries — so server machinery living here is unreachable by exactly the
-packages that need it. The machinery briefly lived in a shared
-`Database.Server` base library above the root; on 2026-07-14 that library was
-judged premature abstraction from n=1 and folded into `Database.Sql` — and,
-later the same day, the **second model server** (`KeyValueDatabaseServer`)
-fired the recorded extraction trigger, so the proven core moved back out into
-`Database.Server` on evidence (its docs/DESIGN.md carries the state-machine
-record and the prediction-vs-evidence table). The root's `IDatabaseServer`
-contract is the only area-wide server requirement, and model servers derive
-from the shared core in their own packages. What the 2026-07-12 fold got right
-is retained here: composing servers into a host process is this module's job —
-it wraps any `IDatabaseServer` in `DatabaseServerHostService`, registered last.
-This module references **no model package and not `Database.Server` either**:
-it composes through the root's `IDatabaseServer` seam alone, which is what
-keeps it transport-free (no `Connections` reference).
+packages that need it. The machinery's placement then settled through evidence
+discipline (area DESIGN decision log): a shared `Database.Server` base above
+the root (2026-07-13) → judged premature abstraction from n=1 and folded into
+`Database.Sql` (2026-07-14) → the second model server fired the recorded
+extraction trigger and the proven core was extracted back out → **the owner
+reviewed the extraction evidence and chose per-model duplication (2026-07-14,
+the settled placement)**: the shared library was removed and each model package
+carries its own full copy of the machinery (the preserved evidence table lives
+in the area DESIGN §3.10). The root's `IDatabaseServer` contract is the only
+area-wide server requirement. What the 2026-07-12 fold got right is retained
+here: composing servers into a host process is this module's job — it wraps any
+`IDatabaseServer` in `DatabaseServerHostService`, registered last. This module
+references **no model package**: it composes through the root's
+`IDatabaseServer` seam alone, which is what keeps it transport-free (no
+`Connections` reference).
 
 ### One host service shape per server, plural servers
 

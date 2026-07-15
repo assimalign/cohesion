@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -12,7 +13,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// <summary>
 /// A live key-value engine + in-memory listener + running
 /// <see cref="KeyValueDatabaseServer"/>, with a raw protocol client, for
-/// wire-level tests of the second model server over the shared core.
+/// wire-level tests of the model's own server machinery.
 /// </summary>
 internal sealed class KeyValueServerHarness : IAsyncDisposable
 {
@@ -54,6 +55,21 @@ internal sealed class KeyValueServerHarness : IAsyncDisposable
     {
         Connection connection = await Listener.CreateFactory().ConnectAsync(Listener.EndPoint, TestTimeout.Token());
         return new KeyValueProtocolClient(connection);
+    }
+
+    /// <summary>
+    /// Polls until the condition holds or the timeout lapses (session teardown is
+    /// asynchronous with respect to the last frame).
+    /// </summary>
+    public static async Task WaitUntilAsync(Func<bool> condition, int timeoutSeconds = 10)
+    {
+        CancellationToken token = TestTimeout.Token(timeoutSeconds);
+
+        while (!condition())
+        {
+            token.ThrowIfCancellationRequested();
+            await Task.Delay(10, CancellationToken.None);
+        }
     }
 
     public async ValueTask DisposeAsync()

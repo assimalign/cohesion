@@ -228,16 +228,14 @@
              closure, so the framework must deliver it. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
-        <!-- Service surface: wire protocol, client core, the shared server core,
-             security, the embedded facade, and the composition-only hosting module.
-             Servers are per-model and ship inside their model package deriving from
-             Database.Server's guided base (extracted 2026-07-14 when the second
-             model server fired the recorded trigger - the root contract remains
-             the only area-wide server requirement). -->
+        <!-- Service surface: wire protocol, client core, security, the embedded
+             facade, and the composition-only hosting module. Servers are per-model
+             and ship inside their model package, each carrying its own copy of the
+             server machinery (owner decision 2026-07-14 - the root contract is the
+             only area-wide server requirement; there is no shared server library). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Server" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
 

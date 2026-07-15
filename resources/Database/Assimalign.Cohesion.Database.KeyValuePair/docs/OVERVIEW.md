@@ -27,9 +27,9 @@ keys order by unsigned lexicographic byte comparison.
   in [COMMANDS.md](COMMANDS.md), parsed by the session's text-execute seam so the
   wire protocol's Execute message serves the model with zero protocol changes.
 - `KeyValueDatabaseServer` (+ `KeyValueDatabaseServerOptions`) — the model's
-  wire-protocol server, a thin derivation of the shared server core
-  (`Assimalign.Cohesion.Database.Server`); the second model server, whose
-  construction fired the area's recorded extraction trigger (see DESIGN.md).
+  wire-protocol server, carrying its own full copy of the server machinery
+  (servers are per-model and each model package owns its copy — owner decision
+  2026-07-14; see DESIGN.md for the placement history).
 
 ## Dependencies
 
@@ -41,6 +41,9 @@ keys order by unsigned lexicographic byte comparison.
 - `Assimalign.Cohesion.Database.Storage` / `.Types` — durability options surface
   and the shared tuple codec (direct references; the rest of the kernel arrives
   through the root).
+- `Assimalign.Cohesion.Connections` — the transport listeners the model's
+  wire-protocol server accepts from (the composition root binds and owns the
+  listener).
 
 ## Usage
 

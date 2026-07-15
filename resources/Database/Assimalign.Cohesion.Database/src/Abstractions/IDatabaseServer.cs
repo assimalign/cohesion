@@ -13,8 +13,11 @@ namespace Assimalign.Cohesion.Database;
 /// <see cref="IDatabaseServerContext.Engine"/>) so model-specific wire behavior has
 /// a home. This contract is the only area-wide server requirement — every model
 /// implements it its own way, against <c>Connections</c> and the protocol child
-/// root, inside its model package (the SQL model's <c>SqlDatabaseServer</c> in
-/// <c>Assimalign.Cohesion.Database.Sql</c>). "Running" lives here, not on the
+/// root, inside its model package, carrying its own copy of the server machinery
+/// (the SQL model's <c>SqlDatabaseServer</c> in
+/// <c>Assimalign.Cohesion.Database.Sql</c>; the key-value model's
+/// <c>KeyValueDatabaseServer</c> in
+/// <c>Assimalign.Cohesion.Database.KeyValuePair</c>). "Running" lives here, not on the
 /// engine: an engine is a data machine (create → use → dispose), and the server is
 /// the thing that starts and stops. An <see cref="IDatabaseApplication"/> composes
 /// servers generically as host services; an embedded or custom host drives

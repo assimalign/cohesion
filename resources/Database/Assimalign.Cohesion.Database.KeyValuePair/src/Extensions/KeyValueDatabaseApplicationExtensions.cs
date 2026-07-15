@@ -51,7 +51,7 @@ public static class KeyValueDatabaseApplicationExtensions
         /// per model it serves.
         /// </summary>
         /// <param name="engine">The key-value engine the server fronts — typically the return of <c>AddKeyValueDatabase</c>, or an engine the composition root created itself. The composition root owns and disposes the engine.</param>
-        /// <param name="configure">Configures the server options; must supply the bound <see cref="Assimalign.Cohesion.Database.Server.DatabaseServerOptions.Listener"/> (the composition root owns the listener).</param>
+        /// <param name="configure">Configures the server options; must supply the bound <see cref="KeyValueDatabaseServerOptions.Listener"/> (the composition root owns the listener).</param>
         /// <returns>
         /// The registered <see cref="KeyValueDatabaseServer"/> (the convention of
         /// returning the feature's own composition object).

@@ -10,21 +10,21 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Server.Internal;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
 /// One server-side session pump: drives the protocol state machine
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
 /// over a single connection and delegates statement execution to the bound
-/// engine session's text-execute seam — the model-agnostic bridge that lets one
-/// pump serve every model whose session implements the root contract (the
-/// server never parses any model language).
+/// engine session's text-execute seam — for this model, the five-verb command
+/// grammar (<c>docs/COMMANDS.md</c>) riding the protocol's existing Execute
+/// message.
 /// </summary>
-internal sealed class DatabaseServerSession : IDatabaseServerSession
+internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
 {
-    private readonly DatabaseServer _server;
+    private readonly KeyValueDatabaseServer _server;
     private readonly IConnection _connection;
-    private readonly DatabaseServerOptions _options;
+    private readonly KeyValueDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
@@ -34,10 +34,10 @@ internal sealed class DatabaseServerSession : IDatabaseServerSession
     private IDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
-    internal DatabaseServerSession(
-        DatabaseServer server,
+    internal KeyValueDatabaseServerSession(
+        KeyValueDatabaseServer server,
         IConnection connection,
-        DatabaseServerOptions options,
+        KeyValueDatabaseServerOptions options,
         IDatabaseEngine engine,
         IDatabaseAuthenticator authenticator)
     {
@@ -101,7 +101,7 @@ internal sealed class DatabaseServerSession : IDatabaseServerSession
         // Yield so Start returns immediately and registration completes before frames flow.
         await Task.Yield();
 
-        CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((DatabaseServerSession)state!).Abort(), this);
+        CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((KeyValueDatabaseServerSession)state!).Abort(), this);
 
         Stream stream = _connection.AsStream();
         _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
@@ -358,6 +358,9 @@ internal sealed class DatabaseServerSession : IDatabaseServerSession
                     await WriteFrameAsync(ProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
+                // ResultComplete carries the set's real AffectedCount: the model's
+                // one-row outcome sets (PUT / conditional PUT) report 1/0 on the
+                // wire; plain query sets report -1.
                 await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 

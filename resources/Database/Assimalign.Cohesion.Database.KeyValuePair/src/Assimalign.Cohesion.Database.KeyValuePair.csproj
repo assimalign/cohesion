@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
-		<!-- The shared server core: KeyValueDatabaseServer derives from its guided
-		     base (servers are per-model — this is the second model server, the one
-		     that fired the recorded extraction trigger). Connections arrives
-		     transitively through it. -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Server" />
+		<!-- Transport listeners/connections for the key-value model's wire-protocol
+		     server (KeyValueDatabaseServer and its machinery are implemented in this
+		     package — servers are per-model and each model carries its own copy,
+		     owner decision 2026-07-14; the root contract is the only area-wide
+		     requirement. Protocol and Security arrive transitively through the
+		     root's child-root rollup). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
 		<!-- Direct (not just transitive via KeyValuePair.Storage): the engine's public

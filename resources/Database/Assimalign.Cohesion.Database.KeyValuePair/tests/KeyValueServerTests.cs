@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -12,9 +13,14 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 using static KeyValueTestHarness;
 
 /// <summary>
-/// The key-value model's wire behavior over a live engine: the second model
-/// server rides the shared core and the existing protocol unchanged — command
-/// text + named tuple-codec parameters in, generic result framing out.
+/// End-to-end tests for the key-value model's wire-protocol server (the machinery
+/// is KeyValuePair-internal — servers are per-model and each model package carries
+/// its own copy, owner decision 2026-07-14): the session state machine, version
+/// negotiation, the DoS guardrails, the two-phase drain, and the model's wire
+/// behavior — command text + named tuple-codec parameters in, generic result
+/// framing out — all over the in-memory Connections driver, through
+/// <see cref="KeyValueDatabaseServer"/> directly. This suite is this copy's
+/// machinery coverage; the SQL suite covers its own copy equivalently.
 /// </summary>
 public class KeyValueServerTests
 {
@@ -59,6 +65,158 @@ public class KeyValueServerTests
         session.DatabaseSession.ShouldNotBeNull();
         harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
         harness.Server.Engine.Model.ShouldBe(EngineModel.KeyValueStore);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server handshake: unknown protocol major is rejected with UnsupportedVersion")]
+    public async Task Handshake_WithUnknownMajorVersion_ShouldRejectWithUnsupportedVersion()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(new ProtocolVersion(99, 0), KeyValueServerHarness.DatabaseName, "tester").Encode());
+
+        // Assert
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.UnsupportedVersion);
+
+        (await client.ReadAsync()).ShouldBeNull(); // the server closed the connection
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server handshake: unknown database is rejected with DatabaseNotFound")]
+    public async Task Handshake_WithUnknownDatabase_ShouldRejectWithDatabaseNotFound()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "no-such-db", "tester").Encode());
+
+        // Assert
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.DatabaseNotFound);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server handshake: a rejecting authenticator yields AuthenticationFailed")]
+    public async Task Handshake_WithRejectingAuthenticator_ShouldFailAuthentication()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.Authenticator = new RejectingAuthenticator());
+        await using var client = await harness.DialAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, KeyValueServerHarness.DatabaseName, "mallory").Encode());
+        await client.ExpectAsync(ProtocolMessageType.Authenticate);
+        await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
+
+        // Assert
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.AuthenticationFailed);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server guardrails: connections beyond MaxSessions are rejected with Unavailable")]
+    public async Task Accept_BeyondMaxSessions_ShouldRejectWithUnavailable()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.MaxSessions = 1);
+        await using var first = await harness.DialAsync();
+        await first.HandshakeAsync();
+
+        // Act
+        await using var second = await harness.DialAsync();
+
+        // Assert: the second connection is rejected before any handshake
+        var frame = await second.ExpectAsync(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        (await second.ReadAsync()).ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server guardrails: unauthenticated connections are dropped after the authentication timeout")]
+    public async Task Handshake_WhenAuthenticationTimesOut_ShouldDropConnection()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.AuthenticationTimeout = TimeSpan.FromMilliseconds(200));
+        await using var client = await harness.DialAsync();
+
+        // Act: send nothing and wait for the server to give up
+        var frame = await client.ReadAsync();
+
+        // Assert
+        frame.ShouldBeNull();
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server guardrails: idle sessions are evicted after the idle timeout")]
+    public async Task ReadyLoop_WhenIdleTimeoutLapses_ShouldEvictSession()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.IdleTimeout = TimeSpan.FromMilliseconds(200));
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+
+        // Act: go idle
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+
+        // Assert
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        (await client.ReadAsync()).ShouldBeNull();
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server liveness: ping frames answer with pong")]
+    public async Task ReadyLoop_OnPing_ShouldAnswerPong()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Ping);
+
+        // Assert
+        await client.ExpectAsync(ProtocolMessageType.Pong);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server lifecycle: terminate closes the session cleanly")]
+    public async Task ReadyLoop_OnTerminate_ShouldCloseSession()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Terminate);
+
+        // Assert
+        (await client.ReadAsync()).ShouldBeNull();
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server lifecycle: StopAsync drains idle sessions within the budget")]
+    public async Task StopAsync_WithIdleSessions_ShouldDrainGracefully()
+    {
+        // Arrange
+        await using var harness = await KeyValueServerHarness.StartAsync(options => options.ShutdownDrainTimeout = TimeSpan.FromSeconds(10));
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+
+        // Act
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await harness.Server.StopAsync(TestTimeout.Token(30));
+        stopwatch.Stop();
+
+        // Assert: the drain closed the idle session at the frame boundary — far
+        // inside the budget — and told the client why.
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+        harness.Server.Context.Sessions.ShouldBeEmpty();
+
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        (await client.ReadAsync()).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Server execute: PUT then GET round-trips over the wire")]

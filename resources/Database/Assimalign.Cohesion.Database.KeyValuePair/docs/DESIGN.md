@@ -110,17 +110,31 @@ COMMANDS.md, and the corpus tests change together (the DIALECT.md precedent).
 
 The model ships its own wire-protocol server — the **second model server**, the
 one whose construction fired the area's recorded server-core extraction trigger
-(2026-07-14). `KeyValueDatabaseServer` is a sealed derivation of the shared
-server core's guided base (`Assimalign.Cohesion.Database.Server`'s
-`DatabaseServer`), fronting exactly one `KeyValueDatabaseEngine`
-(`Create(engine, options)`, options in
-`KeyValueDatabaseServerOptions : DatabaseServerOptions`). It adds **no pump
-behavior**: the command grammar travels the protocol's existing Execute message
-into the root's text-execute seam, and the model's result sets ride the generic
-result framing — which is precisely the evidence that made the extraction's
-scope larger than predicted (the shared core's docs/DESIGN.md carries the
-prediction-vs-evidence record). Model-specific wire surface (binary command
-frames, if measurement ever demands them) would grow here.
+(2026-07-14) and thereby produced the evidence behind the settled placement.
+`KeyValueDatabaseServer` is a sealed implementation of the area root's
+`IDatabaseServer` contract fronting exactly one `KeyValueDatabaseEngine`
+(`Create(engine, options)`, options in `KeyValueDatabaseServerOptions`), and
+this package carries its **own full copy of the server machinery** — accept
+loop, session state machine and frame pump (`Internal/`), auth/idle/session
+guardrails, two-phase drain. **Per-model duplication is the owner's decision
+(2026-07-14), made with this model's extraction evidence in hand:** the
+extraction into a shared `Database.Server` was executed and then reversed on
+review — model independence outweighs the duplication/drift cost, and
+wire-behavior parity is held by the protocol contract plus each model's E2E
+suite, not by shared code (the preserved prediction-vs-evidence table and the
+full placement history live in the area `DESIGN.md` §3.10 and decision log).
+The copy is textually near-identical to `Database.Sql`'s today; divergence over
+time is sanctioned — that is the point. The pump adds no model-specific
+behavior yet: the command grammar travels the protocol's existing Execute
+message into the root's text-execute seam, and the model's result sets ride the
+generic result framing (`ResultComplete` carries the set's real
+`AffectedCount`, so the model's one-row outcome sets report 1/0 on the wire).
+Model-specific wire surface (binary command frames, if measurement ever demands
+them) grows here, in this copy, without touching any other model. The machinery
+design record (composition seam, state machine, error taxonomy, two-phase stop)
+is documented in `Database.Sql`'s DESIGN.md server section, whose decisions
+this copy currently mirrors; when this copy diverges, this section records the
+divergence.
 
 ## Engine-owned background workers
 
