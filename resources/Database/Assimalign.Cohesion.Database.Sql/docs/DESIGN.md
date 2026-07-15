@@ -310,30 +310,34 @@ execution rides the model-agnostic text-execute seam on the root's
 `IDatabaseSession`. "Running" lives here — the engine underneath has no
 lifecycle; the server starts and stops around it.
 
-### Why the machinery is Sql-internal (2026-07-14, owner decision)
+### Why the machinery is Sql-internal — per-model duplication (2026-07-14, owner decision; the settled placement)
 
 The server machinery — accept loop, session state machine and frame pump,
 guardrails, two-phase drain — lives **inside this package** (`Server/` for the
 public surface, `Internal/` for the pump and context), not in a shared library.
-The shared `Assimalign.Cohesion.Database.Server` base this server briefly
-derived from was **premature abstraction from n=1**: only one model server
-existed, and the future model servers are expected to diverge from the
-SQL-shaped execute pump (Blob wants streaming, not header/row/complete framing;
-KV wants binary command paths, not statement text). The root contracts
-(`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`) are the
-**only area-wide requirement** — every model implements them its own way
-against `Connections` and the `Database.Protocol` child root (via the root's
-rollup). With no external derivers by design, the guided abstract base lost its
-reason to exist and was merged into the sealed `SqlDatabaseServer` rather than
-kept as an internal base: an internal abstract class with exactly one
-same-assembly deriver is ceremony.
-
-**Extraction trigger (recorded intent):** when the **second** model server is
-built, extract the then-*proven* common core — predicted: the session table,
-the guardrails (session limit / authentication timeout / idle eviction), and
-the two-phase drain, **not** the execute pump — into a shared library, with the
-second implementation as evidence of what is actually common. Model #2's
-implementer extracts instead of copy-pasting.
+This is the fifth and final placement, and the history is deliberate evidence
+discipline (each move recorded in the area DESIGN decision log): folded into
+`Database.Hosting` (2026-07-12) → resurrected as a shared `Database.Server`
+base (2026-07-13) → folded in here as premature abstraction from n=1
+(2026-07-14), with an extraction trigger recorded for the second model server →
+**the trigger fired the same day**: building `KeyValueDatabaseServer` supplied
+the evidence, the evidence exceeded the prediction (even the execute pump
+proved common, because model #2 rides the root's text-execute seam), and the
+proven core was extracted back into `Database.Server` → **the owner reviewed
+the evidence and chose per-model duplication anyway** (2026-07-14): the shared
+library was removed, and each model package carries its **own full copy** of
+the machinery. The trade-off was stated and accepted — model independence
+(each model server free to evolve its pump, framing, and guardrails without
+coordinating a shared base) outweighs the duplication/drift cost; **wire-behavior
+parity is maintained by the protocol contract and per-model E2E suites, not by
+shared code**. The copies are allowed to be textually near-identical today —
+divergence over time is sanctioned, and no linked-source or shared-internals
+mechanism may be used to fake the independence. The prediction-vs-evidence
+table from the extraction is preserved in the area `DESIGN.md` §3.10. The root
+contracts (`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`)
+remain the **only area-wide requirement** — every model implements them its own
+way against `Connections` and the `Database.Protocol` child root (via the
+root's rollup).
 
 ### Composition seam
 
@@ -371,7 +375,7 @@ limits lesson, #791): unauthenticated connections are dropped after
 protocol `Unavailable` error); idle sessions are evicted; `StopAsync` drains
 within `ShutdownDrainTimeout` then aborts.
 
-Implementation decisions (carried over from the server's prior homes — this
+Implementation decisions (carried over from the machinery's prior homes — this
 record moves with the machinery):
 
 - **Version negotiation:** an unknown *major* in `Startup` earns
@@ -399,6 +403,11 @@ record moves with the machinery):
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`
   and closes the session — the engine's model boundary is where wrapping into
   `DatabaseException` belongs.
+- **`ResultComplete` carries the result set's real `AffectedCount`** — the
+  evidence-driven adjustment from the (since-reversed) shared-core extraction,
+  kept in both models' copies: SQL's materialized query sets report `-1`, so
+  SQL wire behavior is unchanged, while outcome-shaped sets elsewhere carry
+  real counts.
 - **Two-phase stop:** a *soft stop* token ends the accept loop and cancels reads
   at frame boundaries (idle sessions close immediately, telling the peer
   `Unavailable`); in-flight executions run on the session lifetime token and get

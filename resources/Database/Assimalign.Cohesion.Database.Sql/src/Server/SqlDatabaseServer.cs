@@ -22,10 +22,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <remarks>
 /// Servers are per-model, and the root contract is the only area-wide requirement:
 /// every model ships its own <see cref="IDatabaseServer"/> implementation against
-/// <c>Connections</c> and the protocol child root, its own way (the shared
-/// <c>Database.Server</c> base was folded in here on 2026-07-14 — n=1 premature
-/// abstraction; see docs/DESIGN.md for the extraction trigger recorded for the
-/// second model server). This type is where SQL-specific wire behavior grows
+/// <c>Connections</c> and the protocol child root, carrying its <b>own copy</b> of
+/// the server machinery (owner decision 2026-07-14, made with the second model's
+/// extraction evidence in hand: model independence outweighs the duplication
+/// cost — wire parity is held by the protocol contract and per-model E2Es, not
+/// by shared code; see docs/DESIGN.md for the full placement history). This type
+/// is where SQL-specific wire behavior grows
 /// (typed relational payloads, SQL transaction frames) as the protocol's
 /// model-specific surface lands; today execution rides the model-agnostic
 /// text-execute seam on the root's <see cref="IDatabaseSession"/>. The server is

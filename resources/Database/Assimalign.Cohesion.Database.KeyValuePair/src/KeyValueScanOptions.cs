@@ -3,13 +3,14 @@ using System;
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
-/// Bounds and limits for a key-order scan.
+/// Bounds and limits for a key-order scan. A prefix scan and an explicit
+/// start/end range are mutually exclusive shapes.
 /// </summary>
 public sealed class KeyValueScanOptions
 {
     /// <summary>
-    /// Gets or sets the key prefix entries must match. When set, <see cref="Start"/>
-    /// and <see cref="End"/> are ignored.
+    /// Gets or sets the key prefix entries must match. Cannot combine with
+    /// <see cref="Start"/> or <see cref="End"/>.
     /// </summary>
     public ReadOnlyMemory<byte>? Prefix { get; set; }
 

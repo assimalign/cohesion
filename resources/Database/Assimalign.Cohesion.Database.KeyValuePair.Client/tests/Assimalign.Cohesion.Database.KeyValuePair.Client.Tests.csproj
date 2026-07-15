@@ -1,1 +1,29 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
+		<Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
+		<!-- E2E acceptance: the typed client over the key-value model's server
+		     (KeyValueDatabaseServer) + a live key-value engine on the in-memory
+		     Connections driver (tests are exempt from area layering). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- The TCP wire E2E composes the application builder-first (engine + server
+		     verbs on the root builder, DatabaseApplication.CreateBuilder from Hosting)
+		     over real TCP loopback (tests are exempt from area layering). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+	</ItemGroup>
+</Project>

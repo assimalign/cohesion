@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
+		<Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<!-- The KeyValueDatabaseServer wire suite runs over the in-memory
+		     Connections driver. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+	</ItemGroup>
+</Project>

@@ -12,11 +12,13 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// End-to-end tests for the SQL model's wire-protocol server (#852; Sql-internal
-/// machinery since the 2026-07-14 fold): the session state machine, version
+/// End-to-end tests for the SQL model's wire-protocol server (#852; the machinery
+/// is Sql-internal — servers are per-model and each model package carries its own
+/// copy, owner decision 2026-07-14): the session state machine, version
 /// negotiation, the execute exchange against a live SQL engine, and the DoS
 /// guardrails — all over the in-memory Connections driver, through
-/// <see cref="SqlDatabaseServer"/> directly.
+/// <see cref="SqlDatabaseServer"/> directly. This suite is this copy's machinery
+/// coverage; the key-value suite covers its own copy equivalently.
 /// </summary>
 public class SqlDatabaseServerTests
 {

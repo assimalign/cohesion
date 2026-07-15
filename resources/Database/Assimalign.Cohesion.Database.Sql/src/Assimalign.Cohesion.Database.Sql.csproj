@@ -2,9 +2,10 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the SQL model's wire-protocol server
-		     (SqlDatabaseServer is implemented in this package — servers are per-model
-		     and the root contract is the only area-wide requirement; Protocol and
-		     Security arrive transitively through the root's child-root rollup). -->
+		     (SqlDatabaseServer and its machinery are implemented in this package —
+		     servers are per-model and each model carries its own copy, owner decision
+		     2026-07-14; the root contract is the only area-wide requirement. Protocol
+		     and Security arrive transitively through the root's child-root rollup). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />

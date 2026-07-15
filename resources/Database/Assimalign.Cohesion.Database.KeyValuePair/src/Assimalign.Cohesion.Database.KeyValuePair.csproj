@@ -1,5 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<!-- Transport listeners/connections for the key-value model's wire-protocol
+		     server (KeyValueDatabaseServer and its machinery are implemented in this
+		     package — servers are per-model and each model carries its own copy,
+		     owner decision 2026-07-14; the root contract is the only area-wide
+		     requirement. Protocol and Security arrive transitively through the
+		     root's child-root rollup). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+		<!-- Direct (not just transitive via KeyValuePair.Storage): the engine's public
+		     options surface exposes StorageCommitDurability and its workers drive the
+		     IStorage worker seams. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

@@ -356,7 +356,11 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
                     await WriteFrameAsync(ProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
-                await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(-1).Encode(), cancellationToken).ConfigureAwait(false);
+                // Evidence-driven fix kept from the (since-reversed) shared-core
+                // extraction: ResultComplete carries the set's real AffectedCount
+                // (SQL's materialized sets report -1, so SQL wire behavior is
+                // unchanged; outcome sets elsewhere carry real counts).
+                await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
             return;

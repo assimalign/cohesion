@@ -230,10 +230,9 @@
 
         <!-- Service surface: wire protocol, client core, security, the embedded
              facade, and the composition-only hosting module. Servers are per-model
-             and ship inside their model package (the SQL model's SqlDatabaseServer
-             lives in Database.Sql; the shared Database.Server base was folded in
-             there 2026-07-14 - the root contract is the only area-wide server
-             requirement). -->
+             and ship inside their model package, each carrying its own copy of the
+             server machinery (owner decision 2026-07-14 - the root contract is the
+             only area-wide server requirement; there is no shared server library). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
@@ -247,6 +246,14 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
+
+        <!-- The KeyValuePair model family (the second model - the kernel-generality
+             proof): engine + wire-protocol server, model storage, the minimal
+             catalog, and the typed client. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
         <!-- Orchestration manifest (declarative plane; references no runtime). -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.ApplicationModel" />
@@ -266,8 +273,11 @@
               DatabaseResource declares). Frameworks deliver libraries to
               applications; the executable ships as a deployment artifact
               (published binary / container image), never through a framework.
-            - The Documents/Graph/KeyValuePair/Blob/Cache model families - engine
-              scaffolds without shipping surface yet.
+            - The Documents/Graph/Blob/Cache model families - engine scaffolds
+              without shipping surface yet. (KeyValuePair graduated into the
+              shipping set 2026-07-14; its still-source-less satellites -
+              KeyValuePair.Replication and KeyValuePair.Security - stay excluded
+              until they ship.)
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
             - Database.Replication, Database.Sql.Replication, Database.Sql.Security
               - post-MVP contracts-only/empty shells (replication / #177). Add each
