@@ -76,6 +76,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | First-position forwarded-headers middleware (`UseForwardedHeaders`): proxy trust model over the core `Http` parsing primitives, publishing the `Http.Forwarded` effective-identity feature |
 | `Assimalign.Cohesion.Web.CookiePolicy` / `.Cors` / `.Forms` / `.Sessions` / `.Health` | Request-pipeline feature libraries over their `Http.*` counterparts |
 | `Assimalign.Cohesion.Web.StaticFiles` | Static file serving over an `IFileSystem` mount: conditional GET, single byte ranges, default documents, content-type mapping, precompressed `.br`/`.gz` negotiation |
+| `Assimalign.Cohesion.Web.Diagnostics` | HTTP request/response logging middleware (field flags, allowlist redaction, bounded body capture) + the W3C/NCSA access-log file provider riding `Assimalign.Cohesion.Logging` |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |
 | `Assimalign.Cohesion.Web.ApplicationModel` | Placeholder awaiting the ApplicationModel Phase-4 rebuild |
 

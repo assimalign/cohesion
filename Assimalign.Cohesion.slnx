@@ -2088,6 +2088,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Cors/tests/Assimalign.Cohesion.Web.Cors.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/src/Assimalign.Cohesion.Web.Diagnostics.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/Assimalign.Cohesion.Web.Diagnostics.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Forms/src/Assimalign.Cohesion.Web.Forms.csproj" />

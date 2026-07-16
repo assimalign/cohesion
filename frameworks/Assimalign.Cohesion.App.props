@@ -160,6 +160,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authorization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Diagnostics" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
