@@ -24,8 +24,10 @@ reading that a host guard is server policy. The owner redirected this
 (2026-07-16): host filtering is a **feature library** like every other
 pipeline concern, and `Web.Hosting` must not carry feature knowledge — the
 same hosting-isolation pressure that moved the authentication builder verbs
-out of hosting. The issue's original "no standalone Web.HostFiltering project"
-note is superseded by that direction.
+out of hosting, and the same shape `Web.ForwardedHeaders` shipped with ("every
+feature, including foundational middleware, ships as its own `Web.<Feature>`
+package with its verb"). The issue's original "no standalone
+Web.HostFiltering project" note is superseded by that direction.
 
 The consequence is the composition model changing from *hosting-guaranteed*
 first position to a **registration-order contract**: `UseHostFiltering` is
@@ -78,24 +80,29 @@ merely skips a route candidate. Use filtering to bound the hosts the
 application answers *at all*, and host-constrained routes to fan traffic
 across the hosts inside that boundary.
 
-## Ordering — forwarded headers (#778)
+## Ordering — forwarded headers (`Web.ForwardedHeaders`, #778 / PR #892)
 
-The middleware validates `IHttpRequest.Host` *as it is when it runs*, and the
-application chooses where it runs. When the application trusts a fronting
-proxy that conveys the public host in `X-Forwarded-Host` / `Forwarded: host=…`
-(#778, in flight), the composition choices are explicit:
+The forwarded-headers middleware's output is **a feature, never mutation**: its
+trust walk publishes `IHttpForwardedFeature` (read through the `Effective*`
+convention in `Http.Forwarded`) and never rewrites `IHttpRequest.Host`. Two
+consequences for composition:
 
-- **Filter first, allowlist the wire host** (the recommended default):
-  `UseHostFiltering` before forwarded-headers processing validates the
-  internal/edge name the proxy actually dialed; the forwarded *public* host is
-  then #778's to validate under its own trust model (mirroring ASP.NET's
-  split, where `ForwardedHeadersOptions.AllowedHosts` bounds
-  `X-Forwarded-Host` separately from host filtering).
-- **Forwarded first, allowlist the public host**: an application that composes
-  #778's middleware ahead of `UseHostFiltering` — and trusts it to rewrite
-  `Host` — validates the public host instead. Registration order makes this an
-  application decision rather than a framework one; this package needs no
-  knowledge of forwarding either way.
+- **This guard always validates the wire host** — behind a proxy, the
+  authority the proxy actually dialed — regardless of where it sits relative
+  to `UseForwardedHeaders`. Allowlist the name(s) the transport really
+  receives. Because the filter consumes nothing from the forwarded feature,
+  the two registrations are order-independent today; keeping
+  `UseHostFiltering` at the very front simply makes rejection cheapest (no
+  trust walk for a request that is about to 400).
+- **The forwarded (public) host is deliberately out of this guard's scope.**
+  The forwarded walk shape-checks `host` assertions but, by its own design,
+  leaves *which* hosts are acceptable "a consumer allowlist concern". If
+  validating `EffectiveHost` against an allowlist becomes a real need, it is
+  an explicit future knob on this package (and would require registration
+  after `UseForwardedHeaders`) — not something that happens implicitly. This
+  mirrors ASP.NET's split, where forwarded-host acceptance
+  (`ForwardedHeadersOptions.AllowedHosts`) is configured separately from host
+  filtering.
 
 ## AOT posture
 
