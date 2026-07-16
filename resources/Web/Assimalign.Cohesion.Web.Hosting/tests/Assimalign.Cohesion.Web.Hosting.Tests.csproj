@@ -12,7 +12,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />

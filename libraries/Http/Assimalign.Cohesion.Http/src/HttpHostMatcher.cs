@@ -6,12 +6,21 @@ namespace Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
-/// Creates <see cref="IHttpHostMatcher"/> instances from host allowlist patterns.
+/// A precompiled host allowlist: decides whether a request's effective host (the
+/// transport-resolved <see cref="HttpHost"/>) matches a fixed set of host patterns.
+/// Create instances from patterns with <see cref="Create"/> (or use <see cref="MatchAny"/>);
+/// derive from this class only to supply a custom matching strategy.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three pattern forms are supported, mirroring the Web routing host-constraint grammar so
-/// host validation and host-based route selection read the same way:
+/// Matchers are immutable and thread-safe once created: matching a request is a pure
+/// comparison against state fixed at construction, with no per-request parsing of the
+/// patterns, no regular expressions, and no reflection.
+/// </para>
+/// <para>
+/// Three pattern forms are supported by <see cref="Create"/>, mirroring the Web routing
+/// host-constraint grammar so host validation and host-based route selection read the same
+/// way:
 /// </para>
 /// <list type="bullet">
 ///   <item><description><c>*</c> — match any host.</description></item>
@@ -33,13 +42,51 @@ using Assimalign.Cohesion.Http.Internal;
 /// case-insensitive); address canonicalization is deliberately not performed — write the form
 /// clients actually send.
 /// </para>
+/// <para>
+/// This is a <em>validation</em> primitive — "is this host one of mine?" — used for
+/// allowed-hosts enforcement (a defense against Host-header injection). Host-based route
+/// <em>selection</em> ("which endpoint serves this host?") is the Web routing layer's job;
+/// both operate on the same <see cref="HttpHost"/> component semantics but answer different
+/// questions.
+/// </para>
 /// </remarks>
-public static class HttpHostMatcher
+// Deviates from the repo interface-first rule per design decision: the host-matcher contract
+// is an abstract class with its factories as static members (owner direction, 2026-07-16) —
+// one extensible concrete contract rather than an interface-per-concept; precedent: the Dns
+// area's abstract-class contracts.
+public abstract class HttpHostMatcher
 {
+    /// <summary>
+    /// Initializes the matcher base.
+    /// </summary>
+    protected HttpHostMatcher()
+    {
+    }
+
     /// <summary>
     /// Gets the matcher that accepts any host (the precompiled <c>*</c> pattern).
     /// </summary>
-    public static IHttpHostMatcher MatchAny { get; } = HttpHostPatternMatcher.MatchAny;
+    public static HttpHostMatcher MatchAny => HttpHostPatternMatcher.Any;
+
+    /// <summary>
+    /// Gets a value indicating whether the matcher accepts any host (it was created from the
+    /// <c>*</c> match-any pattern), making <see cref="IsMatch"/> unconditionally
+    /// <see langword="true"/>. Defaults to <see langword="false"/> for derived matchers.
+    /// </summary>
+    public virtual bool IsMatchAny => false;
+
+    /// <summary>
+    /// Determines whether the supplied host matches the allowlist.
+    /// </summary>
+    /// <param name="host">The request host to test, as resolved by the transport.</param>
+    /// <returns>
+    /// <see langword="true"/> when the host's normalized host component (port ignored,
+    /// IPv6 brackets ignored, case-insensitive) matches an exact pattern or falls under a
+    /// wildcard-subdomain pattern, or when the matcher is match-any; otherwise
+    /// <see langword="false"/>. A host that is not a well-formed <c>host[:port]</c> never
+    /// matches a non-match-any allowlist.
+    /// </returns>
+    public abstract bool IsMatch(HttpHost host);
 
     /// <summary>
     /// Creates a matcher from the supplied allowlist patterns, precompiling them once.
@@ -50,14 +97,14 @@ public static class HttpHostMatcher
     /// <c>*</c> explicitly or apply no host filtering at all; an empty allowlist would silently
     /// reject every request and is treated as a configuration error.
     /// </param>
-    /// <returns>The precompiled matcher. When any pattern is <c>*</c>, the match-any matcher is returned.</returns>
+    /// <returns>The precompiled matcher. When any pattern is <c>*</c>, <see cref="MatchAny"/> is returned.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="patterns"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="patterns"/> is empty, or a pattern is empty or whitespace, carries a
     /// port, is not a well-formed host, or misuses the <c>*</c> wildcard (anywhere other than
     /// a whole-pattern <c>*</c> or a leading <c>*.</c> label).
     /// </exception>
-    public static IHttpHostMatcher Create(IEnumerable<string> patterns)
+    public static HttpHostMatcher Create(IEnumerable<string> patterns)
     {
         ArgumentNullException.ThrowIfNull(patterns);
 
@@ -140,7 +187,7 @@ public static class HttpHostMatcher
 
         if (matchAny)
         {
-            return HttpHostPatternMatcher.MatchAny;
+            return HttpHostPatternMatcher.Any;
         }
 
         return new HttpHostPatternMatcher(exactHosts.ToArray(), wildcardSuffixes.ToArray());

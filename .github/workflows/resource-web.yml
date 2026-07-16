@@ -32,6 +32,7 @@ jobs:
             'Assimalign.Cohesion.Web.Forms',
             'Assimalign.Cohesion.Web.ForwardedHeaders',
             'Assimalign.Cohesion.Web.Health',
+            'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
             'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Query',

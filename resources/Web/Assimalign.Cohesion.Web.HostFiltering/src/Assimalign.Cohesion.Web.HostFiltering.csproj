@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Allowed-hosts enforcement for the Cohesion Web pipeline: UseHostFiltering registers middleware that validates each request's transport-resolved host against an allowlist precompiled at registration (exact hosts, *.wildcard subdomains, match-any) and rejects a mismatching or empty host with 400 Bad Request per RFC 9112 §3.2 — a defense against Host-header injection. Register it first in the pipeline.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

@@ -67,8 +67,8 @@ public class HttpHostMatcherTests
     public void Create_MatchAnyPattern_ShouldReturnMatchAnyMatcher()
     {
         // Arrange & Act
-        IHttpHostMatcher alone = HttpHostMatcher.Create(new[] { "*" });
-        IHttpHostMatcher beside = HttpHostMatcher.Create(new[] { "*", "example.com" });
+        HttpHostMatcher alone = HttpHostMatcher.Create(new[] { "*" });
+        HttpHostMatcher beside = HttpHostMatcher.Create(new[] { "*", "example.com" });
 
         // Assert
         alone.IsMatchAny.ShouldBeTrue();
@@ -80,7 +80,7 @@ public class HttpHostMatcherTests
     public void MatchAny_AnyHost_ShouldMatch()
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.MatchAny;
+        HttpHostMatcher matcher = HttpHostMatcher.MatchAny;
 
         // Act & Assert — match-any means "do not filter hosts": structural validation and the
         // empty-host policy are the caller's concern, not the matcher's.
@@ -99,7 +99,7 @@ public class HttpHostMatcherTests
     public void IsMatch_ExactPattern_ShouldMatchHostComponentCaseInsensitively(string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com" });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeTrue();
@@ -113,7 +113,7 @@ public class HttpHostMatcherTests
     public void IsMatch_ExactPattern_ShouldRejectOtherHosts(string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com" });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeFalse();
@@ -127,7 +127,7 @@ public class HttpHostMatcherTests
     public void IsMatch_WildcardPattern_ShouldMatchSubdomainsOfAnyDepth(string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "*.example.com" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "*.example.com" });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeTrue();
@@ -141,7 +141,7 @@ public class HttpHostMatcherTests
     public void IsMatch_WildcardPattern_ShouldExcludeApexAndLookalikes(string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "*.example.com" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "*.example.com" });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeFalse();
@@ -156,7 +156,7 @@ public class HttpHostMatcherTests
     public void IsMatch_Ipv6Literal_ShouldCompareBracketInsensitively(string pattern, string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { pattern });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { pattern });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeTrue();
@@ -170,7 +170,7 @@ public class HttpHostMatcherTests
     public void IsMatch_MalformedOrEmptyHost_ShouldNotMatch(string requestHost)
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com", "*.example.com" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "example.com", "*.example.com" });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost(requestHost)).ShouldBeFalse();
@@ -180,7 +180,7 @@ public class HttpHostMatcherTests
     public void IsMatch_MixedPatterns_ShouldMatchAcrossEntries()
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "api.example.com", "*.internal.example", "[::1]" });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "api.example.com", "*.internal.example", "[::1]" });
 
         // Act & Assert
         matcher.IsMatchAny.ShouldBeFalse();
@@ -195,7 +195,7 @@ public class HttpHostMatcherTests
     public void Create_PatternWithSurroundingWhitespace_ShouldTrim()
     {
         // Arrange
-        IHttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "  example.com  " });
+        HttpHostMatcher matcher = HttpHostMatcher.Create(new[] { "  example.com  " });
 
         // Act & Assert
         matcher.IsMatch(new HttpHost("example.com")).ShouldBeTrue();

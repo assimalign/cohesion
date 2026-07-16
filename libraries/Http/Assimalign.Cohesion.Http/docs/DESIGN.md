@@ -175,11 +175,22 @@ AOT/trim safe.
 
 `HttpHost` carries the request's effective authority exactly as the transport
 resolved it (`ResolveAuthority` above). On top of that raw value it exposes the
-split into normalized host and port components, and `IHttpHostMatcher` /
-`HttpHostMatcher` compile a host **allowlist** from patterns. The enforcement
-middleware lives in `Web.Hosting` (issue #781); the matching primitives live
+split into normalized host and port components, and `HttpHostMatcher` compiles
+a host **allowlist** from patterns. The enforcement middleware lives in the
+`Web.HostFiltering` feature package (issue #781); the matching primitives live
 here per the typed-protocol-primitives rule — like the caching and range
 toolkits, they are value logic every consumer must agree on, not Web behavior.
+
+**Why an abstract class, not an interface.** `HttpHostMatcher` is a public
+abstract class carrying its factories (`Create`, `MatchAny`) as static members,
+with the compiled pattern matcher as the internal default implementation —
+rather than the repo-default `IHttpHostMatcher` + static factory pair. Owner
+decision (2026-07-16): one extensible concrete contract reads better than an
+interface-per-concept for a primitive with exactly one meaningful default
+implementation, and the base class gives derived matchers guided defaults
+(`IsMatchAny => false`) an interface cannot. Precedent: the Dns area's
+abstract-class contracts (contrast with FileSystem's interfaces). The deviation
+is scoped to this type and marked at the declaration.
 
 ### The component split (`TryGetComponents`, `Host`, `Port`)
 
@@ -227,7 +238,7 @@ primitive claiming "components" cannot.
 ### Validation vs selection
 
 The matcher answers *"is this host one of mine?"* — allowlist **validation**,
-enforced as a 400 by the Web.Hosting first-position middleware. Routing's host
+enforced as a 400 by the `Web.HostFiltering` middleware. Routing's host
 constraints answer *"which endpoint serves this host?"* — **selection** (#788,
 `RequireHost`). They share component semantics by design so a given wire value
 means the same thing on both paths, but they are different questions: do not

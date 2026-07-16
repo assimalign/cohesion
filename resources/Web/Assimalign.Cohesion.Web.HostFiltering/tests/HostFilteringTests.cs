@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
@@ -18,12 +19,13 @@ using Xunit;
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using NetHttpStatusCode = System.Net.HttpStatusCode;
 
-namespace Assimalign.Cohesion.Web.Hosting.Tests;
+namespace Assimalign.Cohesion.Web.HostFiltering.Tests;
 
 /// <summary>
-/// End-to-end coverage for allowed-hosts enforcement (issue #781): builder-time
-/// <c>HostFiltering</c> configuration compiled once at pipeline build and enforced as the
-/// pipeline's first-position middleware. HttpClient-driven cases ride
+/// End-to-end coverage for allowed-hosts enforcement (issue #781): the
+/// <c>UseHostFiltering</c> verb compiles the allowlist once at registration and its
+/// middleware — registered first, per the package's ordering contract — rejects mismatching
+/// hosts ahead of everything registered after it. HttpClient-driven cases ride
 /// <see cref="WebApplicationTestFactory"/> (origin-form HTTP/1.1 and HTTP/2 <c>:authority</c>);
 /// the missing-Host and absolute-form cases speak raw HTTP/1.1 over an in-memory connection,
 /// because <see cref="HttpClient"/> always emits a <c>Host</c> header and only ever sends
@@ -33,10 +35,10 @@ public class HostFilteringTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: No allowlist configured should accept any host (opt-in default)")]
-    public async Task HostFiltering_NotConfigured_ShouldAcceptAnyHost()
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: Without UseHostFiltering any host should be accepted (opt-in)")]
+    public async Task HostFiltering_NotRegistered_ShouldAcceptAnyHost()
     {
-        // Arrange — the default: HostFiltering.AllowedHosts left empty, no middleware installed.
+        // Arrange — the default: the verb is never called, no middleware is installed.
         using CancellationTokenSource cancellation = new(TestTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
@@ -52,7 +54,7 @@ public class HostFilteringTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: An exact allowlist should pass matching hosts and reject others with an empty 400")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An exact allowlist should pass matching hosts and reject others with an empty 400")]
     public async Task HostFiltering_ExactAllowlist_ShouldPassMatchAndRejectOthers()
     {
         // Arrange
@@ -60,7 +62,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("allowed.example");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -78,21 +80,21 @@ public class HostFilteringTests
         allowedAgain.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: A rejected request should short-circuit ahead of every user middleware (first position)")]
-    public async Task HostFiltering_RejectedRequest_ShouldShortCircuitBeforeUserMiddleware()
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: Registered first, a rejection should short-circuit everything registered after it")]
+    public async Task HostFiltering_RegisteredFirst_ShouldShortCircuitLaterMiddleware()
     {
-        // Arrange — even the FIRST user-registered middleware must never observe a request
-        // whose host failed validation.
+        // Arrange — the package's ordering contract: UseHostFiltering goes first, so no later
+        // middleware ever observes a request whose host failed validation.
         using CancellationTokenSource cancellation = new(TestTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("allowed.example");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
 
-        bool userMiddlewareRan = false;
+        bool laterMiddlewareRan = false;
         factory.Application.Use((context, next) =>
         {
-            userMiddlewareRan = true;
+            laterMiddlewareRan = true;
             return next.Invoke(context);
         });
         UseTerminalOkHandler(factory.Application);
@@ -104,15 +106,15 @@ public class HostFilteringTests
 
         // Assert
         denied.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
-        userMiddlewareRan.ShouldBeFalse();
+        laterMiddlewareRan.ShouldBeFalse();
 
         // The same pipeline serves an allowed host normally.
         using HttpResponseMessage allowed = await client.GetAsync("http://allowed.example/", cancellationToken);
         allowed.StatusCode.ShouldBe(NetHttpStatusCode.OK);
-        userMiddlewareRan.ShouldBeTrue();
+        laterMiddlewareRan.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: Host matching should be case-insensitive")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: Host matching should be case-insensitive")]
     public async Task HostFiltering_UppercaseHostHeader_ShouldMatchCaseInsensitively()
     {
         // Arrange — the Uri class lowercases URI hosts, so the uppercase form is forced
@@ -121,7 +123,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("allowed.example");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -135,7 +137,7 @@ public class HostFilteringTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: The request's port should be ignored by a portless pattern")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: The request's port should be ignored by a portless pattern")]
     public async Task HostFiltering_HostWithPort_ShouldMatchPortlessPattern()
     {
         // Arrange
@@ -143,7 +145,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("allowed.example");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -155,7 +157,7 @@ public class HostFilteringTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: A wildcard pattern should match subdomain depth and exclude the apex and lookalikes")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: A wildcard pattern should match subdomain depth and exclude the apex and lookalikes")]
     public async Task HostFiltering_WildcardPattern_ShouldMatchSubdomainsOnly()
     {
         // Arrange
@@ -163,7 +165,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("*.example.com");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("*.example.com"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -181,7 +183,7 @@ public class HostFilteringTests
         lookalike.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: An IPv6 literal pattern should match a bracketed request host")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An IPv6 literal pattern should match a bracketed request host")]
     public async Task HostFiltering_Ipv6Pattern_ShouldMatchBracketedRequestHost()
     {
         // Arrange
@@ -189,7 +191,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("[::1]");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("[::1]"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -203,7 +205,7 @@ public class HostFilteringTests
         denied.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: The * pattern should accept every host while keeping the middleware installed")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: The * pattern should accept every host while keeping the middleware installed")]
     public async Task HostFiltering_MatchAnyPattern_ShouldAcceptEveryHost()
     {
         // Arrange
@@ -211,7 +213,7 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.HostFiltering.AllowedHosts.Add("*");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("*"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -225,22 +227,33 @@ public class HostFilteringTests
         second.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: An invalid allowlist pattern should fail at pipeline build, not at request time")]
-    public void HostFiltering_InvalidPattern_ShouldFailAtPipelineBuild()
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An invalid allowlist pattern should fail at registration, not at request time")]
+    public void HostFiltering_InvalidPattern_ShouldFailAtRegistration()
     {
         // Arrange — a port-bearing pattern is a configuration error: it would otherwise never
-        // match (filtering ignores ports) and must fail loudly when the matcher compiles.
+        // match (filtering ignores ports) and must fail loudly when the matcher compiles,
+        // which happens inside the UseHostFiltering call.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.HostFiltering.AllowedHosts.Add("allowed.example:8080");
-
         WebApplication application = builder.Build();
-        IWebApplicationPipelineBuilder pipelineBuilder = application;
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => pipelineBuilder.Build());
+        Should.Throw<ArgumentException>(
+            () => application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example:8080")));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: HTTP/2 requests should be validated through the resolved :authority")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An empty allowlist should fail at registration rather than deny every request")]
+    public void HostFiltering_EmptyAllowlist_ShouldFailAtRegistration()
+    {
+        // Arrange — calling the verb opts in to filtering; an empty allowlist would compile
+        // to deny-all, so it is rejected as a configuration error.
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        WebApplication application = builder.Build();
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => application.UseHostFiltering(_ => { }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: HTTP/2 requests should be validated through the resolved :authority")]
     public async Task HostFiltering_Http2Authority_ShouldValidateResolvedAuthority()
     {
         // Arrange — prior-knowledge HTTP/2 over the in-memory transport: the effective host is
@@ -252,7 +265,7 @@ public class HostFilteringTests
         {
             Protocol = WebApplicationTestProtocol.Http2,
         });
-        factory.Builder.HostFiltering.AllowedHosts.Add("allowed.example");
+        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -267,7 +280,7 @@ public class HostFilteringTests
         denied.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: An HTTP/1.1 request without a Host header should be rejected with 400 by default")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An HTTP/1.1 request without a Host header should be rejected with 400 by default")]
     public async Task HostFiltering_MissingHostHeader_ShouldRejectWith400()
     {
         // Arrange — RFC 9112 §3.2: the request cannot be validated against the allowlist, and
@@ -278,7 +291,7 @@ public class HostFilteringTests
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =
             await StartRawHttp1ApplicationAsync(
-                builder => builder.HostFiltering.AllowedHosts.Add("allowed.example"),
+                options => options.AllowedHosts.Add("allowed.example"),
                 cancellationToken);
 
         try
@@ -296,7 +309,7 @@ public class HostFilteringTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: AllowEmptyHost should let a hostless HTTP/1.1 request through")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: AllowEmptyHost should let a hostless HTTP/1.1 request through")]
     public async Task HostFiltering_MissingHostHeader_WithAllowEmptyHost_ShouldPass()
     {
         // Arrange — the explicit opt-out for legacy HTTP/1.0-style clients.
@@ -305,10 +318,10 @@ public class HostFilteringTests
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =
             await StartRawHttp1ApplicationAsync(
-                builder =>
+                options =>
                 {
-                    builder.HostFiltering.AllowedHosts.Add("allowed.example");
-                    builder.HostFiltering.AllowEmptyHost = true;
+                    options.AllowedHosts.Add("allowed.example");
+                    options.AllowEmptyHost = true;
                 },
                 cancellationToken);
 
@@ -327,7 +340,7 @@ public class HostFilteringTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HostFiltering: An absolute-form target's authority should supersede the Host header (RFC 9112 §3.2.2)")]
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An absolute-form target's authority should supersede the Host header (RFC 9112 §3.2.2)")]
     public async Task HostFiltering_AbsoluteFormTarget_ShouldSupersedeHostHeader()
     {
         // Arrange — the middleware validates the transport-resolved effective host, and for an
@@ -337,7 +350,7 @@ public class HostFilteringTests
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =
             await StartRawHttp1ApplicationAsync(
-                builder => builder.HostFiltering.AllowedHosts.Add("allowed.example"),
+                options => options.AllowedHosts.Add("allowed.example"),
                 cancellationToken);
 
         try
@@ -381,19 +394,20 @@ public class HostFilteringTests
 
     /// <summary>
     /// Builds and starts a minimal application serving HTTP/1.1 on a private in-memory
-    /// listener, with a terminal 200 handler, for tests that must write raw request bytes.
+    /// listener — host filtering registered first, then a terminal 200 handler — for tests
+    /// that must write raw request bytes.
     /// </summary>
     private static async Task<(WebApplication Application, IWebApplicationServer Server, InMemoryConnectionListener Listener)> StartRawHttp1ApplicationAsync(
-        Action<WebApplicationBuilder> configure,
+        Action<HostFilteringOptions> configureFiltering,
         CancellationToken cancellationToken)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         InMemoryConnectionListener listener = new();
 
         builder.Server.UseServer(options => options.UseHttp1(listener));
-        configure.Invoke(builder);
 
         WebApplication application = builder.Build();
+        application.UseHostFiltering(configureFiltering);
         UseTerminalOkHandler(application);
 
         IWebApplicationServer server = application.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();

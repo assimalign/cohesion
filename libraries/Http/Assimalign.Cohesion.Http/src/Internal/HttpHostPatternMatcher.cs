@@ -3,16 +3,17 @@ using System;
 namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
-/// The precompiled <see cref="IHttpHostMatcher"/>: exact host entries and wildcard-subdomain
-/// suffixes stored as plain arrays, matched with span comparisons — no regular expressions,
-/// no per-request pattern parsing, no reflection.
+/// The default <see cref="HttpHostMatcher"/> implementation: exact host entries and
+/// wildcard-subdomain suffixes stored as plain arrays, matched with span comparisons — no
+/// regular expressions, no per-request pattern parsing, no reflection.
 /// </summary>
-internal sealed class HttpHostPatternMatcher : IHttpHostMatcher
+internal sealed class HttpHostPatternMatcher : HttpHostMatcher
 {
     /// <summary>
-    /// The shared match-any instance (the compiled <c>*</c> pattern).
+    /// The shared match-any instance (the compiled <c>*</c> pattern), surfaced publicly as
+    /// <see cref="HttpHostMatcher.MatchAny"/>.
     /// </summary>
-    public static HttpHostPatternMatcher MatchAny { get; } = new();
+    public static HttpHostPatternMatcher Any { get; } = new();
 
     // Exact entries are stored normalized (trimmed, IPv6 brackets removed) by the factory;
     // wildcard entries are stored as their ".suffix" including the label-boundary dot.
@@ -35,10 +36,10 @@ internal sealed class HttpHostPatternMatcher : IHttpHostMatcher
     }
 
     /// <inheritdoc />
-    public bool IsMatchAny => _isMatchAny;
+    public override bool IsMatchAny => _isMatchAny;
 
     /// <inheritdoc />
-    public bool IsMatch(HttpHost host)
+    public override bool IsMatch(HttpHost host)
     {
         if (_isMatchAny)
         {

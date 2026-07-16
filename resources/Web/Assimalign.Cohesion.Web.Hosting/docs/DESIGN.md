@@ -226,111 +226,6 @@ Two deliberate properties:
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).
 
-## Host filtering (allowed hosts)
-
-### What it is
-
-Builder-time allowed-hosts enforcement (issue #781): a defense against
-Host-header injection (cache poisoning, password-reset poisoning, absolute-URL
-generation against an attacker-chosen host), which matters here because a
-Cohesion web application is designed to be directly exposed by its own server,
-not assumed to sit behind a validating proxy.
-
-Configuration lives on `WebApplicationOptions.HostFiltering` (surfaced as
-`WebApplicationBuilder.HostFiltering`): an `AllowedHosts` pattern list plus an
-`AllowEmptyHost` policy flag. The matching primitives — the `host[:port]`
-component split on `HttpHost` and the precompiled allowlist matcher
-(`IHttpHostMatcher` / `HttpHostMatcher`) — live in `Assimalign.Cohesion.Http`
-(see its `docs/DESIGN.md`, "Host values and allowlist matching"); this module
-owns only the policy surface and the enforcement point. Per the issue and the
-lean-dependency-tree rule there is deliberately **no `Web.HostFiltering`
-micro-package**.
-
-### Enforcement — first position, built once
-
-While `AllowedHosts` is empty (the default) no middleware is installed and
-every host is accepted — the opt-in mirrors the pre-#781 behavior and costs
-nothing. When patterns are present, the pipeline `Build()` compiles them into a
-matcher **once** and wraps the composed pipeline in the filtering middleware at
-the **first position** — outside feature seeding and every user middleware — so
-nothing downstream ever observes a request whose host failed validation, and a
-rejected request does not even pay for feature stamping. Invalid patterns
-(ports, wildcard misuse, malformed hosts, an empty-compiling allowlist) throw
-`ArgumentException` from `Build()`: configuration errors surface at startup,
-never as per-request behavior.
-
-The check itself is builder-time-composed and request-time-trivial: the
-transports already resolve the effective host with the correct per-version
-precedence (HTTP/1.1 absolute/authority-form target supersedes `Host`
-per RFC 9112 §3.2.2; HTTP/2 / HTTP/3 `:authority` via
-`HttpFieldNormalization.ResolveAuthority`), so the middleware reads
-`IHttpRequest.Host` and performs one component split plus span comparisons. A
-mismatch answers `400 Bad Request` with an empty body (the HTTP/1.1 writer
-synthesizes `Content-Length: 0`) and short-circuits; the connection itself is
-left alive. A richer problem-details payload is deliberately not rendered here:
-the runtime module must not depend on Web feature packages (`Web.ProblemDetails`
-included) per the hosting-isolation rule, and rejected-request bodies are an
-application error-handling concern (the #864 `OnError` direction), not a
-hosting one.
-
-**Empty/missing host policy (RFC 9112 §3.2).** An HTTP/1.1 request that lacks a
-`Host` header (and carries no target authority) resolves to `HttpHost.Empty`
-and cannot be validated, so with filtering active it is rejected by default.
-`AllowEmptyHost = true` is the explicit opt-out for legacy HTTP/1.0-style
-clients; it admits only the *hostless* case — a present-but-unmatched host is
-still rejected.
-
-### Validation, not selection — composing with #788
-
-Host filtering **validates** the request ("is this host one of mine?");
-routing's host constraints (#788, `RequireHost` / `RouteHostMetadata`)
-**select** among endpoints ("which route serves this host?"). They are
-complementary, not duplicates: both consume the same `HttpHost` component
-semantics from the Http core (bracket-insensitive IPv6, case-insensitive,
-apex-excluded `*.` wildcards), so a given wire value means the same thing on
-both paths — but a filtering mismatch is a 400, while a routing host mismatch
-merely skips a route candidate. Use filtering to bound the hosts the
-application answers *at all*, and host-constrained routes to fan traffic
-across the hosts inside that boundary.
-
-### Ordering — forwarded headers (#778)
-
-The filter validates `IHttpRequest.Host` *as it is when the filter runs*, and
-the filter runs first. When the application trusts a fronting proxy that
-conveys the public host in `X-Forwarded-Host` / `Forwarded: host=…` (#778,
-in flight), the wire-level `Host` reaching this server is the proxy's target —
-typically the internal name the proxy dialed. Until the forwarded-headers
-middleware lands and its trust model defines where its rewrite happens, the
-composition contract is:
-
-- **Allowlist what actually arrives on the wire.** Behind a trusted proxy that
-  means the internal/edge name(s) the proxy uses — the forwarded *public* host
-  is then #778's to validate under its own trust model (mirroring ASP.NET's
-  split, where `ForwardedHeadersOptions.AllowedHosts` bounds `X-Forwarded-Host`
-  separately from host filtering).
-- If #778's design instead rewrites `Host` ahead of validation (its middleware
-  would have to be hosting-coordinated in front of this filter — the seam
-  exists, since hosting owns the pipeline head), the allowlist then names the
-  public hosts. That decision belongs to #778; this module deliberately does
-  not pre-wire it.
-
-Either way the two stay coordinated through this section and #778's design
-notes — the filter itself needs no knowledge of forwarding.
-
-### Scope boundary
-
-- The guard protects the pipeline the host composes. An application that
-  replaces the pipeline wholesale via `IWebApplicationBuilder.AddPipeline`
-  owns its own composition, including host validation.
-- Enforcement is per-application (each application compiles its own matcher
-  from its own options), consistent with the per-application feature story
-  above.
-
-### AOT posture
-
-Options → precompiled matcher at build; request-time span comparisons only. No
-reflection, no configuration binding, no service location.
-
 ## Testing
 
 Behaviour is verified in `tests/` with xUnit + Shouldly against instrumented
@@ -353,12 +248,6 @@ dispatch (a parked connection does not starve others), application-fault isolati
 with continued service, and graceful shutdown draining (in-flight unwind, idle
 keep-alive unblock, post-stop connection refusal).
 
-Host filtering has its own end-to-end suite (`HostFilteringTests`): allow/deny
-over origin-form HTTP/1.1 and HTTP/2 `:authority` through the factory, plus raw
-HTTP/1.1 exchanges over the in-memory transport for the cases `HttpClient`
-cannot produce — a missing `Host` header (the empty-host policy both ways) and
-absolute-form request-targets superseding the `Host` header.
-
 ## Non-goals
 
 - **Lame-duck request draining.** Waiting for in-progress exchanges to finish
@@ -372,6 +261,11 @@ absolute-form request-targets superseding the `Host` header.
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
   isolation stay in `Http.Connections` and are never duplicated here.
+- **Host filtering.** Allowed-hosts enforcement ships as the
+  `Assimalign.Cohesion.Web.HostFiltering` feature package (`UseHostFiltering`,
+  registered first by the application). The runtime module deliberately has no
+  knowledge of it — the hosting-isolation rule forbids the reference, and
+  pipeline composition is the application's, not the host's.
 The Web resource's composition root: the `WebApplicationBuilder` /
 `WebApplication` surface that wires the `Assimalign.Cohesion.Http.Connections`
 transport, the request pipeline, DI, logging, and configuration into a runnable

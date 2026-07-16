@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Http;
 /// same component), and an unbracketed value containing multiple colons is treated as an IPv6
 /// literal without a port. These normalization rules deliberately mirror the Web routing
 /// host-constraint semantics so that host <em>selection</em> (routing) and host
-/// <em>validation</em> (allowlist filtering, see <see cref="IHttpHostMatcher"/>) agree on what
+/// <em>validation</em> (allowlist filtering, see <see cref="HttpHostMatcher"/>) agree on what
 /// a given wire value means.
 /// </para>
 /// </remarks>
