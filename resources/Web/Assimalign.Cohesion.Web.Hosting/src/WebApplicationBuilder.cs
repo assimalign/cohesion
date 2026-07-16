@@ -55,7 +55,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     public ConfigurationManager Configuration { get; }
 
     /// <summary>
-    /// 
+    ///
     /// </summary>
     public LoggerFactoryBuilder Logging { get; }
 

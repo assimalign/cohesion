@@ -261,6 +261,11 @@ keep-alive unblock, post-stop connection refusal).
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
   isolation stay in `Http.Connections` and are never duplicated here.
+- **Host filtering.** Allowed-hosts enforcement ships as the
+  `Assimalign.Cohesion.Web.HostFiltering` feature package (`UseHostFiltering`,
+  registered first by the application). The runtime module deliberately has no
+  knowledge of it — the hosting-isolation rule forbids the reference, and
+  pipeline composition is the application's, not the host's.
 The Web resource's composition root: the `WebApplicationBuilder` /
 `WebApplication` surface that wires the `Assimalign.Cohesion.Http.Connections`
 transport, the request pipeline, DI, logging, and configuration into a runnable
