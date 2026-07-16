@@ -190,6 +190,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Query/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Query/tests/Assimalign.Cohesion.Web.Query.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/">
+		<File Path="Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.RequestTimeouts/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/">
+		<Project Path="Assimalign.Cohesion.Web.RequestTimeouts/src/Assimalign.Cohesion.Web.RequestTimeouts.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/">
+		<Project Path="Assimalign.Cohesion.Web.RequestTimeouts/tests/Assimalign.Cohesion.Web.RequestTimeouts.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="Assimalign.Cohesion.Web.Routing/README.md" />
 	</Folder>

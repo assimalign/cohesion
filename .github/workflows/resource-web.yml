@@ -36,6 +36,7 @@ jobs:
             'Assimalign.Cohesion.Web.Hosting',
             'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Query',
+            'Assimalign.Cohesion.Web.RequestTimeouts',
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
