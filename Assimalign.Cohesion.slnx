@@ -2099,6 +2099,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/Assimalign.Cohesion.Web.Diagnostics.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ErrorHandling/src/Assimalign.Cohesion.Web.ErrorHandling.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ErrorHandling/tests/Assimalign.Cohesion.Web.ErrorHandling.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Forms/src/Assimalign.Cohesion.Web.Forms.csproj" />
@@ -2190,6 +2201,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Serialization/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Serialization/src/Assimalign.Cohesion.Web.Serialization.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Serialization/tests/Assimalign.Cohesion.Web.Serialization.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">

@@ -161,6 +161,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Diagnostics" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ErrorHandling" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Forms" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
@@ -170,6 +171,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RequestTimeouts" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Serialization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.StaticFiles" />
 

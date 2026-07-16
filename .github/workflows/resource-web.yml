@@ -29,6 +29,7 @@ jobs:
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',
             'Assimalign.Cohesion.Web.Diagnostics',
+            'Assimalign.Cohesion.Web.ErrorHandling',
             'Assimalign.Cohesion.Web.Forms',
             'Assimalign.Cohesion.Web.ForwardedHeaders',
             'Assimalign.Cohesion.Web.Health',
@@ -38,6 +39,7 @@ jobs:
             'Assimalign.Cohesion.Web.Query',
             'Assimalign.Cohesion.Web.RequestTimeouts',
             'Assimalign.Cohesion.Web.Routing',
+            'Assimalign.Cohesion.Web.Serialization',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
             'Assimalign.Cohesion.Web.Testing'

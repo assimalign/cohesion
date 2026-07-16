@@ -109,6 +109,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Diagnostics/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Diagnostics/tests/Assimalign.Cohesion.Web.Diagnostics.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/">
+		<File Path="Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.ErrorHandling/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/src/">
+		<Project Path="Assimalign.Cohesion.Web.ErrorHandling/src/Assimalign.Cohesion.Web.ErrorHandling.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/tests/">
+		<Project Path="Assimalign.Cohesion.Web.ErrorHandling/tests/Assimalign.Cohesion.Web.ErrorHandling.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Forms/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Forms/docs/">
 		<File Path="Assimalign.Cohesion.Web.Forms/docs/DESIGN.md" />
@@ -212,6 +223,17 @@
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Routing/tests/Assimalign.Cohesion.Web.Routing.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Serialization/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Serialization/docs/">
+		<File Path="Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Serialization/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Serialization/src/">
+		<Project Path="Assimalign.Cohesion.Web.Serialization/src/Assimalign.Cohesion.Web.Serialization.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Serialization/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Serialization/tests/Assimalign.Cohesion.Web.Serialization.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Sessions/src/">

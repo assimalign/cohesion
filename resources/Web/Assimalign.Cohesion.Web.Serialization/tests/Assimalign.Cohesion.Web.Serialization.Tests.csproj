@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<!-- Pipeline-level coverage drives the real runtime through the in-memory test factory;
+		     test projects are exempt from the hosting-isolation rule (COHRES001). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+	</ItemGroup>
+</Project>
