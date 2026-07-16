@@ -7,6 +7,12 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// </summary>
 /// <param name="Major">The major version; incompatible framing changes increment this.</param>
 /// <param name="Minor">The minor version; additive message changes increment this.</param>
+/// <remarks>
+/// The value type lives with the wire implementation that defines it (this package);
+/// the area root consumes it for the <c>IDatabaseServerSession</c> vocabulary through
+/// the root's child-root reference. <see cref="Current"/> is the version this
+/// assembly implements.
+/// </remarks>
 public readonly record struct ProtocolVersion(ushort Major, ushort Minor) : IComparable<ProtocolVersion>
 {
     /// <summary>

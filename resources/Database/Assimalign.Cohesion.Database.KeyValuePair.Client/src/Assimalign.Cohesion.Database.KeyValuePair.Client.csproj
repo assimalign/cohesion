@@ -1,1 +1,15 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		The typed key-value client: a thin point/range surface (get/put/delete/
+		exists/scan, etag-conditional writes, errors, telemetry) over the shared
+		Database.Client core. It sends command text + byte parameters (the model's
+		COMMANDS.md grammar) and decodes the model's result shapes; it references
+		neither the engine package nor any hosting module.
+	-->
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+</Project>

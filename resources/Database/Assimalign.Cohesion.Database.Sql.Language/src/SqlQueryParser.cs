@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -25,6 +25,22 @@ public sealed partial class SqlQueryParser : QueryParser
 
     /// <inheritdoc />
     protected override TokenLexerOptions Options => TokenLexerOptions.Sql;
+
+    /// <inheritdoc />
+    public override QueryStatement Parse(ReadOnlySpan<char> query)
+    {
+        var statement = base.Parse(query);
+
+        // Stamp the raw statement text so downstream consumers (planners, tooling,
+        // the wire protocol) can carry the source without re-threading it through
+        // every expression constructor.
+        if (statement is SqlQueryStatement { SqlExpression: { } expression })
+        {
+            expression.SetStatementText(query.ToString());
+        }
+
+        return statement;
+    }
 
     /// <inheritdoc />
     protected override QueryStatement ParseCore(TokenLexer lexer)
@@ -75,7 +91,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("CREATE", StringComparison.OrdinalIgnoreCase))
             {
-                expression = ParseCreateTable(ref lexer);
+                expression = ParseCreate(ref lexer);
             }
             else if (keyword.Equals("ALTER", StringComparison.OrdinalIgnoreCase))
             {
@@ -83,7 +99,7 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             else if (keyword.Equals("DROP", StringComparison.OrdinalIgnoreCase))
             {
-                expression = ParseDropTable(ref lexer);
+                expression = ParseDrop(ref lexer);
             }
             else
             {
@@ -281,5 +297,19 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             // just consuming tokens to track semicolon and position
         }
+    }
+
+    /// <summary>
+    /// Strips the surrounding quotes from a string-literal lexeme and unescapes
+    /// doubled quotes, yielding the literal's value.
+    /// </summary>
+    private static string UnquoteStringLiteral(string lexeme)
+    {
+        if (lexeme.Length >= 2 && lexeme[0] == '\'' && lexeme[^1] == '\'')
+        {
+            return lexeme[1..^1].Replace("''", "'");
+        }
+
+        return lexeme;
     }
 }

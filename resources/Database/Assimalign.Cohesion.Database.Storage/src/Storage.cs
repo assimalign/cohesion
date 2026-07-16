@@ -1,31 +1,61 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// Abstract base class for all storage implementations. Manages three file assets
-/// (data, journal, backup), page allocation, buffer caching, and record-level I/O
-/// through slotted pages.
+/// (data, journal, backup), page allocation, buffer caching, record-level I/O
+/// through slotted pages, and storage-level transactions over the write-ahead log.
 /// </summary>
 /// <remarks>
-/// Derived classes (SQL, Document, Graph, KeyValue) provide model-specific APIs that delegate
-/// to the record operations defined here. All models share the same page-based
-/// storage infrastructure operating on the <see cref="Data"/> stream, with a
-/// per-database journal backed by the <see cref="Journal"/> stream.
+/// <para>
+/// Derived classes (SQL, Document, Graph, KeyValue) provide model-specific APIs that
+/// delegate to the record operations defined here. All models share the same
+/// page-based storage infrastructure operating on the <see cref="Data"/> stream, with
+/// a per-database write-ahead log backed by the <see cref="Journal"/> stream.
+/// </para>
+/// <para>
+/// <b>Durability model (steal / no-force).</b> Record mutations run inside an
+/// <see cref="IStorageTransaction"/>: the first touch of a page journals its before
+/// image, commit journals after images plus a commit record and returns once the
+/// journal is durable. Data pages flush lazily — the buffer pool may steal (evict)
+/// dirty pages early because the write-ahead gate guarantees the journal covers
+/// them, and commit never forces data pages. Opening a storage file replays the
+/// journal: committed work is redone, uncommitted work is undone.
+/// </para>
+/// <para>
+/// The file-header page (page 0) is deliberately unlogged: it carries recomputable
+/// bookkeeping only, and every field in it is reconstructed or revalidated on open.
+/// </para>
 /// </remarks>
 public abstract class Storage : IStorage
 {
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
+    private readonly Dictionary<long, long> _pageWriteLocks = new();
+    private readonly object _transactionLock = new();
+    private readonly StorageGroupCommitGate _groupCommitGate = new();
+
+    // Per-owner record chains: which data pages belong to which owner, and each
+    // owner's current write page. Rebuilt from page headers on open (the same scan
+    // that rebuilds the free-space map); maintained on allocation and commit-time
+    // frees. Guarded by _ownerLock — page headers on disk stay the source of truth.
+    private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
+    private readonly Dictionary<ulong, PageId> _currentWritePages = new();
+    private readonly object _ownerLock = new();
+
     private StoragePageManager? _pageManager;
-    private StreamJournalLogger? _journalLogger;
+    private StreamJournal? _journal;
+    private long _nextTransactionSequence;
+    private int _activeTransactionCount;
     private StorageId _id;
     private Name _name;
-    private PageId _currentWritePageId;
     private bool _disposed;
 
     /// <summary>
@@ -47,6 +77,7 @@ public abstract class Storage : IStorage
         _bufferPool = new StorageBufferPool(bufferPoolCapacity);
         _freeSpaceMap = new StorageFreeSpaceMap();
     }
+
     /// <inheritdoc />
     public StorageId Id => _id;
 
@@ -78,15 +109,43 @@ public abstract class Storage : IStorage
         _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
 
     /// <summary>
-    /// Gets the journal logger for this storage instance.
+    /// Gets the write-ahead log for this storage instance.
     /// </summary>
     /// <remarks>
-    /// Available to derived classes for model-specific transaction logging.
-    /// The session/transaction layer decides when to log — base record operations
-    /// do not automatically write journal entries.
+    /// Available to derived classes and the transaction layer for logical operation
+    /// records. Physical durability (page images, commit records, recovery) is
+    /// managed by the storage transaction scope — derived classes should not append
+    /// page images directly.
     /// </remarks>
-    protected IJournalLogger JournalLogger =>
-        _journalLogger ?? throw new InvalidOperationException("Storage has not been initialized.");
+    protected IStorageJournal WriteAheadLog =>
+        _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
+
+    /// <summary>
+    /// Gets or sets how commits reach stable storage. The default,
+    /// <see cref="StorageCommitDurability.Synchronous"/>, flushes the journal durably
+    /// inside every commit; <see cref="StorageCommitDurability.Grouped"/> batches
+    /// concurrent commits behind one durable flush performed by a flush worker
+    /// (see <see cref="FlushPendingCommits"/>). Both modes acknowledge a commit only
+    /// after its records are durable.
+    /// </summary>
+    public StorageCommitDurability CommitDurability { get; set; } = StorageCommitDurability.Synchronous;
+
+    /// <summary>
+    /// Gets or sets the bounded window a grouped commit waits for the flush worker
+    /// before flushing inline itself. Only meaningful when
+    /// <see cref="CommitDurability"/> is <see cref="StorageCommitDurability.Grouped"/>.
+    /// </summary>
+    public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.FromMilliseconds(5);
+
+    /// <summary>
+    /// Gets or sets the hook invoked when a grouped commit registers for durability,
+    /// so an engine-level flush worker can be woken. Invoked outside storage locks.
+    /// </summary>
+    public Action? OnCommitPending
+    {
+        get => _groupCommitGate.CommitPending;
+        set => _groupCommitGate.CommitPending = value;
+    }
 
     /// <summary>
     /// Creates a new storage file set with the specified name, writing the file header
@@ -98,40 +157,54 @@ public abstract class Storage : IStorage
         _name = name;
         _id = StorageId.NewId();
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap);
+        _journal = new StreamJournal(Journal, leaveOpen: true);
+        _bufferPool.WriteAheadGate = lsn => _journal.EnsureDurable(lsn);
 
-        // Initialize the journal logger from the journal stream
-        _journalLogger = new StreamJournalLogger(Journal, leaveOpen: true);
-
-        // Allocate and write file header (page 0)
+        // Allocate and write file header (page 0). The file metadata lives in the
+        // page body so the page header (id, LSN, checksum) stays intact.
         using (var headerHandle = _pageManager.AllocatePage(PageType.FileHeader))
         {
             WriteFileHeader(headerHandle);
             headerHandle.MarkDirty();
         }
 
-        // Allocate first data page (page 1)
+        // Allocate first data page (page 1) — the shared (owner-zero) space's
+        // initial write page.
         var dataHandle = _pageManager.AllocatePage(PageType.Data);
         var slotted = new SlottedPage(dataHandle.Page);
         slotted.Initialize();
         dataHandle.MarkDirty();
-        _currentWritePageId = dataHandle.Id;
+        RegisterOwnerPage(0, dataHandle.Id);
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
     }
 
     /// <summary>
-    /// Opens an existing storage file set by reading the file header and reconstructing
-    /// the internal state.
+    /// Opens an existing storage file set: validates the file header, replays the
+    /// write-ahead log (redo committed work, undo uncommitted work), reconstructs the
+    /// free-space map from page headers, and — unless the caller defers it —
+    /// checkpoints so the journal starts clean.
     /// </summary>
-    protected unsafe void OpenExisting()
+    /// <param name="checkpointOnOpen">
+    /// When true (the default), a journal with records is checkpointed (truncated)
+    /// once recovery completes. An engine that must analyze the recovered journal
+    /// first — transaction-recovery classification reads lifecycle records the
+    /// truncation would destroy — passes false and checkpoints itself afterwards.
+    /// </param>
+    /// <exception cref="StorageCorruptionException">The file header page fails checksum verification.</exception>
+    /// <exception cref="StorageIOException">The file header is not a valid Cohesion storage header.</exception>
+    protected unsafe void OpenExisting(bool checkpointOnOpen = true)
     {
         var headerBuffer = new byte[Page.Size];
         Data.ReadPage((PageId)0L, headerBuffer);
+        PageChecksum.Verify(headerBuffer, (PageId)0L);
+
+        long sequenceFloor;
 
         fixed (byte* ptr = headerBuffer)
         {
-            var header = (StorageFileHeader*)ptr;
+            var header = (StorageFileHeader*)(ptr + Page.HeaderSize);
 
             if (!header->IsValid())
             {
@@ -160,40 +233,274 @@ public abstract class Storage : IStorage
                 ? (Name)Encoding.UTF8.GetString(nameBytes, 0, nameLen)
                 : (Name)"";
 
-            long totalPages = header->TotalPageCount;
-            for (long i = 0; i < totalPages; i++)
+            sequenceFloor = header->LastTransactionSequence;
+        }
+
+        // Recover before anything reads pages: redo committed changes that never
+        // reached the data file, undo stolen uncommitted writes that did.
+        _journal = new StreamJournal(Journal, leaveOpen: true);
+        _bufferPool.WriteAheadGate = lsn => _journal.EnsureDurable(lsn);
+        bool journalHadRecords = _journal.LastLsn > 0;
+
+        // Sequence assignment resumes above both the journal's highest observed
+        // sequence and the header floor persisted at the last checkpoint — the
+        // journal alone is insufficient because checkpoints truncate it while row
+        // version stamps persist in data pages.
+        _nextTransactionSequence = Math.Max(StorageRecovery.Run(Data, _journal), sequenceFloor);
+
+        // Rebuild the free-space map and the per-owner page directory in one pass
+        // over the on-disk page headers. The stream length is the source of truth
+        // for the page count (the file header trails it if the process stopped
+        // between an allocation and the next header update). Page headers are also
+        // the single source of truth for chain membership — there is no persisted
+        // directory to drift from reality (the free-space-map precedent).
+        _freeSpaceMap.MarkAllocated((PageId)0L);
+
+        long pageCount = Data.Length / Page.Size;
+        var pageHeader = new byte[Page.HeaderSize];
+
+        for (long i = 1; i < pageCount; i++)
+        {
+            Data.ReadPageHeader((PageId)i, pageHeader);
+
+            PageType type;
+            ulong pageOwner;
+            fixed (byte* headerPtr = pageHeader)
+            {
+                type = ((Page.Header*)headerPtr)->Type;
+                pageOwner = ((Page.Header*)headerPtr)->OwnerId;
+            }
+
+            if (type == PageType.Free)
+            {
+                _freeSpaceMap.MarkFree((PageId)i);
+            }
+            else
             {
                 _freeSpaceMap.MarkAllocated((PageId)i);
+
+                if (type == PageType.Data)
+                {
+                    // Ascending scan: the last page seen per owner becomes that
+                    // owner's current write page.
+                    RegisterOwnerPage(pageOwner, (PageId)i);
+                }
             }
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap);
 
-        // Initialize the journal logger from the journal stream
-        _journalLogger = new StreamJournalLogger(Journal, leaveOpen: true);
+        // Everything the journal described is now in the data file; start it clean.
+        if (journalHadRecords && checkpointOnOpen)
+        {
+            Checkpoint();
+        }
+    }
 
-        _currentWritePageId = FindLastDataPage();
+    /// <inheritdoc />
+    public IStorageTransaction BeginTransaction()
+    {
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        long sequence;
+        lock (_transactionLock)
+        {
+            sequence = ++_nextTransactionSequence;
+
+            // Counted under the same lock the checkpoint holds, so a checkpoint can
+            // never truncate the journal between a transaction's begin and its
+            // completion (which would orphan its before images).
+            _activeTransactionCount++;
+        }
+
+        _journal.AppendBegin(sequence);
+        return new StorageTransaction(this, sequence);
+    }
+
+    /// <inheritdoc />
+    public long ReserveTransactionSequence()
+    {
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        lock (_transactionLock)
+        {
+            return ++_nextTransactionSequence;
+        }
+    }
+
+    /// <inheritdoc />
+    public IStorageTransaction BeginTransaction(long sequence)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sequence);
+
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        lock (_transactionLock)
+        {
+            // Adopted sequences normally come from ReserveTransactionSequence, but
+            // keep the counter monotonic even for a caller that minted its own —
+            // a later internally assigned sequence must never collide.
+            if (sequence > _nextTransactionSequence)
+            {
+                _nextTransactionSequence = sequence;
+            }
+
+            _activeTransactionCount++;
+        }
+
+        // Deliberately no begin record: the reserving caller's transaction log owns
+        // the lifecycle records (see IStorage.BeginTransaction(long)); page images
+        // journaled by this bracket carry the sequence, which is all recovery needs.
+        return new StorageTransaction(this, sequence);
+    }
+
+    /// <inheritdoc />
+    public IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId)
+    {
+        var owner = ValidateTransaction(transaction);
+        return TouchPage(owner, pageId);
+    }
+
+    /// <inheritdoc />
+    public IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type)
+    {
+        var owner = ValidateTransaction(transaction);
+        var handle = _pageManager!.AllocatePage(type);
+
+        try
+        {
+            RegisterTouch(owner, handle);
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Checkpoint() => Checkpoint(ReadOnlySpan<long>.Empty);
+
+    /// <inheritdoc />
+    public void Checkpoint(ReadOnlySpan<long> activeTransactionSequences)
+    {
+        // The whole checkpoint runs under the transaction lock: BeginTransaction
+        // increments the active count under the same lock, so no transaction can
+        // start (and journal no before image) between the emptiness check and the
+        // journal truncation. Lock order is transaction lock → buffer pool → journal;
+        // no other path takes them in the opposite order.
+        lock (_transactionLock)
+        {
+            if (_activeTransactionCount > 0)
+            {
+                throw new StorageTransactionException("Checkpoint requires no active transactions.");
+            }
+
+            UpdateFileHeader();
+            _pageManager?.FlushAll();
+            Data.FlushDurable();
+            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences);
+
+            if (checkpointLsn is not null)
+            {
+                // Wake any group-commit bookkeeping past the truncation point.
+                _groupCommitGate.PublishDurable(checkpointLsn.Value);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool FlushPendingCommits()
+    {
+        if (_journal is null)
+        {
+            return false;
+        }
+
+        return _groupCommitGate.FlushPending(_journal);
+    }
+
+    /// <inheritdoc />
+    public int WriteBackDirtyPages(int maxPages)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
+
+        if (_pageManager is null || _disposed)
+        {
+            return 0;
+        }
+
+        return _bufferPool.FlushSome(Data, maxPages);
     }
 
     /// <summary>
-    /// Inserts a record into the storage. Automatically allocates a new data page
-    /// if the current page is full.
+    /// Inserts a record into the shared (owner-zero) record space within a storage
+    /// transaction. Automatically allocates a new data page if the current page is full.
     /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
-    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(ReadOnlySpan<byte> data)
+    /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    protected (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ReadOnlySpan<byte> data)
+        => InsertRecord(transaction, 0, data);
+
+    /// <summary>
+    /// Inserts a record into the specified owner's record chain within a storage
+    /// transaction: the record lands on the owner's current write page (a new page
+    /// is allocated and tagged with the owner when needed), so scans scoped to the
+    /// owner touch only its own pages.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owner whose chain receives the record; zero is the shared space.</param>
+    /// <param name="data">The record data to insert.</param>
+    /// <returns>The page identifier and slot index where the record was stored.</returns>
+    /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
     {
-        var handle = _pageManager!.GetPage(_currentWritePageId);
-        var slotted = new SlottedPage(handle.Page);
+        var owner = ValidateTransaction(transaction);
 
-        if (!slotted.CanFit(data.Length))
+        if (data.Length > SlottedPage.MaxRecordSize)
         {
-            handle.Dispose();
+            throw new SlottedPageException(
+                $"Record of {data.Length} bytes exceeds the maximum record size of {SlottedPage.MaxRecordSize} bytes.");
+        }
 
-            handle = _pageManager.AllocatePage(PageType.Data);
+        IStoragePageHandle handle;
+        SlottedPage slotted;
+
+        PageId? currentWritePage;
+        lock (_ownerLock)
+        {
+            currentWritePage = _currentWritePages.TryGetValue(ownerId, out var current) ? current : null;
+        }
+
+        // The current write page may have been freed since the last insert.
+        if (currentWritePage is null || !_freeSpaceMap.IsAllocated(currentWritePage.Value))
+        {
+            handle = AllocateDataPage(owner, ownerId, out slotted);
+        }
+        else
+        {
+            handle = TouchPage(owner, currentWritePage.Value);
             slotted = new SlottedPage(handle.Page);
-            slotted.Initialize();
-            _currentWritePageId = handle.Id;
+
+            if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != ownerId || !slotted.CanFit(data.Length))
+            {
+                handle.Dispose();
+                handle = AllocateDataPage(owner, ownerId, out slotted);
+            }
         }
 
         int slotIndex = slotted.InsertSlot(data);
@@ -203,6 +510,20 @@ public abstract class Storage : IStorage
         handle.Dispose();
 
         return (pageId, slotIndex);
+    }
+
+    /// <summary>
+    /// Inserts a record with auto-commit semantics: a single-operation transaction
+    /// that commits (durably) before returning.
+    /// </summary>
+    /// <param name="data">The record data to insert.</param>
+    /// <returns>The page identifier and slot index where the record was stored.</returns>
+    protected (PageId PageId, int SlotIndex) InsertRecord(ReadOnlySpan<byte> data)
+    {
+        using var transaction = BeginTransaction();
+        var location = InsertRecord(transaction, data);
+        transaction.Commit();
+        return location;
     }
 
     /// <summary>
@@ -244,30 +565,63 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Deletes a record at the specified page and slot by marking the slot as deleted.
+    /// Deletes a record within a storage transaction by marking the slot as deleted.
     /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
-    protected unsafe void DeleteRecord(PageId pageId, int slotIndex)
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    protected unsafe void DeleteRecord(IStorageTransaction transaction, PageId pageId, int slotIndex)
     {
-        using var handle = _pageManager!.GetPage(pageId);
+        var owner = ValidateTransaction(transaction);
+
+        using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
         slotted.DeleteSlot(slotIndex);
         handle.MarkDirty();
     }
 
     /// <summary>
-    /// Updates a record at the specified page and slot with new data.
+    /// Deletes a record with auto-commit semantics.
+    /// </summary>
+    /// <param name="pageId">The page containing the record.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    protected void DeleteRecord(PageId pageId, int slotIndex)
+    {
+        using var transaction = BeginTransaction();
+        DeleteRecord(transaction, pageId, slotIndex);
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Updates a record within a storage transaction with new data.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page containing the record.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    /// <param name="data">The new record data.</param>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    protected unsafe void UpdateRecord(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
+    {
+        var owner = ValidateTransaction(transaction);
+
+        using var handle = TouchPage(owner, pageId);
+        var slotted = new SlottedPage(handle.Page);
+        slotted.UpdateSlot(slotIndex, data);
+        handle.MarkDirty();
+    }
+
+    /// <summary>
+    /// Updates a record with auto-commit semantics.
     /// </summary>
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="data">The new record data.</param>
-    protected unsafe void UpdateRecord(PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
+    protected void UpdateRecord(PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
     {
-        using var handle = _pageManager!.GetPage(pageId);
-        var slotted = new SlottedPage(handle.Page);
-        slotted.UpdateSlot(slotIndex, data);
-        handle.MarkDirty();
+        using var transaction = BeginTransaction();
+        UpdateRecord(transaction, pageId, slotIndex, data);
+        transaction.Commit();
     }
 
     /// <summary>
@@ -289,13 +643,206 @@ public abstract class Storage : IStorage
     {
         UpdateFileHeader();
         _pageManager?.FlushAll();
-        _journalLogger?.Flush(forceDurable: true);
+        _journal?.Flush(forceDurable: true);
     }
 
     /// <inheritdoc />
     public IStorageUnitIterator GetUnitIterator()
     {
-        return new StorageUnitIterator(_pageManager!);
+        return new StorageUnitIterator(_pageManager!, _freeSpaceMap);
+    }
+
+    /// <inheritdoc />
+    public IStorageUnitIterator GetUnitIterator(ulong ownerId)
+    {
+        return new StorageUnitIterator(_pageManager!, _freeSpaceMap, SnapshotOwnerPages(ownerId), ownerId);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<PageId> GetOwnerPages(ulong ownerId)
+    {
+        long[] pages = SnapshotOwnerPages(ownerId);
+        var result = new PageId[pages.Length];
+
+        for (int i = 0; i < pages.Length; i++)
+        {
+            result[i] = (PageId)pages[i];
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public unsafe int FreeOwnerPages(IStorageTransaction transaction, ulong ownerId)
+    {
+        var owner = ValidateTransaction(transaction);
+        long[] pages = SnapshotOwnerPages(ownerId);
+
+        foreach (long pageId in pages)
+        {
+            // Retype under the transaction: the before-image covers the whole page
+            // (records included), so rollback and crash recovery restore the chain;
+            // a committed release replays as a Free page and the open-time header
+            // scan rebuilds both the free-space map and the directory accordingly.
+            using var handle = TouchPage(owner, (PageId)pageId);
+            var page = handle.Page;
+            page.AsBodySpan().Clear();
+            page.Type = PageType.Free;
+            page.OwnerId = 0;
+
+            var slotted = new SlottedPage(page);
+            slotted.Initialize();
+
+            handle.MarkDirty();
+            owner.RegisterPendingFree(pageId, ownerId);
+        }
+
+        return pages.Length;
+    }
+
+    /// <summary>
+    /// Records a data page as belonging to an owner's chain and makes it the
+    /// owner's current write page.
+    /// </summary>
+    private void RegisterOwnerPage(ulong ownerId, PageId pageId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_ownerPages.TryGetValue(ownerId, out var pages))
+            {
+                pages = new SortedSet<long>();
+                _ownerPages[ownerId] = pages;
+            }
+
+            pages.Add((long)pageId);
+            _currentWritePages[ownerId] = pageId;
+        }
+    }
+
+    /// <summary>
+    /// Snapshots an owner's page ids in ascending order.
+    /// </summary>
+    private long[] SnapshotOwnerPages(ulong ownerId)
+    {
+        lock (_ownerLock)
+        {
+            if (!_ownerPages.TryGetValue(ownerId, out var pages) || pages.Count == 0)
+            {
+                return Array.Empty<long>();
+            }
+
+            var snapshot = new long[pages.Count];
+            pages.CopyTo(snapshot);
+            return snapshot;
+        }
+    }
+
+    /// <summary>
+    /// Applies a committed transaction's page releases: the pages return to the
+    /// free-space map and leave the owner directory. Deferred to commit so the
+    /// allocator can never hand out a page whose release might still roll back.
+    /// </summary>
+    private void ApplyPendingFrees(StorageTransaction transaction)
+    {
+        var pendingFrees = transaction.PendingFrees;
+
+        if (pendingFrees is null)
+        {
+            return;
+        }
+
+        lock (_ownerLock)
+        {
+            foreach (var (pageId, ownerId) in pendingFrees)
+            {
+                if (_ownerPages.TryGetValue(ownerId, out var pages))
+                {
+                    pages.Remove(pageId);
+
+                    if (pages.Count == 0)
+                    {
+                        _ownerPages.Remove(ownerId);
+                    }
+                }
+
+                if (_currentWritePages.TryGetValue(ownerId, out var current) && (long)current == pageId)
+                {
+                    _currentWritePages.Remove(ownerId);
+                }
+
+                _freeSpaceMap.Free((PageId)pageId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Commits a storage transaction: appends after images of every touched page and
+    /// a commit record, then — unless the caller owns durability through a later
+    /// record — makes the journal durable before returning.
+    /// </summary>
+    internal unsafe void CommitTransaction(StorageTransaction transaction, bool awaitDurability = true)
+    {
+        // Deterministic page order keeps the journal replayable and testable.
+        var pageIds = new List<long>(transaction.BeforeImages.Keys);
+        pageIds.Sort();
+
+        foreach (long pageId in pageIds)
+        {
+            using var handle = _pageManager!.GetPage((PageId)pageId);
+
+            var image = new byte[Page.Size];
+            new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).CopyTo(image);
+
+            long lsn = _journal!.AppendPageImage(
+                transaction.Sequence, (PageId)pageId, JournalRecordType.AfterPageImage, image);
+
+            var page = handle.Page;
+            page.Lsn = lsn;
+            handle.MarkDirty();
+        }
+
+        long commitLsn = _journal!.AppendCommit(transaction.Sequence);
+
+        if (!awaitDurability)
+        {
+            // The caller's own later commit record owns durability (the journal
+            // is ordered); the write-ahead gate still covers any stolen page.
+        }
+        else if (CommitDurability == StorageCommitDurability.Grouped)
+        {
+            // Ride the group-commit gate: wait (bounded) for the flush worker's
+            // shared durable flush, self-helping inline if it does not come. The
+            // commit is acknowledged only once the journal is durable either way.
+            _groupCommitGate.AwaitDurable(commitLsn, GroupCommitWindow, _journal);
+        }
+        else
+        {
+            _journal.EnsureDurable(commitLsn);
+        }
+
+        // Page releases become effective only now that the commit record exists:
+        // the freed pages re-enter the allocator and leave their owner chains.
+        ApplyPendingFrees(transaction);
+
+        ReleasePageWriteLocks(transaction);
+    }
+
+    /// <summary>
+    /// Rolls a storage transaction back: restores every touched page to its before
+    /// image in the buffer pool and appends a rollback record.
+    /// </summary>
+    internal unsafe void RollbackTransaction(StorageTransaction transaction)
+    {
+        foreach (var (pageId, image) in transaction.BeforeImages)
+        {
+            using var handle = _pageManager!.GetPage((PageId)pageId);
+            image.CopyTo(new Span<byte>(handle.Page.Pointer, Page.Size));
+            handle.MarkDirty();
+        }
+
+        _journal!.AppendRollback(transaction.Sequence);
+
+        ReleasePageWriteLocks(transaction);
     }
 
     /// <inheritdoc />
@@ -305,13 +852,8 @@ public abstract class Storage : IStorage
         {
             try
             {
-                // Flush data pages and update header
-                UpdateFileHeader();
-                _pageManager?.FlushAll();
-
-                // Flush and dispose journal
-                _journalLogger?.Flush(forceDurable: true);
-                _journalLogger?.Dispose();
+                ShutdownFlush();
+                _journal?.Dispose();
             }
             finally
             {
@@ -335,19 +877,16 @@ public abstract class Storage : IStorage
         {
             try
             {
-                // Flush data pages and update header
-                UpdateFileHeader();
-                if (_pageManager != null)
+                ShutdownFlush();
+
+                if (_journal != null)
                 {
-                    await _pageManager.FlushAllAsync();
-                    await _pageManager.DisposeAsync();
+                    await _journal.DisposeAsync();
                 }
 
-                // Flush and dispose journal
-                _journalLogger?.Flush(forceDurable: true);
-                if (_journalLogger != null)
+                if (_pageManager != null)
                 {
-                    await _journalLogger.DisposeAsync();
+                    await _pageManager.DisposeAsync();
                 }
             }
             finally
@@ -364,9 +903,165 @@ public abstract class Storage : IStorage
         }
     }
 
+    /// <summary>
+    /// Flushes state on shutdown: a clean checkpoint when no transactions are active
+    /// (so the next open recovers instantly), otherwise a plain durable flush — the
+    /// write-ahead gate has kept the journal ahead of any stolen page, so recovery
+    /// will undo whatever the abandoned transactions left behind.
+    /// </summary>
+    private void ShutdownFlush()
+    {
+        if (_pageManager is null || _journal is null)
+        {
+            return;
+        }
+
+        bool idle;
+        lock (_transactionLock)
+        {
+            idle = _activeTransactionCount == 0;
+        }
+
+        if (idle)
+        {
+            Checkpoint();
+        }
+        else
+        {
+            UpdateFileHeader();
+            _pageManager.FlushAll();
+            Data.FlushDurable();
+            _journal.Flush(forceDurable: true);
+        }
+    }
+
+    private StorageTransaction ValidateTransaction(IStorageTransaction transaction)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (transaction is not StorageTransaction owner)
+        {
+            throw new StorageTransactionException("The transaction was not created by this storage instance.");
+        }
+
+        if (!owner.IsActive)
+        {
+            throw new StorageTransactionException($"Storage transaction {owner.Sequence} has already completed.");
+        }
+
+        return owner;
+    }
+
+    /// <summary>
+    /// Pins a page for modification by a transaction: acquires the page write lock
+    /// and captures the before image on first touch.
+    /// </summary>
+    private IStoragePageHandle TouchPage(StorageTransaction transaction, PageId pageId)
+    {
+        var handle = _pageManager!.GetPage(pageId);
+
+        try
+        {
+            RegisterTouch(transaction, handle);
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Allocates and initializes a fresh data page for an owner's chain inside a
+    /// transaction. The owner tag is stamped before the before-image is captured, so
+    /// rollback restores an allocated-but-empty page still belonging to the chain —
+    /// a safe leak the owner's next insert reuses.
+    /// </summary>
+    private IStoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
+    {
+        var handle = _pageManager!.AllocatePage(PageType.Data);
+
+        try
+        {
+            slotted = new SlottedPage(handle.Page);
+            slotted.Initialize();
+
+            var page = handle.Page;
+            page.OwnerId = ownerId;
+
+            RegisterOwnerPage(ownerId, handle.Id);
+            RegisterTouch(transaction, handle);
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private unsafe void RegisterTouch(StorageTransaction transaction, IStoragePageHandle handle)
+    {
+        long pageId = (long)handle.Id;
+
+        lock (_transactionLock)
+        {
+            if (_pageWriteLocks.TryGetValue(pageId, out long owner))
+            {
+                if (owner != transaction.Sequence)
+                {
+                    throw new StorageTransactionException(
+                        $"Page {pageId} is write-locked by transaction {owner}.");
+                }
+            }
+            else
+            {
+                _pageWriteLocks[pageId] = transaction.Sequence;
+            }
+        }
+
+        if (transaction.HasTouched(pageId))
+        {
+            return;
+        }
+
+        var image = new byte[Page.Size];
+        new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).CopyTo(image);
+
+        long lsn = _journal!.AppendPageImage(
+            transaction.Sequence, handle.Id, JournalRecordType.BeforePageImage, image);
+
+        transaction.RecordBeforeImage(pageId, image);
+
+        // Stamp the page so the write-ahead gate flushes the before image before any
+        // stolen write of this page can reach the data file.
+        var page = handle.Page;
+        page.Lsn = lsn;
+    }
+
+    private void ReleasePageWriteLocks(StorageTransaction transaction)
+    {
+        lock (_transactionLock)
+        {
+            foreach (long pageId in transaction.BeforeImages.Keys)
+            {
+                if (_pageWriteLocks.TryGetValue(pageId, out long owner) && owner == transaction.Sequence)
+                {
+                    _pageWriteLocks.Remove(pageId);
+                }
+            }
+
+            // Commit and rollback each end exactly one begun transaction (the scope
+            // guards double completion), so the active count pairs with
+            // BeginTransaction's increment.
+            _activeTransactionCount--;
+        }
+    }
+
     private unsafe void WriteFileHeader(IStoragePageHandle handle)
     {
-        var header = (StorageFileHeader*)handle.Page.Pointer;
+        var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
         header->Magic = StorageFileHeader.ExpectedMagic;
         header->FormatVersion = StorageFileHeader.CurrentFormatVersion;
         header->PageSize = Page.Size;
@@ -403,28 +1098,26 @@ public abstract class Storage : IStorage
             return;
         }
 
+        long lastSequence;
+        lock (_transactionLock)
+        {
+            lastSequence = _nextTransactionSequence;
+        }
+
         using var handle = _pageManager.GetPage((PageId)0L);
-        var header = (StorageFileHeader*)handle.Page.Pointer;
+        var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
         header->TotalPageCount = _pageManager.PageCount;
         header->FreePageCount = _pageManager.FreePageCount;
         header->ModifiedAtUtcTicks = DateTime.UtcNow.Ticks;
-        handle.MarkDirty();
-    }
 
-    private PageId FindLastDataPage()
-    {
-        long pageCount = _pageManager!.PageCount;
-        PageId lastDataPage = (PageId)1L;
-
-        for (long i = 1; i < pageCount; i++)
+        // The sequence floor: after a checkpoint truncates the journal, this is
+        // what keeps sequence assignment monotonic across reopen (row version
+        // stamps persist in data pages and must never see a recycled sequence).
+        if (lastSequence > header->LastTransactionSequence)
         {
-            using var handle = _pageManager.GetPage((PageId)i);
-            if (handle.Page.Type == PageType.Data)
-            {
-                lastDataPage = (PageId)i;
-            }
+            header->LastTransactionSequence = lastSequence;
         }
 
-        return lastDataPage;
+        handle.MarkDirty();
     }
 }

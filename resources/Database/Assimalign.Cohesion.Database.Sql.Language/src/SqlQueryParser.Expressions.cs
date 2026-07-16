@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -336,12 +336,14 @@ public sealed partial class SqlQueryParser
             return new SqlStarExpression(Location.Create(1, 1, pos, pos + 1));
         }
 
-        // String literal
+        // String literal: the AST carries the VALUE (quotes stripped, doubled
+        // quotes unescaped), not the raw lexeme — executors and planners consume
+        // it directly.
         if (lexer.Current.Type == TokenType.String)
         {
             var text = CurrentText(ref lexer);
             Advance(ref lexer);
-            return new SqlLiteralExpression(text, SqlLiteralType.String,
+            return new SqlLiteralExpression(UnquoteStringLiteral(text), SqlLiteralType.String,
                 Location.Create(1, 1, pos, pos + text.Length));
         }
 

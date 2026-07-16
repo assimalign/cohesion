@@ -1,17 +1,115 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Language.Sql;
+namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private SqlCreateTableExpression ParseCreateTable(ref TokenLexer lexer)
+    /// <summary>
+    /// Dispatches a CREATE statement on the object keyword after CREATE: INDEX
+    /// (optionally preceded by UNIQUE) parses as CREATE INDEX, everything else as
+    /// CREATE TABLE (the TABLE keyword itself stays optional-tolerant).
+    /// </summary>
+    private SqlQueryExpression ParseCreate(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume CREATE
 
+        if (!IsAtEnd(ref lexer) && (IsKeyword(ref lexer, "UNIQUE") || IsKeyword(ref lexer, "INDEX")))
+        {
+            return ParseCreateIndex(ref lexer, pos);
+        }
+
+        return ParseCreateTable(ref lexer, pos);
+    }
+
+    private SqlCreateIndexExpression ParseCreateIndex(ref TokenLexer lexer, int pos)
+    {
+        // UNIQUE
+        bool isUnique = false;
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "UNIQUE"))
+        {
+            isUnique = true;
+            Advance(ref lexer);
+        }
+
+        // INDEX
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "INDEX"))
+        {
+            Advance(ref lexer);
+        }
+
+        // IF NOT EXISTS
+        bool ifNotExists = false;
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
+        {
+            Advance(ref lexer);
+            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NOT"))
+            {
+                Advance(ref lexer);
+            }
+
+            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
+            {
+                ifNotExists = true;
+                Advance(ref lexer);
+            }
+        }
+
+        // Index name
+        string indexName = "?";
+        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        {
+            indexName = CurrentText(ref lexer);
+            Advance(ref lexer);
+        }
+
+        // ON <table>
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON"))
+        {
+            Advance(ref lexer);
+        }
+
+        var table = ParseUnaliasedTableReference(ref lexer);
+
+        // Key column list: ( col [, col]* )
+        var columns = new List<string>();
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        {
+            Advance(ref lexer);
+
+            while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
+            {
+                if (IsIdentifierOrKeyword(ref lexer))
+                {
+                    columns.Add(CurrentText(ref lexer));
+                    Advance(ref lexer);
+                }
+
+                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+                {
+                    Advance(ref lexer);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
+            {
+                Advance(ref lexer);
+            }
+        }
+
+        return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, null,
+            Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    private SqlCreateTableExpression ParseCreateTable(ref TokenLexer lexer, int pos)
+    {
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
         {
@@ -100,16 +198,18 @@ public sealed partial class SqlQueryParser
             dataType = CurrentText(ref lexer);
             Advance(ref lexer);
 
-            // Handle parameterized types: VARCHAR(100)
+            // Handle parameterized types: VARCHAR(100), DECIMAL(18, 4)
             if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
             {
                 dataType += "(";
                 Advance(ref lexer);
-                if (!IsAtEnd(ref lexer))
+
+                while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
                 {
                     dataType += CurrentText(ref lexer);
                     Advance(ref lexer);
                 }
+
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                 {
                     dataType += ")";
@@ -240,11 +340,61 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
-    private SqlDropTableExpression ParseDropTable(ref TokenLexer lexer)
+    /// <summary>
+    /// Dispatches a DROP statement on the object keyword after DROP: INDEX parses
+    /// as DROP INDEX, everything else as DROP TABLE.
+    /// </summary>
+    private SqlQueryExpression ParseDrop(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
 
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "INDEX"))
+        {
+            return ParseDropIndex(ref lexer, pos);
+        }
+
+        return ParseDropTable(ref lexer, pos);
+    }
+
+    private SqlDropIndexExpression ParseDropIndex(ref TokenLexer lexer, int pos)
+    {
+        Advance(ref lexer); // consume INDEX
+
+        // IF EXISTS
+        bool ifExists = false;
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
+        {
+            Advance(ref lexer);
+            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
+            {
+                ifExists = true;
+                Advance(ref lexer);
+            }
+        }
+
+        // Index name
+        string indexName = "?";
+        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        {
+            indexName = CurrentText(ref lexer);
+            Advance(ref lexer);
+        }
+
+        // ON <table> — required by the dialect (index names are table-scoped).
+        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON"))
+        {
+            Advance(ref lexer);
+        }
+
+        var table = ParseUnaliasedTableReference(ref lexer);
+
+        return new SqlDropIndexExpression(indexName, table, ifExists, null,
+            Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    private SqlDropTableExpression ParseDropTable(ref TokenLexer lexer, int pos)
+    {
         // TABLE
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
         {
@@ -263,8 +413,19 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        // Table reference (no alias)
-        SqlTableReference? table = null;
+        var table = ParseUnaliasedTableReference(ref lexer);
+
+        return new SqlDropTableExpression(table, ifExists, null,
+            Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    /// <summary>
+    /// Parses an optionally schema-qualified table reference without alias
+    /// support (the DDL form), yielding a <c>?</c> placeholder when the reference
+    /// is missing (total parsing — the planner rejects placeholders precisely).
+    /// </summary>
+    private SqlTableReference ParseUnaliasedTableReference(ref TokenLexer lexer)
+    {
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
             string firstPart = CurrentText(ref lexer);
@@ -280,11 +441,9 @@ public sealed partial class SqlQueryParser
                 }
             }
 
-            table = new SqlTableReference(firstPart, schemaName, null);
+            return new SqlTableReference(firstPart, schemaName, null);
         }
-        table ??= new SqlTableReference("?", null, null);
 
-        return new SqlDropTableExpression(table, ifExists, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+        return new SqlTableReference("?", null, null);
     }
 }

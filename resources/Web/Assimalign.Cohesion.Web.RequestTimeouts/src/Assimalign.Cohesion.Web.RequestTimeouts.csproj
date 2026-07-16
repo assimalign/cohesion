@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Request-timeout policies for the Cohesion Web pipeline: a builder-time global default plus per-endpoint policies carried as sealed endpoint metadata, enforced by a UseRequestTimeouts middleware that arms a TimeProvider-based timer per exchange and cancels downstream work on expiry. A timed-out request is answered with a configurable status (504 Gateway Timeout by default, optionally an RFC 9457 problem payload via Web.ProblemDetails) when the response has not started, or aborted cleanly at the protocol layer when it has. Suspends while a debugger is attached, mirroring ASP.NET.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+</Project>

@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Transactions;
+
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
@@ -24,6 +26,14 @@ public interface IDatabaseTransaction : IAsyncDisposable
     /// Gets the current state of the transaction.
     /// </summary>
     TransactionState State { get; }
+
+    /// <summary>
+    /// Gets the isolation level this transaction was begun at
+    /// (<see cref="IDatabaseSession.BeginTransactionAsync(IsolationLevel, CancellationToken)"/>;
+    /// <see cref="IsolationLevel.Snapshot"/> when begun without one). An engine may
+    /// execute at a stronger level than requested, never weaker.
+    /// </summary>
+    IsolationLevel IsolationLevel { get; }
 
     /// <summary>
     /// Commits all operations performed within this transaction.

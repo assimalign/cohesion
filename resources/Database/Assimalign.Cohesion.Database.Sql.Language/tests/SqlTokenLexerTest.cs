@@ -1,28 +1,42 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Text;
+using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Language.Tests;
+using Assimalign.Cohesion.Database.Language;
 
+namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
+
+/// <summary>
+/// Lexer smoke tests over the declared SQL token tables.
+/// </summary>
 public class SqlTokenLexerTest
 {
-    [Fact]
-    public void Test()
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Lexer: tokenizes keywords, functions, and qualified names")]
+    public void MoveNext_SimpleQuery_ShouldClassifyTokens()
     {
-        var query = "SELECT Count(*) FROM dbo.Users";
-        var lexer = new TokenLexer(query, TokenLexerOptions.Sql);
+        // Arrange
+        var lexer = new TokenLexer("SELECT Count(*) FROM dbo.Users", TokenLexerOptions.Sql);
+        var tokens = new List<(string Value, TokenType Type)>();
 
-
-        var tokens = new List<(string Value, int Position, TokenType Type)>();
-
+        // Act
         while (lexer.MoveNext())
         {
-            tokens.Add((lexer.Current.Value.ToString(), lexer.Current.Position, lexer.Current.Type));
+            tokens.Add((lexer.Current.Value.ToString(), lexer.Current.Type));
         }
 
-        
-
-
+        // Assert
+        tokens.ShouldBe(new[]
+        {
+            ("SELECT", TokenType.Keyword),
+            ("Count", TokenType.Function),
+            ("(", TokenType.LeftParen),
+            ("*", TokenType.Asterisk),
+            (")", TokenType.RightParen),
+            ("FROM", TokenType.Keyword),
+            ("dbo", TokenType.Identifier),
+            (".", TokenType.Dot),
+            ("Users", TokenType.Identifier),
+        });
     }
 }

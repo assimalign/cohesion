@@ -45,6 +45,11 @@ public readonly unsafe struct SlottedPage
     public const int BodySize = Page.Size - Page.HeaderSize;
 
     /// <summary>
+    /// The largest record that fits in a single page (the body minus one slot entry).
+    /// </summary>
+    public const int MaxRecordSize = BodySize - 4;
+
+    /// <summary>
     /// Initializes a new <see cref="SlottedPage"/> over the given page buffer.
     /// </summary>
     /// <param name="page">The underlying page whose buffer will be managed.</param>

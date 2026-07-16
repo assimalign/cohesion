@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<Description>Effective (proxy-resolved) connection identity for the Cohesion HTTP family. Layered on top of Assimalign.Cohesion.Http; owns the IHttpForwardedFeature contract and the feature-first Effective* read convention (EffectiveScheme/EffectiveHost/EffectiveRemoteIp/EffectiveRemoteEndPoint on IHttpContext). Contract-only: the trust model that produces the feature ships in Assimalign.Cohesion.Web.ForwardedHeaders. Optional — consumers that never key on client identity behind a proxy should not reference this package.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

@@ -1,6 +1,8 @@
 using System;
 using System.Buffers.Binary;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Indexing;
 
 /// <summary>
@@ -60,6 +62,41 @@ public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
         var buffer = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64BigEndian(buffer, value);
         return new IndexKey(buffer);
+    }
+
+    /// <summary>
+    /// Creates a key from the shared type system's composite key writer — the path
+    /// for typed and composite keys (strings under an explicit collation, decimals,
+    /// temporal types, multi-column keys).
+    /// </summary>
+    /// <param name="writer">The writer holding the encoded components.</param>
+    /// <returns>A key over the writer's order-preserving encoding.</returns>
+    public static IndexKey From(DatabaseKeyWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        return new IndexKey(writer.ToArray());
+    }
+
+    /// <summary>
+    /// Computes the key's stable content hash (FNV-1a over the encoded bytes) —
+    /// the identity unique-key locks are taken under. Exposed so writers can
+    /// pre-acquire a key's lock (through the shared lock manager, as
+    /// <c>LockResource.Entry(objectId, key.Hash())</c>) before entering a scope
+    /// that must never wait, relying on the lock manager's same-owner re-grant
+    /// when the index acquires it again internally. A hash collision only
+    /// over-locks (two keys sharing one lock), which is safe.
+    /// </summary>
+    /// <returns>The 64-bit FNV-1a hash of the encoded key bytes.</returns>
+    public ulong Hash()
+    {
+        ulong hash = 14695981039346656037UL;
+
+        foreach (byte value in _encoded.Span)
+        {
+            hash = (hash ^ value) * 1099511628211UL;
+        }
+
+        return hash;
     }
 
     /// <inheritdoc />

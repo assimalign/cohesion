@@ -26,6 +26,13 @@ public interface ISqlStorageStrategy
     /// <param name="databaseName">The name of the database to open storage for.</param>
     /// <returns>An existing <see cref="SqlStorage"/> instance.</returns>
     /// <exception cref="DatabaseException">Thrown when storage does not exist for the specified name.</exception>
+    /// <remarks>
+    /// Implementations that reopen persisted state must open with the open-time
+    /// checkpoint deferred (<c>SqlStorage.Open(..., checkpointOnOpen: false)</c>):
+    /// the engine runs transaction-recovery analysis over the recovered journal —
+    /// classification reads lifecycle records an eager truncation would destroy —
+    /// and checkpoints the storage itself once analysis completes.
+    /// </remarks>
     SqlStorage OpenStorage(string databaseName);
 
     /// <summary>

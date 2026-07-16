@@ -840,6 +840,19 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forms/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forms/tests/Assimalign.Cohesion.Http.Forms.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Forwarded/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Forwarded/tests/Assimalign.Cohesion.Http.Forwarded.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ExtendedConnect/src/Assimalign.Cohesion.Http.ExtendedConnect.csproj" />
@@ -1337,6 +1350,17 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Application/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Application/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Application/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Application/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Application/src/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Application/src/Assimalign.Cohesion.Database.Application.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Application/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Application/tests/Assimalign.Cohesion.Database.Application.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.ApplicationModel/src/Assimalign.Cohesion.Database.ApplicationModel.csproj" />
@@ -1556,6 +1580,9 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/src/Assimalign.Cohesion.Database.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Hosting/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Hosting/tests/Assimalign.Cohesion.Database.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Indexing/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />
@@ -1564,10 +1591,22 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Indexing/tests/Assimalign.Cohesion.Database.Indexing.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/COMMANDS.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/Assimalign.Cohesion.Database.KeyValuePair.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair/tests/Assimalign.Cohesion.Database.KeyValuePair.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/src/Assimalign.Cohesion.Database.KeyValuePair.Catalog.csproj" />
 	</Folder>
@@ -1575,6 +1614,10 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog/tests/Assimalign.Cohesion.Database.KeyValuePair.Catalog.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client/src/Assimalign.Cohesion.Database.KeyValuePair.Client.csproj" />
 	</Folder>
@@ -1595,8 +1638,10 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Security/tests/Assimalign.Cohesion.Database.KeyValuePair.Security.Tests.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/">
-		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/README.md" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/src/Assimalign.Cohesion.Database.KeyValuePair.Storage.csproj" />
@@ -1637,13 +1682,6 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Server/" />
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Server/src/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Server/src/Assimalign.Cohesion.Database.Server.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Server/tests/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Server/tests/Assimalign.Cohesion.Database.Server.Tests.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql/src/Assimalign.Cohesion.Database.Sql.csproj" />
@@ -1655,9 +1693,15 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/src/Assimalign.Cohesion.Database.Sql.Catalog.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Catalog/tests/Assimalign.Cohesion.Database.Sql.Catalog.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Client/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Client/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Client/src/Assimalign.Cohesion.Database.Sql.Client.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Client/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Client/tests/Assimalign.Cohesion.Database.Sql.Client.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Language/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Language/src/">
@@ -1683,6 +1727,10 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/src/Assimalign.Cohesion.Database.Sql.Storage.csproj" />
 	</Folder>
@@ -1706,6 +1754,9 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Transactions/tests/Assimalign.Cohesion.Database.Transactions.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types/tests/Assimalign.Cohesion.Database.Types.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Types/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
 	</Folder>
@@ -1963,6 +2014,10 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 	</Folder>
@@ -2033,6 +2088,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Cors/tests/Assimalign.Cohesion.Web.Cors.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/src/Assimalign.Cohesion.Web.Diagnostics.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Diagnostics/tests/Assimalign.Cohesion.Web.Diagnostics.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md" />
@@ -2051,6 +2117,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Forms/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Forms/tests/Assimalign.Cohesion.Web.Forms.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/src/Assimalign.Cohesion.Web.ForwardedHeaders.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/tests/Assimalign.Cohesion.Web.ForwardedHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Health/README.md" />
 	</Folder>
@@ -2063,6 +2140,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Health/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Health/tests/Assimalign.Cohesion.Web.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HostFiltering/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HostFiltering/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.HostFiltering/src/Assimalign.Cohesion.Web.HostFiltering.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HostFiltering/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.HostFiltering/tests/Assimalign.Cohesion.Web.HostFiltering.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
@@ -2093,6 +2181,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Query/tests/Assimalign.Cohesion.Web.Query.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/Assimalign.Cohesion.Web.RequestTimeouts.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/Assimalign.Cohesion.Web.RequestTimeouts.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/README.md" />

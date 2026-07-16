@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 /// <remarks>
 /// One manager instance serves one logical database. Engines create sessions whose
-/// <see cref="IDatabaseTransaction"/> surfaces delegate to this manager. The manager
+/// <c>IDatabaseTransaction</c> surfaces delegate to this manager. The manager
 /// owns the active-transaction table used to capture <see cref="TransactionSnapshot"/>
 /// instances and drives write-ahead logging through <see cref="ITransactionLog"/>.
 /// </remarks>

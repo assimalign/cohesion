@@ -48,4 +48,32 @@ public class DatabaseResourceTests
         // Act & Assert
         Should.Throw<ArgumentException>(() => new DatabaseResource(" "));
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: Resource injects the conventional host environment variables")]
+    public void Resource_WithOptions_ShouldInjectConventionalEnvironmentVariables()
+    {
+        // Arrange
+        var resource = new DatabaseResource("orders-db", new DatabaseResourceOptions
+        {
+            Port = 6543,
+            DataMountPath = "/srv/data",
+            Durability = "full",
+        });
+
+        // Assert: the manifest side sets the same names Database.Hosting binds
+        resource.EnvironmentVariables[DatabaseResource.DataPathVariable].ShouldBe("/srv/data");
+        resource.EnvironmentVariables[DatabaseResource.PortVariable].ShouldBe("6543");
+        resource.EnvironmentVariables[DatabaseResource.DurabilityVariable].ShouldBe("full");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: A platform-allocated port is left for the gateway to inject")]
+    public void Resource_WithDefaultPort_ShouldNotSetThePortVariable()
+    {
+        // Arrange: default port 0 = platform-allocated; the gateway injects the observed port
+        var resource = new DatabaseResource("orders-db");
+
+        // Assert
+        resource.EnvironmentVariables.ContainsKey(DatabaseResource.PortVariable).ShouldBeFalse();
+        resource.EnvironmentVariables[DatabaseResource.DataPathVariable].ShouldBe("/data");
+    }
 }

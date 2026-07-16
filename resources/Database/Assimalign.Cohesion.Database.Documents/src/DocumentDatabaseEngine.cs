@@ -15,20 +15,19 @@ namespace Assimalign.Cohesion.Database.Documents;
 public sealed class DocumentDatabaseEngine : IDatabaseEngine
 {
     private readonly DocumentDatabaseEngineOptions _options;
-    private EngineState _state;
+    private bool _disposed;
 
     private DocumentDatabaseEngine(DocumentDatabaseEngineOptions options)
     {
         _options = options;
         Name = options.EngineName ?? "documents-engine";
-        _state = EngineState.Idle;
     }
 
     /// <inheritdoc />
     public string Name { get; }
 
     /// <inheritdoc />
-    public EngineState State => _state;
+    public EngineState State => _disposed ? EngineState.Disposed : EngineState.Running;
 
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Document;
@@ -43,6 +42,9 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
         ArgumentNullException.ThrowIfNull(options);
         return new DocumentDatabaseEngine(options);
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
     /// <inheritdoc />
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
@@ -70,7 +72,7 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     public void Dispose()
     {
-        _state = EngineState.Stopped;
+        _disposed = true;
     }
 
     /// <inheritdoc />

@@ -4,23 +4,26 @@ using System.Runtime.InteropServices;
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Defines the binary layout of the first page (page 0) in a storage file.
+/// Defines the binary layout of the file metadata stored in the body of page 0.
 /// The file header contains metadata that identifies the storage resource and
 /// describes its configuration.
 /// </summary>
 /// <remarks>
-/// Every storage file, regardless of database model, begins with a file header page.
-/// The header occupies the first <see cref="Units.Page.Size"/> bytes of the file.
+/// Every storage file, regardless of database model, begins with a file header page
+/// (<see cref="PageType.FileHeader"/>). Page 0 carries a normal page header (identifier,
+/// LSN, checksum) in its first <see cref="Units.Page.HeaderSize"/> bytes, so it is
+/// integrity-checked like every other page; this struct lives in the page body
+/// immediately after it.
 /// <code>
 /// File Layout:
 /// ┌─────────────────────────────────┐  Page 0
-/// │ StorageFileHeader               │
-/// ├─────────────────────────────────┤  Page 1
-/// │ Free Space Map page(s)          │
-/// ├─────────────────────────────────┤  Page N
-/// │ Data / Index / Segment pages    │
+/// │ Page header │ StorageFileHeader │
+/// ├─────────────────────────────────┤  Page 1..N
+/// │ Data / Index / Catalog pages    │
 /// └─────────────────────────────────┘
 /// </code>
+/// Free pages are stamped <see cref="PageType.Free"/> in their page headers; the
+/// free-space map is reconstructed by scanning page headers when the file is opened.
 /// </remarks>
 [StructLayout(LayoutKind.Explicit, Size = 256, Pack = 1)]
 public unsafe struct StorageFileHeader
@@ -102,10 +105,34 @@ public unsafe struct StorageFileHeader
     public fixed byte Name[128];
 
     /// <summary>
-    /// Reserved bytes for future use.
+    /// The log sequence number of the most recent completed checkpoint, or zero when
+    /// no checkpoint has been taken. Recovery replays the journal from this point.
     /// </summary>
     [FieldOffset(208)]
-    public fixed byte Reserved[48];
+    public long LastCheckpointLsn;
+
+    /// <summary>
+    /// The highest transaction sequence assigned by this storage as of the last
+    /// header update, or zero for files written before the field existed. On open
+    /// this is the floor for new sequence assignment alongside the journal's
+    /// highest observed sequence: a checkpoint truncates the journal, and MVCC
+    /// row stamps persist in data pages, so sequences must never restart across
+    /// reopen once row versions carry them (a recycled sequence would corrupt
+    /// snapshot visibility).
+    /// </summary>
+    /// <remarks>
+    /// Carved from the front of the former reserved block; files written before
+    /// the field read zero here, which is a safe floor — they predate row
+    /// version stamps.
+    /// </remarks>
+    [FieldOffset(216)]
+    public long LastTransactionSequence;
+
+    /// <summary>
+    /// Reserved bytes for future use.
+    /// </summary>
+    [FieldOffset(224)]
+    public fixed byte Reserved[32];
 
     /// <summary>
     /// The expected magic number value for valid Cohesion storage files.

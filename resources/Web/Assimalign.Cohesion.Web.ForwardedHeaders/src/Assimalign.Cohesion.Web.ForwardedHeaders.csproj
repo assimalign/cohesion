@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.ForwardedHeaders</RootNamespace>
+		<Description>Forwarded-headers resolution for Cohesion web applications: the first-position UseForwardedHeaders middleware that resolves the effective client address/scheme/host behind proxies from the RFC 7239 Forwarded and X-Forwarded-* headers under an explicit trust model (header selection, KnownProxies/KnownNetworks, ForwardLimit, TrustLocalTransports). Consumes the parsing primitives from Assimalign.Cohesion.Http and publishes results as the IHttpForwardedFeature from Assimalign.Cohesion.Http.Forwarded — raw headers and wire-level request/connection surfaces are never mutated.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+	</ItemGroup>
+</Project>

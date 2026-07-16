@@ -171,6 +171,98 @@ and must not be normalized away:
 Pure logic over the existing collections — no reflection, no codegen. Fully
 AOT/trim safe.
 
+## Host values and allowlist matching
+
+`HttpHost` carries the request's effective authority exactly as the transport
+resolved it (`ResolveAuthority` above). On top of that raw value it exposes the
+split into normalized host and port components, and `HttpHostMatcher` compiles
+a host **allowlist** from patterns. The enforcement middleware lives in the
+`Web.HostFiltering` feature package (issue #781); the matching primitives live
+here per the typed-protocol-primitives rule — like the caching and range
+toolkits, they are value logic every consumer must agree on, not Web behavior.
+
+**Why an abstract class, not an interface.** `HttpHostMatcher` is a public
+abstract class carrying its factories (`Create`, `MatchAny`) as static members,
+with the compiled pattern matcher as the internal default implementation —
+rather than the repo-default `IHttpHostMatcher` + static factory pair. Owner
+decision (2026-07-16): one extensible concrete contract reads better than an
+interface-per-concept for a primitive with exactly one meaningful default
+implementation, and the base class gives derived matchers guided defaults
+(`IsMatchAny => false`) an interface cannot. Precedent: the Dns area's
+abstract-class contracts (contrast with FileSystem's interfaces). The deviation
+is scoped to this type and marked at the declaration.
+
+### The component split (`TryGetComponents`, `Host`, `Port`)
+
+`TryGetComponents` is a span-based structural split of `host[:port]`, exposed
+alongside allocating `Host` / `Port` convenience properties:
+
+- A bracketed IPv6 literal is exposed **without** its brackets, so `[::1]` and
+  `::1` yield the same component (bracket-insensitive comparison falls out for
+  free).
+- An unbracketed value containing multiple colons is treated as an IPv6 literal
+  tolerated bracket-insensitively — such a value cannot carry a port.
+- Malformed shapes return `false`: an unterminated/empty bracket form, junk
+  after the closing bracket, a trailing `host:` with no digits, or a port that
+  is not a decimal 1–65535. `Host` falls back to the raw value in that case.
+- The split is structural, not semantic: host characters are not validated
+  against the `reg-name` grammar and IPv6 contents are not parsed as addresses.
+
+**Parity with routing.** The semantics deliberately mirror the Web routing
+host-constraint (`RouteHostConstraint`, issue #788): the same bracket rules,
+the same wildcard grammar, the same 1–65535 port range. One deliberate
+strictness delta: the split validates port digits as part of parsing, where the
+routing constraint's raw-text match tolerates junk port text on a route that
+does not constrain the port. Selection can afford leniency; a validation
+primitive claiming "components" cannot.
+
+### The allowlist matcher
+
+`HttpHostMatcher.Create` compiles patterns once into an immutable matcher:
+
+- **Grammar:** `*` (match any), an exact host (name, IPv4, or IPv6 literal in
+  either bracket form), or a wildcard subdomain `*.example.com` — any depth,
+  apex excluded. The stored wildcard suffix keeps its leading dot, which is
+  what enforces the label boundary (`evilexample.com` cannot match).
+- **Precompiled:** normalized exact entries and wildcard suffixes in plain
+  arrays; a request costs one component split plus ordinal-ignore-case span
+  comparisons. No regex, no reflection, nothing per-request.
+- **Fail-fast creation:** a pattern that carries a port, is malformed, or
+  misuses `*` throws at `Create` — a pattern that could never match is a
+  configuration error, not a runtime condition. An empty allowlist also throws
+  (it would compile to deny-all); `*` beside a typo still validates the typo.
+- **Match-any is honest:** `*` disables host checking entirely — even a
+  malformed host passes. Structural strictness comes from real allowlists, and
+  the empty-host policy belongs to the enforcement layer, not the matcher.
+
+### Validation vs selection
+
+The matcher answers *"is this host one of mine?"* — allowlist **validation**,
+enforced as a 400 by the `Web.HostFiltering` middleware. Routing's host
+constraints answer *"which endpoint serves this host?"* — **selection** (#788,
+`RequireHost`). They share component semantics by design so a given wire value
+means the same thing on both paths, but they are different questions: do not
+fold one into the other. (A route host mismatch skips a candidate; an allowlist
+mismatch rejects the request.)
+
+### AOT posture
+
+Pure span logic over strings — no reflection, no codegen. Fully AOT/trim safe.
+
+### Non-goals
+
+- **No DNS and no IDN/Punycode mapping** — comparison is against what the
+  client actually sent on the wire.
+- **No IPv6 address canonicalization** — `::1` and `0:0:0:0:0:0:0:1` are
+  different patterns; bracket removal is the only normalization. Write the
+  form clients send.
+- **No port-aware allowlisting** — host validation is host-identity; which
+  ports are served is a listener/binding concern. (Routing's host constraints
+  *do* match ports, because selection legitimately needs them.)
+- **No `reg-name` charset validation** — against a real allowlist, junk hosts
+  fail to match anyway; the grammar check would add cost without adding
+  security.
+
 ## Media types and content negotiation
 
 The core owns the RFC 9110 §8.3 / §12 content-negotiation primitives so that every
@@ -970,14 +1062,28 @@ proxy's IP and `http://` scheme instead of the client's.
 This library is deliberately the **protocol half only**: it turns raw header
 text into typed, validated value objects and back. It contains **no trust
 model**. Deciding *which* forwarded hops to believe — `KnownProxies`,
-`KnownNetworks`, `ForwardLimit`, and the actual overwrite of
-`connection.RemoteIp` / `request.Scheme` — lives in the forwarded-headers
-middleware (issue #778) in the Web runtime, because that is a policy decision
-that depends on the deployment topology, not on the wire grammar. Keeping the
-split here means the security-sensitive code has one job (apply policy to
-already-parsed, already-validated data) and the parser has one job (be a correct,
-total function over hostile input). This mirrors the established seam/feature
-taxonomy: protocol value objects in core, policy in the layer that composes them.
+`KnownNetworks`, `ForwardLimit`, header selection — lives in the
+forwarded-headers middleware (#778) in `Assimalign.Cohesion.Web`, because that
+is a policy decision that depends on the deployment topology, not on the wire
+grammar. Keeping the split here means the security-sensitive code has one job
+(apply policy to already-parsed, already-validated data) and the parser has one
+job (be a correct, total function over hostile input). This mirrors the
+established seam/feature taxonomy: protocol value objects in core, policy in
+the layer that composes them.
+
+### The effective-identity contract lives in `Http.Forwarded`, not here
+
+The *output* contract of that trust evaluation — `IHttpForwardedFeature`
+(effective scheme/host/remote endpoint, the original wire values, the
+accepted-hop count) and the feature-first `Effective*` read convention on
+`IHttpContext` — ships as its own layered package,
+`Assimalign.Cohesion.Http.Forwarded`, following the same separation that keeps
+`Http.Sessions`/`Http.Cookies`/`Http.Forms` out of the core: per-concern
+feature contracts are opt-in assemblies extending the `Assimalign.Cohesion.Http`
+namespace, and the core's surface stays protocol-only. That package's
+`docs/DESIGN.md` records the read-convention decision (feature-first with wire
+fallback; the get-only wire surfaces are never mutated); its producer is the
+`Assimalign.Cohesion.Web.ForwardedHeaders` middleware.
 
 ### The surface
 
@@ -1068,7 +1174,12 @@ array (no `ImmutableArray` dependency). Builds clean under the trim/AOT analyzer
 ### Non-goals
 
 - **The trust model.** `KnownProxies`/`KnownNetworks`/`ForwardLimit` and the
-  mutation of connection/request state belong to the #778 middleware, not here.
+  walk that applies them belong to the #778 middleware in
+  `Assimalign.Cohesion.Web.ForwardedHeaders`, not here.
+- **The effective-identity feature contract.** `IHttpForwardedFeature` and the
+  `Effective*` read convention are the layered `Assimalign.Cohesion.Http.Forwarded`
+  package (see above) — the core stays protocol-only, and nothing ever mutates
+  the wire-level request/connection state.
 - **Interpreting `X-Forwarded-For` entries as addresses.** `HttpForwardedValues`
   is a faithful ordered list; turning an entry into an `IPAddress` (and deciding
   whether to trust it) is the consumer's call via `HttpForwardedNode`.

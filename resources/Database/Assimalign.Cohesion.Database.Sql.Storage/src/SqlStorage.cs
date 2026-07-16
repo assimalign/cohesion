@@ -80,11 +80,18 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">The storage stream for the data file (<c>.dat</c>).</param>
     /// <param name="journal">The storage stream for the journal file (<c>.log</c>).</param>
     /// <param name="backup">The storage stream for the backup file (<c>.bak</c>).</param>
+    /// <param name="checkpointOnOpen">
+    /// When true (the default), a journal with records is checkpointed (truncated)
+    /// after recovery. The SQL engine passes false so it can run
+    /// transaction-recovery analysis over the recovered journal — classification
+    /// reads lifecycle records the truncation would destroy — and checkpoints
+    /// itself afterwards.
+    /// </param>
     /// <returns>A <see cref="SqlStorage"/> loaded from the streams.</returns>
-    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup)
+    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = true)
     {
         var storage = new SqlStorage(data, journal, backup);
-        storage.OpenExisting();
+        storage.OpenExisting(checkpointOnOpen);
         return storage;
     }
 
@@ -94,20 +101,55 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">The data stream (<c>.dat</c>).</param>
     /// <param name="journal">The journal stream (<c>.log</c>).</param>
     /// <param name="backup">The backup stream (<c>.bak</c>).</param>
+    /// <param name="checkpointOnOpen">When true (the default), a journal with records is checkpointed after recovery; see the primary overload.</param>
     /// <returns>A <see cref="SqlStorage"/> loaded from the streams.</returns>
-    public static SqlStorage Open(System.IO.Stream data, System.IO.Stream journal, System.IO.Stream backup)
+    public static SqlStorage Open(System.IO.Stream data, System.IO.Stream journal, System.IO.Stream backup, bool checkpointOnOpen = true)
     {
-        return Open(new StorageStream(data), new StorageStream(journal), new StorageStream(backup));
+        return Open(new StorageStream(data), new StorageStream(journal), new StorageStream(backup), checkpointOnOpen);
     }
 
     /// <summary>
-    /// Inserts a row into the storage.
+    /// Gets the write-ahead journal, for the engine's transaction coordinator: the
+    /// manager's journal-bound transaction log and open-time recovery analysis
+    /// (<c>TransactionRecovery.Analyze</c>) both ride the same journal the storage
+    /// brackets write page images to.
+    /// </summary>
+    internal IStorageJournal WriteAheadJournal => WriteAheadLog;
+
+    /// <summary>
+    /// Inserts a row with auto-commit semantics (a single-operation durable transaction).
     /// </summary>
     /// <param name="row">The serialized row bytes.</param>
     /// <returns>The page and slot location where the row was written.</returns>
     public (PageId PageId, int SlotIndex) InsertRow(ReadOnlySpan<byte> row)
     {
         return InsertRecord(row);
+    }
+
+    /// <summary>
+    /// Inserts a row within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="row">The serialized row bytes.</param>
+    /// <returns>The page and slot location where the row was written.</returns>
+    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ReadOnlySpan<byte> row)
+    {
+        return InsertRecord(transaction, row);
+    }
+
+    /// <summary>
+    /// Inserts a row into the specified owner's record chain within a storage
+    /// transaction. The SQL engine passes the owning table's object id, giving each
+    /// table per-object page locality: scans scoped to the table touch only its own
+    /// pages.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owning table's object id; zero is the shared space.</param>
+    /// <param name="row">The serialized row bytes.</param>
+    /// <returns>The page and slot location where the row was written.</returns>
+    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> row)
+    {
+        return InsertRecord(transaction, ownerId, row);
     }
 
     /// <summary>
@@ -122,7 +164,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
-    /// Updates a row at the specified page and slot.
+    /// Updates a row at the specified page and slot with auto-commit semantics.
     /// </summary>
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
@@ -133,7 +175,19 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
-    /// Deletes a row at the specified page and slot.
+    /// Updates a row at the specified page and slot within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page containing the row.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    /// <param name="row">The new row bytes.</param>
+    public void UpdateRow(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> row)
+    {
+        UpdateRecord(transaction, pageId, slotIndex, row);
+    }
+
+    /// <summary>
+    /// Deletes a row at the specified page and slot with auto-commit semantics.
     /// </summary>
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
@@ -143,16 +197,21 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     }
 
     /// <summary>
+    /// Deletes a row at the specified page and slot within a storage transaction.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page containing the row.</param>
+    /// <param name="slotIndex">The slot index within the page.</param>
+    public void DeleteRow(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    {
+        DeleteRecord(transaction, pageId, slotIndex);
+    }
+
+    /// <summary>
     /// Flushes all pending changes to the underlying stream.
     /// </summary>
     public void FlushChanges()
     {
         Flush();
     }
-
-    /// <summary>
-    /// Gets the journal logger for transaction management.
-    /// </summary>
-    /// <returns>The <see cref="IJournalLogger"/> owned by this storage instance.</returns>
-    internal IJournalLogger GetJournalLogger() => JournalLogger;
 }

@@ -1,7 +1,7 @@
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Language.Sql.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public class SqlSelectParserTests
 {

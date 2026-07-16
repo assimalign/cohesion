@@ -12,6 +12,10 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web/">
 		<File Path="Assimalign.Cohesion.Web/README.md" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web/docs/">
+		<File Path="Assimalign.Cohesion.Web/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web/src/">
 		<Project Path="Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 	</Folder>
@@ -94,6 +98,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Cors/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Cors/tests/Assimalign.Cohesion.Web.Cors.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Diagnostics/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Diagnostics/docs/">
+		<File Path="Assimalign.Cohesion.Web.Diagnostics/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Diagnostics/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Diagnostics/src/">
+		<Project Path="Assimalign.Cohesion.Web.Diagnostics/src/Assimalign.Cohesion.Web.Diagnostics.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Diagnostics/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Diagnostics/tests/Assimalign.Cohesion.Web.Diagnostics.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/">
 		<File Path="Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md" />
@@ -115,6 +130,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Forms/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Forms/tests/Assimalign.Cohesion.Web.Forms.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ForwardedHeaders/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/">
+		<File Path="Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.ForwardedHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ForwardedHeaders/src/">
+		<Project Path="Assimalign.Cohesion.Web.ForwardedHeaders/src/Assimalign.Cohesion.Web.ForwardedHeaders.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ForwardedHeaders/tests/">
+		<Project Path="Assimalign.Cohesion.Web.ForwardedHeaders/tests/Assimalign.Cohesion.Web.ForwardedHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/">
 		<File Path="Assimalign.Cohesion.Web.Health/README.md" />
 	</Folder>
@@ -127,6 +153,17 @@
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Health/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Health/tests/Assimalign.Cohesion.Web.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HostFiltering/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HostFiltering/docs/">
+		<File Path="Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.HostFiltering/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HostFiltering/src/">
+		<Project Path="Assimalign.Cohesion.Web.HostFiltering/src/Assimalign.Cohesion.Web.HostFiltering.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HostFiltering/tests/">
+		<Project Path="Assimalign.Cohesion.Web.HostFiltering/tests/Assimalign.Cohesion.Web.HostFiltering.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/docs/">
@@ -163,6 +200,17 @@
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Query/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Query/tests/Assimalign.Cohesion.Web.Query.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/">
+		<File Path="Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.RequestTimeouts/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/">
+		<Project Path="Assimalign.Cohesion.Web.RequestTimeouts/src/Assimalign.Cohesion.Web.RequestTimeouts.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/">
+		<Project Path="Assimalign.Cohesion.Web.RequestTimeouts/tests/Assimalign.Cohesion.Web.RequestTimeouts.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="Assimalign.Cohesion.Web.Routing/README.md" />

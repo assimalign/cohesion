@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <summary>
 /// Represents errors related to journal operations.
 /// </summary>
-public sealed class JournalException : Exception
+public sealed class JournalException : StorageException
 {
     /// <summary>
     /// Initializes a new <see cref="JournalException"/> with a message.
