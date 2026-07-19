@@ -70,6 +70,47 @@ public class HttpHeaderKeyTests
         pair.Value.Value.ShouldBe("chat");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - StrictTransportSecurity: Should map to the RFC 6797 header name")]
+    public void StrictTransportSecurity_Value_ShouldMatchRfc6797HeaderName()
+    {
+        // Arrange & Act
+        string headerName = HttpHeaderKey.StrictTransportSecurity.Value;
+
+        // Assert
+        headerName.ShouldBe("Strict-Transport-Security");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - StrictTransportSecurity: Should round-trip a value through IHttpHeaderCollection")]
+    public void StrictTransportSecurity_RoundTripThroughHeaderCollection_ShouldPreserveValue()
+    {
+        // Arrange
+        IHttpHeaderCollection headers = new HttpHeaderCollection();
+        headers.Add(HttpHeaderKey.StrictTransportSecurity, "max-age=31536000; includeSubDomains");
+
+        // Act
+        bool found = headers.TryGetValue(HttpHeaderKey.StrictTransportSecurity, out HttpHeaderValue value);
+
+        // Assert
+        found.ShouldBeTrue();
+        value.Value.ShouldBe("max-age=31536000; includeSubDomains");
+        headers[HttpHeaderKey.StrictTransportSecurity].Value.ShouldBe("max-age=31536000; includeSubDomains");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - StrictTransportSecurity: Should match case-insensitively through IHttpHeaderCollection")]
+    public void StrictTransportSecurity_LookupWithWireCasing_ShouldMatchCaseInsensitively()
+    {
+        // Arrange
+        IHttpHeaderCollection headers = new HttpHeaderCollection();
+        headers.Add(HttpHeaderKey.StrictTransportSecurity, "max-age=0");
+
+        HttpHeaderKey wireCaseKey = "strict-transport-security";
+
+        // Act & Assert — the RFC 6797 wire name (lowercase) resolves the canonical key.
+        headers.ContainsKey(wireCaseKey).ShouldBeTrue();
+        headers.TryGetValue(wireCaseKey, out HttpHeaderValue value).ShouldBeTrue();
+        value.Value.ShouldBe("max-age=0");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http] - HeaderKey: Should expose the forwarding header names")]
     [InlineData("Forwarded")]
     [InlineData("X-Forwarded-For")]

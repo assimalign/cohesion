@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>HTTPS policy for the Cohesion Web pipeline: UseHttpsRedirection answers an insecure request with a 307 (default) or 308 redirect to a configured HTTPS endpoint, and UseHsts emits the RFC 6797 Strict-Transport-Security header (max-age/includeSubDomains/preload) on secure responses only, with localhost/loopback excluded by default. Connection security is read from the transport-derived typed scheme delivered by the Web TLS surface — no scheme-string sniffing, no request-time service location.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

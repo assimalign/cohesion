@@ -168,6 +168,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HostFiltering" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HttpsPolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.RequestTimeouts" />
