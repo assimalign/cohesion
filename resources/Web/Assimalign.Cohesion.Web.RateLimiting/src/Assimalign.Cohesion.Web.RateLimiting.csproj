@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Inbound request rate limiting for the Cohesion Web pipeline over the BCL System.Threading.RateLimiting engine. UseRateLimiting composes a builder-time global limiter (applied to every request, partitioned by an AOT-safe key selector — client address composing forwarded trust, header value, or a typed selector) plus named policies attached per-endpoint as sealed routing metadata. A rejected request is answered with a configurable 429 Too Many Requests carrying Retry-After from the lease metadata, with an OnRejected hook that may own the response; the limiter decision is surfaced downstream through a typed IRateLimitingFeature. Cohesion supplies the middleware, policy model, and partition-key surface — never a limiter algorithm.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionPackageReference Include="System.Threading.RateLimiting" />
+	</ItemGroup>
+</Project>
