@@ -2247,6 +2247,10 @@
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Serialization/tests/Assimalign.Cohesion.Web.Serialization.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Sessions/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Sessions/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Sessions/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Sessions/src/Assimalign.Cohesion.Web.Sessions.csproj" />
 	</Folder>
