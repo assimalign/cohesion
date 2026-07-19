@@ -158,6 +158,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authorization" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Compression" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Diagnostics" />
