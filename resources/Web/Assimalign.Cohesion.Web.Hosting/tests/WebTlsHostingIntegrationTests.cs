@@ -146,13 +146,15 @@ public class WebTlsHostingIntegrationTests
 
         WebApplication app = builder.Build();
 
-        // A terminal middleware observes the transport-derived scheme and answers 200.
+        // A terminal middleware observes the transport-derived scheme and answers an empty 200. It
+        // does not chain to next: a handler that produces the final (bodyless) response is terminal,
+        // and the pipeline's #881 terminal now reads a bodyless-200 fall-through as unhandled (404).
         TaskCompletionSource<HttpScheme> observedScheme = new(TaskCreationOptions.RunContinuationsAsynchronously);
         app.Use((context, next) =>
         {
             observedScheme.TrySetResult(context.Request.Scheme);
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
-            return next.Invoke(context);
+            return Task.CompletedTask;
         });
 
         // Resolve and drive the default server directly. StartAsync launches the accept loop; the

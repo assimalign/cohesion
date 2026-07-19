@@ -226,6 +226,30 @@ Two deliberate properties:
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).
 
+## The pipeline terminal — bodyless 404 fallback (#881)
+
+`WebApplication`'s pipeline `Build()` composes the innermost middleware — the
+terminal reached only when every registered middleware chained to `next` and none
+produced a response. It used to be a silent `Task.CompletedTask`, which handed the
+transport an empty `200` for any unhandled request. It now sets a **bodyless
+`404 Not Found`** when the response arrives untouched (still `200`, no body, no
+`Content-Type`, no `Location`); a response a middleware already shaped — a non-`200`
+status, a written body/content type, or a redirect `Location` — is left as-is.
+
+Two deliberate properties:
+
+- **Payload-free by necessity.** The resource hosting-isolation rule (COHRES002)
+  forbids this runtime module from referencing the Web feature libraries, including
+  `Web.ProblemDetails`, so the terminal can only *set the status*. Turning the
+  bodyless 404 into an RFC 9457 problem+json body is the job of the opt-in
+  `UseStatusCodePages()` middleware in `Web.ErrorHandling`, which the application
+  composes over the top.
+- **A deliberate empty `200` must be terminal.** A `200` with no body is
+  indistinguishable from an untouched response, so a middleware that means to answer
+  with an empty `200` must be terminal (not call `next`); a bodyless-`200`
+  fall-through is read as unhandled. This is the accepted trade-off for turning
+  no-match into a `404` without a routing-level "handled" signal.
+
 ## Testing
 
 Behaviour is verified in `tests/` with xUnit + Shouldly against instrumented
@@ -240,12 +264,13 @@ a slot frees.
 
 The same properties are additionally pinned **end to end** by the full-pipeline
 integration suite (`WebApplicationPipelineIntegrationTests`,
-`WebApplicationServerIntegrationTests`), which drives the real server over the
-in-memory transport through `Assimalign.Cohesion.Web.Testing`'s
-`WebApplicationTestFactory` — a real `HttpClient`, real HTTP/1.1 exchanges, no
-sockets. It covers middleware onion ordering and short-circuiting, per-connection
-dispatch (a parked connection does not starve others), application-fault isolation
-with continued service, and graceful shutdown draining (in-flight unwind, idle
+`WebApplicationServerIntegrationTests`, and `WebApplicationTerminalFallbackTests`
+for the bodyless-404 terminal), which drives the real server over the in-memory
+transport through `Assimalign.Cohesion.Web.Testing`'s `WebApplicationTestFactory` —
+a real `HttpClient`, real HTTP/1.1 exchanges, no sockets. It covers middleware onion
+ordering and short-circuiting, per-connection dispatch (a parked connection does not
+starve others), application-fault isolation with continued service, the unhandled-
+request 404 fallback, and graceful shutdown draining (in-flight unwind, idle
 keep-alive unblock, post-stop connection refusal).
 
 ## Non-goals

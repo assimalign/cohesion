@@ -4,6 +4,10 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- IHttpResponseStreamingFeature.HasStarted is the boundary's no-clobber signal (whether the
+		     response head is committed) — the same wire-commit truth the request-timeout middleware
+		     reads. Outside the Web area, so unconstrained by the hosting-isolation rule. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
 	</ItemGroup>
