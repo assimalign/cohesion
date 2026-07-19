@@ -20,6 +20,43 @@ public static class WebApplicationStaticFilesExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
+
+        public IWebApplicationPipelineBuilder UseStaticFiles(Action<StaticFilesOptions>? configure = null)
+        {
+            return builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
+            {
+                PhysicalFileSystemOptions options = new()
+                {
+                    IsReadOnly = true,
+                    Name = "StaticFiles",
+                };
+
+                WebApplicationMiddleware next2 = next;
+
+                if (context.ContentRootPath is not null and { IsEmpty: false  } )
+                {
+                    options.Root = context.ContentRootPath.Value;
+                }
+                else
+                {
+                    options.Root = Environment.CurrentDirectory;
+                }
+
+                PhysicalFileSystem fileSystem = new(options);
+
+                WebApplicationMiddleware middleware = (IHttpContext context2) =>
+                {
+                    var options = new StaticFilesOptions();
+                    configure?.Invoke(options);
+                    Validate(options);
+                    var middleware = new StaticFilesMiddleware(fileSystem, options);
+                    return middleware.InvokeAsync(context2, next2);
+                };
+
+                return middleware;
+            });
+        }
+
         /// <summary>
         /// Serves <c>GET</c>/<c>HEAD</c> requests from <paramref name="fileSystem"/> at the site
         /// root with default options: default documents (<c>index.html</c>/<c>index.htm</c>),
@@ -30,7 +67,9 @@ public static class WebApplicationStaticFilesExtensions
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="fileSystem"/> is <see langword="null"/>.</exception>
         public IWebApplicationPipelineBuilder UseStaticFiles(IFileSystem fileSystem)
-            => builder.UseStaticFiles(fileSystem, configure: null);
+        {
+            return builder.UseStaticFiles(fileSystem, configure: null);
+        }
 
         /// <summary>
         /// Serves <c>GET</c>/<c>HEAD</c> requests from <paramref name="fileSystem"/> with

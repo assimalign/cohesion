@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Handlers are registered at builder time (<see cref="ErrorHandlingBuilder.OnError(IHttpErrorHandler)"/>)
-/// and consulted in registration order by <see cref="IHttpErrorHandlingFeature.HandleAsync"/> —
+/// Handlers are registered at builder time (<see cref="ErrorHandlingBuilder.OnError(IErrorHandler)"/>)
+/// and consulted in registration order by <see cref="IErrorHandlingFeature.HandleAsync"/> —
 /// the first handler to return <see langword="true"/> ends the chain, so specific handlers
 /// register before general ones. A handler that returns <see langword="true"/> must have written
 /// (or deliberately chosen) the response. When every handler passes, the terminal default renders
@@ -32,7 +32,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// which the server's last-resort connection isolation still stands.
 /// </para>
 /// </remarks>
-public interface IHttpErrorHandler
+public interface IErrorHandler
 {
     /// <summary>
     /// Attempts to turn <paramref name="exception"/> into a response on <paramref name="context"/>.

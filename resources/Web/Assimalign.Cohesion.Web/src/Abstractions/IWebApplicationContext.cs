@@ -3,6 +3,7 @@
 namespace Assimalign.Cohesion.Web;
 
 using Assimalign.Cohesion.Http;
+using System.IO;
 
 /// <summary>
 /// 
@@ -10,10 +11,15 @@ using Assimalign.Cohesion.Http;
 public interface IWebApplicationContext
 {
     /// <summary>
+    /// Represents the base directory where your application is running
+    /// </summary>
+    FileSystemPath? ContentRootPath { get; }
+
+    /// <summary>
     /// Represents the pipeline of middleware components that are executed 
     /// in order to process incoming HTTP requests and generate responses.
     /// </summary>
-    IEnumerable<IWebApplicationMiddleware> Middleware { get; }
+    IEnumerable <IWebApplicationMiddleware> Middleware { get; }
 
     /// <summary>
     /// A collection of servers that are hosting the web application. This allows for multiple servers to be used for 

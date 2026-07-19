@@ -184,7 +184,7 @@ public class RequestTimeoutMiddlewareTests
             options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
             async ctx =>
             {
-                IHttpRequestTimeoutFeature feature = ctx.Features.Get<IHttpRequestTimeoutFeature>()!;
+                IRequestTimeoutFeature feature = ctx.Features.Get<IRequestTimeoutFeature>()!;
                 feature.Disable();
 
                 await Task.Delay(PastArmedTimeout, ctx.RequestCancelled);
@@ -211,7 +211,7 @@ public class RequestTimeoutMiddlewareTests
             configure: null,
             async ctx =>
             {
-                IHttpRequestTimeoutFeature feature = ctx.Features.Get<IHttpRequestTimeoutFeature>()!;
+                IRequestTimeoutFeature feature = ctx.Features.Get<IRequestTimeoutFeature>()!;
                 feature.SetTimeout(ArmedTimeout);
 
                 await Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled);
@@ -386,7 +386,7 @@ public class RequestTimeoutMiddlewareTests
             configure: null,
             ctx =>
             {
-                featurePresentDuringRequest = ctx.Features.Get<IHttpRequestTimeoutFeature>() is not null;
+                featurePresentDuringRequest = ctx.Features.Get<IRequestTimeoutFeature>() is not null;
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
                 return Task.CompletedTask;
             });
@@ -397,7 +397,7 @@ public class RequestTimeoutMiddlewareTests
         // Assert
         context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
         featurePresentDuringRequest.ShouldBeTrue();
-        context.Features.Get<IHttpRequestTimeoutFeature>().ShouldBeNull();
+        context.Features.Get<IRequestTimeoutFeature>().ShouldBeNull();
         context.RequestCancelled.IsCancellationRequested.ShouldBeFalse();
     }
 

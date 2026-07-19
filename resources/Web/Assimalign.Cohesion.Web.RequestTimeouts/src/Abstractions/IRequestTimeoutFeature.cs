@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 /// <c>DisableRequestTimeout</c>; call them early in the handler.
 /// </para>
 /// </remarks>
-public interface IHttpRequestTimeoutFeature : IHttpFeature
+public interface IRequestTimeoutFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the effective request-cancellation token for the exchange: it is cancelled when the

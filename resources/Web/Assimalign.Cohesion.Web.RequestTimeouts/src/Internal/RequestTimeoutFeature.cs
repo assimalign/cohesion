@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 
 /// <summary>
-/// The per-exchange timeout engine and the <see cref="IHttpRequestTimeoutFeature"/>
+/// The per-exchange timeout engine and the <see cref="IRequestTimeoutFeature"/>
 /// implementation. Owns two cancellation sources: the timeout source (armed and re-armed against
 /// the composed <see cref="TimeProvider"/>) and a source linking it with the transport's
 /// <see cref="IHttpContext.RequestCancelled"/> — the linked token is what downstream work
@@ -18,13 +18,13 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// after the source has fired is inherently a no-op (<see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/>
 /// cannot un-cancel), which is exactly the documented race semantic of <see cref="Disable"/>.
 /// </remarks>
-internal sealed class HttpRequestTimeoutFeature : IHttpRequestTimeoutFeature, IDisposable
+internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposable
 {
     private readonly CancellationTokenSource _timeoutSource;
     private readonly CancellationTokenSource _linkedSource;
     private RequestTimeoutPolicy? _policy;
 
-    public HttpRequestTimeoutFeature(IHttpContext context, RequestTimeoutOptions options)
+    public RequestTimeoutFeature(IHttpContext context, RequestTimeoutOptions options)
     {
         _timeoutSource = new CancellationTokenSource(Timeout.InfiniteTimeSpan, options.TimeProvider);
         _linkedSource = CancellationTokenSource.CreateLinkedTokenSource(context.RequestCancelled, _timeoutSource.Token);
@@ -36,7 +36,7 @@ internal sealed class HttpRequestTimeoutFeature : IHttpRequestTimeoutFeature, ID
         }
     }
 
-    public string Name => nameof(IHttpRequestTimeoutFeature);
+    public string Name => nameof(IRequestTimeoutFeature);
 
     public CancellationToken Token => _linkedSource.Token;
 

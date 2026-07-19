@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// <summary>
 /// Builder-time registration of the <c>OnError</c> hook. Registration is dependency-free per the
 /// area's composition model: the hook is attached to the application as a typed feature
-/// (<see cref="IHttpErrorHandlingFeature"/>) holding plain handler values — no service container,
+/// (<see cref="IErrorHandlingFeature"/>) holding plain handler values — no service container,
 /// no configuration binding, no request-time service location.
 /// </summary>
 public static class ErrorHandlingWebApplicationExtensions
@@ -33,7 +33,7 @@ public static class ErrorHandlingWebApplicationExtensions
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            HttpErrorHandlingFeature feature = new();
+            ErrorHandlingFeature feature = new();
             builder.AddFeature(feature);
 
             return new ErrorHandlingBuilder(feature);

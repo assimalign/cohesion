@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// and deliberately no exception detail (fault internals never leak to clients by default;
 /// applications that want richer payloads register their own handler ahead of this one).
 /// </summary>
-internal sealed class ProblemDetailsErrorHandler : IHttpErrorHandler
+internal sealed class ProblemDetailsErrorHandler : IErrorHandler
 {
     internal static ProblemDetailsErrorHandler Instance { get; } = new();
 

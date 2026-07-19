@@ -8,22 +8,22 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 
 /// <summary>
-/// The <c>OnError</c> chain behind <see cref="IHttpErrorHandlingFeature"/>: a builder-time
+/// The <c>OnError</c> chain behind <see cref="IErrorHandlingFeature"/>: a builder-time
 /// singleton seeded onto every exchange. Registrations mutate a copy-on-write array under a lock
 /// so the per-request read path is lock-free; mutation happens only during composition.
 /// </summary>
-internal sealed class HttpErrorHandlingFeature : IHttpErrorHandlingFeature
+internal sealed class ErrorHandlingFeature : IErrorHandlingFeature
 {
     private readonly object _gate = new();
-    private IHttpErrorHandler[] _handlers = [];
+    private IErrorHandler[] _handlers = [];
 
     /// <inheritdoc />
-    public string Name => nameof(HttpErrorHandlingFeature);
+    public string Name => nameof(ErrorHandlingFeature);
 
     /// <inheritdoc />
-    public IReadOnlyList<IHttpErrorHandler> Handlers => _handlers;
+    public IReadOnlyList<IErrorHandler> Handlers => _handlers;
 
-    internal void AddHandler(IHttpErrorHandler handler)
+    internal void AddHandler(IErrorHandler handler)
     {
         lock (_gate)
         {
@@ -37,9 +37,9 @@ internal sealed class HttpErrorHandlingFeature : IHttpErrorHandlingFeature
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(exception);
 
-        IHttpErrorHandler[] handlers = _handlers;
+        IErrorHandler[] handlers = _handlers;
 
-        foreach (IHttpErrorHandler handler in handlers)
+        foreach (IErrorHandler handler in handlers)
         {
             if (await handler.TryHandleAsync(context, exception, cancellationToken).ConfigureAwait(false))
             {

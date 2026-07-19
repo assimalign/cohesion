@@ -35,7 +35,7 @@ public class ErrorHandlingPipelineTests
             }
             catch (Exception exception)
             {
-                IHttpErrorHandlingFeature hook = context.Features.Get<IHttpErrorHandlingFeature>()!;
+                IErrorHandlingFeature hook = context.Features.Get<IErrorHandlingFeature>()!;
                 await hook.HandleAsync(context, exception, context.RequestCancelled);
             }
         });

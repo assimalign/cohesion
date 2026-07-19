@@ -4,12 +4,12 @@ namespace Assimalign.Cohesion.Web.Authentication;
 
 /// <summary>
 /// The per-request feature that carries the result of authenticating the request against the
-/// default authenticate scheme, sitting alongside <see cref="IHttpAuthenticationFeature"/> in the
+/// default authenticate scheme, sitting alongside <see cref="IAuthenticationFeature"/> in the
 /// context's feature collection.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Where <see cref="IHttpAuthenticationFeature"/> holds only the resolved
+/// Where <see cref="IAuthenticationFeature"/> holds only the resolved
 /// <see cref="System.Security.Claims.ClaimsPrincipal"/> (<c>context.User</c>), this feature holds
 /// the richer <see cref="AuthenticateResult"/> — including its ticket, properties, and any failure
 /// — so authorization, diagnostics, and result writers can inspect <em>how</em> the principal was

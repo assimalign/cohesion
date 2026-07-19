@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// <c>ClaimsPrincipal</c> dependency.
 /// </para>
 /// </remarks>
-public interface IHttpAuthenticationFeature : IHttpFeature
+public interface IAuthenticationFeature : IHttpFeature
 {
     /// <summary>
     /// Gets or sets the principal authenticated for this exchange.

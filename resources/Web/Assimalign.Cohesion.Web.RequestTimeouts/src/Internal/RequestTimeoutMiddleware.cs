@@ -55,11 +55,11 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        HttpRequestTimeoutFeature feature = new(context, _options);
+        RequestTimeoutFeature feature = new(context, _options);
 
         try
         {
-            context.Features.Set<IHttpRequestTimeoutFeature>(feature);
+            context.Features.Set<IRequestTimeoutFeature>(feature);
 
             try
             {
@@ -74,7 +74,7 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
         {
             // Remove before disposing so later pipeline stages can never resolve a feature whose
             // cancellation sources have been released.
-            context.Features.Set<IHttpRequestTimeoutFeature>(null);
+            context.Features.Set<IRequestTimeoutFeature>(null);
             feature.Dispose();
         }
     }

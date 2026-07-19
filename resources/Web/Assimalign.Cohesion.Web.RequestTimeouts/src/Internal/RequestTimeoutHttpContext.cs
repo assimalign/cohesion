@@ -25,10 +25,10 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 internal sealed class RequestTimeoutHttpContext : IHttpContext
 {
     private readonly IHttpContext _inner;
-    private readonly HttpRequestTimeoutFeature _feature;
+    private readonly RequestTimeoutFeature _feature;
     private readonly RequestTimeoutFeatureCollection _features;
 
-    public RequestTimeoutHttpContext(IHttpContext inner, HttpRequestTimeoutFeature feature)
+    public RequestTimeoutHttpContext(IHttpContext inner, RequestTimeoutFeature feature)
     {
         _inner = inner;
         _feature = feature;

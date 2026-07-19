@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.ErrorHandling;
 
 /// <summary>
-/// The delegate form of an <c>OnError</c> registration — see <see cref="IHttpErrorHandler"/> for
+/// The delegate form of an <c>OnError</c> registration — see <see cref="IErrorHandler"/> for
 /// the chain semantics. Return <see langword="true"/> to own the fault (the response must be
 /// written), <see langword="false"/> to pass it to the next registration.
 /// </summary>

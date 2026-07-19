@@ -45,7 +45,7 @@ public class HttpContextAuthenticationExtensionsTests
         _ = context.User;
 
         // Assert
-        context.Features.Get<IHttpAuthenticationFeature>().ShouldBeNull();
+        context.Features.Get<IAuthenticationFeature>().ShouldBeNull();
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public class HttpContextAuthenticationExtensionsTests
         context.User = principal;
 
         // Assert
-        IHttpAuthenticationFeature? feature = context.Features.Get<IHttpAuthenticationFeature>();
+        IAuthenticationFeature? feature = context.Features.Get<IAuthenticationFeature>();
         feature.ShouldNotBeNull();
         feature!.User.ShouldBeSameAs(principal);
     }
@@ -92,12 +92,12 @@ public class HttpContextAuthenticationExtensionsTests
         // Arrange
         IHttpContext context = new BareHttpContext();
         context.User = new ClaimsPrincipal(new ClaimsIdentity("first"));
-        IHttpAuthenticationFeature firstFeature = context.Features.Get<IHttpAuthenticationFeature>()!;
+        IAuthenticationFeature firstFeature = context.Features.Get<IAuthenticationFeature>()!;
 
         // Act
         ClaimsPrincipal second = new(new ClaimsIdentity("second"));
         context.User = second;
-        IHttpAuthenticationFeature secondFeature = context.Features.Get<IHttpAuthenticationFeature>()!;
+        IAuthenticationFeature secondFeature = context.Features.Get<IAuthenticationFeature>()!;
 
         // Assert
         secondFeature.ShouldBeSameAs(firstFeature);
@@ -143,7 +143,7 @@ public class HttpContextAuthenticationExtensionsTests
         // Arrange
         IHttpContext context = new BareHttpContext();
         ClaimsPrincipal principal = new(new ClaimsIdentity("preinstalled"));
-        context.Features.Set<IHttpAuthenticationFeature>(new TestAuthenticationFeature(principal));
+        context.Features.Set<IAuthenticationFeature>(new TestAuthenticationFeature(principal));
 
         // Act
         ClaimsPrincipal observed = context.User;
@@ -153,11 +153,11 @@ public class HttpContextAuthenticationExtensionsTests
     }
 
     /// <summary>
-    /// Test-local <see cref="IHttpAuthenticationFeature"/> stand-in. Used to verify
+    /// Test-local <see cref="IAuthenticationFeature"/> stand-in. Used to verify
     /// that the extension getter consults the feature collection rather than only
     /// recognizing the package's internal default implementation.
     /// </summary>
-    private sealed class TestAuthenticationFeature : IHttpAuthenticationFeature
+    private sealed class TestAuthenticationFeature : IAuthenticationFeature
     {
         public TestAuthenticationFeature(ClaimsPrincipal user)
         {

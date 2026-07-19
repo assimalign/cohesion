@@ -19,16 +19,16 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Tests;
 /// </summary>
 public class HttpErrorHandlingFeatureTests
 {
-    private static IHttpErrorHandlingFeature Compose(TestWebApplicationBuilder builder, params IHttpErrorHandler[] handlers)
+    private static IErrorHandlingFeature Compose(TestWebApplicationBuilder builder, params IErrorHandler[] handlers)
     {
         ErrorHandlingBuilder composition = builder.AddErrorHandling();
 
-        foreach (IHttpErrorHandler handler in handlers)
+        foreach (IErrorHandler handler in handlers)
         {
             composition.OnError(handler);
         }
 
-        return builder.Features.OfType<IHttpErrorHandlingFeature>().Single();
+        return builder.Features.OfType<IErrorHandlingFeature>().Single();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - AddErrorHandling: Should attach the hook feature to the application")]
@@ -41,7 +41,7 @@ public class HttpErrorHandlingFeatureTests
         builder.AddErrorHandling();
 
         // Assert
-        builder.Features.OfType<IHttpErrorHandlingFeature>().Count().ShouldBe(1);
+        builder.Features.OfType<IErrorHandlingFeature>().Count().ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - OnError: Should expose handlers in registration order")]
@@ -53,7 +53,7 @@ public class HttpErrorHandlingFeatureTests
         RecordingErrorHandler second = new(handles: true);
 
         // Act
-        IHttpErrorHandlingFeature feature = Compose(builder, first, second);
+        IErrorHandlingFeature feature = Compose(builder, first, second);
 
         // Assert
         feature.Handlers.Count.ShouldBe(2);
@@ -68,7 +68,7 @@ public class HttpErrorHandlingFeatureTests
         ErrorHandlingBuilder builder = new TestWebApplicationBuilder().AddErrorHandling();
 
         // Act / Assert
-        Should.Throw<ArgumentNullException>(() => builder.OnError((IHttpErrorHandler)null!));
+        Should.Throw<ArgumentNullException>(() => builder.OnError((IErrorHandler)null!));
         Should.Throw<ArgumentNullException>(() => builder.OnError((HttpErrorHandler)null!));
     }
 
@@ -79,7 +79,7 @@ public class HttpErrorHandlingFeatureTests
         TestWebApplicationBuilder builder = new();
         RecordingErrorHandler first = new(handles: true);
         RecordingErrorHandler second = new(handles: false);
-        IHttpErrorHandlingFeature feature = Compose(builder, first, second);
+        IErrorHandlingFeature feature = Compose(builder, first, second);
         TestHttpContext context = new();
 
         // Act
@@ -98,7 +98,7 @@ public class HttpErrorHandlingFeatureTests
         TestWebApplicationBuilder builder = new();
         RecordingErrorHandler first = new(handles: false);
         RecordingErrorHandler second = new(handles: true);
-        IHttpErrorHandlingFeature feature = Compose(builder, first, second);
+        IErrorHandlingFeature feature = Compose(builder, first, second);
         TestHttpContext context = new();
 
         // Act
@@ -115,7 +115,7 @@ public class HttpErrorHandlingFeatureTests
         // Arrange
         TestWebApplicationBuilder builder = new();
         RecordingErrorHandler passer = new(handles: false);
-        IHttpErrorHandlingFeature feature = Compose(builder, passer);
+        IErrorHandlingFeature feature = Compose(builder, passer);
         TestHttpContext context = new();
 
         // Act
@@ -140,7 +140,7 @@ public class HttpErrorHandlingFeatureTests
     {
         // Arrange
         TestWebApplicationBuilder builder = new();
-        IHttpErrorHandlingFeature feature = Compose(builder);
+        IErrorHandlingFeature feature = Compose(builder);
         TestHttpContext context = new();
 
         // Act
@@ -162,7 +162,7 @@ public class HttpErrorHandlingFeatureTests
             context.Response.StatusCode = 503;
             return ValueTask.FromResult(true);
         });
-        IHttpErrorHandlingFeature feature = builder.Features.OfType<IHttpErrorHandlingFeature>().Single();
+        IErrorHandlingFeature feature = builder.Features.OfType<IErrorHandlingFeature>().Single();
         TestHttpContext context = new();
 
         // Act
@@ -180,7 +180,7 @@ public class HttpErrorHandlingFeatureTests
         TestWebApplicationBuilder builder = new();
         ErrorHandlingBuilder composition = builder.AddErrorHandling();
         composition.OnError((context, exception, cancellationToken) => throw new NotSupportedException("handler fault"));
-        IHttpErrorHandlingFeature feature = builder.Features.OfType<IHttpErrorHandlingFeature>().Single();
+        IErrorHandlingFeature feature = builder.Features.OfType<IErrorHandlingFeature>().Single();
         TestHttpContext context = new();
 
         // Act / Assert — secondary faults are not masked; the invoking boundary (behind which the
@@ -194,7 +194,7 @@ public class HttpErrorHandlingFeatureTests
     {
         // Arrange
         TestWebApplicationBuilder builder = new();
-        IHttpErrorHandlingFeature feature = Compose(builder);
+        IErrorHandlingFeature feature = Compose(builder);
         TestHttpContext context = new();
 
         // Act / Assert

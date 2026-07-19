@@ -27,14 +27,14 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// responsibility.
 /// </para>
 /// </remarks>
-public interface IHttpErrorHandlingFeature : IHttpFeature
+public interface IErrorHandlingFeature : IHttpFeature
 {
     /// <summary>
     /// Gets the application's <c>OnError</c> registrations, in the order they are consulted. The
     /// terminal <c>ProblemDetails</c> default is not part of the list — it runs only when every
     /// registration passes.
     /// </summary>
-    IReadOnlyList<IHttpErrorHandler> Handlers { get; }
+    IReadOnlyList<IErrorHandler> Handlers { get; }
 
     /// <summary>
     /// Turns <paramref name="exception"/> into a response on <paramref name="context"/>: consults

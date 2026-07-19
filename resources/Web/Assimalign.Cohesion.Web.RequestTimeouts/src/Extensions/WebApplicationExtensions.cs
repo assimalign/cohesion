@@ -22,7 +22,7 @@ public static class WebApplicationExtensions
         /// Adds the request-timeout middleware to the pipeline. With no configuration the
         /// middleware applies no global timeout — only endpoints carrying
         /// <see cref="RequestTimeoutMetadata"/> (or handlers arming
-        /// <see cref="IHttpRequestTimeoutFeature.SetTimeout"/>) are governed.
+        /// <see cref="IRequestTimeoutFeature.SetTimeout"/>) are governed.
         /// </summary>
         /// <param name="configure">An optional callback to configure the middleware.</param>
         /// <returns>The same pipeline builder for chaining.</returns>

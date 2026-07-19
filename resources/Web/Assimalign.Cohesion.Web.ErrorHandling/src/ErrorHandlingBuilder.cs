@@ -19,9 +19,9 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// </remarks>
 public sealed class ErrorHandlingBuilder
 {
-    private readonly HttpErrorHandlingFeature _feature;
+    private readonly ErrorHandlingFeature _feature;
 
-    internal ErrorHandlingBuilder(HttpErrorHandlingFeature feature)
+    internal ErrorHandlingBuilder(ErrorHandlingFeature feature)
     {
         _feature = feature;
     }
@@ -32,7 +32,7 @@ public sealed class ErrorHandlingBuilder
     /// <param name="handler">The handler to consult when a fault escapes the pipeline.</param>
     /// <returns>The builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <see langword="null"/>.</exception>
-    public ErrorHandlingBuilder OnError(IHttpErrorHandler handler)
+    public ErrorHandlingBuilder OnError(IErrorHandler handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
 

@@ -117,7 +117,7 @@ internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
 /// <summary>
 /// A chain-order probe: records that it was consulted and answers with a configured verdict.
 /// </summary>
-internal sealed class RecordingErrorHandler : IHttpErrorHandler
+internal sealed class RecordingErrorHandler : IErrorHandler
 {
     private readonly bool _handles;
 

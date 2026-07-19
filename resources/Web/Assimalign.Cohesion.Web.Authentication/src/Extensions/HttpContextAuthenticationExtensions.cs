@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Authentication;
 
 /// <summary>
 /// Surfaces the authenticated principal on <see cref="IHttpContext"/>
-/// as a property, backed by <see cref="IHttpAuthenticationFeature"/>
+/// as a property, backed by <see cref="IAuthenticationFeature"/>
 /// stored in the context's feature collection.
 /// </summary>
 /// <remarks>
@@ -27,7 +27,7 @@ public static class HttpContextAuthenticationExtensions
         /// Gets or sets the authenticated <see cref="ClaimsPrincipal"/>
         /// for the current exchange. Returns an empty principal (no
         /// claims, no identity) when no authentication middleware has
-        /// attached an <see cref="IHttpAuthenticationFeature"/> —
+        /// attached an <see cref="IAuthenticationFeature"/> —
         /// matching the ASP.NET Core <c>HttpContext.User</c> default so
         /// callers don't need a null-check on the common path.
         /// </summary>
@@ -36,7 +36,7 @@ public static class HttpContextAuthenticationExtensions
             get
             {
                 ArgumentNullException.ThrowIfNull(context);
-                return context.Features.Get<IHttpAuthenticationFeature>()?.User
+                return context.Features.Get<IAuthenticationFeature>()?.User
                     ?? EmptyPrincipal;
             }
             set
@@ -44,10 +44,10 @@ public static class HttpContextAuthenticationExtensions
                 ArgumentNullException.ThrowIfNull(context);
                 ArgumentNullException.ThrowIfNull(value);
 
-                IHttpAuthenticationFeature? feature = context.Features.Get<IHttpAuthenticationFeature>();
+                IAuthenticationFeature? feature = context.Features.Get<IAuthenticationFeature>();
                 if (feature is null)
                 {
-                    context.Features.Set<IHttpAuthenticationFeature>(new HttpAuthenticationFeature(value));
+                    context.Features.Set<IAuthenticationFeature>(new AuthenticationFeature(value));
                 }
                 else
                 {

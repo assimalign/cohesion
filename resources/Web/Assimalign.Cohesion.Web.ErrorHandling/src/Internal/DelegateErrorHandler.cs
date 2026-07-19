@@ -8,9 +8,9 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 
 /// <summary>
 /// Adapts an <see cref="HttpErrorHandler"/> delegate registration to the
-/// <see cref="IHttpErrorHandler"/> chain contract.
+/// <see cref="IErrorHandler"/> chain contract.
 /// </summary>
-internal sealed class DelegateErrorHandler : IHttpErrorHandler
+internal sealed class DelegateErrorHandler : IErrorHandler
 {
     private readonly HttpErrorHandler _handler;
 
