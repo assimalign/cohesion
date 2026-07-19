@@ -43,7 +43,11 @@ the *store only*, never headers, so it is safe even after the head has committed
 The one case the establishment path cannot serve is a session first touched *after* the head already
 started: a committed head can carry no new field, so cookie establishment is skipped (best-effort) and
 the guard is the `IHttpResponseStreamingFeature.HasStarted` / `Headers.IsReadOnly` pattern shared with
-the rest of the Web stack. The session still functions in memory for the remainder of that request.
+the rest of the Web stack. The session still functions in memory for the remainder of that request —
+but it is **not committed to the store**: the client can never present the undelivered id again, so
+persisting it would only accumulate orphaned entries until the idle timeout reaped them. (A session the
+request *presented by cookie* commits normally after a started head — the commit path touches only the
+store.)
 
 ### Why a request that already carries a cookie is not re-issued
 

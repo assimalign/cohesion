@@ -39,6 +39,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
 
     private IHttpSession? _current;
     private HttpSessionStoreSession? _storeSession;
+    private bool _orphanedNewSession;
 
     public WebSessionFeature(IHttpContext context, IHttpSessionStore store, HttpSessionOptions options)
     {
@@ -71,8 +72,10 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
             ArgumentNullException.ThrowIfNull(value);
             _current = value;
             // An externally-supplied session replaces our managed one; regeneration
-            // (which needs the store-backed type) no longer applies to it.
+            // (which needs the store-backed type) no longer applies to it, and its
+            // commit lifecycle is the caller's — never suppressed as an orphan.
             _storeSession = value as HttpSessionStoreSession;
+            _orphanedNewSession = false;
         }
     }
 
@@ -100,6 +103,14 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     public async ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         if (_current is null)
+        {
+            return;
+        }
+
+        // A new id whose Set-Cookie could not be delivered (head already committed) is
+        // unreachable by the client forever — persisting it would only litter the store
+        // with orphaned entries until the idle timeout reaps them.
+        if (_orphanedNewSession)
         {
             return;
         }
@@ -152,7 +163,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         else
         {
             id = SessionId.Create();
-            EstablishCookie(id);
+            _orphanedNewSession = !EstablishCookie(id);
         }
 
         HttpSessionStoreSession session = new(id, _store, _options.IdleTimeout);
@@ -173,18 +184,20 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         return null;
     }
 
-    private void EstablishCookie(string id)
+    private bool EstablishCookie(string id)
     {
         // A committed head can carry no new Set-Cookie; skip rather than fault. The
-        // session still functions in memory for the remainder of the request.
+        // session still functions in memory for the remainder of the request, but the
+        // client can never present the id again, so the commit path drops it too.
         if (ResponseHeadStarted())
         {
-            return;
+            return false;
         }
 
         IHttpCookieCollection cookies = _context.Response.Cookies;
         RemoveQueuedSessionCookies(cookies);
         cookies.Add(BuildCookie(id));
+        return true;
     }
 
     private HttpCookie BuildCookie(string id)

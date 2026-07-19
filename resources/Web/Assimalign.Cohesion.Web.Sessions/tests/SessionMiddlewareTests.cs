@@ -195,7 +195,7 @@ public class SessionMiddlewareTests
         // Arrange — a committed head cannot carry a new Set-Cookie
         SessionTestContext context = new();
         context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
-        InMemoryHttpSessionStore store = new();
+        RecordingSessionStore store = new();
 
         // Act
         await RunAsync(context, store, async c =>
@@ -204,8 +204,33 @@ public class SessionMiddlewareTests
             session.SetString("k", "v");
         });
 
-        // Assert — no cookie despite the session being accessed (best-effort establishment)
+        // Assert — no cookie despite the session being accessed (best-effort establishment), and no
+        // store persist either: the client can never present the undelivered id, so committing the
+        // orphaned session would only litter the store until the idle timeout reaped it.
         context.Response.Cookies.ShouldBeEmpty();
+        store.SetCount.ShouldBe(0);
+        store.RefreshCount.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An established session presented by cookie still commits after the head starts")]
+    public async Task Invoke_ExistingSessionHeadStarted_ShouldStillCommit()
+    {
+        // Arrange — the client already holds the id, so a committed head suppresses nothing
+        RecordingSessionStore store = new();
+        await SeedAsync(store, "held-id", ("user", "alice"));
+        SessionTestContext context = new(HttpScheme.Http, requestCookieHeader: $"{DefaultCookieName}=held-id");
+        context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            IHttpSession session = await c.LoadSessionAsync();
+            session.SetString("user", "bob");
+        });
+
+        // Assert — the post-next commit touches only the store, never headers, so it proceeds
+        store.SetCount.ShouldBeGreaterThan(1); // the seed write plus the commit
+        (await ReadStoredStringAsync(store, "held-id", "user")).ShouldBe("bob");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: Regenerating before any session access throws")]
@@ -233,7 +258,7 @@ public class SessionMiddlewareTests
 
     private static async Task RunAsync(
         SessionTestContext context,
-        InMemoryHttpSessionStore store,
+        IHttpSessionStore store,
         Func<IHttpContext, Task> handler,
         Action<HttpSessionOptions>? configure = null)
     {
@@ -244,7 +269,7 @@ public class SessionMiddlewareTests
         await middleware.InvokeAsync(context, ctx => handler(ctx));
     }
 
-    private static async Task SeedAsync(InMemoryHttpSessionStore store, string id, params (string Key, string Value)[] entries)
+    private static async Task SeedAsync(IHttpSessionStore store, string id, params (string Key, string Value)[] entries)
     {
         System.Collections.Generic.Dictionary<string, byte[]> values = new(StringComparer.Ordinal);
         foreach ((string key, string value) in entries)
@@ -255,7 +280,7 @@ public class SessionMiddlewareTests
         await store.SetAsync(id, HttpSessionSerializer.Serialize(values), IdleTimeout);
     }
 
-    private static async Task<string?> ReadStoredStringAsync(InMemoryHttpSessionStore store, string id, string key)
+    private static async Task<string?> ReadStoredStringAsync(IHttpSessionStore store, string id, string key)
     {
         byte[]? frame = await store.GetAsync(id);
         if (frame is null || !HttpSessionSerializer.TryDeserialize(frame, out System.Collections.Generic.Dictionary<string, byte[]>? values))
