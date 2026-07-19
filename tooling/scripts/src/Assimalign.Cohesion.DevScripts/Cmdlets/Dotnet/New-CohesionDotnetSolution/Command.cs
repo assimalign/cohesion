@@ -118,7 +118,7 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
         }
     }
 
-    internal Glob[] Globs => IgnorePaths.Select(path => Glob.Parse(path)).ToArray();
+    internal Glob[] Globs => field ??= IgnorePaths.Select(path => Glob.Parse(path)).ToArray();
 
     // This method gets called once for each cmdlet in the pipeline when the pipeline starts executing
     protected override void BeginProcessing()
@@ -381,7 +381,7 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
                 {
                     _unresolvedReferences.Add(include);
 
-                    WriteVerbose($"Project reference '{include}' was not found under the search root; skipping.");
+                    WriteVerbose($"Project reference '{include}' was not found under the search root or is excluded by '-IgnorePaths'; skipping.");
                 }
             }
         }
@@ -392,7 +392,8 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
     /// Builds, once per cmdlet invocation, a lookup of candidate reference projects keyed by
     /// project name (file name without extension). Candidates are every <c>*.csproj</c> beneath
     /// the resolved search root, excluding projects that already live inside the solution
-    /// directory and any in build-output or version-control directories.
+    /// directory, any in build-output or version-control directories, and any matching an
+    /// <c>-IgnorePaths</c> pattern.
     /// </summary>
     private Dictionary<string, string> GetProjectIndex(string solutionPath)
     {
@@ -425,6 +426,14 @@ public class NewCohesionDotnetSolutionCmdlet : PSCmdlet
             }
 
             if (IsExcludedReferencePath(projectFile))
+            {
+                continue;
+            }
+
+            // '-IgnorePaths' must exclude reference candidates the same way it excludes
+            // solution entries. Filtering here rather than at resolution time also keeps an
+            // ignored project from shadowing a same-named candidate in first-match-wins below.
+            if (Globs.Any(glob => glob.IsMatch(projectFile)))
             {
                 continue;
             }

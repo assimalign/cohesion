@@ -36,6 +36,10 @@
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ClientFactory/">
 		<File Path="Assimalign.Cohesion.Http.ClientFactory/README.md" />
 	</Folder>
+	<Folder Name="/Http/Assimalign.Cohesion.Http.ClientFactory/docs/">
+		<File Path="Assimalign.Cohesion.Http.ClientFactory/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Http.ClientFactory/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Http/Assimalign.Cohesion.Http.ClientFactory/src/">
 		<Project Path="Assimalign.Cohesion.Http.ClientFactory/src/Assimalign.Cohesion.Http.ClientFactory.csproj" />
 	</Folder>
