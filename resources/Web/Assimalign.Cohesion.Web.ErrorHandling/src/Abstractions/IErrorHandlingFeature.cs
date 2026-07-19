@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// The feature is composed once at builder time (<c>AddErrorHandling</c>) and seeded onto every
 /// exchange. Boundaries that catch pipeline faults — the exception-boundary middleware, or an
 /// inline <c>try/catch</c> around a risky section — resolve it via
-/// <c>context.Features.Get&lt;IHttpErrorHandlingFeature&gt;()</c> and delegate the response to
+/// <c>context.Features.Get&lt;IErrorHandlingFeature&gt;()</c> and delegate the response to
 /// <see cref="HandleAsync"/>.
 /// </para>
 /// <para>

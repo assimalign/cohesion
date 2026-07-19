@@ -68,7 +68,7 @@ Three layers, outermost last:
 1. **Handler-local `try/catch`** — a middleware that can produce a real *outcome* from a
    failure does so itself and never involves this seam.
 2. **The pipeline boundary → `OnError` (this package + #881)** — application-owned fault
-   presentation. The boundary catches, resolves `IHttpErrorHandlingFeature`, and delegates the
+   presentation. The boundary catches, resolves `IErrorHandlingFeature`, and delegates the
    response.
 3. **The server's exception isolation (#762, `Web.Hosting`)** — infrastructure protection: an
    exception that escapes even the boundary (or a fault in the boundary/handlers themselves)

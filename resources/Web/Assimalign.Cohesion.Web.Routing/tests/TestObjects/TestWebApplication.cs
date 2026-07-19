@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -106,6 +107,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
         private readonly IEnumerable<IHttpFeature> _features;
 
         public TestWebApplicationContext(IEnumerable<IHttpFeature> features) => _features = features;
+
+        public FileSystemPath? ContentRootPath => null;
 
         public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
 
