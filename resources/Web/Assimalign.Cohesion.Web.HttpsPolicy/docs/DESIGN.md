@@ -44,6 +44,20 @@ reflects. It is the same signal `Web.Compression` already gates its BREACH
 protection on (`context.Request.Scheme == HttpScheme.Https`), so this package
 follows an established precedent rather than inventing a detection path.
 
+### Behind a TLS-terminating proxy
+
+`IHttpRequest.Scheme` describes the **immediate hop**. When TLS terminates at a
+proxy and the app-facing hop is plaintext, every request reads as insecure here:
+`UseHttpsRedirection` would loop (the proxy re-delivers the redirect over the
+same plaintext hop) and `UseHsts` would never emit. That is deliberate for now —
+the forwarded-headers feature (#778, `Web.ForwardedHeaders`) intentionally never
+mutates `Request.Scheme`; the proxy-asserted scheme lives on the
+`IHttpForwardedFeature` effective values instead. Teaching this package to
+consult that feature (a legal cross-feature reference) when forwarded trust is
+configured is a recorded follow-up, not silently assumed behavior. Until then:
+do not register `UseHttpsRedirection`/`UseHsts` on a plaintext hop behind a
+TLS-terminating proxy.
+
 ## Redirection
 
 ### Location composition
