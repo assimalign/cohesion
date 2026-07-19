@@ -88,6 +88,11 @@ Two consequences follow from the seam being **synchronous** (`Set` is `void`):
 The endpoint gate applies **at most once per exchange** (a re-published match does not acquire a second
 lease).
 
+**Ordering constraint that follows:** the signal travels the pipeline segment between the router and
+`UseRateLimiting`, so no catch-all middleware may sit between them — in particular, the `Web.ErrorHandling`
+exception boundary belongs **outside** `UseRateLimiting` (its usual outermost position), never between
+`UseRateLimiting` and `UseRouting`, or it would swallow the signal and render a rejection as a 500.
+
 ## Queueing semantics
 
 `QueueLimit`/`QueueProcessingOrder` pass through the BCL limiter options unchanged — the package configures
