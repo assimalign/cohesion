@@ -94,6 +94,37 @@ internal static class Http1MessageReader
                 $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {targetError}");
         }
 
+        // RFC 3986 §2.4 / RFC 9112 §3.2.1 — percent-decode the origin-form request-target path so this
+        // transport surfaces IHttpRequest.Path identically to HTTP/2 and HTTP/3, which run the :path
+        // through HttpPath.FromUriComponent (Http2Stream.ParseQuery / Http3HeaderCodec.ParseQuery).
+        // HttpRequestTarget already split the path from the query on the first '?', so the query is
+        // decoded independently (below, via HttpQuery.Parse — the same path h2/h3 take) and the decode
+        // scopes to the path component only. FromUriComponent keeps %2F encoded (it never becomes a
+        // separator — the routing '{**}' identity invariant relies on it), decodes encoded dot segments
+        // to "..", and leaves invalid/overlong sequences intact per UrlDecoder. A decoded octet that is
+        // not a legal path character (a space, control, '?'/'#', or NUL) makes the target malformed —
+        // the same outcome the shared decode reaches on h2/h3; surface it as the transport's existing
+        // malformed-request-target failure rather than letting it escape the read loop. The other three
+        // request-target forms keep their current handling: absolute-form's path is already normalized by
+        // System.Uri, authority-form (CONNECT) carries none, and asterisk-form is the literal '*'.
+        HttpPath requestPath;
+        if (target.Form == HttpRequestTargetForm.Origin)
+        {
+            try
+            {
+                requestPath = HttpPath.FromUriComponent(target.Path.Value);
+            }
+            catch (Exception ex) when (ex is HttpException or InvalidOperationException)
+            {
+                throw new InvalidDataException(
+                    $"The HTTP/1.1 request line '{requestLine}' has a malformed request-target: {ex.Message}");
+            }
+        }
+        else
+        {
+            requestPath = target.Path;
+        }
+
         HttpHeaderCollection headers = await ReadHeadersAsync(stream, limits, readToken).ConfigureAwait(false);
 
         // The header section is fully received; disarm the request-headers deadline so the body
@@ -143,7 +174,7 @@ internal static class Http1MessageReader
             {
                 Version = HttpVersion.Http11,
                 Method = method,
-                Path = target.Path,
+                Path = requestPath,
                 Scheme = requestScheme,
                 Host = host,
                 Headers = headers.AsReadOnly(),
@@ -238,7 +269,7 @@ internal static class Http1MessageReader
 
             Http1Request request = new(
                 host,
-                target.Path,
+                requestPath,
                 method,
                 requestScheme,
                 queryCollection,

@@ -330,6 +330,38 @@ No reflection, no runtime code generation. Hook dispatch is interface calls
 over a snapshotted array; the context is one small allocation per request,
 only when at least one interceptor is registered.
 
+## Request-target percent-decoding (h1/h2/h3 parity)
+
+`IHttpRequest.Path` is the **percent-decoded** path on every transport, produced by the same
+`HttpPath.FromUriComponent` decode (RFC 3986 §2.4). HTTP/2 and HTTP/3 run it over the `:path`
+pseudo-header (`Http2Stream.ParseQuery` / `Http3HeaderCodec.ParseQuery`); HTTP/1.1's
+`Http1MessageReader` runs it over the **origin-form** request-target path after
+`HttpRequestTarget` has split path from query (issue #895). Identical wire bytes therefore yield
+an identical `Path` on all three: `%2e%2e` decodes to `..` (so the encoded-traversal form a
+static-file or routing layer must reject reads the same everywhere), an ordinary octet like
+`%24` decodes to `$`, and an invalid or overlong escape (`%zz`, `%C0%AE`) is left intact per
+`UrlDecoder`.
+
+Two invariants are load-bearing:
+
+- **`%2F` is never decoded to a separator** — `UrlDecoder` skips it, so a catch-all route's
+  `{**}` identity form and a static mount's segment boundaries survive an encoded slash. The
+  query, by contrast, is decoded fully (including `%2F` → `/`) because it is split off before
+  the path decode and parsed through `HttpQuery.Parse`, not `FromUriComponent` — the same split
+  and the same query decode on all three transports.
+- **A decoded octet that is not a legal path character** (a space from `%20`, a control from
+  `%09`, `?`/`#`, or a NUL from `%00`) makes the request-target malformed. On h1 the reader
+  surfaces this as its existing malformed-request-target failure (an `InvalidDataException`
+  classified as a wire-level fault — the connection is dropped, never mistaken for a literal
+  reachable path), reaching the same reject outcome the shared decode produces on h2/h3.
+
+Why decode in the transport rather than in `HttpRequestTarget`: the value object is a purely
+syntactic RFC 9112 §3.2 parse whose `Path`/`RawValue` stay wire-faithful (its tests pin
+`/with%20space` as a literal), and h2/h3 already decode in their transport layer — so h1 matches
+them by decoding in `Http1MessageReader`, not by changing the shared parser. The other three
+request-target forms keep their existing handling (absolute-form's path is already normalized by
+`System.Uri`, authority-form/CONNECT carries none, asterisk-form is the literal `*`).
+
 ## IsSecure: capability-derived, single-source
 
 ### What it is
