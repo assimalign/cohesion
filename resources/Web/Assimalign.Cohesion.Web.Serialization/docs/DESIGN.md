@@ -36,8 +36,9 @@ layer, composing over the same seam.
   registration-order tie-break — the same RFC 9110 §12.5.1 rules `Accept` handling uses, so
   #149's negotiation and this registry can never disagree about what matches. Consequence: the
   `application/*+json` structured-suffix convention is **not** a match rule here (it is not an
-  RFC media range); the JSON pair claims `application/json` + `text/json`. Suffix awareness is
-  #149's call, via `HttpMediaType.Suffix`.
+  RFC media range); the JSON pair claims `application/json` + `text/json`. Suffix awareness is the
+  negotiation layer's call, via `HttpMediaType.Suffix` — delivered narrowly (see *Content
+  negotiation* below).
 - **`AddJsonSerialization(resolver)` is the AOT registration story.** The built-in JSON pair
   serializes exclusively through the `JsonTypeInfo`-based System.Text.Json entry points, with
   contracts supplied by the application's source-generated resolver (typically its
@@ -64,12 +65,69 @@ layer, composing over the same seam.
 - **Default write target = first registered writer.** `WriteContentAsync(value)` with no
   explicit media type uses the response's already-set `Content-Type` when present, else the
   first registered writer's canonical type (its first declared media type, validated concrete
-  at registration). Deterministic and documented; `Accept`-driven selection is #149, which will
-  pass its choice through the explicit-media-type overload.
+  at registration). Deterministic and documented; `Accept`-driven selection is the negotiation
+  layer (#149), which passes its choice through the explicit-media-type overload — see *Content
+  negotiation* below.
 - **The declared type is the contract.** `WriteContentAsync<T>` serializes as `typeof(T)`, not
   `value.GetType()` — polymorphic-by-runtime-type serialization is an implicit-reflection shape
   that undermines the explicit-contract story; STJ's declared-type polymorphism options remain
   available through the resolver.
+
+## Content negotiation (#149)
+
+Server-driven negotiation composes *over* the registry as a thin layer, never redoing its work:
+the q-value / precedence engine is the shared `HttpContentNegotiation` primitive (#771), and the
+selectable representations are exactly the registry's writers. `HttpContentNegotiationExtensions`
+ships three members — `IHttpContentSerializationFeature.TryNegotiate(acceptHeader, out mediaType)`
+(the pure seam), `IHttpContext.TryNegotiateContentType(out mediaType)` (the same, reading the
+exchange's `Accept`), and `IHttpContext.WriteNegotiatedContentAsync<T>(value, ct)` (negotiate →
+write, or compose the `406`).
+
+- **A seam, not a feature.** Negotiation is a stateless function of *(registered writers, `Accept`
+  header)*, so it is an extension surface over the existing `IHttpContentSerializationFeature`,
+  not a second feature seeded onto the exchange. A separate `IHttpContentNegotiator` feature
+  would need its own builder wiring and would only re-read the writers the registry already holds;
+  the extension composes with zero new composition surface and no DI, usable from any middleware.
+  This matches the package's other stateless call-site extensions (`ReadContentAsync`,
+  `WriteContentAsync`) rather than the interface-first rule that governs stateful contracts.
+- **Server options are the writers' concrete media types.** Negotiation offers every concrete
+  (wildcard-free) media type across the writers, in registration order, de-duplicated. A writer's
+  wildcard entries are match *targets*, not representations it can emit, so they are excluded; a
+  writer's alternate concrete types (the JSON pair's `text/json`) are offered. Registration order
+  is server-preference order, so equal-quality ties and a wildcard `*/*` request resolve to the
+  earliest writer — the same precedence the registry's `GetWriter` applies.
+- **Structured-suffix fallback — the decision #864 deferred here.** The registry's `Includes`
+  matching has no `+suffix` semantics (a recorded #864 non-goal). #149 owns the call and makes it
+  narrowly: exact RFC 9110 §12.5.1 matching runs first; only when it finds nothing does a fallback
+  let a **bare base-type** `Accept` range (`application/json`) be satisfied by a registered writer
+  whose media type carries that base as its `HttpMediaType.Suffix` (`application/problem+json`).
+  The response then carries the writer's honest concrete type, not the requested base.
+  - *Direction.* A `+json` type is guaranteed parseable as JSON (RFC 6839), so a JSON-accepting
+    client can consume it; the reverse does not hold, so an already-suffixed range
+    (`application/vnd.foo+json`) is **not** widened — it names a specific schema.
+  - *Precedence.* The fallback is strictly below exact matching, so it never changes an exact
+    outcome; it only turns a would-be `406` into a served, correctly-typed response. The
+    motivating case is an error surface that registers only `application/problem+json` still
+    answering an `Accept: application/json` request.
+  - *Refusals honored.* A `q=0` range covering the suffixed type (`application/problem+json;q=0`)
+    still rejects it — the fallback re-checks explicit refusals before selecting.
+  - *Not general suffix matching.* A client **range** like `application/*+json` is not honored:
+    the #771 parser treats `*+json` as a literal subtype, not a suffix wildcard, and reproducing
+    that here would mean re-implementing media-range parsing. Recorded as a primitive gap, not
+    duplicated (see Non-goals).
+- **`Vary: Accept`, appended.** A negotiated response depends on `Accept`, so
+  `WriteNegotiatedContentAsync` stamps `Vary: Accept` on both the written response and the `406`.
+  It appends — an existing `Vary` token (e.g. a CORS layer's `Origin`) is preserved, `Accept` is
+  never duplicated, and a `Vary: *` is left untouched.
+- **`406` is an outcome, not a fault.** A missing registry is still a composition fault (the
+  call-site resolver throws, per the error model). But *no acceptable representation* — including
+  an empty registry — is a protocol outcome: `WriteNegotiatedContentAsync` sets a **bodyless**
+  `406` (no `Content-Type`, no body) and returns `false`, the exact shape the #881 status-code-pages
+  middleware upgrades into a problem+json explanation. This is deliberately looser than the default
+  `WriteContentAsync(value)`, which faults on an empty registry — a negotiated write's contract is
+  "serve the best the registry can, else `406`", so it treats "nothing to offer" as the
+  client-facing outcome. The pure `TryNegotiate` seam is non-throwing throughout (an unacceptable
+  request is `false`, never an exception).
 
 ## Error model
 
@@ -104,9 +162,16 @@ builder registered, with no compile-time knowledge of this package.
 
 ## Non-goals
 
-- **Content negotiation** — #149, over this registry.
 - **Binding and validation** — #796, over this registry.
-- **Structured-suffix (`+json`) range matching** — #149's call, recorded above.
+- **Structured-suffix wildcard ranges (`application/*+json`)** — the negotiation layer added a
+  narrow base-type→suffix fallback (see *Content negotiation*), but a client range like
+  `application/*+json` is still not honored; the #771 parser treats `*+json` as a literal subtype,
+  and reproducing suffix-wildcard matching would mean re-implementing media-range parsing. A
+  primitive-side gap, revisited if a real consumer needs it.
+- **`Accept-Charset` / `Accept-Language` negotiation** — media types only; charset and language
+  selection are a separate concern (the #771 primitive already parses them).
+- **Client-side content negotiation** — this surface is server-side response media-type selection;
+  the client half (setting `Accept`, reading a response's `Content-Type`) lives elsewhere.
 - **Non-UTF-8 request transcoding** — the JSON reader takes the body stream as-is (UTF-8);
   charset transcoding is a documented gap until a real consumer appears.
 - **Raw/string body helpers and SSE** — raw writes stay on `Body`;
