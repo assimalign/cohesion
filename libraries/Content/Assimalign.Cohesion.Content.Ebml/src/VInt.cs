@@ -11,7 +11,9 @@ public readonly struct VInt
     private VInt(ulong encodedValue, int length)
     {
         if (length < 1 || length > 8)
+        {
             throw new ArgumentOutOfRangeException(nameof(length));
+        }
 
         EncodedValue = encodedValue;
         _length = (sbyte)length;
@@ -67,11 +69,17 @@ public readonly struct VInt
     public static VInt EncodeSize(ulong value, int length = 0)
     {
         if (value > MaxSizeValue)
+        {
             throw new ArgumentException("Value exceed VInt capacity", nameof(value));
+        }
         if (length < 0 || length > 8)
+        {
             throw new ArgumentOutOfRangeException(nameof(length));
+        }
         if (length > 0 && DataBitsMask[length] <= value)
+        {
             throw new ArgumentException("Specified width is not sufficient to encode value", nameof(value));
+        }
 
         if (length == 0)
         {
@@ -90,7 +98,9 @@ public readonly struct VInt
     public static VInt MakeId(uint elementId)
     {
         if (elementId > MaxElementIdValue)
+        {
             throw new ArgumentException("Value exceed VInt capacity", nameof(elementId));
+        }
 
         var id = EncodeSize(elementId);
         Debug.Assert(id._length <= 4);
@@ -105,7 +115,9 @@ public readonly struct VInt
     public static VInt UnknownSize(int length)
     {
         if (length < 0 || length > 8)
+        {
             throw new ArgumentOutOfRangeException(nameof(length));
+        }
 
         var sizeMarker = 1UL << (7 * length);
         var dataBits = (1UL << (7 * length)) - 1;
@@ -120,7 +132,9 @@ public readonly struct VInt
     public static VInt FromEncoded(ulong encodedValue)
     {
         if (encodedValue == 0)
+        {
             throw new ArgumentException("Zero is not a correct value", nameof(encodedValue));
+        }
 
         var mostSignificantOctetIndex = 7;
         while ((encodedValue >> mostSignificantOctetIndex * 8) == 0x0)
@@ -132,7 +146,9 @@ public readonly struct VInt
         var extraBytes = (marker >> 4 > 0) ? ExtraBytesSize[marker >> 4] : 4 + ExtraBytesSize[marker];
 
         if (extraBytes != mostSignificantOctetIndex)
+        {
             throw new ArgumentException("Width marker does not match its position", nameof(encodedValue));
+        }
 
         return new VInt(encodedValue, extraBytes + 1);
     }
@@ -152,13 +168,15 @@ public readonly struct VInt
     {
         buffer = buffer ?? new byte[maxLength];
 
-        if (source.ReadFully(buffer, 0, 1) == 0)
-        {
-            throw new EndOfStreamException();
-        }
+        // ReadExactly throws EndOfStreamException when the stream ends before
+        // the requested count is satisfied, which is exactly the contract this
+        // reader needs for both the width marker and its trailing octets.
+        source.ReadExactly(buffer, 0, 1);
 
         if (buffer[0] == 0)
+        {
             throw new EbmlDataFormatException("Length bigger than 8 is not supported");
+        }
         // TODO handle EBMLMaxSizeWidth
 
         var extraBytes = (buffer[0] & 0xf0) != 0
@@ -166,12 +184,11 @@ public readonly struct VInt
             : 4 + ExtraBytesSize[buffer[0]];
 
         if (extraBytes + 1 > maxLength)
-            throw new EbmlDataFormatException($"Expected VInt with a max length of {maxLength}. Got {extraBytes + 1}");
-
-        if (source.ReadFully(buffer, 1, extraBytes) != extraBytes)
         {
-            throw new EndOfStreamException();
+            throw new EbmlDataFormatException($"Expected VInt with a max length of {maxLength}. Got {extraBytes + 1}");
         }
+
+        source.ReadExactly(buffer, 1, extraBytes);
 
         ulong encodedValue = buffer[0];
         for (var i = 0; i < extraBytes; i++)
@@ -187,7 +204,7 @@ public readonly struct VInt
     /// <param name="stream"></param>
     public int Write(Stream stream)
     {
-        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
 
         var buffer = new byte[Length];
 
@@ -243,9 +260,8 @@ public readonly struct VInt
         return other.EncodedValue == EncodedValue && other._length == _length;
     }
 
-    public override bool Equals(object obj)
+    public override bool Equals(object? obj)
     {
-        if (ReferenceEquals(null, obj)) return false;
         return obj is VInt i && Equals(i);
     }
 
