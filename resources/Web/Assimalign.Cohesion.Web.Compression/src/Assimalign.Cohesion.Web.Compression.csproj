@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Transparent HTTP body compression for the Cohesion Web pipeline, both directions in one lean feature package. UseResponseCompression negotiates gzip/brotli from Accept-Encoding for configured MIME types above a size threshold, wrapping the response body so the Content-Encoding/Content-Length/Vary decision is deferred to first write; it never double-compresses already-encoded content and is off by default for HTTPS dynamic content (BREACH, CVE-2013-3587). UseRequestDecompression transparently inflates gzip/br/deflate request bodies before handlers read them, enforcing a decompressed-size guard (413) against zip bombs and answering 415 for unsupported codings. BCL GZipStream/BrotliStream/ZLibStream only; builder-time options; AOT-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+</Project>

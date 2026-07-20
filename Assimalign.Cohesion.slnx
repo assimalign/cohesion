@@ -2074,6 +2074,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Authorization/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Authorization/tests/Assimalign.Cohesion.Web.Authorization.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Compression/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Compression/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Compression/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Compression/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Compression/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Compression/src/Assimalign.Cohesion.Web.Compression.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Compression/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Compression/tests/Assimalign.Cohesion.Web.Compression.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.CookiePolicy/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.CookiePolicy/src/Assimalign.Cohesion.Web.CookiePolicy.csproj" />
