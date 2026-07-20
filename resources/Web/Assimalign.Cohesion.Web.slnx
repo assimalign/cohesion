@@ -190,6 +190,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HttpsPolicy/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/">
+		<File Path="Assimalign.Cohesion.Web.HttpsPolicy/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.HttpsPolicy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HttpsPolicy/src/">
+		<Project Path="Assimalign.Cohesion.Web.HttpsPolicy/src/Assimalign.Cohesion.Web.HttpsPolicy.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/">
+		<Project Path="Assimalign.Cohesion.Web.HttpsPolicy/tests/Assimalign.Cohesion.Web.HttpsPolicy.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ProblemDetails/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/">
 		<File Path="Assimalign.Cohesion.Web.ProblemDetails/docs/DESIGN.md" />

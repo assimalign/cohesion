@@ -321,8 +321,8 @@ public readonly struct HttpHeaderKey : IEquatable<HttpHeaderKey>, IComparable<Ht
     /// <summary>Gets the <c>:status</c> HTTP header name.</summary>
     public static HttpHeaderKey Status {get;}= new( ":status");
 
-    /// <summary>Gets the <c>Strict-Transports-Security</c> HTTP header name.</summary>
-    public static HttpHeaderKey StrictTransportSecurity {get;}= new( "Strict-Transports-Security");
+    /// <summary>Gets the <c>Strict-Transport-Security</c> HTTP header name (RFC 6797).</summary>
+    public static HttpHeaderKey StrictTransportSecurity {get;}= new( "Strict-Transport-Security");
 
     /// <summary>Gets the <c>TE</c> HTTP header name.</summary>
     public static HttpHeaderKey TE {get;}= new( "TE");
