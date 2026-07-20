@@ -51,7 +51,6 @@ internal readonly record struct EndpointBinding(
     string ReceiverType,
     bool HasMethodParameter,
     string MethodExpression,
-    bool HasValidator,
     string DelegateType,
     ReturnKind Return,
     EquatableArray<ParameterBinding> Parameters,

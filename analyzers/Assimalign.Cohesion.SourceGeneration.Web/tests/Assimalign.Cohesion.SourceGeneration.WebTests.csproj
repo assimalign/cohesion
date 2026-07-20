@@ -30,6 +30,5 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 	</ItemGroup>
 </Project>

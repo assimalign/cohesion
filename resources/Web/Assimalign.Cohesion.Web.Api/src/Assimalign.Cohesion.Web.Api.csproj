@@ -2,9 +2,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
-		<!-- Typed-binding failure semantics (RFC 9457) render through the ProblemDetails writer, and the
-		     opt-in validation seam runs an ObjectValidation IValidator over the bound model. -->
+		<!-- Typed-binding failure semantics (RFC 9457) render through the ProblemDetails writer. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 	</ItemGroup>
 </Project>

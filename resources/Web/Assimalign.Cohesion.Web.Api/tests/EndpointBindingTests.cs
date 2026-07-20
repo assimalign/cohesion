@@ -10,7 +10,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.ObjectValidation;
 using Assimalign.Cohesion.Web.Api.Tests.TestObjects;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Serialization;
@@ -23,8 +22,8 @@ namespace Assimalign.Cohesion.Web.Api.Tests;
 
 /// <summary>
 /// End-to-end coverage for the source-generated typed-delegate endpoint binding: real requests are
-/// driven through <see cref="WebApplicationTestFactory"/> and the generated thunks bind each source,
-/// enforce the failure semantics, and honor the validation seam.
+/// driven through <see cref="WebApplicationTestFactory"/> and the generated thunks bind each source
+/// and enforce the failure semantics.
 /// </summary>
 public class EndpointBindingTests
 {
@@ -312,58 +311,6 @@ public class EndpointBindingTests
 
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("cancellable");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Api] - Validation: invalid model short-circuits to 400 problem")]
-    public async Task Validation_InvalidModel_ShouldShortCircuit()
-    {
-        using CancellationTokenSource cancellation = new(TestTimeout);
-        await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
-
-        IValidator validator = Validator.Create(configure => configure.AddProfile(new WidgetValidationProfile()));
-
-        factory.Application.UseRouting();
-
-        factory.Application.MapPost("/validated", async (Widget widget, IHttpContext context) =>
-        {
-            await WriteTextAsync(context, "handled");
-        }, validator);
-
-        using HttpClient client = factory.CreateClient();
-        using StringContent content = new("""{"name":"","quantity":1}""", Encoding.UTF8, "application/json");
-
-        using HttpResponseMessage response = await client.PostAsync("/validated", content, cancellation.Token);
-
-        response.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldContain("\"errors\"", Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Api] - Validation: valid model runs the handler")]
-    public async Task Validation_ValidModel_ShouldRunHandler()
-    {
-        using CancellationTokenSource cancellation = new(TestTimeout);
-        await using WebApplicationTestFactory factory = new();
-        factory.Builder.AddRouting();
-        factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
-
-        IValidator validator = Validator.Create(configure => configure.AddProfile(new WidgetValidationProfile()));
-
-        factory.Application.UseRouting();
-
-        factory.Application.MapPost("/validated", async (Widget widget, IHttpContext context) =>
-        {
-            await WriteTextAsync(context, "handled");
-        }, validator);
-
-        using HttpClient client = factory.CreateClient();
-        using StringContent content = new("""{"name":"gizmo","quantity":1}""", Encoding.UTF8, "application/json");
-
-        using HttpResponseMessage response = await client.PostAsync("/validated", content, cancellation.Token);
-
-        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
-        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("handled");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: single-context handler uses the middleware overload")]

@@ -80,10 +80,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         // registered verbatim and are not our concern.
         int delegateParameterIndex = -1;
         int patternParameterIndex = -1;
-        int validatorParameterIndex = -1;
         bool hasMethodParameter = false;
 
-        INamedTypeSymbol? validatorType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.ObjectValidation.IValidator");
         INamedTypeSymbol? httpMethodType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.HttpMethod");
 
         for (int i = 0; i < method.Parameters.Length; i++)
@@ -101,10 +99,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             else if (httpMethodType is not null && SymbolEqualityComparer.Default.Equals(parameterType, httpMethodType))
             {
                 hasMethodParameter = true;
-            }
-            else if (validatorType is not null && SymbolEqualityComparer.Default.Equals(parameterType, validatorType))
-            {
-                validatorParameterIndex = i;
             }
         }
 
@@ -216,7 +210,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             receiverType.ToDisplayString(FullyQualified),
             hasMethodParameter,
             methodExpression,
-            validatorParameterIndex >= 0,
             delegateType,
             returnKind,
             new EquatableArray<ParameterBinding>(parameters.ToImmutable()),
@@ -500,11 +493,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         builder.Append("string pattern, global::System.Delegate handler");
 
-        if (model.HasValidator)
-        {
-            builder.Append(", global::Assimalign.Cohesion.ObjectValidation.IValidator validator");
-        }
-
         builder.AppendLine(")");
         builder.AppendLine("        {");
         builder.Append("            var __handler = (").Append(model.DelegateType).AppendLine(")handler;");
@@ -516,16 +504,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         EmitThunkBody(builder, model, "                ");
 
         builder.Append("            }");
-
-        if (model.HasValidator)
-        {
-            builder.AppendLine(",");
-            builder.AppendLine("            new global::Assimalign.Cohesion.Web.Routing.Metadata.RouterRouteMetadataCollection(new global::Assimalign.Cohesion.Web.EndpointValidationMetadata(validator)));");
-        }
-        else
-        {
-            builder.AppendLine(");");
-        }
+        builder.AppendLine(");");
 
         builder.AppendLine("        }");
     }
@@ -542,19 +521,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         for (int i = 0; i < parameters.Count; i++)
         {
             EmitParameter(builder, parameters[i], i, indent);
-        }
-
-        if (model.HasValidator && model.BodyParameterIndex >= 0)
-        {
-            builder.Append(indent).AppendLine("{");
-            builder.Append(indent).Append("    global::Assimalign.Cohesion.ObjectValidation.ValidationResult __validation = validator.Validate(__arg")
-                .Append(model.BodyParameterIndex).AppendLine(");");
-            builder.Append(indent).AppendLine("    if (!__validation.IsValid)");
-            builder.Append(indent).AppendLine("    {");
-            builder.Append(indent).AppendLine("        await global::Assimalign.Cohesion.Web.EndpointValidation.WriteProblemAsync(context, __validation, context.RequestCancelled);");
-            builder.Append(indent).AppendLine("        return;");
-            builder.Append(indent).AppendLine("    }");
-            builder.Append(indent).AppendLine("}");
         }
 
         string arguments = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(static i => "__arg" + i));

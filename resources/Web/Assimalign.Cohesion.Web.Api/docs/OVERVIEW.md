@@ -39,17 +39,6 @@ Parameters bind from the request by convention or by explicit attribute:
 Unparseable or missing-required scalars produce a 400 problem+json (with an `errors` extension naming
 the parameter); an unsupported body Content-Type produces 415; a malformed body produces 400.
 
-## Validation
-
-```csharp
-IValidator validator = Validator.Create(c => c.AddProfile(new OrderValidationProfile()));
-
-app.MapPost("/orders", async (Order order, IHttpContext context) => { /* ... */ }, validator);
-```
-
-The validator runs against the bound model before the handler; failures short-circuit to a 400
-problem+json whose `errors` extension is built from the validation result.
-
 ## Wiring
 
 - Reference the generator: `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`

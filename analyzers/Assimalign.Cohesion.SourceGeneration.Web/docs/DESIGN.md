@@ -19,7 +19,7 @@ consuming library bundles the DLL under `analyzers/dotnet/cs/` (see delivery bel
 only the calls that resolve to a typed overload — one whose handler parameter is `System.Delegate`
 (the `WebApplicationMiddleware` overloads are registered verbatim and ignored). For each such call site
 the transform records an equatable `EndpointBinding` model: the interceptable location, the concrete
-receiver type, whether an explicit `HttpMethod` and/or `IValidator` parameter is present, the handler's
+receiver type, whether an explicit `HttpMethod` parameter is present, the handler's
 exact delegate type, its return shape, and a classified `ParameterBinding` per handler parameter. Any
 call site the transform cannot fully model returns `null` and is left to the throwing placeholder
 overload.
@@ -44,8 +44,6 @@ Each interceptor:
   fallback), query/form (`TryGetValue` + `TryParse`), header (`GetValue` + `TryParse`), body
   (`IHttpContentSerializationFeature` reader probe → 415, `ReadContentAsync<T>` with `JsonException`
   → 400 / `HttpContentSerializationException` → 415), and direct injections.
-- Runs a registered validator (when the `IValidator` overload is used), attaching an
-  `EndpointValidationMetadata` carrier and short-circuiting failures to a 400 problem+json.
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
   the typed overload, so generated registration is never itself intercepted.
 
@@ -70,9 +68,9 @@ Consumers must allow-list the generated namespace with
 ## Testing
 
 `tests/` drives the generator with a hand-rolled `CSharpGeneratorDriver` and asserts on the emitted
-source. Runtime behavior — real requests through every binding source, the 400/415 outcomes, injection,
-and the validation seam — is proven end-to-end in `Assimalign.Cohesion.Web.Api/tests` against the
-in-memory `WebApplicationTestFactory`.
+source. Runtime behavior — real requests through every binding source, the 400/415 outcomes, and
+injection — is proven end-to-end in `Assimalign.Cohesion.Web.Api/tests` against the in-memory
+`WebApplicationTestFactory`.
 
 ## Non-Goals
 

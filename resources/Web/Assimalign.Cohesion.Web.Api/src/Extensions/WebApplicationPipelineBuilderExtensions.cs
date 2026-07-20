@@ -5,9 +5,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Web;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.ObjectValidation;
 using Assimalign.Cohesion.Web.Routing;
-using Assimalign.Cohesion.Web.Routing.Metadata;
 
 /// <summary>
 /// API-oriented endpoint mapping helpers for web application pipelines.
@@ -59,39 +57,6 @@ public static class WebApplicationPipelineBuilderExtensions
         }
 
         /// <summary>
-        /// Maps a route to the supplied terminal middleware, attaching the supplied endpoint
-        /// metadata to the route.
-        /// </summary>
-        /// <param name="method">The HTTP method the route matches.</param>
-        /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="middleware">The middleware to execute when the route matches.</param>
-        /// <param name="metadata">The endpoint metadata to attach to the route.</param>
-        /// <returns>The current pipeline builder.</returns>
-        /// <remarks>
-        /// The source generator uses this overload to attach carriers such as
-        /// <see cref="EndpointValidationMetadata"/> alongside the generated binding thunk.
-        /// </remarks>
-        public IWebApplicationPipelineBuilder Map(HttpMethod method, string pattern, WebApplicationMiddleware middleware, IRouterRouteMetadataCollection metadata)
-        {
-            ArgumentException.ThrowIfNullOrEmpty(pattern);
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(middleware);
-            ArgumentNullException.ThrowIfNull(metadata);
-            IWebApplicationContext context = builder.Context;
-
-            IRouterFeature? feature = context.Features.OfType<IRouterFeature>().FirstOrDefault();
-
-            if (feature is null || feature.Builder is null)
-            {
-                throw new InvalidOperationException("No router builder was registered. Call AddRouting() on the application builder before mapping endpoints.");
-            }
-
-            feature.Builder.Map(new Route(method, pattern, new RouterRouteHandler(middleware), metadata));
-
-            return builder;
-        }
-
-        /// <summary>
         /// Maps a GET route pattern to the supplied terminal middleware.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
@@ -121,20 +86,6 @@ public static class WebApplicationPipelineBuilderExtensions
             => throw RequiresSourceGenerator();
 
         /// <summary>
-        /// Maps a route to a typed handler bound from the request, running the supplied validator
-        /// against the bound model before the handler executes. The Cohesion Web source generator
-        /// intercepts this call and substitutes an AOT-safe binding thunk.
-        /// </summary>
-        /// <param name="method">The HTTP method the route matches.</param>
-        /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <param name="validator">The validator run against the bound model; failures short-circuit to a 400 response.</param>
-        /// <returns>The current pipeline builder.</returns>
-        /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder Map(HttpMethod method, string pattern, Delegate handler, IValidator validator)
-            => throw RequiresSourceGenerator();
-
-        /// <summary>
         /// Maps a GET route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
@@ -157,19 +108,6 @@ public static class WebApplicationPipelineBuilderExtensions
             => throw RequiresSourceGenerator();
 
         /// <summary>
-        /// Maps a POST route to a typed handler bound from the request, running the supplied validator
-        /// against the bound model before the handler executes. The Cohesion Web source generator
-        /// intercepts this call and substitutes an AOT-safe binding thunk.
-        /// </summary>
-        /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <param name="validator">The validator run against the bound model; failures short-circuit to a 400 response.</param>
-        /// <returns>The current pipeline builder.</returns>
-        /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPost(string pattern, Delegate handler, IValidator validator)
-            => throw RequiresSourceGenerator();
-
-        /// <summary>
         /// Maps a PUT route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
@@ -181,19 +119,6 @@ public static class WebApplicationPipelineBuilderExtensions
             => throw RequiresSourceGenerator();
 
         /// <summary>
-        /// Maps a PUT route to a typed handler bound from the request, running the supplied validator
-        /// against the bound model before the handler executes. The Cohesion Web source generator
-        /// intercepts this call and substitutes an AOT-safe binding thunk.
-        /// </summary>
-        /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <param name="validator">The validator run against the bound model; failures short-circuit to a 400 response.</param>
-        /// <returns>The current pipeline builder.</returns>
-        /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPut(string pattern, Delegate handler, IValidator validator)
-            => throw RequiresSourceGenerator();
-
-        /// <summary>
         /// Maps a PATCH route to a typed handler whose parameters are bound from the request. The
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
@@ -202,19 +127,6 @@ public static class WebApplicationPipelineBuilderExtensions
         /// <returns>The current pipeline builder.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IWebApplicationPipelineBuilder MapPatch(string pattern, Delegate handler)
-            => throw RequiresSourceGenerator();
-
-        /// <summary>
-        /// Maps a PATCH route to a typed handler bound from the request, running the supplied validator
-        /// against the bound model before the handler executes. The Cohesion Web source generator
-        /// intercepts this call and substitutes an AOT-safe binding thunk.
-        /// </summary>
-        /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
-        /// <param name="validator">The validator run against the bound model; failures short-circuit to a 400 response.</param>
-        /// <returns>The current pipeline builder.</returns>
-        /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
-        public IWebApplicationPipelineBuilder MapPatch(string pattern, Delegate handler, IValidator validator)
             => throw RequiresSourceGenerator();
 
         /// <summary>

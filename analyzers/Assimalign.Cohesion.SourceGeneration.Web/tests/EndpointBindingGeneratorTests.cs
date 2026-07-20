@@ -21,7 +21,6 @@ public class EndpointBindingGeneratorTests
     private const string Preamble = """
         using System.Threading.Tasks;
         using Assimalign.Cohesion.Http;
-        using Assimalign.Cohesion.ObjectValidation;
         using Assimalign.Cohesion.Web;
         using Assimalign.Cohesion.Web.Hosting;
 
@@ -30,7 +29,7 @@ public class EndpointBindingGeneratorTests
 
     private static string Run(string body)
     {
-        string source = Preamble + "\n\npublic static class Endpoints\n{\n    public static void Configure(WebApplication app, IValidator validator)\n    {\n" + body + "\n    }\n}\n";
+        string source = Preamble + "\n\npublic static class Endpoints\n{\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
         List<MetadataReference> references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
@@ -41,7 +40,6 @@ public class EndpointBindingGeneratorTests
             .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.WebApplicationPipelineBuilderExtensions).Assembly.Location))
             .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.Hosting.WebApplication).Assembly.Location))
             .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.Routing.RouteValueDictionary).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.ObjectValidation.IValidator).Assembly.Location))
             .ToList();
 
         CSharpParseOptions parseOptions = new(LanguageVersion.Preview);
@@ -104,16 +102,6 @@ public class EndpointBindingGeneratorTests
         string generated = Run("""app.MapGet("/whoami", async ([FromHeader(Name = "X-User")] string user, IHttpContext context) => { await Task.CompletedTask; });""");
 
         generated.ShouldContain("context.Request.Headers.GetValue(\"X-User\")", Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: validator overload attaches metadata and runs validation")]
-    public void Generator_ValidatorOverload_EmitsValidationSeam()
-    {
-        string generated = Run("""app.MapPost("/widgets", async (Widget widget, IHttpContext context) => { await Task.CompletedTask; }, validator);""");
-
-        generated.ShouldContain("global::Assimalign.Cohesion.Web.EndpointValidationMetadata(validator)", Case.Sensitive);
-        generated.ShouldContain("validator.Validate(__arg0)", Case.Sensitive);
-        generated.ShouldContain("EndpointValidation.WriteProblemAsync", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: injections bind context and cancellation directly")]
