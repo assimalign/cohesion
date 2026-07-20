@@ -1,3 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Content.Text" />
+	</ItemGroup>
 </Project>

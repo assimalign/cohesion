@@ -18,7 +18,8 @@ jobs:
         projects: [
             'Assimalign.Cohesion.Content',
             'Assimalign.Cohesion.Content.Text',
-            'Assimalign.Cohesion.Content.Ebml'
+            'Assimalign.Cohesion.Content.Ebml',
+            'Assimalign.Cohesion.Content.Markdown'
         ]
     steps:
       - uses: actions/checkout@v4

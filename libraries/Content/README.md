@@ -25,7 +25,7 @@ layers, never on each other's internals.
 | `Assimalign.Cohesion.Content.Binary` | Shared binary parsing surface (exact reads, bounded slices) | Content | Placeholder |
 | [`Assimalign.Cohesion.Content.Text`](./Assimalign.Cohesion.Content.Text/) | Encoding detection and text reading surface | Content | Implemented |
 | [`Assimalign.Cohesion.Content.Yaml`](./Assimalign.Cohesion.Content.Yaml/) | YAML 1.2 document model, parser, emitter | Content, Content.Text | Implemented |
-| `Assimalign.Cohesion.Content.Markdown` | Markdown document model and parser | Content.Text | Placeholder |
+| [`Assimalign.Cohesion.Content.Markdown`](./Assimalign.Cohesion.Content.Markdown/) | Markdown document model, parser, HTML renderer, canonical writer (CommonMark 0.31.2 subset) | Content, Content.Text | Implemented |
 | `Assimalign.Cohesion.Content.Media` | Shared media abstractions | Content.Binary | Placeholder |
 | `Assimalign.Cohesion.Content.Bmff` | ISO BMFF box model and reader/writer | Content.Media | Broken — repair tracked (#442) |
 | `Assimalign.Cohesion.Content.Mpeg` | MP4/MPEG-4 profile over BMFF | Content.Bmff | Placeholder |
