@@ -109,6 +109,33 @@ public class OutputCacheMiddlewareTests
         counter.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: CacheAuthenticated stores the response but never replays its Set-Cookie")]
+    public async Task Invoke_CacheAuthenticatedSetCookie_ShouldServeHitWithoutSetCookie()
+    {
+        // Arrange — the policy opts authenticated responses into shared storage; the cookie grant
+        // itself is per-recipient and must never be part of the stored representation.
+        OutputCacheMiddleware middleware = CreateMiddleware(
+            out _,
+            options => options.AddBasePolicy(policy =>
+            {
+                policy.Duration = TimeSpan.FromMinutes(10);
+                policy.CacheAuthenticated = true;
+            }));
+        Counter counter = new();
+        WebApplicationMiddleware handler = Handler(counter, "shared", ctx => ctx.Response.Headers[HttpHeaderKey.SetCookie] = "session=1");
+
+        // Act
+        string first = await RunAsync(middleware, new OutputCacheTestContext(), handler);
+        OutputCacheTestContext hitContext = new();
+        string second = await RunAsync(middleware, hitContext, Handler(counter, "SHOULD-NOT-RUN"));
+
+        // Assert — the body is shared from the store, the cookie grant is not.
+        first.ShouldBe("shared");
+        second.ShouldBe("shared");
+        counter.Count.ShouldBe(1);
+        hitContext.Response.Headers.ContainsKey(HttpHeaderKey.SetCookie).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A request no-store directive bypasses the cache")]
     public async Task Invoke_RequestNoStore_ShouldBypass()
     {

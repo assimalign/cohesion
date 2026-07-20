@@ -137,7 +137,10 @@ cache should not take on. Widening the set is an additive future change.
 **Authenticated responses** are never cached by default: an `Authorization` request or a `Set-Cookie`
 response both bypass unless the policy sets `CacheAuthenticated`. That opt-in is dangerous (it shares a
 per-user representation) and is intended only alongside a `VaryBy*` that segments the key per principal —
-the caller owns that correctness.
+the caller owns that correctness. The opt-in covers the *response*, never the cookie grant itself:
+`Set-Cookie` is in the non-cacheable header set unconditionally, so a stored entry can never replay one
+client's cookie (say, a freshly minted session id) to another. A hit therefore carries the shared body
+and headers but no `Set-Cookie`.
 
 ## Time-to-live and Age
 

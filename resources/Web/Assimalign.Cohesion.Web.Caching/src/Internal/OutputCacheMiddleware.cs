@@ -42,6 +42,9 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
     {
         "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade",
         "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Age",
+        // Never replay one client's cookie grant to another: CacheAuthenticated opts the RESPONSE into
+        // shared storage, but the Set-Cookie field itself is always per-recipient and never stored.
+        "Set-Cookie",
     };
 
     private readonly IOutputCacheStore _store;
