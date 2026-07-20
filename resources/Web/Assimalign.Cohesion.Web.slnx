@@ -23,6 +23,10 @@
 		<Project Path="Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/docs/">
+		<File Path="Assimalign.Cohesion.Web.Api/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Api/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
 	</Folder>

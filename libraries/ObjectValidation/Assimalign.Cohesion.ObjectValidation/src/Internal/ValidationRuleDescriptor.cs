@@ -74,7 +74,7 @@ internal sealed class ValidationRuleDescriptor<T> : IValidationRuleDescriptor<T>
 
         return new ValidationRuleBuilder<T, TValue>(item);
     }
-    public IValidationCondition<T> When(Expression<Func<T, bool>> condition, Action<IValidationRuleDescriptor<T>> configure)
+    public IValidationCondition<T> When(Func<T, bool> condition, Action<IValidationRuleDescriptor<T>> configure)
     {
         var validationCondition = new ValidationCondition<T>()
         {
@@ -84,7 +84,7 @@ internal sealed class ValidationRuleDescriptor<T> : IValidationRuleDescriptor<T>
         var descriptor = new ValidationRuleDescriptor<T>()
         {
             ValidationItems = new ValidationItemQueue(),
-            ValidationCondition = condition.Compile()
+            ValidationCondition = condition
         };
         
         configure.Invoke(descriptor);

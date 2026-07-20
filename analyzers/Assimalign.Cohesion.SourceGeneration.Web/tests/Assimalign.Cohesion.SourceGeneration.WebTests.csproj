@@ -1,6 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
-<PropertyGroup>
+	<PropertyGroup>
+		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsRoslynComponent>false</IsRoslynComponent>
+		<EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
 		<IsPackable>false</IsPackable>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
@@ -8,8 +15,21 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp"  />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" />
-        <CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The CohesionProjectReference resolver only searches libraries/ and resources/, so the
+		     generator under test is referenced directly. This is a test host, not a shipped component. -->
+		<ProjectReference Include="..\src\Assimalign.Cohesion.SourceGeneration.Web.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The metadata/model assemblies the sample source and reference set need for the generator's
+		     semantic model to resolve the typed Map* surface. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 	</ItemGroup>
 </Project>

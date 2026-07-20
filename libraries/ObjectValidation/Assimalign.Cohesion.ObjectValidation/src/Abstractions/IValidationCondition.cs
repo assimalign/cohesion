@@ -34,5 +34,5 @@ public interface IValidationCondition<T> : IValidationCondition
     /// <param name="condition">The Condition in which the child validation rule collection should be applied.</param>
     /// <param name="configure">The validation to </param>
     /// <returns></returns>
-    IValidationCondition<T> When(Expression<Func<T, bool>> condition, Action<IValidationRuleDescriptor<T>> configure);
+    IValidationCondition<T> When(Func<T, bool> condition, Action<IValidationRuleDescriptor<T>> configure);
 }
