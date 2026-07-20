@@ -140,14 +140,17 @@ public class StaticFilesEndToEndTests
 
     [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: encoded traversal must never escape the mounted root")]
     [InlineData("/static/%2e%2e/secret.txt")]
+    [InlineData("/static/%2E%2E/secret.txt")]
     [InlineData("/static/%2e%2e/%2e%2e/secret.txt")]
     [InlineData("/static/..%5csecret.txt")]
     [InlineData("/static/nested/%2e%2e/%2e%2e/secret.txt")]
     public async Task E2E_EncodedTraversal_ShouldYield404(string attackPath)
     {
-        // Arrange — the transport percent-decodes these into literal dot segments before the
-        // middleware sees them; the URI client-side keeps them encoded, so the hostile form
-        // actually reaches the server (a literal "/../" would be normalized away by HttpClient).
+        // Arrange — every transport (HTTP/1.1 included, now that Http1MessageReader percent-decodes
+        // the request-target path to h2/h3 parity) decodes these into literal dot segments before the
+        // middleware sees them, so the traversal gate catches them uniformly; the URI client-side keeps
+        // them encoded, so the hostile form actually reaches the server (a literal "/../" would be
+        // normalized away by HttpClient).
         using CancellationTokenSource cancellation = new(TestTimeout);
         using InMemoryFileSystem site = StaticSite.Create(
             ("public.txt", "public"),
@@ -166,6 +169,29 @@ public class StaticFilesEndToEndTests
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.NotFound);
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldNotContain("top-secret");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: a legitimately percent-encoded name should decode over the wire and resolve")]
+    public async Task E2E_EncodedName_ShouldResolveDecodedFile()
+    {
+        // Arrange — the correctness counterpart to the traversal defense: a reserved character that is
+        // legitimately percent-encoded on the wire ("%24" → "$") must decode in the h1 transport and
+        // resolve the file whose name actually contains it. Before Http1MessageReader gained decode
+        // parity, "%24" reached the middleware raw and this file was unreachable on HTTP/1.1.
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        using InMemoryFileSystem site = StaticSite.Create(("prices$.json", "{\"ok\":true}"));
+        await using WebApplicationTestFactory factory = CreateFactory(site);
+        using HttpClient client = factory.CreateClient();
+
+        // Act — keep the client from canonicalizing "%24" away so the encoded octet reaches the wire.
+        var rawUri = new Uri(
+            "http://localhost/prices%24.json",
+            new UriCreationOptions { DangerousDisablePathAndQueryCanonicalization = true });
+        using HttpResponseMessage response = await client.GetAsync(rawUri, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("{\"ok\":true}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: Accept-Encoding negotiation should serve the precompressed sibling")]

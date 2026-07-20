@@ -69,17 +69,12 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        // Transport-parity compensation: the h2/h3 transports percent-decode the request path
-        // before it reaches middleware (HttpPath.FromUriComponent), but HTTP/1.x currently
-        // surfaces the raw request-target text. Decode here so the traversal gate and the file
-        // lookup see the same text on every transport — otherwise "%2e%2e" would read as a
-        // literal segment name on h1 and as ".." on h2. Remove once the h1 transport gains
-        // decode parity (filed as a follow-up; see docs/DESIGN.md).
+        // Every transport now percent-decodes the request-target path before middleware sees it
+        // (HttpPath.FromUriComponent in Http1MessageReader / Http2Stream / Http3HeaderCodec), so the
+        // traversal gate and the file lookup see the same decoded text regardless of protocol — "%2e%2e"
+        // arrives here as ".." on h1 exactly as it does on h2/h3. The middleware MUST NOT re-decode, or
+        // an encoded octet would decode twice; it trusts the transport's single decode.
         string path = context.Request.Path.Value;
-        if (context.Version == HttpVersion.Http11 && path.Contains('%'))
-        {
-            path = Uri.UnescapeDataString(path);
-        }
 
         if (!StaticFilePath.TryGetRelativePath(path, _prefix, out string remainder))
         {

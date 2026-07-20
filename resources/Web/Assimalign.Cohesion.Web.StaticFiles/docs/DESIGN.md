@@ -81,7 +81,6 @@ rule applied to a feature family that always ships together.
 ```
 GET/HEAD?  ──no──▶ next
 prefix match (segment-aligned, ordinal)? ──no──▶ next
-h1 percent-decode compensation (see below)
 unsafe segments (../.\:/NUL)? ──yes──▶ 404 (terminal)
 FileSystemPath.Parse  ──throws──▶ 404
 resolve: file | directory(+default doc | 301 append-slash) | miss ──▶ next
@@ -92,20 +91,22 @@ range (GET only; If-Range gate) ──▶ 416 | single 206 | full 200
 open stream → head (Content-*, ETag, Last-Modified, Accept-Ranges, Cache-Control, Vary) → body (GET)
 ```
 
-## HTTP/1.1 percent-decode parity (known transport gap)
+## HTTP/1.1 percent-decode parity (transport-owned)
 
-The h2/h3 transports percent-decode the request path before middleware sees it
-(`HttpPath.FromUriComponent`), but the HTTP/1.1 reader currently surfaces the raw
-request-target text (`HttpRequestTarget` does no decoding). Undefended, `%2e%2e` would read
-as a literal segment name on h1 and as `..` on h2 — the classic encoded-traversal split.
-The middleware compensates: when `Version == Http11` and the path contains `%`, it decodes
-once (`Uri.UnescapeDataString`) before prefix matching and the traversal gate, so every
-transport funnels the same text through the same defense. This also makes encoded *legit*
-names (`my%20file.txt`) resolve on h1.
+The traversal gate runs over the **decoded** request path, and every transport now decodes it
+before the middleware sees it: HTTP/1.1's `Http1MessageReader` percent-decodes the origin-form
+request-target through the same `HttpPath.FromUriComponent` HTTP/2 (`Http2Stream`) and HTTP/3
+(`Http3HeaderCodec`) run over the `:path` pseudo-header (issue #895). So `%2e%2e` arrives here as
+`..` on h1 exactly as on h2/h3, `%2F` stays encoded on all three (it never becomes a separator),
+and a decoded octet that is not a legal path character (a space, control, `?`/`#`, or NUL) makes
+the request-target malformed on every transport — so `my%20file.txt` is uniformly unreachable
+rather than resolving on h1 alone.
 
-This is a deliberate, removable wart: the right fix is decode parity in the h1 transport,
-filed as a follow-up work item — **remove this compensation in the same change** or h1 paths
-would double-decode.
+Because the transport owns the single decode, **the middleware must not decode again** — it reads
+`context.Request.Path.Value` verbatim. The former `Version == Http11` + `Uri.UnescapeDataString`
+compensation (which double-decoded relative to `FromUriComponent`, e.g. also collapsing `%2F` to a
+separator) was removed together with the h1 transport fix; re-introducing any middleware-side decode
+would double-decode a path the transport already handled.
 
 ## AOT posture
 

@@ -182,41 +182,25 @@ public class StaticFilesMiddlewareTests
         passedThrough[0].ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: percent-encoded traversal on HTTP/1.1 should be rejected with 404")]
-    [InlineData("/static/%2e%2e/secret.txt")]
-    [InlineData("/static/%2E%2E/secret.txt")]
-    [InlineData("/static/..%2fsecret.txt")]
-    [InlineData("/static/..%5csecret.txt")]
-    public async Task Invoke_EncodedTraversalOnHttp11_ShouldRespond404(string path)
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: the middleware serves the path verbatim without re-decoding percent sequences")]
+    public async Task Invoke_PercentEncodedName_IsNotReDecodedByMiddleware()
     {
-        // Arrange — the HTTP/1.1 transport surfaces the raw request-target text, so the
-        // middleware's own decode step must expose these as dot segments before the gate runs
-        // (the fake context reports HttpVersion.Http11).
-        using InMemoryFileSystem site = StaticSite.Create(("public.txt", "public"));
+        // Arrange — every transport now percent-decodes the request-target path exactly once before
+        // middleware runs (Http1MessageReader / Http2Stream / Http3HeaderCodec via
+        // HttpPath.FromUriComponent). A literal "%2E" that still reaches the middleware came from a
+        // double-encoded wire target ("%252E") the transport decoded once, so it is a plain name
+        // character — decoding it again would resolve the wrong file. The middleware must treat
+        // "/report%2Etxt" verbatim and never turn it into "/report.txt". (The encoded-traversal and
+        // encoded-name decode behaviors themselves are pinned at the transport — see the
+        // Http.Connections parity suite and the E2E traversal/name tests.)
+        using InMemoryFileSystem site = StaticSite.Create(("report.txt", "sensitive-report"));
 
         // Act
-        TestHttpContext context = await RunAsync(
-            site, path, HttpMethod.Get,
-            options => options.RequestPath = new HttpPath("/static"));
+        TestHttpContext context = await RunAsync(site, "/report%2Etxt", HttpMethod.Get);
 
-        // Assert
-        context.Response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: percent-encoded names on HTTP/1.1 should resolve to the decoded file")]
-    public async Task Invoke_EncodedNameOnHttp11_ShouldResolveDecodedFile()
-    {
-        // Arrange — the same decode step serves correctness, not just defense: a space-encoded
-        // request must reach the file whose name actually contains the space.
-        using InMemoryFileSystem site = StaticSite.Create(("my file.txt", "spaced"));
-
-        // Act
-        TestHttpContext context = await RunAsync(site, "/my%20file.txt", HttpMethod.Get);
-
-        // Assert
-        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-        context.ReadResponseBody().ShouldBe("spaced");
-        Header(context, HttpHeaderKey.ContentType).ShouldBe("text/plain");
+        // Assert — report.txt is never served; a served body would mean the middleware re-decoded
+        // "%2E" into "." and resolved "/report.txt".
+        context.ReadResponseBody().ShouldNotContain("sensitive-report", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - Invoke: backslash traversal should be rejected with 404")]
