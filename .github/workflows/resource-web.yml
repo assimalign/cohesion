@@ -26,6 +26,7 @@ jobs:
             'Assimalign.Cohesion.Web.Authentication.Bearer',
             'Assimalign.Cohesion.Web.Authentication.Cookie',
             'Assimalign.Cohesion.Web.Authorization',
+            'Assimalign.Cohesion.Web.Caching',
             'Assimalign.Cohesion.Web.Compression',
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',

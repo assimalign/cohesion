@@ -81,6 +81,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Authorization/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Authorization/tests/Assimalign.Cohesion.Web.Authorization.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Caching/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Caching/docs/">
+		<File Path="Assimalign.Cohesion.Web.Caching/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Caching/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Caching/src/">
+		<Project Path="Assimalign.Cohesion.Web.Caching/src/Assimalign.Cohesion.Web.Caching.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Caching/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Caching/tests/Assimalign.Cohesion.Web.Caching.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Compression/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Compression/docs/">
 		<File Path="Assimalign.Cohesion.Web.Compression/docs/DESIGN.md" />

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<Description>Server-owned HTTP output caching for the Cohesion Web pipeline. UseOutputCache serves cacheable GET/HEAD responses from an async, tag-aware store without invoking the endpoint, buffering the response body on a miss within per-entry/total size caps. Cache-or-bypass decisions ride the #755 typed RFC 9111 primitives (bypass on no-store/private/Set-Cookie, and never cache authenticated responses by default); the cache key honors the response's own Vary header, so a compressed or content-negotiated variant is never served to a client that cannot accept it. Base plus named policies compose at builder time with per-endpoint overrides through a sealed metadata carrier resolved at the router's route-match seam; the default in-memory store adapts Assimalign.Cohesion.Caching.InMemory with SizeLimit and per-entry size accounting. Byte-buffer payloads, no serializers, AOT-safe.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Caching.InMemory" />
+	</ItemGroup>
+</Project>
