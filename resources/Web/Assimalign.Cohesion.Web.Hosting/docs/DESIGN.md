@@ -279,9 +279,12 @@ keep-alive unblock, post-stop connection refusal).
   before cancelling on shutdown (versus cancelling them with the drain token) is
   future work; it needs a two-phase signal ("finish the current exchange, accept
   no new ones on this connection") that this iteration does not implement.
-- **HTTP/3 registration surface** on the server builder — tracked separately
-  (issue #767). The TLS convenience surface (issue #763) has landed; see "TLS
-  convenience surface" below.
+- **Full HTTP/3 response round-trip.** The HTTP/3 registration surface (issue
+  #767) has landed — see "HTTP/3 (QUIC) registration surface" below — and the
+  QUIC bind, h3 connection accept, and pipeline dispatch are verified. The full
+  client response round-trip is blocked by a pre-existing HTTP/3 server
+  control-stream defect in `Http.Connections` (`H3_CLOSED_CRITICAL_STREAM`),
+  which is Http-area work outside this module.
 - **Per-request service resolution.** DI/logging/config are builder-time only;
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
@@ -488,10 +491,10 @@ re-modeled on this convenience.
 
 ### Scope boundary
 
-`UseHttp1s` / `UseHttp2s` cover the stream protocols. HTTP/3 is out of scope here:
-QUIC's transport security is always-on (TLS is inherent to the protocol) and QUIC
-listeners bind asynchronously, so the HTTP/3 registration surface is tracked
-separately under #767.
+`UseHttp1s` / `UseHttp2s` cover the stream protocols. HTTP/3 has its own
+always-on-TLS surface — QUIC's transport security is inherent and QUIC listeners
+bind asynchronously — documented in "HTTP/3 (QUIC) registration surface" below
+(issue #767).
 
 ### AOT posture
 
@@ -499,3 +502,113 @@ No reflection, no runtime codegen. The composition is plain delegate wiring
 (`TcpConnectionListener.Create(...).UseTls(...)` inside a `Func<IConnectionListener>`),
 and the ALPN default is a list assignment. `IsAotCompatible=true` holds with no
 special handling.
+
+## HTTP/3 (QUIC) registration surface
+
+### What it is
+
+`HttpConnectionListenerOptions.UseHttp3(configure)` and
+`UseHttp3(configure, tlsOptions)` (extension members in `WebHostingExtensions`)
+register an HTTP/3 listener over QUIC — the h3 counterpart of the TCP
+`UseHttp1s` / `UseHttp2s` sugar:
+
+```csharp
+builder.Server.UseServer(options =>
+{
+    options.UseHttp3(quic =>
+    {
+        quic.EndPoint = new IPEndPoint(IPAddress.Loopback, 8443);
+        quic.ServerAuthenticationOptions.ServerCertificate = certificate;
+    });
+});
+```
+
+There is no plaintext `UseHttp3`: QUIC's transport security is always-on (TLS 1.3
+is inherent to the protocol, RFC 9001), so both members register a secured listener
+whose `Capabilities.Security == ConnectionSecurity.Tls`, and the HTTP layer derives
+the `https` scheme from that capability exactly as it does for `UseHttp1s` /
+`UseHttp2s`. A request served over an h3 listener carries `HttpScheme.Https` and
+reports `HttpVersion.Http30`.
+
+Two overloads, one for each certificate-configuration ergonomic:
+
+- **`UseHttp3(Action<QuicConnectionListenerOptions>)`** — the QUIC-native form. The
+  callback configures the endpoint, the certificate (through
+  `ServerAuthenticationOptions.ServerCertificate` — the QUIC equivalent of the
+  `TlsServerOptions` surface), stream limits, and error codes in one place,
+  mirroring the `Http.Connections` HTTP/3 example.
+- **`UseHttp3(Action<QuicConnectionListenerOptions>, TlsServerOptions)`** — the
+  cross-protocol-consistent form. The certificate flows through the *same*
+  `TlsServerOptions` type as `UseHttp1s` / `UseHttp2s`; its `AuthenticationOptions`
+  becomes the QUIC listener's `ServerAuthenticationOptions`, leaving the callback for
+  the endpoint and QUIC tunables. This is the exact ergonomic mirror of
+  `UseHttp2s(configure, tlsOptions)`.
+
+Both default the ALPN application-protocol list to `h3` and the enabled TLS
+protocols to TLS 1.3 when the caller leaves them unset (a caller-supplied list is
+preserved unmodified); the `TlsServerOptions` overload applies those defaults
+eagerly to the passed options so a later read observes them, matching `UseHttp2s`.
+
+### Async materialization — why a deferred factory that blocks once
+
+The stream-protocol sugar composes a *synchronous* listener factory
+(`() => TcpConnectionListener.Create(...)`), but binding a QUIC listener is
+asynchronous (`QuicConnectionListener.CreateAsync`). That mismatch is what the earlier
+`WebHostingExtensions` remarks recorded as the reason h3 had no callback overload.
+
+Rather than push an async shape up through the whole registration surface (and the
+synchronous `IWebApplicationServer` DI factory that resolves it), the h3 members reuse
+the transport's existing synchronous deferred-factory seam
+(`HttpConnectionListenerOptions.UseHttp3(Func<IMultiplexedConnectionListener>)`) and
+supply a factory that **materializes the QUIC listener at server start** — inside the
+`HttpConnectionListener` constructor, which the default server resolves lazily — and
+**blocks once** on the async bind there. The block is offloaded to the thread pool
+(`Task.Run(() => CreateAsync(...).AsTask()).GetAwaiter().GetResult()`) so no captured
+`SynchronizationContext` can deadlock it — the same sync-over-async bridge the
+connection primitives use (`DuplexPipeStream`, the request-body streams). Listener
+creation therefore happens at start, never at configuration time: the callback is not
+even invoked until the listener materializes, which a registration-time defer test pins.
+
+### Platform posture
+
+`System.Net.Quic` is available only on Windows, Linux, and macOS, and only when the
+platform ships a usable QUIC implementation (for example libmsquic). The h3 members —
+and the private materialization helper — are annotated
+`[SupportedOSPlatform("windows"/"linux"/"macos")]` to match the QUIC driver, so a call
+site on another OS is flagged by the platform-compatibility analyzer. At run time, when
+the platform lacks QUIC support (`QuicListener.IsSupported` is `false`), materialization
+throws `PlatformNotSupportedException` **at start**, propagated straight from
+`QuicConnectionListener.CreateAsync`. The tests gate on `QuicListener.IsSupported` and
+assert the bind on supported platforms or the `PlatformNotSupportedException` otherwise,
+so a CI machine without QUIC never hard-fails.
+
+### Coexistence and Alt-Svc composition
+
+h1/h2/h3 register simultaneously on one `HttpConnectionListenerOptions` (different
+endpoints), and each accepted exchange reports its own scheme and protocol — the QUIC
+listener's `Capabilities.Security = Tls` yields `https` / `Http30`, independent of any
+coexisting TCP listener. HTTP/3 `Alt-Svc` advertisement (issue #754) needs no extra
+wiring from this surface: `UseHttp3` registers the multiplexed listener that
+`HttpConnectionListener` reads when it computes the RFC 7838 `Alt-Svc` header, and the
+advertised port is taken from that listener's bound endpoint. An application opts in with
+`options.AdvertiseAltService(...)` alongside a stream listener; the server then injects
+`Alt-Svc: h3=":<port>"` on the h1/h2 responses so clients can discover and upgrade to h3.
+
+### Known limitation — h3 response round-trip
+
+The registration surface, the QUIC bind, the h3 connection accept, and pipeline dispatch
+(scheme + protocol) are verified end to end against a real .NET HTTP/3 client. The full
+**response** round-trip is currently blocked by a pre-existing HTTP/3 *server
+control-stream* defect in `Assimalign.Cohesion.Http.Connections`
+(`H3_CLOSED_CRITICAL_STREAM`, 0x104) that reproduces with that library's own Http3
+example, independent of this surface. The e2e test therefore makes the server-side
+observation (the protocol and scheme seen on the dispatched `IHttpContext`) its
+load-bearing assertion and treats the client response as best-effort. Closing the
+transport defect is Http-area work, tracked outside this issue.
+
+### AOT posture
+
+No reflection, no runtime codegen. Registration is plain delegate wiring; the ALPN/TLS
+defaults are list/enum assignments; materialization is `Task.Run` +
+`GetAwaiter().GetResult()` over `QuicConnectionListener.CreateAsync`.
+`IsAotCompatible=true` holds with no special handling.
