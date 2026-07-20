@@ -2204,6 +2204,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Query/tests/Assimalign.Cohesion.Web.Query.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RateLimiting/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RateLimiting/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.RateLimiting/src/Assimalign.Cohesion.Web.RateLimiting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RateLimiting/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.RateLimiting/tests/Assimalign.Cohesion.Web.RateLimiting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/docs/DESIGN.md" />
