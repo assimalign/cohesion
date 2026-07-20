@@ -38,13 +38,12 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// implementation (for example a missing libmsquic) it returns early, and the deferred-factory and
 /// platform-guard behaviour stays covered by <see cref="WebHttp3HostingExtensionsTests"/>.
 /// <para>
-/// The <em>server-side observation</em> (protocol + scheme seen on the dispatched
-/// <see cref="IHttpContext"/>) is the load-bearing assertion: it proves <c>UseHttp3</c> accepts a real
-/// QUIC h3 connection and drives it through the pipeline. The client's full response round-trip is
-/// observed best-effort: it currently trips a pre-existing HTTP/3 <em>server control-stream</em> defect
-/// (<c>H3_CLOSED_CRITICAL_STREAM</c>, 0x104) that reproduces with the <c>Http.Connections</c> Http3
-/// example independently of this registration surface, so a broken response read never hard-fails the
-/// suite.
+/// Both halves are load-bearing assertions: the client observes the full response round-trip (HTTP/3
+/// status <b>and</b> body), and the terminal middleware observes the protocol + transport-derived
+/// scheme on the dispatched <see cref="IHttpContext"/>. The client round-trip became a hard assertion
+/// once issue #928 — an <c>Http.Connections</c> HTTP/3 send-path defect that left the request stream
+/// unterminated and surfaced at the client as <c>H3_CLOSED_CRITICAL_STREAM</c> (0x104) — was fixed;
+/// the server now ends the request stream when the response completes (RFC 9114 §4.1).
 /// </para>
 /// </remarks>
 // System.Net.Quic is Windows/Linux/macOS only; annotated to match UseHttp3 and gated at runtime.
@@ -55,8 +54,8 @@ public class WebHttp3HostingIntegrationTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should accept and dispatch an HTTP/3 request over QUIC reporting the https scheme")]
-    public async Task UseHttp3_OverQuic_ShouldDispatchRequestWithHttp30AndHttpsScheme()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should complete a full HTTP/3 response round-trip and dispatch reporting the https scheme")]
+    public async Task UseHttp3_OverQuic_ShouldCompleteResponseRoundTripAndDispatchWithHttps()
     {
         if (!QuicListener.IsSupported)
         {
@@ -83,7 +82,7 @@ public class WebHttp3HostingIntegrationTests
         WebApplication app = builder.Build();
 
         // The terminal middleware records the protocol and transport-derived scheme it observes, then
-        // answers 200 with a small body. The recorded observation is the load-bearing assertion.
+        // answers 200 with a small body. Both the observation and the client's received body are asserted.
         TaskCompletionSource<(CohesionHttpVersion Version, HttpScheme Scheme)> observed =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         app.Use((context, next) =>
@@ -102,35 +101,38 @@ public class WebHttp3HostingIntegrationTests
         IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
         await server.StartAsync(cancellationToken);
 
-        // Drive a real HTTP/3 client as a background stimulus, on its own token so the observation can
-        // stop it promptly.
-        using CancellationTokenSource clientCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task clientStimulus = DriveHttp3ClientAsync(new Uri($"https://127.0.0.1:{port}/secure?probe=h3"), clientCancellation.Token);
-
         try
         {
-            // Act / Assert — the request reached the pipeline over a real QUIC h3 connection and reports
-            // HTTP/3 with the transport-derived https scheme.
-            (CohesionHttpVersion version, HttpScheme scheme) = await observed.Task.WaitAsync(cancellationToken);
+            // Act — a real .NET HTTP/3 client completes the full round-trip: headers AND response body.
+            (Version version, int status, string body) = await GetHttp3ResponseAsync(
+                new Uri($"https://127.0.0.1:{port}/secure?probe=h3"), cancellationToken);
 
-            version.ShouldBe(CohesionHttpVersion.Http30);
-            scheme.ShouldBe(HttpScheme.Https);
+            // Assert — the client observed a complete HTTP/3 response.
+            version.ShouldBe(NetHttpVersion.Version30);
+            status.ShouldBe(200);
+            body.ShouldBe("hello-http3");
+
+            // Assert — the request reached the pipeline over a real QUIC h3 connection and reported
+            // HTTP/3 with the transport-derived https scheme.
+            (CohesionHttpVersion observedVersion, HttpScheme observedScheme) = await observed.Task.WaitAsync(cancellationToken);
+
+            observedVersion.ShouldBe(CohesionHttpVersion.Http30);
+            observedScheme.ShouldBe(HttpScheme.Https);
         }
         finally
         {
-            clientCancellation.Cancel();
             await server.StopAsync(CancellationToken.None);
-            await ObserveAsync(clientStimulus);
         }
     }
 
     /// <summary>
-    /// Repeatedly issues an exact-HTTP/3 request until one completes cleanly or the token is cancelled.
-    /// A clean completion is the healthy-platform path; connect/handshake races and the pre-existing h3
-    /// server control-stream defect are swallowed and retried, since the test asserts on the server-side
-    /// observation the first request already produced.
+    /// Issues an exact-HTTP/3 request and reads the full response, returning the negotiated version,
+    /// status code, and body. Connect/handshake races against server startup surface as a transient
+    /// <see cref="HttpRequestException"/> and are retried until the shared timeout; the HTTP/3
+    /// send-path defect that previously forced a best-effort read (issue #928) is fixed, so a healthy
+    /// platform returns a complete response.
     /// </summary>
-    private static async Task DriveHttp3ClientAsync(Uri uri, CancellationToken cancellationToken)
+    private static async Task<(Version Version, int Status, string Body)> GetHttp3ResponseAsync(Uri uri, CancellationToken cancellationToken)
     {
         using HttpClientHandler handler = new()
         {
@@ -139,49 +141,28 @@ public class WebHttp3HostingIntegrationTests
         };
         using HttpClient client = new(handler);
 
-        while (!cancellationToken.IsCancellationRequested)
+        while (true)
         {
-            using HttpRequestMessage request = new(ClientHttpMethod.Get, uri)
-            {
-                Version = NetHttpVersion.Version30,
-                VersionPolicy = HttpVersionPolicy.RequestVersionExact
-            };
+            cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
-                using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                using HttpRequestMessage request = new(ClientHttpMethod.Get, uri)
+                {
+                    Version = NetHttpVersion.Version30,
+                    VersionPolicy = HttpVersionPolicy.RequestVersionExact
+                };
 
-                return;
-            }
-            catch (OperationCanceledException)
-            {
-                return;
+                using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+                return (response.Version, (int)response.StatusCode, body);
             }
             catch (HttpRequestException)
             {
-                // Connect/handshake not ready, or the pre-existing h3 response-stream defect; retry until
-                // the observation cancels this stimulus or the shared timeout fires.
-                try
-                {
-                    await Task.Delay(50, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
+                // Connect/handshake not ready yet — retry until the observation cancels or the timeout fires.
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
             }
-        }
-    }
-
-    private static async Task ObserveAsync(Task task)
-    {
-        try
-        {
-            await task.ConfigureAwait(false);
-        }
-        catch
-        {
-            // The test's assertions own the verdict; drain the background client quietly on teardown.
         }
     }
 
