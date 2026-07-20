@@ -7,6 +7,14 @@ withdrawn pre-merge on PR #887). Faults therefore travel the only way they can i
 pipeline: as exceptions. This package is the seam that turns them back into responses — owned by
 the application, not by whichever feature happened to throw.
 
+The package carries two layers. The **`OnError` hook** (#864) is the composition surface —
+`AddErrorHandling().OnError(...)` registers the handler chain and the terminal problem+json default.
+The **pipeline exception boundary** (#881) is the consumer: `UseErrorHandling()` installs the
+middleware that catches faults escaping downstream, publishes them as an `IHttpExceptionFeature`,
+and dispatches through the hook; `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal
+response (including the pipeline's bodyless 404) into a problem+json body. The boundary does not
+redesign the chain — it consumes the same `IErrorHandler` registrations.
+
 ## The faults-vs-outcomes line (the rule this package enforces)
 
 - An **outcome** is an expected protocol result: an authentication challenge's `401`, a
@@ -60,7 +68,7 @@ Three layers, outermost last:
 1. **Handler-local `try/catch`** — a middleware that can produce a real *outcome* from a
    failure does so itself and never involves this seam.
 2. **The pipeline boundary → `OnError` (this package + #881)** — application-owned fault
-   presentation. The boundary catches, resolves `IHttpErrorHandlingFeature`, and delegates the
+   presentation. The boundary catches, resolves `IErrorHandlingFeature`, and delegates the
    response.
 3. **The server's exception isolation (#762, `Web.Hosting`)** — infrastructure protection: an
    exception that escapes even the boundary (or a fault in the boundary/handlers themselves)
@@ -71,6 +79,59 @@ Three layers, outermost last:
 `HandleAsync` assumes an **unstarted response**; a boundary that buffers or wraps enforces
 that invariant and owns response hygiene (clearing half-set headers/status). The hook cannot
 un-send a committed response head, so it does not pretend to.
+
+## The exception boundary (#881)
+
+`UseErrorHandling()` installs `ExceptionBoundaryMiddleware` — the pipeline layer-2 fault handler of
+the three-layer model above. It wraps everything downstream in a `try/catch` and, on a fault:
+
+- **Publishes `IHttpExceptionFeature`** onto the exchange (the caught exception + the request path) so
+  handlers, a diagnostics observer, and custom pages can read the fault without it being re-thrown.
+- **Guards against clobbering (no-clobber).** If `IHttpResponseStreamingFeature.HasStarted` reports
+  the response head is on the wire, the status and headers are locked and no clean error body can
+  replace what a faulted handler began streaming — the only honest answer is a protocol-level abort of
+  the one exchange (`IHttpContext.CancelAsync`; the connection survives). This is the same wire-commit
+  signal the request-timeout middleware reads. While the response is unstarted, the boundary discards
+  the partial response (clears headers, truncates/replaces the body) and writes the error cleanly.
+- **Dispatches through the `OnError` chain.** It consults `IErrorHandlingFeature.Handlers` in
+  registration order, first-`true`-wins — the same contract `HandleAsync` implements. It consumes the
+  chain rather than calling `HandleAsync` blindly only so the **developer-detail toggle** can enrich
+  the terminal fallback: with `IncludeDeveloperDetails` off (the default) the terminal is byte-identical
+  to the chain's default (500 problem+json, `about:blank`, no detail); with it on, the fallback adds the
+  exception message as `detail` and the full text as an `exception` extension. The toggle affects only
+  the boundary's own terminal — a registered handler that owns the fault is unaffected.
+- **Never masks a handler fault.** An exception thrown by a registered `IErrorHandler` propagates out of
+  the boundary to the server's last-resort isolation (layer 3) — the shipped `OnError` semantics. A
+  client-cancellation `OperationCanceledException` (request token tripped) is re-thrown as a clean drain,
+  not manufactured into an error response.
+
+### The diagnostics hook and its suppression
+
+The boundary exposes an `OnException` observation hook (fault → logging/metrics/tracing, dependency-free
+so the boundary needs no logging stack) invoked for each caught fault. `SuppressDiagnosticsCallback` is
+the Cohesion parity for .NET 10's `ExceptionHandlerOptions.SuppressDiagnosticsCallback`: a predicate that
+marks a fault *expected*, skipping `OnException` for it while the fault is still handled and a response is
+still produced. Because the repo carries no `Microsoft.Extensions.Logging`, "suppress error-level logging"
+becomes "suppress the diagnostic hook the boundary exposes". A throwing `OnException` is swallowed —
+observation must never defeat response rendering — whereas a throwing `IErrorHandler` propagates; the
+distinction is deliberate (an observer only watches; a handler owns the response).
+
+## Status-code pages and the 404 terminal (#881)
+
+`UseStatusCodePages()` installs `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
+**bodyless** `4xx`/`5xx` terminal response into a body — RFC 9457 problem+json by default, or a custom
+responder. It acts only when the response is genuinely bodyless (no `Content-Type`, no positive
+`Content-Length`, no buffered body) and unstarted, so it never clobbers a body a handler already wrote or
+a head already committed.
+
+Its motivating source is the **pipeline's bodyless 404 terminal**. The silent `Task.CompletedTask`
+terminal in `WebApplication.Build` (which returned an empty `200` for any unhandled request) now sets a
+bodyless `404 Not Found` when the response reaches it untouched (still `200`, no body, no `Content-Type`,
+no `Location`). That terminal lives in **`Web.Hosting`** and must stay payload-free: the resource
+hosting-isolation rule (COHRES002) forbids the runtime module from referencing `Web.ProblemDetails` (or
+this package), so the runtime can only set the status — this package's opt-in status-code-pages middleware
+is what turns it into problem+json. A middleware that deliberately produces an empty `200` must be
+terminal (not chain to `next`); a bodyless-`200` fall-through is read as unhandled.
 
 ## Homing under the hosting-isolation rule
 
@@ -95,11 +156,12 @@ Nothing dynamic: sealed internals, delegate/interface dispatch, and the payload 
 
 ## Non-goals
 
-- **The exception boundary, status-code pages, and the 404 terminal** — #881, invoking this
-  seam.
-- **Retry, compensation, or fault swallowing** — the hook shapes responses; it does not manage
-  recovery.
-- **Logging/diagnostics of faults** — #794 (`Web.Diagnostics`) territory; handlers may of
-  course log, but the seam imposes nothing.
-- **Environment-aware developer error pages** — a boundary concern (#881) layered on the same
-  hook.
+- **Retry, compensation, or fault swallowing** — the boundary and hook shape responses; they do
+  not manage recovery.
+- **A logging/diagnostics stack** — #794 (`Web.Diagnostics`) territory. The boundary's `OnException`
+  hook is a dependency-free observation seam, not a logger; it imposes no sink, format, or category.
+- **HTML developer error pages** — the developer-detail toggle enriches the problem+json *payload*
+  (message + exception text); a rendered HTML exception page with source/stack framing is not in
+  scope. Custom presentation is a status-code-pages responder or an `OnError` handler.
+- **Wire-level failure isolation** — the transport's per-connection survival (Http.Connections, and
+  the server's #762 last-resort catch) is a separate layer the boundary sits inside, not a duplicate.

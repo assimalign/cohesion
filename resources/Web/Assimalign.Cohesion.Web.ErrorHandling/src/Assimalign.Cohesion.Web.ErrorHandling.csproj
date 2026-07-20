@@ -1,9 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<Description>The OnError fault seam for the Cohesion Web pipeline: builder-time registration of the error handlers through which an application owns its fault responses (AddErrorHandling().OnError(...)), the IHttpErrorHandlingFeature exchange feature that exception boundaries invoke, and the terminal default that renders the RFC 9457 Web.ProblemDetails payload. Faults only — expected protocol outcomes (401 challenges, 404s, 415s) remain each feature's normal response path.</Description>
+		<Description>The OnError fault seam for the Cohesion Web pipeline: builder-time registration of the error handlers through which an application owns its fault responses (AddErrorHandling().OnError(...)), the IErrorHandlingFeature exchange feature that exception boundaries invoke, and the terminal default that renders the RFC 9457 Web.ProblemDetails payload. Faults only — expected protocol outcomes (401 challenges, 404s, 415s) remain each feature's normal response path.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<!-- IHttpResponseStreamingFeature.HasStarted is the boundary's no-clobber signal (whether the
+		     response head is committed) — the same wire-commit truth the request-timeout middleware
+		     reads. Outside the Web area, so unconstrained by the hosting-isolation rule. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
 	</ItemGroup>

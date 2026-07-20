@@ -11,6 +11,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
+		<!-- The no-clobber tests fabricate a started-response streaming feature (HasStarted). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<!-- Pipeline-level coverage drives the real runtime through the in-memory test factory;
 		     test projects are exempt from the hosting-isolation rule (COHRES001). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />

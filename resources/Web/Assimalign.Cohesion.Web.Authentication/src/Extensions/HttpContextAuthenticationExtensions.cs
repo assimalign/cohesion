@@ -2,6 +2,7 @@ using System;
 using System.Security.Claims;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Authentication.Internal;
 
 namespace Assimalign.Cohesion.Web.Authentication;
 

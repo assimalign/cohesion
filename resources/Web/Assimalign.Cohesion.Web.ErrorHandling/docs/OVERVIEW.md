@@ -7,15 +7,22 @@ decides what the client sees, with an overridable default that renders the RFC 9
 
 ## What it provides
 
-- **The hook contract** — `IHttpErrorHandler` / the `HttpErrorHandler` delegate: inspect a
-  fault, own the response for it (return `true`) or pass (`false`).
+- **The hook contract** — `IErrorHandler` / the `HttpErrorHandler` delegate: inspect a fault, own
+  the response for it (return `true`) or pass (`false`).
 - **Builder-time registration** — `builder.AddErrorHandling().OnError(...)`; handlers are
   consulted in registration order.
-- **The exchange feature** — `IHttpErrorHandlingFeature`, seeded onto every exchange; a
-  pipeline exception boundary invokes `HandleAsync(context, exception)` to turn a caught fault
-  into the application's response.
+- **The exchange feature** — `IErrorHandlingFeature`, seeded onto every exchange; a pipeline
+  exception boundary invokes `HandleAsync(context, exception)` to turn a caught fault into the
+  application's response.
 - **The terminal default** — when no registration owns a fault, the response is
   `500` + `application/problem+json` (`about:blank`, status phrase, no exception detail).
+- **The pipeline exception boundary** — `UseErrorHandling()` installs the middleware that catches
+  faults escaping downstream, publishes the caught exception as an `IHttpExceptionFeature`, resets
+  an unstarted response (aborting the exchange when it has already started), and dispatches through
+  the `OnError` chain. A developer-detail toggle enriches the terminal payload; a diagnostics
+  observer (`OnException`) and its suppression predicate provide the fault-observation seam.
+- **Status-code pages** — `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal response
+  (such as the pipeline's bodyless 404) into problem+json, or a custom responder body.
 
 ## Usage
 
@@ -37,11 +44,20 @@ builder.AddErrorHandling().OnError(async (context, exception, cancellationToken)
 });
 ```
 
-A boundary invokes the hook (this is what the #881 exception-boundary middleware does; until it
-lands, an inline `try/catch` around `next(context)` serves):
+Install the boundary (and, optionally, status-code pages) on the pipeline. Register
+`UseErrorHandling()` first so it wraps everything downstream:
 
 ```csharp
-IHttpErrorHandlingFeature hook = context.Features.Get<IHttpErrorHandlingFeature>()!;
+app.UseErrorHandling(options => options.IncludeDeveloperDetails = builder.Environment.IsDevelopment());
+app.UseStatusCodePages();   // upgrades the pipeline's bodyless 404 (and any bodyless 4xx/5xx) to problem+json
+// ... routing, endpoints, and the rest of the pipeline
+```
+
+The boundary resolves the hook from the exchange and delegates to it — the manual equivalent (an
+inline `try/catch` around `next(context)`) is:
+
+```csharp
+IErrorHandlingFeature hook = context.Features.Get<IErrorHandlingFeature>()!;
 await hook.HandleAsync(context, exception, context.RequestCancelled);
 ```
 
@@ -50,8 +66,9 @@ await hook.HandleAsync(context, exception, context.RequestCancelled);
 - **Faults only.** Expected protocol outcomes — an authentication challenge's `401`, a router's
   `404`, an unsupported media type's `415` — are each feature's normal response path and must
   never arrive here as exceptions.
-- **The boundary middleware itself** (exception catching, status-code pages, the 404 terminal)
-  is #881's scope; this package is the seam it invokes.
+- **The bodyless 404 terminal lives in `Web.Hosting`.** The pipeline's unhandled-request terminal
+  can only set a payload-free `404` (the hosting-isolation rule keeps `Web.ProblemDetails` out of
+  the runtime module); `UseStatusCodePages()` here is what upgrades it to problem+json.
 - **The payload** is `Web.ProblemDetails`' scope; this package renders it.
 
 Design rationale lives in [DESIGN.md](DESIGN.md).
