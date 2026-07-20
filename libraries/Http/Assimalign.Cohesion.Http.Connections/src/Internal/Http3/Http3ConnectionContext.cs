@@ -1088,7 +1088,42 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        // RFC 9114 §4.1 — an HTTP/3 response body is delimited by the request stream's end, so the
+        // response is not complete on the wire until the server ends its write side. End it now, with
+        // the response fully flushed: a real .NET HTTP/3 client stays in ReadResponseContentAsync until
+        // this FIN arrives, and if the stream is left dangling until connection teardown the client
+        // surfaces the teardown as H3_CLOSED_CRITICAL_STREAM (0x104) instead of completing the response.
+        CompleteResponseStreamWrites(http3Context);
+
         await http3Context.InvokeAfterResponseAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ends the request stream's write side once the final response is fully written, emitting the
+    /// graceful QUIC FIN that delimits an HTTP/3 response body (RFC 9114 §4.1). Completing the
+    /// connection's outbound <see cref="PipeWriter"/> is the <see cref="IConnection"/> contract's
+    /// documented half-close signal. Best-effort: the response bytes are already flushed to the
+    /// transport, so a teardown race that disposes the stream underneath the completion is benign.
+    /// </summary>
+    /// <param name="http3Context">The exchange whose request-stream write side is ended.</param>
+    private static void CompleteResponseStreamWrites(Http3Context http3Context)
+    {
+        try
+        {
+            http3Context.StreamConnection.Output.Complete();
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException derives from InvalidOperationException: a concurrent connection
+            // abort tore the stream down after the response flushed, so the FIN is moot.
+        }
+        catch (Exception ex) when (IsWireLevelFailure(ex))
+        {
+            // Completing flushes any residual bytes into the QUIC stream, which raises a wire-level
+            // failure (QuicException is an IOException) when the stream/connection is already gone.
+            // The response is already delivered, so the missed FIN rides on the connection close.
+        }
     }
 
     /// <summary>

@@ -18,6 +18,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.DigestFields" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- Test-only: drives the HTTP/3 engine over a real QUIC loopback with a real .NET HTTP/3
+		     client (the transport LIBRARY takes no QUIC dependency — it is wired via UseHttp3 at
+		     composition time). Platform-guarded on QuicListener.IsSupported (see Http3RoundTripTests). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

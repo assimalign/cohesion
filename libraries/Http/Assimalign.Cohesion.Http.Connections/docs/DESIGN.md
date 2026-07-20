@@ -463,7 +463,12 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   frame carrying `END_STREAM`.
 - **HTTP/3 — incremental DATA frames (RFC 9114).** Same shape over the QUIC request
   stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
-  delimited by the QUIC stream end, so finalize only flushes.
+  delimited by the QUIC stream **end** (RFC 9114 §4.1), so when the response completes
+  the transport ends the request stream's write side — a graceful QUIC FIN via the
+  `IConnection` half-close contract (`Output.Complete()`). This happens for both the
+  buffered `SendAsync` path (after the HEADERS + optional DATA frame) and the streaming
+  sink's finalize; see "Ending the request stream at response completion" below for why
+  a missing FIN manifests as `H3_CLOSED_CRITICAL_STREAM` at the client.
 
 ### Backpressure (flow control)
 
@@ -1483,6 +1488,39 @@ gate (`_decoderWriteGate`); a `PipeWriter` tolerates no concurrent writers.
 A client opening a push stream (type 0x01) is `H3_STREAM_CREATION_ERROR`
 — only a server may push, and Cohesion does not push (see "server push
 (de-scoped)" below). The engine treats it as a connection error.
+
+### Ending the request stream at response completion
+
+An HTTP/3 response body is delimited by the **request stream's end** (RFC 9114
+§4.1), not by `Content-Length`: a real client (`System.Net.Http.Http3RequestStream`)
+stays in its response-content read until it observes the stream FIN, even for a
+zero-length body. So when a response completes, the engine ends the request stream's
+write side — the graceful QUIC FIN, signalled through the `IConnection` half-close
+contract by completing the stream's `Output` (`PipeWriter`). Both response paths do
+this: the buffered `SendAsync` after it flushes the HEADERS (+ optional DATA) frame,
+and the streaming sink's `CompleteFramedAsync` after its final flush. Completion is
+best-effort — the response bytes are already flushed, so a teardown race that disposed
+the stream underneath the completion is swallowed (a `QuicException` is an
+`IOException`).
+
+This was the fix for issue #928. Before it, `SendAsync` wrote HEADERS/DATA, flushed,
+and returned **without ending the stream**; the request stream's write side was then
+only completed at *connection* teardown (when the multiplexed connection disposes its
+bidirectional streams). A client therefore never saw the response terminate on a live
+connection and stayed reading until the connection was torn down, at which point the
+control/QPACK critical streams closing surfaced at the client as
+`H3_CLOSED_CRITICAL_STREAM` (0x104) — during `ReadResponseContentAsync`, never during
+header read. Ending the request stream at response completion means the exchange
+finishes cleanly on the wire well before any GOAWAY/`CONNECTION_CLOSE`. The two send
+observations tracked with #928 both resolve here: a bodyless 200 (no DATA frame) now
+completes the client's zero-length drain via the FIN, and the buffered-body content
+length always matches the DATA written because `ReadBodyAsync` reads the whole buffer
+(`MemoryStream.ToArray()`, position-independent), not from the stream's current position.
+
+The connection-first teardown below still completes any bidirectional stream that is
+still open at close — the request-stream FIN at response completion is the normal path,
+and the teardown completion remains the fallback for an exchange that never produced a
+response.
 
 ### Connection teardown — critical streams and close ordering
 

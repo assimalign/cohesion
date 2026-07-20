@@ -279,12 +279,6 @@ keep-alive unblock, post-stop connection refusal).
   before cancelling on shutdown (versus cancelling them with the drain token) is
   future work; it needs a two-phase signal ("finish the current exchange, accept
   no new ones on this connection") that this iteration does not implement.
-- **Full HTTP/3 response round-trip.** The HTTP/3 registration surface (issue
-  #767) has landed — see "HTTP/3 (QUIC) registration surface" below — and the
-  QUIC bind, h3 connection accept, and pipeline dispatch are verified. The full
-  client response round-trip is blocked by a pre-existing HTTP/3 server
-  control-stream defect in `Http.Connections` (`H3_CLOSED_CRITICAL_STREAM`),
-  which is Http-area work outside this module.
 - **Per-request service resolution.** DI/logging/config are builder-time only;
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
@@ -594,17 +588,19 @@ advertised port is taken from that listener's bound endpoint. An application opt
 `options.AdvertiseAltService(...)` alongside a stream listener; the server then injects
 `Alt-Svc: h3=":<port>"` on the h1/h2 responses so clients can discover and upgrade to h3.
 
-### Known limitation — h3 response round-trip
+### h3 response round-trip — verified end to end
 
-The registration surface, the QUIC bind, the h3 connection accept, and pipeline dispatch
-(scheme + protocol) are verified end to end against a real .NET HTTP/3 client. The full
-**response** round-trip is currently blocked by a pre-existing HTTP/3 *server
-control-stream* defect in `Assimalign.Cohesion.Http.Connections`
-(`H3_CLOSED_CRITICAL_STREAM`, 0x104) that reproduces with that library's own Http3
-example, independent of this surface. The e2e test therefore makes the server-side
-observation (the protocol and scheme seen on the dispatched `IHttpContext`) its
-load-bearing assertion and treats the client response as best-effort. Closing the
-transport defect is Http-area work, tracked outside this issue.
+The registration surface, the QUIC bind, the h3 connection accept, pipeline dispatch
+(scheme + protocol), **and the full client response round-trip** (HTTP/3 status + body)
+are verified end to end against a real .NET HTTP/3 client
+(`WebHttp3HostingIntegrationTests`). The client round-trip was previously best-effort
+because of a pre-existing HTTP/3 *server send-path* defect in
+`Assimalign.Cohesion.Http.Connections` (issue #928): the request stream was never ended
+when a response completed, so the client's response-content read never finished and
+surfaced the eventual connection teardown as `H3_CLOSED_CRITICAL_STREAM` (0x104). That
+defect is fixed in `Http.Connections` (the send path now ends the request stream per RFC
+9114 §4.1), so the e2e test asserts the client-observed status and body alongside the
+server-side dispatch observation.
 
 ### AOT posture
 

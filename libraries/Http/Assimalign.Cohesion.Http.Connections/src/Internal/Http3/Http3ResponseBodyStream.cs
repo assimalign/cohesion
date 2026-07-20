@@ -16,7 +16,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
 /// Backpressure is inherent: the QUIC transport applies per-stream flow control on the underlying
 /// <see cref="Stream"/> write, so a full window blocks the write until the peer grants more credit —
 /// no manual window accounting is needed here. The response body is delimited by the QUIC stream
-/// end, which the exchange's disposal signals; completion therefore only flushes.
+/// end (RFC 9114 §4.1): completion flushes the last <c>DATA</c> frame and then ends the request
+/// stream's write side (a graceful FIN via the <see cref="IConnection"/> half-close contract), so a
+/// real HTTP/3 client observes the streamed body terminate rather than waiting on connection
+/// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>).
 /// </remarks>
 internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 {
@@ -49,8 +52,30 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
     protected override ValueTask FlushFramedAsync(CancellationToken cancellationToken)
         => new(_stream.FlushAsync(cancellationToken));
 
-    protected override ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
-        => new(_stream.FlushAsync(cancellationToken));
+    protected override async ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
+    {
+        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        // RFC 9114 §4.1 — the streamed body is delimited by the request stream's end. End the write
+        // side (graceful QUIC FIN via the IConnection half-close contract) so the client sees the
+        // body terminate now; leaving it dangling until connection teardown surfaces at the client as
+        // H3_CLOSED_CRITICAL_STREAM. Best-effort: the DATA frames are already flushed, so a teardown
+        // race that disposed the stream underneath the completion is benign.
+        try
+        {
+            _context.StreamConnection.Output.Complete();
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException derives from InvalidOperationException — the stream was torn
+            // down by a concurrent connection abort after the body flushed; the FIN is moot.
+        }
+        catch (IOException)
+        {
+            // QuicException is an IOException: the stream/connection is already gone, so the missed
+            // FIN rides on the connection close instead.
+        }
+    }
 
     private async ValueTask WriteFrameAsync(Http3FrameType frameType, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
