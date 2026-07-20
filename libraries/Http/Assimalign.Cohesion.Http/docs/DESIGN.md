@@ -208,13 +208,18 @@ alongside allocating `Host` / `Port` convenience properties:
 - The split is structural, not semantic: host characters are not validated
   against the `reg-name` grammar and IPv6 contents are not parsed as addresses.
 
-**Parity with routing.** The semantics deliberately mirror the Web routing
-host-constraint (`RouteHostConstraint`, issue #788): the same bracket rules,
-the same wildcard grammar, the same 1–65535 port range. One deliberate
-strictness delta: the split validates port digits as part of parsing, where the
-routing constraint's raw-text match tolerates junk port text on a route that
-does not constrain the port. Selection can afford leniency; a validation
-primitive claiming "components" cannot.
+**Parity with routing.** Parity is now *shared code*, not two mirrored copies:
+the structural `host[:port]` split (`TrySplitHostPort`) and the port parse
+(`TryParsePort`) are `internal` helpers here that the Web routing host
+constraint (`RouteHostConstraint`, #788) also calls (via `InternalsVisibleTo`),
+so the bracket rules, single-colon rule, and 1–65535 port range are one copy of
+the logic (#890). `TryGetComponents` layers this primitive's stricter rule on
+top of the shared split: it validates the port as part of parsing and reports a
+present-but-invalid port as malformed. The routing constraint reuses the same
+structural split but defers the port parse, so it can tolerate junk port text on
+a route that does not constrain the port. Selection can afford that leniency; a
+validation primitive claiming "components" cannot — same split, different port
+policy, no drift.
 
 ### The allowlist matcher
 
