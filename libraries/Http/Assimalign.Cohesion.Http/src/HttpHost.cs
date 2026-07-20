@@ -115,8 +115,56 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     {
         port = null;
 
-        ReadOnlySpan<char> value = Value.AsSpan().Trim();
+        // Reuse the shared structural split (also used by the Web routing host constraint, so
+        // selection and validation cannot drift), then layer this primitive's stricter port
+        // rule on top: a component split that surfaces a "port" must have validated it, so a
+        // present-but-invalid port makes the whole value malformed here — where the routing
+        // constraint instead tolerates junk port text on a port-unconstrained route.
+        if (!TrySplitHostPort(Value.AsSpan().Trim(), out host, out ReadOnlySpan<char> portText, out bool hasPort))
+        {
+            host = default;
+            return false;
+        }
+
+        if (hasPort)
+        {
+            if (!TryParsePort(portText, out int parsed))
+            {
+                host = default;
+                return false;
+            }
+
+            port = parsed;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Splits a <c>host[:port]</c> value into its host and (unparsed) port-text components using
+    /// the structural rules shared by the Web routing host constraint: a bracketed IPv6 literal
+    /// exposes its host without brackets, an unbracketed value with multiple colons is an IPv6
+    /// literal that carries no port, and a single-colon value splits at that colon.
+    /// </summary>
+    /// <param name="value">The value to split. Callers trim before calling; this method does not.</param>
+    /// <param name="host">The host component (IPv6 brackets removed); undefined when the method returns <see langword="false"/>.</param>
+    /// <param name="port">The raw port text (digits only when structurally present); empty when <paramref name="hasPort"/> is <see langword="false"/>.</param>
+    /// <param name="hasPort">
+    /// <see langword="true"/> when a port component is syntactically present. The port text is
+    /// <em>not</em> range-validated here — a present-but-out-of-range or non-numeric port still
+    /// reports <see langword="true"/> so callers can choose to reject it (<see cref="TryGetComponents"/>)
+    /// or tolerate it. Validate with <see cref="TryParsePort"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the value is structurally <c>host[:port]</c>; <see langword="false"/>
+    /// for an unterminated or empty bracket form, trailing junk after a closing bracket, or a
+    /// trailing colon with no port digits.
+    /// </returns>
+    internal static bool TrySplitHostPort(ReadOnlySpan<char> value, out ReadOnlySpan<char> host, out ReadOnlySpan<char> port, out bool hasPort)
+    {
         host = value;
+        port = default;
+        hasPort = false;
 
         if (value.IsEmpty)
         {
@@ -130,7 +178,6 @@ public readonly struct HttpHost : IEquatable<HttpHost>
             int close = value.IndexOf(']');
             if (close <= 1)
             {
-                host = default;
                 return false;
             }
 
@@ -142,13 +189,14 @@ public readonly struct HttpHost : IEquatable<HttpHost>
                 return true;
             }
 
-            if (rest[0] != ':' || rest.Length == 1 || !TryParsePort(rest[1..], out int bracketedPort))
+            if (rest[0] != ':' || rest.Length == 1)
             {
-                host = default;
+                // Junk after the closing bracket, or a trailing "]:" with no port digits.
                 return false;
             }
 
-            port = bracketedPort;
+            port = rest[1..];
+            hasPort = true;
             return true;
         }
 
@@ -165,15 +213,15 @@ public readonly struct HttpHost : IEquatable<HttpHost>
             return true;
         }
 
-        if (first == value.Length - 1 || !TryParsePort(value[(first + 1)..], out int parsed))
+        if (first == value.Length - 1)
         {
-            // Trailing "host:" with no digits, or a port that is not a decimal 1-65535.
-            host = default;
+            // Trailing "host:" with no port digits.
             return false;
         }
 
         host = value[..first];
-        port = parsed;
+        port = value[(first + 1)..];
+        hasPort = true;
         return true;
     }
 
@@ -186,6 +234,14 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     public static implicit operator HttpHost(string value) => new(value);
     public static implicit operator string(HttpHost host) => host.Value;
 
-    private static bool TryParsePort(ReadOnlySpan<char> value, out int port) =>
+    /// <summary>
+    /// Parses a port component: a decimal integer in the range 1–65535, with no sign,
+    /// whitespace, or other <see cref="NumberStyles"/> leniency. Shared with the Web routing
+    /// host constraint so both paths apply the identical port rule.
+    /// </summary>
+    /// <param name="value">The port text to parse.</param>
+    /// <param name="port">The parsed port when the text is a valid 1–65535 decimal.</param>
+    /// <returns><see langword="true"/> when the text is a valid port; otherwise <see langword="false"/>.</returns>
+    internal static bool TryParsePort(ReadOnlySpan<char> value, out int port) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 }

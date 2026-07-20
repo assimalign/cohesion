@@ -165,6 +165,21 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
 - Patterns are parsed **once, at metadata construction** (`RouteHostConstraint.Parse`/`TryParse`);
   a malformed pattern throws `RoutePatternException` at the producer, never at match time. The
   parser and matcher are span-based `IndexOf`/`EndsWith` scans — no regex, no reflection, AOT-safe.
+- The `host[:port]` **structural split and port parse are shared** with the `Http` layer, not
+  reimplemented here: `RouteHostConstraint` delegates both to `HttpHost.TrySplitHostPort` /
+  `HttpHost.TryParsePort` (#890). This is the same primitive `HttpHostMatcher` (#781) validates
+  against, so host **selection** here and host **allowlist validation** there cannot drift on what
+  a given wire value means — the bracket rules, single-colon rule, and 1–65535 port range are one
+  copy of the logic.
+- **The port-unconstrained leniency (deliberate, pinned).** The shared helper is the *structural*
+  split only; port digits are validated as a separate step. A route that constrains no port skips
+  that step entirely, so an otherwise well-formed request host carrying a **junk or out-of-range
+  port** (`example.com:abc`, `example.com:0`) still matches on its host component alone. Selection
+  can afford this leniency where the `Http` validation primitive (`HttpHost.TryGetComponents`,
+  which fuses the port validation into the split) deliberately rejects the same value. The leniency
+  is bounded to a present-but-invalid port: a *structurally* malformed authority (`example.com:`,
+  `[::1`, `[::1]x`) fails the shared split and never matches, even a port-unconstrained route.
+  `RouteHostConstraintTests` pins both the leniency and its structural boundary.
 
 ### Selection semantics (selects, never validates)
 

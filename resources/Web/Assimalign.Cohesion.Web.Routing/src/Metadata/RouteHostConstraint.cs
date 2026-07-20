@@ -109,7 +109,7 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
 
         ReadOnlySpan<char> trimmed = pattern.AsSpan().Trim();
 
-        if (!TrySplitHostAndPort(trimmed, out ReadOnlySpan<char> host, out ReadOnlySpan<char> portText, out bool hasPort) ||
+        if (!HttpHost.TrySplitHostPort(trimmed, out ReadOnlySpan<char> host, out ReadOnlySpan<char> portText, out bool hasPort) ||
             host.IsEmpty)
         {
             return false;
@@ -118,7 +118,7 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
         int? port = null;
         if (hasPort)
         {
-            if (!TryParsePort(portText, out int parsed))
+            if (!HttpHost.TryParsePort(portText, out int parsed))
             {
                 return false;
             }
@@ -152,15 +152,22 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
 
         ReadOnlySpan<char> value = host.Value.AsSpan().Trim();
 
-        if (!TrySplitHostAndPort(value, out ReadOnlySpan<char> name, out ReadOnlySpan<char> portText, out bool hasPort))
+        if (!HttpHost.TrySplitHostPort(value, out ReadOnlySpan<char> name, out ReadOnlySpan<char> portText, out bool hasPort))
         {
-            // A malformed request host never satisfies a host-constrained route.
+            // A structurally malformed request host never satisfies a host-constrained route.
+            // Note this is the structural split only: a present-but-invalid port (junk, out of
+            // range) still splits successfully, so a port-unconstrained route matches on the
+            // host part alone — the deliberate leniency preserved from #788 (see below).
             return false;
         }
 
         if (_port is int requiredPort)
         {
-            if (!hasPort || !TryParsePort(portText, out int requestPort) || requestPort != requiredPort)
+            // The route constrains the port: the request must carry an explicit, valid port that
+            // equals it. A missing or invalid port fails here. When the route does NOT constrain
+            // the port, this block is skipped and any port text on the request host is ignored —
+            // so "example.com" matches request host "example.com:junk".
+            if (!hasPort || !HttpHost.TryParsePort(portText, out int requestPort) || requestPort != requiredPort)
             {
                 return false;
             }
@@ -226,71 +233,4 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
 
         return host.IndexOf('*') < 0;
     }
-
-    private static bool TrySplitHostAndPort(ReadOnlySpan<char> value, out ReadOnlySpan<char> host, out ReadOnlySpan<char> port, out bool hasPort)
-    {
-        host = value;
-        port = default;
-        hasPort = false;
-
-        if (value.IsEmpty)
-        {
-            return true;
-        }
-
-        if (value[0] == '[')
-        {
-            // Bracketed IPv6 literal: "[::1]" or "[::1]:8080". The stored/compared host is
-            // the literal without its brackets.
-            int close = value.IndexOf(']');
-            if (close <= 1)
-            {
-                return false;
-            }
-
-            host = value[1..close];
-            ReadOnlySpan<char> rest = value[(close + 1)..];
-
-            if (rest.IsEmpty)
-            {
-                return true;
-            }
-
-            if (rest[0] != ':' || rest.Length == 1)
-            {
-                return false;
-            }
-
-            port = rest[1..];
-            hasPort = true;
-            return true;
-        }
-
-        int first = value.IndexOf(':');
-        if (first < 0)
-        {
-            return true;
-        }
-
-        if (value.LastIndexOf(':') != first)
-        {
-            // Multiple colons without brackets: an unbracketed IPv6 literal, which cannot
-            // carry a port component.
-            return true;
-        }
-
-        if (first == value.Length - 1)
-        {
-            // Trailing "host:" with no port digits.
-            return false;
-        }
-
-        host = value[..first];
-        port = value[(first + 1)..];
-        hasPort = true;
-        return true;
-    }
-
-    private static bool TryParsePort(ReadOnlySpan<char> value, out int port) =>
-        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 }

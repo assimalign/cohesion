@@ -209,4 +209,49 @@ public class RouteHostConstraintTests
         first.GetHashCode().ShouldBe(second.GetHashCode());
         first.Equals(differentPort).ShouldBeFalse();
     }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - IsMatch: Port-unconstrained routes tolerate invalid request-host port text; port-constrained routes do not")]
+    // A route that does not constrain the port ignores the request host's port component
+    // entirely — even when that port text is junk or out of range — and matches on the host
+    // part alone. This is the deliberate #788 selection leniency, preserved after the split was
+    // rebased onto HttpHost.TrySplitHostPort (#890): the structural split still yields the host,
+    // and the skipped port block never rejects the junk. Selection can afford this; the
+    // HttpHost validation primitive (TryGetComponents) deliberately cannot.
+    [InlineData("api.example.com", "api.example.com:abc", true)]
+    [InlineData("api.example.com", "api.example.com:0", true)]
+    [InlineData("api.example.com", "api.example.com:65536", true)]
+    [InlineData("api.example.com", "api.example.com:-1", true)]
+    [InlineData("*.example.com", "api.example.com:notaport", true)]
+    [InlineData("[::1]", "[::1]:notaport", true)]
+    [InlineData("*", "anything:whatever", true)]
+    // Contrast: a route that DOES constrain the port must still reject a request whose port text
+    // is not a valid port — the leniency is scoped to port-unconstrained routes only.
+    [InlineData("api.example.com:8080", "api.example.com:abc", false)]
+    [InlineData("api.example.com:8080", "api.example.com:0", false)]
+    public void IsMatch_InvalidRequestPortText_ShouldBeIgnoredOnlyWhenRouteIsPortUnconstrained(string pattern, string requestHost, bool expected)
+    {
+        // Arrange
+        RouteHostConstraint constraint = RouteHostConstraint.Parse(pattern);
+
+        // Act + Assert
+        constraint.IsMatch(new HttpHost(requestHost)).ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - IsMatch: Structurally malformed request hosts never match, even a port-unconstrained route")]
+    // The leniency above is bounded: it applies to a present-but-invalid port on an otherwise
+    // well-formed host[:port], not to a structurally malformed authority. A trailing colon with
+    // no digits, an unterminated/empty bracket, or junk after a closing bracket fails the
+    // structural split, so even a port-unconstrained route rejects it.
+    [InlineData("api.example.com", "api.example.com:")]
+    [InlineData("[::1]", "[::1")]
+    [InlineData("[::1]", "[]")]
+    [InlineData("[::1]", "[::1]x")]
+    public void IsMatch_StructurallyMalformedRequestHost_ShouldNeverMatch(string pattern, string requestHost)
+    {
+        // Arrange
+        RouteHostConstraint constraint = RouteHostConstraint.Parse(pattern);
+
+        // Act + Assert
+        constraint.IsMatch(new HttpHost(requestHost)).ShouldBeFalse();
+    }
 }
