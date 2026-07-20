@@ -69,6 +69,13 @@
 	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration/src/">
 		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration/src/Assimalign.Cohesion.SourceGeneration.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.Web/" />
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/">
+		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.Web/src/Assimalign.Cohesion.SourceGeneration.Web.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/">
+		<Project Path="analyzers/Assimalign.Cohesion.SourceGeneration.Web/tests/Assimalign.Cohesion.SourceGeneration.WebTests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/assets/" />
 	<Folder Name="/cohesion/assets/schemas/">
 		<File Path="assets/schemas/cohesion.config.IoTHub.json" />
@@ -2025,6 +2032,10 @@
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Api/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Api/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
 	</Folder>

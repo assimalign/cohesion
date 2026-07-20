@@ -203,6 +203,11 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security.DataProtection" />
 
+        <!-- The typed-delegate endpoint-binding source generator ships with the Web framework so
+             Sdk.Web consumers' typed Map* call sites are intercepted (delivered under
+             analyzers/dotnet/cs, the same mechanism as the base MapperProfileGenerator above). -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />
+
         <!-- Candidates as they come online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ClientFactory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols" />

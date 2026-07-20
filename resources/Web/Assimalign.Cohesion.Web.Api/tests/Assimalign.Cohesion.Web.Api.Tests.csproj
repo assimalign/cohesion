@@ -1,14 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
+		<!-- Allow the Web.Api endpoint-binding generator's interceptors (typed Map* call sites). -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<!-- Drive the real runtime through the in-memory test factory; test projects are exempt from
+		     the hosting-isolation rule (COHRES001). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites so the
+		     generated thunks can be exercised end-to-end through the factory. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
 	</ItemGroup>
 </Project>
