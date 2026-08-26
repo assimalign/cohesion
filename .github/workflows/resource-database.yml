@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -45,7 +44,8 @@ jobs:
             'Assimalign.Cohesion.Database.KeyValuePair.Storage',
             'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
-            'Assimalign.Cohesion.Database.ApplicationModel'
+            'Assimalign.Cohesion.Database.ApplicationModel',
+            'Assimalign.Cohesion.Database.Governance'
         ]
     steps:
       - uses: actions/checkout@v4

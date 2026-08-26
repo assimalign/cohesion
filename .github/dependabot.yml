@@ -1,0 +1,57 @@
+# Keeps SHA-pinned GitHub Actions current.
+#
+# .github/workflows/release.yml and .github/actions/build/action.yml pin every `uses:` to a commit
+# SHA, because a git tag is mutable: the action's owner - or anyone who compromises that account -
+# can repoint `@v7` at new code. In release.yml that code would run alongside `packages: write` and
+# a nuget.org OIDC identity; in the build action it runs in every CI job in the repository,
+# including the release pipeline's own validation gate. A commit SHA cannot be repointed. See
+# GitHub's "Security hardening for GitHub Actions" and the OpenSSF Scorecard `Pinned-Dependencies`
+# check.
+#
+# The cost of pinning is staleness: a pin never moves, including past security fixes to the action
+# itself. Dependabot closes that gap. It understands SHA pinning specifically - it bumps the SHA
+# *and* rewrites the trailing version comment - so updates arrive as reviewable pull requests
+# without giving up immutability.
+#
+# Without this file the pinning is only half a practice: immutable, and indefinitely out of date.
+#
+# Two things this file's shape depends on:
+#
+#   * The version comment must be TRAILING (`uses: owner/action@sha # v7.0.1`). Dependabot rewrites
+#     a trailing comment; it does not touch a comment on its own line above the `uses:`. Viu's
+#     release.yml uses the own-line form, and its comments have drifted three major versions behind
+#     the SHAs Dependabot bumped underneath them - which is worse than no comment, because the pin
+#     then lies about what it points at.
+#
+#   * `directory: /` covers .github/workflows only. Composite actions under .github/actions/ each
+#     need their own entry, or their pins are silently outside Dependabot's coverage.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+    groups:
+      # Action bumps are near-always routine; one grouped PR per week keeps the review surface
+      # proportional to the risk.
+      github-actions:
+        patterns:
+          - '*'
+
+  - package-ecosystem: github-actions
+    directory: /.github/actions/build
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+    groups:
+      github-actions:
+        patterns:
+          - '*'

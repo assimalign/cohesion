@@ -6,7 +6,6 @@ on:
       - ".github/workflows/library-object-validation.yml" # When Pipeline File Changes
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:

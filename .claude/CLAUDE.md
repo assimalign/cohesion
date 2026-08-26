@@ -14,17 +14,20 @@ The rules in `.claude/rules/` are the canonical coding standard for this repo. T
 - `build/` — custom MSBuild logic, centralized targets, package-version management. `build/Targets/Build.Version.props` is the single source of truth for `$(CohesionVersion)`
 - `sdks/` — Cohesion SDK projects; `Sdk` is the base and `Sdk.<Domain>` chain to it
 - `analyzers/` — Roslyn analyzers/codefixes/generators; target `netstandard2.0` with `IsAotCompatible=false` — the one sanctioned exception to the repo-wide TFM/AOT defaults
-- `assets/` — shared repo assets such as the `cohesion.config` JSON schemas
-- `installer/` — WiX MSI source plus dev scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`; the publish helper lives at `.github/scripts/Publish-Nupkg.ps1`)
+- `assets/` — shared repo assets: the `cohesion.config` JSON schemas and `branding/` (NuGet package icon, imported from the branding repo)
+- `installer/` — WiX MSI source plus dev and release scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`, `Pack-Release.ps1`, `Get-ReleaseMatrix.ps1`, and `modules/CohesionPackaging.psm1` — the authoritative release inventory; the framework workflow's publish helper lives at `.github/scripts/Publish-Nupkg.ps1`)
 - `extensions/` and `tooling/` — developer tooling and integration surfaces
 - `docs/` — repository-level documentation
 
 ## Build & test
 
 ```powershell
-dotnet build [path-to-csproj]               # build repo or a single project
-dotnet test <project>/tests/                # run a project's tests
-pwsh installer/scripts/Install-Local.ps1    # dev loop: pack all SDKs + frameworks into _out/packages/
+dotnet build [path-to-csproj]                          # build repo or a single project
+dotnet test <project>/tests/                           # run a project's tests
+pwsh installer/scripts/Install-Local.ps1               # dev loop: pack all SDKs + frameworks into _out/packages/
+pwsh installer/scripts/Pack-Release.ps1 -Version <v>   # strict release pack into _out/release/packages/
 ```
 
-Outputs land in `_out/packages/` and `_out/dotnet/sdk/`. In a **fresh worktree**, build `build/Tasks` first — per-project builds fail with MSB4062 until the build tasks exist.
+Outputs land in `_out/packages/`, `_out/release/packages/`, and `_out/dotnet/sdk/`. In a **fresh worktree**, build `build/Tasks` first — per-project builds fail with MSB4062 until the build tasks exist.
+
+Publishing happens **only** from `.github/workflows/release.yml`, triggered by a published GitHub Release tagged `v$(CohesionVersion)`. What ships is defined once, in `installer/scripts/modules/CohesionPackaging.psm1`; a package ships only if a per-area CI workflow already builds and tests it, enforced both ways by `Assert-CohesionReleaseInventory`. See `.claude/rules/build-system.md`.

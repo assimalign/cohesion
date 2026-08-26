@@ -55,11 +55,13 @@ concurrency:
   group: framework-${{ github.ref }}
   cancel-in-progress: true
 
-# Workflow-level permissions. The publish job below pushes .nupkgs to GitHub
-# Packages via the built-in GITHUB_TOKEN, which needs write:packages.
+# Read-only by default. `packages: write` is granted on the publish job alone
+# (see below): it covers DELETE as well as upload, and `pack` and `smoke-test`
+# execute arbitrary code -- MSBuild tasks, source generators, restored NuGet
+# packages, and in smoke-test the produced apphosts themselves. None of that
+# needs a token that can rewrite the org's package feed.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   pack:
@@ -365,6 +367,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [pack, smoke-test]
     runs-on: ubuntu-latest
+    # The only job in this workflow that touches the feed, and so the only one
+    # that gets a token which can write and delete on it.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout (for .github/scripts/Publish-Nupkg.ps1)
         uses: actions/checkout@v4

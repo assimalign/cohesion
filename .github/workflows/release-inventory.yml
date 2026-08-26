@@ -1,0 +1,62 @@
+# Guards the release inventory on every change that could invalidate it.
+#
+# installer/scripts/modules/CohesionPackaging.psm1 is the single definition of what a Cohesion
+# release ships, and Assert-CohesionReleaseInventory checks it against the repository and against
+# the per-area CI matrices. That check already runs inside .github/workflows/release.yml - but a
+# release is exactly the wrong moment to discover that someone added a project to an area workflow
+# six weeks ago and never added it to the inventory.
+#
+# So it runs here too, on the pull request that causes the drift. No SDK, no restore: the guard
+# reads csproj and workflow files as text, so the whole job is a checkout and one pwsh call.
+name: Release Inventory
+
+on:
+  push:
+    paths:
+      - '.github/workflows/*.yml'
+      - 'installer/scripts/**'
+      - 'libraries/**/*.csproj'
+      - 'resources/**/*.csproj'
+      - 'sdks/**/*.csproj'
+      - 'frameworks/**/*.csproj'
+  pull_request:
+    paths:
+      - '.github/workflows/*.yml'
+      - 'installer/scripts/**'
+      - 'libraries/**/*.csproj'
+      - 'resources/**/*.csproj'
+      - 'sdks/**/*.csproj'
+      - 'frameworks/**/*.csproj'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate the release inventory
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert the inventory matches the repository and CI
+        shell: pwsh
+        run: |
+          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Assert-CohesionReleaseInventory
+
+      - name: Assert the release matrix still builds
+        shell: pwsh
+        run: |
+          # The same call release.yml's prepare job makes. Emitting it here means a malformed
+          # matrix is a red pull request rather than a release that dies after the tag is public.
+          $matrix = (& ./installer/scripts/Get-ReleaseMatrix.ps1)
+          $include = ($matrix | ConvertFrom-Json).include
+          if ($include.Count -lt 1) {
+            throw 'The release validation matrix is empty.'
+          }
+
+          Write-Host "Release validation matrix: $($include.Count) legs."

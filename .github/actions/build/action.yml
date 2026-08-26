@@ -1,5 +1,14 @@
+# The one build recipe every generic Cohesion pipeline runs: restore, build, test. The per-area
+# workflows under .github/workflows stay thin (a path filter, a matrix of project names, and a call
+# to this action), so the build logic exists once instead of once per area.
+#
+# This action does NOT publish. Package publication happens only in .github/workflows/release.yml,
+# driven by a published GitHub Release, from the single authoritative inventory in
+# installer/scripts/modules/CohesionPackaging.psm1. Publishing from here would have every area
+# workflow racing to push a package built from whatever happened to be on main, at a version that
+# had passed no release gate.
 name: Cohesion Build
-description: Restores, builds, tests, and (on main, from Linux only) packs and pushes a Cohesion project to GitHub Packages.
+description: Restores, builds, and tests one Cohesion project.
 
 inputs:
   area:
@@ -16,7 +25,10 @@ runs:
   using: composite
   steps:
     - name: Install .NET
-      uses: actions/setup-dotnet@v4
+      # SHA-pinned rather than @v4: this action runs in every CI job in the repository, including
+      # the release pipeline's validation gate, and a mutable tag can be repointed at new code.
+      # .github/dependabot.yml carries an entry for this directory to keep the pin current.
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
       with:
         # Install exactly the SDK pinned in global.json (currently the .NET 11
         # preview). Reading the version from global.json keeps CI in lockstep
@@ -48,38 +60,3 @@ runs:
       if: ${{ hashFiles(format('./{0}/{1}/{2}/tests/{2}.Tests.csproj', inputs.area, inputs.category, inputs.project)) != '' }}
       shell: pwsh
       run: dotnet test "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/tests/${{ inputs.project }}.Tests.csproj" --configuration Release --no-restore
-
-    # -----------------------------------------------------------------
-    # Pack + push: only on main, only from Linux.
-    #
-    # The matrix runs three OSes; without the runner.os gate we'd try to
-    # push three identical .nupkgs. Linux is the cheapest runner, so it
-    # gets the publish job.
-    #
-    # The GitHub feed is used as a QA/UAT staging registry, so every
-    # push to main on the same version REPLACES the previous publish.
-    # Publish-Nupkg.ps1 deletes the existing version on the feed (if
-    # any) before pushing the fresh copy. No --skip-duplicate.
-    # -----------------------------------------------------------------
-
-    - name: Pack ${{ inputs.project }}
-      if: ${{ github.ref == 'refs/heads/main' && runner.os == 'Linux' }}
-      shell: pwsh
-      run: dotnet pack "./${{ inputs.area }}/${{ inputs.category }}/${{ inputs.project }}/src/${{ inputs.project }}.csproj" --configuration Release --no-build
-
-    - name: Push ${{ inputs.project }} to GitHub Packages
-      if: ${{ github.ref == 'refs/heads/main' && runner.os == 'Linux' }}
-      shell: pwsh
-      env:
-        # Built-in workflow token; the workflow must declare
-        #   permissions:
-        #     packages: write
-        # for this to have rights to both push and delete on the feed.
-        GITHUB_TOKEN: ${{ github.token }}
-      run: |
-        $nupkg = Get-ChildItem -Path "./_out/packages" -Filter "${{ inputs.project }}.*.nupkg" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $nupkg) {
-            Write-Host "No .nupkg produced for ${{ inputs.project }} (IsPackable=false?); skipping push."
-            exit 0
-        }
-        ./.github/scripts/Publish-Nupkg.ps1 -NupkgPath $nupkg.FullName

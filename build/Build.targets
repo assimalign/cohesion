@@ -7,4 +7,15 @@
 	<Import Project="Targets\Build.References.Analyzers.targets" />
 	<Import Project="Targets\Build.Rules.targets" />
 	<Import Project="Targets\Build.SharedFiles.targets"  Condition="'$(AssemblyName)' != 'Assimalign.Cohesion.Build.Tasks'" />
+	<!--
+		Imported UNCONDITIONALLY, unlike its siblings above. Those are excluded for the build-tasks
+		project because they depend on the task assembly it is producing. This one is a plain
+		ItemGroup with no such cycle - and the exclusion would actively break packing, because the
+		matching condition on the props side does NOT hold: $(AssemblyName) is still empty when
+		Directory.Build.props is evaluated (the SDK defaults it later, in
+		Microsoft.Common.CurrentVersion.targets), so Build.Branding.props IS imported for the build
+		tasks and sets <PackageIcon>. Skipping the packing target here would leave PackageIcon
+		naming a file that never enters the archive - NU5046 on `dotnet pack build/Tasks`.
+	-->
+	<Import Project="Targets\Build.Packaging.targets" />
 </Project>

@@ -6,7 +6,6 @@ on:
       - ".github/workflows/library-connections.yml" # When Pipeline File Changes
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -21,7 +20,8 @@ jobs:
             "Assimalign.Cohesion.Connections.Tcp",
             "Assimalign.Cohesion.Connections.Udp",
             "Assimalign.Cohesion.Connections.Quic",
-            "Assimalign.Cohesion.Connections.Security"
+            "Assimalign.Cohesion.Connections.Security",
+            "Assimalign.Cohesion.Connections.InMemory"
           ]
     steps:
       - uses: actions/checkout@v4

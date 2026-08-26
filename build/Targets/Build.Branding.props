@@ -4,5 +4,33 @@
         <Copyright>© Assimalign $([System.DateTime]::Now.ToString(`yyyy`))</Copyright>
         <RepositoryType>git</RepositoryType>
         <RepositoryUrl>https://github.com/assimalign/cohesion</RepositoryUrl>
+
+        <!--
+            Set centrally because the SDK's defaults are actively wrong on a public feed: with no
+            <Authors> NuGet writes the assembly name into the authors field, and with no
+            <Description> it writes the literal string "Package Description". Both were shipping
+            that way. A project may override Description and PackageTags; nothing overrides the
+            identity fields.
+        -->
+        <Authors>Assimalign</Authors>
+        <Description>$(MSBuildProjectName) is part of Cohesion, a code-first, multi-service application framework for .NET.</Description>
+        <PackageProjectUrl>https://github.com/assimalign/cohesion</PackageProjectUrl>
+        <PackageTags>Cohesion;dotnet;aot;microservices;application-framework</PackageTags>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+        <!--
+            Every shipped Cohesion package carries the same mark. The mono variant on the light
+            tile is the branding system's single-asset treatment: NuGet exposes one icon and
+            cannot swap it with the viewer's theme, so the light tile self-grounds the glyph and
+            stays legible on both. See assets/branding/README.md.
+        -->
+        <PackageIcon>cohesion-nuget-mono-light-128.png</PackageIcon>
+
+        <!--
+            The icon is an imported branding artifact. Its location in the repository is kept
+            separate from PackageIcon, which is the path NuGet records inside the archive.
+            build/Targets/Build.Packaging.targets does the packing.
+        -->
+        <CohesionPackageIconSource>$(CohesionRepositoryDirectory)assets\branding\nuget\$(PackageIcon)</CohesionPackageIconSource>
     </PropertyGroup>
 </Project>

@@ -1,0 +1,34 @@
+<Project>
+
+	<!--
+		Central packaging contract for every shipped Cohesion package.
+
+		This is a .targets, not a .props, on purpose: <IsPackable> is set by individual csprojs
+		and by area Directory.Build.props files that run *after* build/Build.props, so a props-time
+		condition on it would read a stale value (analyzers/Directory.Build.props sets it false).
+		Directory.Build.targets is imported after the project body, so the value read here is final.
+
+		The import chain that gets this file everywhere:
+
+			<area>/Directory.Build.targets -> ... -> /Directory.Build.targets -> build/Build.targets
+
+		Every area's Directory.Build.targets imports its parent, so libraries, resources, sdks
+		(whose packs use a custom TargetsForTfmSpecificContentInPackage layout), frameworks
+		(targeting + runtime packs), extensions, and tooling all inherit the same branding without
+		per-project wiring.
+	-->
+
+	<!--
+		Every shipped package embeds the same purpose-built NuGet icon named by <PackageIcon> in
+		build/Targets/Build.Branding.props. There is deliberately no Exists() guard: if the imported
+		branding artifact goes missing, NuGet would otherwise fail later with an opaque NU5046
+		("icon file not found in the package") on whichever project happened to pack first.
+	-->
+	<ItemGroup Condition="'$(IsPackable)' != 'false' and '$(CohesionPackageIconSource)' != ''">
+		<None Include="$(CohesionPackageIconSource)"
+		      Pack="true"
+		      PackagePath="\"
+		      Visible="false" />
+	</ItemGroup>
+
+</Project>

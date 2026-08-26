@@ -6,7 +6,6 @@ on:
       - ".github/workflows/library-http.yml" # When Pipeline File Changes
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -27,7 +26,8 @@ jobs:
             "Assimalign.Cohesion.Http.RequestLimits",
             "Assimalign.Cohesion.Http.Cookies",
             "Assimalign.Cohesion.Http.Antiforgery",
-            "Assimalign.Cohesion.Http.Forwarded"
+            "Assimalign.Cohesion.Http.Forwarded",
+            "Assimalign.Cohesion.Http.Streaming"
           ]
     steps:
       - uses: actions/checkout@v4

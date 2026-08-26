@@ -120,57 +120,20 @@ Write-Host ""
 # serving the OLD extract from ~/.nuget/packages/ instead of re-reading the
 # fresh .nupkg in our local feed. Prune cached extracts up front so the next
 # restore picks up the fresh package.
-# Per-framework families: each has a Ref pack (one .nupkg) and a per-RID
-# Runtime pack (one .nupkg per RID). Keep this list aligned with the
-# framework projects under frameworks/ and the KnownFrameworkReferences
-# in sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
-$cohesionFrameworks = @(
-    'Assimalign.Cohesion.App',
-    'Assimalign.Cohesion.App.Web',
-    'Assimalign.Cohesion.App.Database',
-    'Assimalign.Cohesion.App.ApiManager',
-    'Assimalign.Cohesion.App.ConfigurationStore',
-    'Assimalign.Cohesion.App.EmailHub',
-    'Assimalign.Cohesion.App.EventHub',
-    'Assimalign.Cohesion.App.IdentityHub',
-    'Assimalign.Cohesion.App.IoTHub',
-    'Assimalign.Cohesion.App.LoadBalancer',
-    'Assimalign.Cohesion.App.LogSpace',
-    'Assimalign.Cohesion.App.MediaHub',
-    'Assimalign.Cohesion.App.MessageHub',
-    'Assimalign.Cohesion.App.NatGateway',
-    'Assimalign.Cohesion.App.NotificationHub',
-    'Assimalign.Cohesion.App.Rezolvr',
-    'Assimalign.Cohesion.App.Scheduler',
-    'Assimalign.Cohesion.App.SecretStore',
-    'Assimalign.Cohesion.App.VpnGateway'
-)
-
-# SDK families. The base Sdk must come first because the others chain to it.
-# Keep this list aligned with the folders under sdks/; each entry maps to
-# sdks/<SdkName>/Tasks/<SdkName>.Tasks.csproj and to the NuGet package id used
-# for the cache prune + locked-DLL probe below.
-$cohesionSdks = @(
-    'Assimalign.Cohesion.Sdk',
-    'Assimalign.Cohesion.Sdk.Web',
-    'Assimalign.Cohesion.Sdk.Database',
-    'Assimalign.Cohesion.Sdk.ApiManager',
-    'Assimalign.Cohesion.Sdk.ConfigurationStore',
-    'Assimalign.Cohesion.Sdk.EmailHub',
-    'Assimalign.Cohesion.Sdk.EventHub',
-    'Assimalign.Cohesion.Sdk.IdentityHub',
-    'Assimalign.Cohesion.Sdk.IoTHub',
-    'Assimalign.Cohesion.Sdk.LoadBalancer',
-    'Assimalign.Cohesion.Sdk.LogSpace',
-    'Assimalign.Cohesion.Sdk.MediaHub',
-    'Assimalign.Cohesion.Sdk.MessageHub',
-    'Assimalign.Cohesion.Sdk.NatGateway',
-    'Assimalign.Cohesion.Sdk.NotificationHub',
-    'Assimalign.Cohesion.Sdk.Rezolvr',
-    'Assimalign.Cohesion.Sdk.Scheduler',
-    'Assimalign.Cohesion.Sdk.SecretStore',
-    'Assimalign.Cohesion.Sdk.VpnGateway'
-)
+# The framework and SDK families come from the shared packaging module, so the local
+# dogfooding feed and the release set (installer/scripts/Pack-Release.ps1) cannot
+# disagree about what exists. Adding a family is one edit, in
+# installer/scripts/modules/CohesionPackaging.psm1 - not two lists that drift.
+#
+# Each framework family has a Ref pack (one .nupkg) and a per-RID Runtime pack (one
+# .nupkg per RID). Each SDK entry maps to sdks/<name>/Tasks/<name>.Tasks.csproj. The
+# base Sdk comes first because the others chain to it. The module keeps both lists
+# aligned with the folders under frameworks/ and sdks/ and with the
+# KnownFrameworkReferences in
+# sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
+Import-Module (Join-Path $PSScriptRoot 'modules/CohesionPackaging.psm1') -Force
+$cohesionFrameworks = Get-CohesionReleaseFramework
+$cohesionSdks       = Get-CohesionReleaseSdk
 
 $cohesionPackages = @($cohesionSdks | ForEach-Object { $_.ToLowerInvariant() }) `
     + ($cohesionFrameworks | ForEach-Object { "$($_.ToLowerInvariant()).ref" }) `

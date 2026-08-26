@@ -136,7 +136,11 @@ pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 #       frameworks/Assimalign.Cohesion.App.props
 #    c. Add the framework name to $cohesionFrameworks and the SDK name to
 #       $cohesionSdks in installer/scripts/Install-Local.ps1
-#    d. Add the new Refs + Runtime folder/project entries to
+#    d. Add the same two names to $script:CohesionReleaseFramework and
+#       $script:CohesionReleaseSdk in
+#       installer/scripts/modules/CohesionPackaging.psm1 -- otherwise the new
+#       family builds locally but never ships
+#    e. Add the new Refs + Runtime folder/project entries to
 #       frameworks/Assimalign.Cohesion.Frameworks.slnx
 
 # 4. Verify locally:
@@ -144,6 +148,8 @@ pwsh installer/scripts/Install-Local.ps1
 ```
 
 The scaffold script is idempotent: re-running skips anything already on disk.
+
+Step 3d is guarded, not merely documented: `Assert-CohesionReleaseInventory` fails if a `sdks/<name>` or `frameworks/<family>.{Refs,Runtime}` project exists on disk but is missing from the release lists, so forgetting it turns the next release red rather than shipping a family short.
 
 ## Versioning
 
@@ -175,14 +181,48 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 
 ## CI pipeline summary
 
-`.github/workflows/framework.yml` runs three stages:
+Two pipelines, with different jobs. **Continuous integration proves the branch; the release pipeline ships it.** Nothing else publishes.
+
+### Per-area CI — `library-*.yml`, `resource-*.yml`
+
+Path-filtered on push, each a thin matrix over project names calling the shared composite action at `.github/actions/build/action.yml` across ubuntu/windows/macos. The action restores, builds, and tests. **It does not pack or push** — publishing from there had every area workflow racing to push a package built from whatever was on `main`, at a version that had passed no release gate. These workflows declare `permissions: contents: read` only.
+
+### Release — `.github/workflows/release.yml`
+
+Triggered solely by a **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included. Five jobs:
+
+1. **prepare** — resolves the tag to a commit, proves it is reachable from `main`, validates the version against `Get-CohesionVersion.ps1`, and emits the validation matrix from `Get-ReleaseMatrix.ps1`. Fails fast, before ~130 build legs run. Every downstream job checks out **that commit**, not the tag, so a tag moved mid-run cannot publish something no job built.
+2. **validate-release** — one leg per shipping package (Linux only; the per-area workflows already carry the three-OS matrix), running the same `.github/actions/build` recipe at the release commit.
+3. **pack-packages** — runs `Pack-Release.ps1` (300 packages: 129 libraries and resources, 19 SDK packs, 19 targeting packs, 19 x 7 runtime packs), asserts the produced set and its package metadata, and uploads `_out/release/packages` as the `Assimalign.Cohesion.Packages` artifact.
+4. **publish-github-packages** — stages the artifact in GitHub Packages with `--skip-duplicate`. A release version is immutable, so re-running the pipeline for the same tag is a no-op on the feed.
+5. **publish-nuget** — promotes that same artifact to nuget.org via OIDC (`NuGet/login`), routed through the `nuget-org` environment (which must still be created and given required reviewers — GitHub auto-creates a referenced environment with no protection rules). Only `-preview.` and `-rc.` versions promote; other prereleases stop at the staging feed and stable versions are deliberately not matched yet.
+
+Both publish jobs re-verify `checksums.sha256` before pushing, so "what we published is what we validated" is checked, not assumed.
+
+**The release inventory is the contract.** `installer/scripts/modules/CohesionPackaging.psm1` is the single source of what ships: the curated library/resource list, the SDK families, the framework families, and the RIDs. The release validation matrix, the pack plan, and `Install-Local.ps1`'s local feed all read it, so none of them can disagree about what exists.
+
+A package ships only if **(1)** a per-area CI workflow builds it, **(2)** it is not `IsPackable=false`, and **(3)** it has at least one source file. `Assert-CohesionReleaseInventory` enforces all three in both directions — a package CI never built cannot ship, and a packable project CI does build cannot be silently omitted — plus two guards that the build itself cannot provide:
+
+- **Dependency closure.** A public `CohesionProjectReference` becomes a `<dependency>` in the `.nuspec`. If the target is not itself shipped, the package publishes green and then restores to NU1101 for every consumer — permanently, since nuget.org unlists but never deletes. A name that resolves to no project at all is dropped silently by the reference resolver, so that case warns rather than fails.
+- **No empty packages.** Seven projects under `libraries/` and `resources/` currently compile to an empty assembly. They stay in CI and still reach consumers inside the framework packs, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
+
+Note what (1) does *not* claim: 12 shipping entries have no tests csproj beside them, so "CI builds it" is the guarantee and "CI tests it" is true of most, not all.
+
+Well over a third of the `src` csprojs under `libraries/` and `resources/` are scaffolded placeholders. That is why the inventory is curated rather than globbed, and why `Pack-Release.ps1` has no analog of `Install-Local.ps1`'s `-ContinueOnLibraryError`: a project that does not build does not ship.
+
+`.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, an installer script, or a csproj, so drift surfaces on the change that causes it rather than on the release that trips over it. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
+
+Every `uses:` in `release.yml` and in `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag would run attacker-controlled code with that workflow's `packages: write` and nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
+
+### Framework — `.github/workflows/framework.yml`
+
 1. **Pack** (Linux) — runs `Install-Local.ps1` with all declared RIDs, uploads `.nupkg`s as the `cohesion-packages` artifact.
 2. **Smoke-test** (ubuntu/windows/macos matrix) — materializes inline consumer csprojs, builds against targeting packs, publishes self-contained against per-RID runtime packs.
-3. **Publish** (`needs: [pack, smoke-test]`, only on `main`) — pushes every `.nupkg` to GitHub Packages.
+3. **Publish** (`needs: [pack, smoke-test]`, only on `main`) — pushes every `.nupkg` to GitHub Packages via `Publish-Nupkg.ps1`.
 
-GitHub Packages is treated as a QA/UAT staging registry: each push to `main` on the same `$(CohesionVersion)` deletes and replaces the previous publish, so `--skip-duplicate` is deliberately omitted (a failed replacement turns CI red instead of silently leaving the old version on the feed).
+Its GitHub Packages feed is a QA/UAT staging registry: each push to `main` on the same `$(CohesionVersion)` deletes and replaces the previous publish, so `--skip-duplicate` is deliberately omitted (a failed replacement turns CI red instead of silently leaving the old version on the feed).
 
-The library/resource workflows (`library-*.yml`, `resource-*.yml`) follow the same publish pattern via the shared composite action at `.github/actions/build/action.yml`. Each declares `permissions: packages: write` so the workflow's `GITHUB_TOKEN` can both push and delete on the feed.
+> **Open overlap.** This job and `release.yml`'s `publish-github-packages` both write the SDK and framework packs to the same feed at the same `$(CohesionVersion)`, with opposite policies — replace-on-main versus immutable-on-release. Whichever ran last wins. Resolve it before the first tagged release: either scope the framework job to a distinct prerelease channel, or drop its publish stage and let the release pipeline own the feed.
 
 ## File layout reference
 
@@ -212,13 +252,24 @@ sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 └── ...Sdk.ApplicationModel.Build.targets
 
 installer/scripts/
+├── modules/
+│   └── CohesionPackaging.psm1             ← THE release inventory + its drift guards
+├── Pack-Release.ps1                       ← strict release pack → _out/release/packages
+├── Get-ReleaseMatrix.ps1                  ← release validation matrix (JSON) for release.yml
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
 ├── Get-CohesionVersion.ps1                ← resolves $(CohesionVersion) for scripts + CI
 ├── New-CohesionDomainScaffold.ps1         ← scaffold a new SDK + Framework pair
 └── Cleanup-PriorRegistrations.ps1         ← one-shot cleanup for old MSI-based registrations
 
 .github/scripts/
-└── Publish-Nupkg.ps1                      ← delete-then-push helper for GitHub Packages
+└── Publish-Nupkg.ps1                      ← delete-then-push helper (framework.yml only)
+
+build/Targets/
+├── Build.Branding.props                   ← package metadata + <PackageIcon>
+└── Build.Packaging.targets                ← packs the icon into every packable project
+
+assets/branding/nuget/
+└── cohesion-nuget-mono-light-128.png      ← imported from the branding repo; see the README
 ```
 
 ## Architecture rules (hard constraints)
