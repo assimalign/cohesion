@@ -24,4 +24,11 @@
 	<ItemGroup>
 		<Folder Include="System\Decorators\" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- Ships the component-integration generator inside Core's own nupkg at
+		     analyzers/dotnet/cs/. Core is in every Cohesion consumer's graph, and a packed
+		     analyzer is picked up transitively, so this is the single delivery point for
+		     PackageReference consumers. SDK consumers get it from App.Ref instead. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+	</ItemGroup>
 </Project>

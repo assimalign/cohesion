@@ -1,0 +1,63 @@
+name: Analyzers
+on:
+  push:
+    paths:
+      - "analyzers/**"
+      - "build/**"
+      - "libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/**"
+      - "libraries/Http/Assimalign.Cohesion.Http.ClientFactory/**"
+      - ".github/workflows/analyzers.yml" # When Pipeline File Changes
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "${{ matrix.projects }} [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            "Assimalign.Cohesion.OpenApi.SourceGeneration",
+            "Assimalign.Cohesion.SourceGeneration",
+            "Assimalign.Cohesion.SourceGeneration.ComponentModel",
+            "Assimalign.Cohesion.SourceGeneration.Database",
+            "Assimalign.Cohesion.SourceGeneration.Web"
+          ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Build build tasks
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release
+
+      - name: "Build: ${{ matrix.projects }}"
+        run: dotnet build "./analyzers/${{ matrix.projects }}/src/${{ matrix.projects }}.csproj" --configuration Release
+
+      - name: "Test: ${{ matrix.projects }}"
+        run: dotnet test "./analyzers/${{ matrix.projects }}/tests/" --configuration Release
+
+  integration-check:
+    name: "IntegrationCheck [ubuntu-latest]"
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: IntegrationCheck"
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Build build tasks
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release
+
+      - name: "Build: IntegrationCheck"
+        run: dotnet build "./build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj" --configuration Release

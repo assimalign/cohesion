@@ -94,3 +94,16 @@ No reflection, no dynamic code, no serialization — plain delegates and BCL typ
 - **No automatic `300 Multiple Choices` navigation** and **no fragment inheritance** on
   redirects — both are user-agent decisions, not client-library mechanics.
 - **No DI surface**: hosting layers own how factories reach application code.
+
+## Reference-free composition integration
+
+This library still has no dependency on, or directly authored surface for, Cohesion dependency
+injection. Its assembly-level `ComponentIntegrationAttribute` names the
+`IServiceProviderBuilder` seam as a string, so the source assembly continues to reference only
+its own HTTP family.
+
+When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
+`Assimalign.Cohesion.SourceGeneration.ComponentModel` projects `AddHttpClientFactory` into that
+consumer. Without the dependency-injection assembly the generator emits no verb, preserving the
+library boundary while still providing an ergonomic composition path where both sides are
+intentionally present.

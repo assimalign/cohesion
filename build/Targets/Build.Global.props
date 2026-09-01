@@ -23,6 +23,8 @@
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+		<!-- Emit generated sources under obj/ in Debug builds for diagnostics and review. -->
+		<EmitCompilerGeneratedFiles Condition="'$(Configuration)' == 'Debug'">true</EmitCompilerGeneratedFiles>
 	</PropertyGroup>
 
 	<!-- Cohesion Build Properties -->

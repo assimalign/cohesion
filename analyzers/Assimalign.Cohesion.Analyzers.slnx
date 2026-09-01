@@ -20,6 +20,13 @@
   <Folder Name="/Assimalign.Cohesion.CodeFixes/tests/">
     <Project Path="Assimalign.Cohesion.CodeFixes/tests/Assimalign.Cohesion.CodeFixesTests.csproj" />
   </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ComponentModel/" />
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ComponentModel/src/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.ComponentModel/src/Assimalign.Cohesion.SourceGeneration.ComponentModel.csproj" />
+  </Folder>
+  <Folder Name="/Assimalign.Cohesion.SourceGeneration.ComponentModel/tests/">
+    <Project Path="Assimalign.Cohesion.SourceGeneration.ComponentModel/tests/Assimalign.Cohesion.SourceGeneration.ComponentModelTests.csproj" />
+  </Folder>
   <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/" />
   <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/src/">
     <Project Path="Assimalign.Cohesion.SourceGeneration.Database/src/Assimalign.Cohesion.SourceGeneration.Database.csproj" />

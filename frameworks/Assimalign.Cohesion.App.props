@@ -126,6 +126,8 @@
             lives).
         -->
         <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration" />
+        <!-- Projects [assembly: ComponentIntegration] declarations into consuming-compilation extension verbs. -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 
         <!-- WIP / not yet building - uncomment as each library comes online:
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
