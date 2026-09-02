@@ -49,7 +49,7 @@ internal static class Program
             // Opt into incremental response streaming by registering its response interceptor. The
             // transport exposes its raw response body sink to the feature package through this seam;
             // it has no streaming or SSE dependency of its own.
-            options.ResponseInterceptors.Add(HttpResponseStreaming.CreateInterceptor());
+            options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
         });
 
         Task serverTask = RunServerAsync(listener, cancellationToken);
