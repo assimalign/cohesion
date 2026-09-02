@@ -15,10 +15,17 @@ namespace Assimalign.Cohesion;
 /// nothing.
 /// </para>
 /// <para>
-/// The emitted adapter is always
+/// When <see cref="FactoryMethodName"/> identifies public static methods, the generator copies
+/// each supported overload's signature and emits
 /// <c>receiver.TargetMethodName&lt;Contract&gt;(FactoryType.FactoryMethodName(args)); return receiver;</c>.
-/// The generator copies the factory method's signature, forwards its arguments, and synthesizes
-/// no behaviour of its own; everything expressive belongs in the factory method body.
+/// The adapter forwards every argument without adding behavior of its own.
+/// </para>
+/// <para>
+/// When <see cref="FactoryMethodName"/> identifies a public instance method on a publicly
+/// constructible builder type, the generator projects it as
+/// <c>Verb(Action&lt;FactoryType&gt;)</c>. The emitted adapter constructs the builder, invokes the
+/// configuration action, calls the instance method, and registers the resulting component through
+/// a producer.
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
@@ -30,8 +37,8 @@ public sealed class ComponentIntegrationAttribute : Attribute
     /// <summary>Initializes a new declaration.</summary>
     /// <param name="targetTypeName">Fully qualified metadata name of the composition surface.</param>
     /// <param name="targetMethodName">The member invoked on the surface, e.g. <c>AddSingleton</c>. May be an instance member or an extension member in the surface's own namespace.</param>
-    /// <param name="factoryType">A public static type in the declaring assembly holding the factory method.</param>
-    /// <param name="factoryMethodName">A public static method on <paramref name="factoryType"/>. Every overload with this name is projected.</param>
+    /// <param name="factoryType">The public static factory type or publicly constructible builder type in the declaring assembly.</param>
+    /// <param name="factoryMethodName">The name of either a public static factory method, whose supported overloads are copied, or a public zero-parameter instance method on a builder, which is projected as <c>Verb(Action&lt;FactoryType&gt;)</c> using the construct-configure-build template.</param>
     /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
     public ComponentIntegrationAttribute(
         string targetTypeName,

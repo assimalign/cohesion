@@ -99,11 +99,16 @@ No reflection, no dynamic code, no serialization — plain delegates and BCL typ
 
 This library still has no dependency on, or directly authored surface for, Cohesion dependency
 injection. Its assembly-level `ComponentIntegrationAttribute` names the
-`IServiceProviderBuilder` seam as a string, so the source assembly continues to reference only
-its own HTTP family.
+`IServiceProviderBuilder` seam as a string and names the already-public
+`HttpClientFactoryBuilder.Build()` instance method. No public components class exists solely for
+integration, so the declaration contributes the verb with zero added public surface while the
+source assembly continues to reference only its own HTTP family.
 
 When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
-`Assimalign.Cohesion.SourceGeneration.ComponentModel` projects `AddHttpClientFactory` into that
-consumer. Without the dependency-injection assembly the generator emits no verb, preserving the
-library boundary while still providing an ergonomic composition path where both sides are
-intentionally present.
+`Assimalign.Cohesion.SourceGeneration.ComponentModel` recognizes the instance method as a builder
+template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>)` into that consumer.
+The generated adapter eagerly constructs the builder, invokes the configuration action, calls
+`Build()` so its validation runs at registration time, and registers the result through a producer
+lambda so the container captures it for disposal. Without the dependency-injection assembly the
+generator emits no verb, preserving the library boundary while still providing an ergonomic
+composition path where both sides are intentionally present.

@@ -625,6 +625,223 @@ public class ComponentIntegrationGeneratorTests
                 && diagnostic.Severity == DiagnosticSeverity.Warning);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: instance factory method emits a callable builder-template verb")]
+    public void Generator_InstanceFactoryMethod_EmitsCallableBuilderTemplateVerb()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.BuilderContributor",
+            BuilderContributorSource());
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(
+            """
+            using Test.BuilderContributor;
+            using Test.Seams;
+
+            internal static class Consumer
+            {
+                internal static ISeam Configure(ISeam seam) => seam.AddProjected(builder => { });
+            }
+            """,
+            new[] { contributor },
+            new[] { seam });
+        string generated = GeneratedText(result);
+
+        generated.ShouldContain(
+            "public global::Test.Seams.ISeam AddProjected(global::System.Action<global::Test.BuilderContributor.ThingBuilder> @configure)",
+            Case.Sensitive);
+        generated.ShouldContain(
+            "var cohesionComponentFactory = new global::Test.BuilderContributor.ThingBuilder();",
+            Case.Sensitive);
+        generated.ShouldContain("@configure.Invoke(cohesionComponentFactory);", Case.Sensitive);
+        generated.ShouldContain(
+            "var cohesionComponent = cohesionComponentFactory.Build();",
+            Case.Sensitive);
+        generated.ShouldContain(
+            "builder.AddThing<global::Test.BuilderContributor.IThing>(_ => cohesionComponent);",
+            Case.Sensitive);
+        generated.ShouldNotContain("(global::System.Func<", Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: mixed static and instance factory method group reports unsupported shape")]
+    public void Generator_MixedFactoryMethodGroup_ReportsUnsupportedShapeAndEmitsNothing()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.MixedBuilderContributor",
+            BuilderContributorSource(
+                contributorNamespace: "Test.MixedBuilderContributor",
+                builderMembers: """
+                    public IThing Build()
+                        => new Thing();
+
+                    public static IThing Build(string name)
+                        => new Thing();
+                    """));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+
+        result.RunResult.GeneratedTrees.ShouldBeEmpty();
+        result.RunResult.Diagnostics.ShouldContain(
+            diagnostic => diagnostic.Id == "COHCMP0003"
+                && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder without public parameterless constructor reports unsupported shape")]
+    public void Generator_BuilderWithoutPublicParameterlessConstructor_ReportsUnsupportedShapeAndEmitsNothing()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.ConstructorBuilderContributor",
+            BuilderContributorSource(
+                contributorNamespace: "Test.ConstructorBuilderContributor",
+                builderMembers: """
+                    public ThingBuilder(string name)
+                    {
+                    }
+
+                    public IThing Build()
+                        => new Thing();
+                    """));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+
+        result.RunResult.GeneratedTrees.ShouldBeEmpty();
+        result.RunResult.Diagnostics.ShouldContain(
+            diagnostic => diagnostic.Id == "COHCMP0003"
+                && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: instance factory methods with parameters report unsupported shape")]
+    public void Generator_ParameterizedInstanceFactoryMethodsOnly_ReportUnsupportedShapeAndEmitNothing()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.ParameterizedBuilderContributor",
+            BuilderContributorSource(
+                contributorNamespace: "Test.ParameterizedBuilderContributor",
+                builderMembers: """
+                    public IThing Build(string name)
+                        => new Thing();
+                    """));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+
+        result.RunResult.GeneratedTrees.ShouldBeEmpty();
+        result.RunResult.Diagnostics.ShouldContain(
+            diagnostic => diagnostic.Id == "COHCMP0003"
+                && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: disposable builder product is registered as a producer without a disposal warning")]
+    public void Generator_DisposableBuilderProduct_EmitsVerbWithoutDisposableInstanceWarning()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.DisposableBuilderContributor",
+            BuilderContributorSource(
+                contributorNamespace: "Test.DisposableBuilderContributor",
+                builderMembers: """
+                    public DisposableThing Build()
+                        => new DisposableThing();
+                    """,
+                additionalTypes: """
+                    public sealed class DisposableThing : IThing, IDisposable
+                    {
+                        public void Dispose()
+                        {
+                        }
+                    }
+                    """));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+
+        result.RunResult.Diagnostics.ShouldNotContain(
+            diagnostic => diagnostic.Id == "COHCMP0007");
+        GeneratedText(result).ShouldContain(
+            "public global::Test.Seams.ISeam AddProjected(",
+            Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb guards a null configure action")]
+    public void Generator_BuilderTemplateVerb_EmitsExplicitNullGuard()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.NullGuardBuilderContributor",
+            BuilderContributorSource(contributorNamespace: "Test.NullGuardBuilderContributor"));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+        string generated = GeneratedText(result);
+
+        generated.ShouldContain("if (@configure is null)", Case.Sensitive);
+        generated.ShouldContain(
+            "throw new global::System.ArgumentNullException(\"configure\");",
+            Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb emits the complete eager composition body")]
+    public void Generator_BuilderTemplateVerb_EmitsCompleteEagerCompositionBody()
+    {
+        MetadataReference contributor = CompileReference(
+            "Test.EndToEndBuilderContributor",
+            BuilderContributorSource(
+                contributorNamespace: "Test.EndToEndBuilderContributor",
+                verb: "AddEndToEnd",
+                builderMembers: """
+                    public ThingBuilder Configure(string name)
+                        => this;
+
+                    public IThing Build()
+                        => new Thing();
+                    """));
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        GeneratorResult result = Run(
+            """
+            using Test.EndToEndBuilderContributor;
+            using Test.Seams;
+
+            internal static class Consumer
+            {
+                internal static ISeam Configure(ISeam seam) =>
+                    seam.AddEndToEnd(builder => builder.Configure("configured"));
+            }
+            """,
+            new[] { contributor },
+            new[] { seam });
+        string generated = NormalizeLineEndings(GeneratedText(result));
+
+        generated.ShouldContain(
+            Indent(
+                """
+                    public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder> @configure)
+                    {
+                        if (@configure is null)
+                        {
+                            throw new global::System.ArgumentNullException("configure");
+                        }
+
+                        // Composed eagerly so the factory's own Build-time validation fires at registration
+                        // time rather than at first resolve.
+                        var cohesionComponentFactory = new global::Test.EndToEndBuilderContributor.ThingBuilder();
+                        @configure.Invoke(cohesionComponentFactory);
+                        var cohesionComponent = cohesionComponentFactory.Build();
+
+                        // Registered through the Func<> sink so the container captures the product for
+                        // disposal (an instance registration would become an uncaptured ConstantCallSite).
+                        builder.AddThing<global::Test.EndToEndBuilderContributor.IThing>(_ => cohesionComponent);
+                        return builder;
+                    }
+                """,
+                spaces: 8),
+            Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
     private static string ContributorSource(
         string factoryMembers,
         bool includeContract = true,
@@ -666,6 +883,45 @@ public class ComponentIntegrationGeneratorTests
             }
             """;
     }
+
+    private static string BuilderContributorSource(
+        string contributorNamespace = "Test.BuilderContributor",
+        string verb = "AddProjected",
+        string builderMembers = """
+            public IThing Build()
+                => new Thing();
+            """,
+        string additionalTypes = "") =>
+        $$"""
+            #nullable enable
+            using System;
+            using Assimalign.Cohesion;
+
+            [assembly: ComponentIntegration(
+                targetTypeName: "Test.Seams.ISeam",
+                targetMethodName: "AddThing",
+                factoryType: typeof({{contributorNamespace}}.ThingBuilder),
+                factoryMethodName: nameof({{contributorNamespace}}.ThingBuilder.Build),
+                Verb = "{{verb}}",
+                Contract = typeof({{contributorNamespace}}.IThing))]
+
+            namespace {{contributorNamespace}};
+
+            public interface IThing
+            {
+            }
+
+            public sealed class Thing : IThing
+            {
+            }
+
+            {{additionalTypes}}
+
+            public sealed class ThingBuilder
+            {
+                {{builderMembers}}
+            }
+            """;
 
     private static MetadataReference CompileReference(
         string assemblyName,
@@ -741,6 +997,17 @@ public class ComponentIntegrationGeneratorTests
         string.Join(
             Environment.NewLine,
             result.RunResult.GeneratedTrees.Select(tree => tree.ToString()));
+
+    private static string NormalizeLineEndings(string source) =>
+        source.Replace("\r\n", "\n");
+
+    private static string Indent(string source, int spaces)
+    {
+        string indentation = new(' ', spaces);
+        return string.Join(
+            "\n",
+            source.Split('\n').Select(line => line.Length == 0 ? string.Empty : indentation + line));
+    }
 
     private static int CountOccurrences(string source, string value)
     {

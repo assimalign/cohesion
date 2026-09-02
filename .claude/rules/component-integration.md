@@ -38,36 +38,50 @@ rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs
 
 ## Adding an integration — the whole recipe
 
-Two files in the owning library, one line in the canary. No csproj edits on either library, no
-MSBuild edits, no generator edits, no slnx/CI edits, no new project.
+One declaration file in the owning library, one line in the canary. No csproj edits on either
+library, no MSBuild edits, no generator edits, no slnx/CI edits, no new project.
 
-1. `src/<Thing>Components.cs` — a `public static` factory class. For anything whose product is
-   disposable the factory **must** return `Func<IServiceProvider, T>`, never a bare instance: an
-   instance registration becomes a `ConstantCallSite`, which the resolver returns **without**
-   `CaptureDisposable`, so the container would never dispose it. Compose eagerly inside the
-   factory so validation fires at registration time; return the built instance from the lambda.
-2. `src/Properties/ComponentIntegrations.cs`:
+**Preferred shape — the builder template (zero added public surface).** If the library already has
+a publicly-constructible builder (`new ThingBuilder()` → configure → `Build()`), name its
+**instance** build method; the generator inlines new → configure → build eagerly and registers the
+product through the `Func<>` sink (always disposal-safe):
 
-   ```csharp
-   [assembly: ComponentIntegration(
-       targetTypeName:    "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
-       targetMethodName:  "AddSingleton",
-       factoryType:       typeof(ThingComponents),
-       factoryMethodName: nameof(ThingComponents.CreateThing),
-       Verb = "AddThing",
-       Contract = typeof(IThing))]
-   ```
+```csharp
+// src/Properties/ComponentIntegrations.cs
+[assembly: ComponentIntegration(
+    targetTypeName:    "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
+    targetMethodName:  "AddSingleton",
+    factoryType:       typeof(ThingBuilder),            // public parameterless ctor required
+    factoryMethodName: nameof(ThingBuilder.Build),      // public instance, zero params
+    Verb = "AddThing",
+    Contract = typeof(IThing))]
+```
 
-3. Add one `CohesionProjectReference` for the library to
-   `build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj` and exercise the verb in
-   its `IntegrationSurface.cs`. **Never skip this** — the canary is the only thing that catches
-   sink-signature drift, which otherwise breaks consumers while the declaring library's CI stays
-   green.
+The projected verb is `AddThing(Action<ThingBuilder> configure)`. **Do not create a
+`XxxComponents` factory class when the builder template can express the integration** — the whole
+point of the instance shape is that the integration adds nothing to the library's public API
+(precedent: `Http.ClientFactory`, whose `HttpClientFactoryComponents` class was deleted in favor
+of declaring `HttpClientFactoryBuilder.Build`).
 
-Adding a factory **overload** needs no attribute change — every public static overload of the
-named method is projected. Changing lifetime = change `targetMethodName` (`AddScoped`, …).
-Deleting = delete the attribute line and the factory (source-breaking for consumers, same severity
-as deleting a public method).
+**Fallback shape — a static factory** for compositions a builder can't express: a `public static`
+factory class whose method the attribute names. Quarantine it — `[EditorBrowsable(
+EditorBrowsableState.Never)]`, ideally in a `<RootNamespace>.ComponentModel` sub-namespace — since
+it exists only for the generator to call. If the product is disposable the factory **must** return
+`Func<IServiceProvider, T>`, never a bare instance: an instance registration becomes a
+`ConstantCallSite`, which the resolver returns **without** `CaptureDisposable`, so the container
+would never dispose it (`COHCMP0007` guards this; the builder template is immune by construction).
+Compose eagerly inside the factory so validation fires at registration time. Every public static
+overload of the named method is projected, so adding an overload needs no attribute change.
+
+**Both shapes:** add one `CohesionProjectReference` for the library to
+`build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj` and exercise the verb in its
+`IntegrationSurface.cs`. **Never skip this** — the canary is the only thing that catches
+sink-signature drift, which otherwise breaks consumers while the declaring library's CI stays
+green.
+
+Changing lifetime = change `targetMethodName` (`AddScoped`, …). Deleting = delete the attribute
+line (source-breaking for consumers, same severity as deleting a public method). A method group
+mixing static and instance members is rejected (`COHCMP0003`).
 
 ## Rules
 

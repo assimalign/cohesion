@@ -218,109 +218,248 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (!factoryType.IsStatic || !IsExternallyVisible(factoryType))
-            {
-                diagnostics.Add(DiagnosticInfo.Create(
-                    ComponentIntegrationDiagnostics.InaccessibleFactory,
-                    Location.None,
-                    $"Component integration '{integrationName}' requires a public static factory type."));
-                continue;
-            }
-
             IMethodSymbol[] methods = factoryType.GetMembers(factoryMethodName)
                 .OfType<IMethodSymbol>()
-                .Where(static method => method.IsStatic
-                    && method.DeclaredAccessibility == Accessibility.Public
+                .Where(static method => method.DeclaredAccessibility == Accessibility.Public
                     && method.MethodKind == MethodKind.Ordinary)
                 .ToArray();
 
             if (methods.Length == 0)
             {
-                diagnostics.Add(DiagnosticInfo.Create(
-                    ComponentIntegrationDiagnostics.InaccessibleFactory,
-                    Location.None,
-                    $"Component integration '{integrationName}' has no public static ordinary factory method."));
+                AddUnsupportedShapeDiagnostic(
+                    diagnostics,
+                    integrationName,
+                    "the factory method group has no public ordinary projectable member");
                 continue;
             }
 
-            foreach (IMethodSymbol method in methods)
+            bool hasStaticMethod = methods.Any(static method => method.IsStatic);
+            bool hasInstanceMethod = methods.Any(static method => !method.IsStatic);
+            if (hasStaticMethod && hasInstanceMethod)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                AddUnsupportedShapeDiagnostic(
+                    diagnostics,
+                    integrationName,
+                    "the factory method group is ambiguous because it contains both static and instance members");
+                continue;
+            }
 
-                if (method.IsGenericMethod)
-                {
-                    AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "generic factory methods are not supported");
-                    continue;
-                }
-
-                if (method.Parameters.Any(static parameter => parameter.RefKind != RefKind.None))
-                {
-                    AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "ref, out, and in parameters are not supported");
-                    continue;
-                }
-
-                if (method.ReturnsVoid)
-                {
-                    AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "factory methods must return a value");
-                    continue;
-                }
-
-                if (!IsExternallyVisible(method.ReturnType))
+            if (hasStaticMethod)
+            {
+                if (!factoryType.IsStatic || !IsExternallyVisible(factoryType))
                 {
                     diagnostics.Add(DiagnosticInfo.Create(
                         ComponentIntegrationDiagnostics.InaccessibleFactory,
                         Location.None,
-                        $"Component integration '{integrationName}' has a return type that is not externally visible."));
+                        $"Component integration '{integrationName}' requires a public static factory type."));
                     continue;
                 }
 
-                IParameterSymbol? inaccessibleParameter = method.Parameters.FirstOrDefault(
-                    static parameter => !IsExternallyVisible(parameter.Type));
-                if (inaccessibleParameter is not null)
+                foreach (IMethodSymbol method in methods)
                 {
-                    diagnostics.Add(DiagnosticInfo.Create(
-                        ComponentIntegrationDiagnostics.InaccessibleFactory,
-                        Location.None,
-                        $"Component integration '{integrationName}' has parameter "
-                            + $"'{inaccessibleParameter.Name}' whose type is not externally visible."));
-                    continue;
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (method.IsGenericMethod)
+                    {
+                        AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "generic factory methods are not supported");
+                        continue;
+                    }
+
+                    if (method.Parameters.Any(static parameter => parameter.RefKind != RefKind.None))
+                    {
+                        AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "ref, out, and in parameters are not supported");
+                        continue;
+                    }
+
+                    if (method.ReturnsVoid)
+                    {
+                        AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "factory methods must return a value");
+                        continue;
+                    }
+
+                    if (!IsExternallyVisible(method.ReturnType))
+                    {
+                        diagnostics.Add(DiagnosticInfo.Create(
+                            ComponentIntegrationDiagnostics.InaccessibleFactory,
+                            Location.None,
+                            $"Component integration '{integrationName}' has a return type that is not externally visible."));
+                        continue;
+                    }
+
+                    IParameterSymbol? inaccessibleParameter = method.Parameters.FirstOrDefault(
+                        static parameter => !IsExternallyVisible(parameter.Type));
+                    if (inaccessibleParameter is not null)
+                    {
+                        diagnostics.Add(DiagnosticInfo.Create(
+                            ComponentIntegrationDiagnostics.InaccessibleFactory,
+                            Location.None,
+                            $"Component integration '{integrationName}' has parameter "
+                                + $"'{inaccessibleParameter.Name}' whose type is not externally visible."));
+                        continue;
+                    }
+
+                    // COHCMP0007 applies only to the static forwarding path. Builder templates
+                    // always register the built product through a producer lambda, allowing the
+                    // container to capture it for disposal.
+                    bool returnsFunc = TryGetFuncProduct(method.ReturnType, out ITypeSymbol productType);
+                    if (IsDisposable(productType) && !returnsFunc)
+                    {
+                        diagnostics.Add(DiagnosticInfo.Create(
+                            ComponentIntegrationDiagnostics.DisposableInstance,
+                            Location.None,
+                            $"Component integration '{integrationName}' directly returns disposable type "
+                                + $"'{productType.ToDisplayString(TypeDisplayFormat)}'; return a System.Func<...> "
+                                + "so the container captures the product for disposal."));
+                    }
+
+                    projections.Add(new ProjectionModel(
+                        assemblyName,
+                        factoryType.ContainingNamespace.IsGlobalNamespace
+                            ? string.Empty
+                            : factoryType.ContainingNamespace.ToDisplayString(),
+                        targetTypeName,
+                        seam.ToDisplayString(TypeDisplayFormat),
+                        seam.ContainingNamespace.IsGlobalNamespace
+                            ? string.Empty
+                            : seam.ContainingNamespace.ToDisplayString(),
+                        seam.ContainingAssembly.Identity.Name,
+                        renderedTargetMethodName,
+                        factoryType.ToDisplayString(TypeDisplayFormat),
+                        renderedFactoryMethodName,
+                        renderedVerb,
+                        RenderParameterList(method.Parameters),
+                        RenderArgumentList(method.Parameters),
+                        contract?.ToDisplayString(TypeDisplayFormat) ?? string.Empty,
+                        contract is not null,
+                        false,
+                        string.Join(
+                            ParameterNameSeparator,
+                            method.Parameters.Select(static parameter => parameter.Name))));
                 }
 
-                bool returnsFunc = TryGetFuncProduct(method.ReturnType, out ITypeSymbol productType);
-                if (IsDisposable(productType) && !returnsFunc)
-                {
-                    diagnostics.Add(DiagnosticInfo.Create(
-                        ComponentIntegrationDiagnostics.DisposableInstance,
-                        Location.None,
-                        $"Component integration '{integrationName}' directly returns disposable type "
-                            + $"'{productType.ToDisplayString(TypeDisplayFormat)}'; return a System.Func<...> "
-                            + "so the container captures the product for disposal."));
-                }
+                continue;
+            }
 
-                projections.Add(new ProjectionModel(
-                    assemblyName,
-                    factoryType.ContainingNamespace.IsGlobalNamespace
-                        ? string.Empty
-                        : factoryType.ContainingNamespace.ToDisplayString(),
-                    targetTypeName,
-                    seam.ToDisplayString(TypeDisplayFormat),
-                    seam.ContainingNamespace.IsGlobalNamespace
-                        ? string.Empty
-                        : seam.ContainingNamespace.ToDisplayString(),
-                    seam.ContainingAssembly.Identity.Name,
-                    renderedTargetMethodName,
-                    factoryType.ToDisplayString(TypeDisplayFormat),
-                    renderedFactoryMethodName,
-                    renderedVerb,
-                    RenderParameterList(method.Parameters),
-                    RenderArgumentList(method.Parameters),
-                    contract?.ToDisplayString(TypeDisplayFormat) ?? string.Empty,
-                    contract is not null,
-                    string.Join(
-                        ParameterNameSeparator,
-                        method.Parameters.Select(static parameter => parameter.Name))));
+            if (!IsExternallyVisible(factoryType))
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ComponentIntegrationDiagnostics.InaccessibleFactory,
+                    Location.None,
+                    $"Component integration '{integrationName}' requires an externally visible builder type."));
+                continue;
+            }
+
+            if (factoryType.IsStatic)
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "builder types cannot be static");
+                continue;
+            }
+
+            if (factoryType.IsAbstract)
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "builder types cannot be abstract");
+                continue;
+            }
+
+            if (IsOpenGeneric(factoryType))
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "open generic builder types are not supported");
+                continue;
+            }
+
+            if (!factoryType.InstanceConstructors.Any(static constructor =>
+                    constructor.DeclaredAccessibility == Accessibility.Public
+                    && constructor.Parameters.Length == 0))
+            {
+                AddUnsupportedShapeDiagnostic(
+                    diagnostics,
+                    integrationName,
+                    "builder types require a public parameterless instance constructor");
+                continue;
+            }
+
+            IMethodSymbol[] parameterlessMethods = methods
+                .Where(static method => method.Parameters.Length == 0)
+                .ToArray();
+            if (parameterlessMethods.Length == 0)
+            {
+                AddUnsupportedShapeDiagnostic(
+                    diagnostics,
+                    integrationName,
+                    "the instance factory method group has no zero-parameter member");
+                continue;
+            }
+
+            if (parameterlessMethods.Length != 1)
+            {
+                AddUnsupportedShapeDiagnostic(
+                    diagnostics,
+                    integrationName,
+                    "the instance factory method group has more than one zero-parameter member");
+                continue;
+            }
+
+            IMethodSymbol builderMethod = parameterlessMethods[0];
+            if (builderMethod.IsGenericMethod)
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "generic builder factory methods are not supported");
+                continue;
+            }
+
+            if (builderMethod.ReturnsVoid)
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "builder factory methods must return a value");
+                continue;
+            }
+
+            if (!IsExternallyVisible(builderMethod.ReturnType))
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ComponentIntegrationDiagnostics.InaccessibleFactory,
+                    Location.None,
+                    $"Component integration '{integrationName}' has a return type that is not externally visible."));
+                continue;
+            }
+
+            string factoryTypeName = factoryType.ToDisplayString(TypeDisplayFormat);
+            projections.Add(new ProjectionModel(
+                assemblyName,
+                factoryType.ContainingNamespace.IsGlobalNamespace
+                    ? string.Empty
+                    : factoryType.ContainingNamespace.ToDisplayString(),
+                targetTypeName,
+                seam.ToDisplayString(TypeDisplayFormat),
+                seam.ContainingNamespace.IsGlobalNamespace
+                    ? string.Empty
+                    : seam.ContainingNamespace.ToDisplayString(),
+                seam.ContainingAssembly.Identity.Name,
+                renderedTargetMethodName,
+                factoryTypeName,
+                renderedFactoryMethodName,
+                renderedVerb,
+                $"global::System.Action<{factoryTypeName}> @configure",
+                string.Empty,
+                contract?.ToDisplayString(TypeDisplayFormat) ?? string.Empty,
+                contract is not null,
+                true,
+                string.Join(
+                    ParameterNameSeparator,
+                    new[] { "configure", "cohesionComponentFactory", "cohesionComponent" })));
+        }
+    }
+
+    private static bool IsOpenGeneric(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+        {
+            if (current.IsUnboundGenericType
+                || current.TypeArguments.Any(static argument => argument.TypeKind == TypeKind.TypeParameter))
+            {
+                return true;
             }
         }
+
+        return false;
     }
 
     private static bool CouldContainDeclaration(IAssemblySymbol assembly)
@@ -945,9 +1084,40 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 builder.AppendLine(
                     $"{indent}        public {projection.SeamTypeName} {projection.Verb}({projection.ParameterList})");
                 builder.AppendLine($"{indent}        {{");
-                builder.AppendLine(
-                    $"{indent}            {receiver}.{projection.TargetMethodName}{contract}("
-                    + $"{projection.FactoryTypeName}.{projection.FactoryMethodName}({projection.ArgumentList}));");
+                if (projection.IsBuilderTemplate)
+                {
+                    builder.AppendLine($"{indent}            if (@configure is null)");
+                    builder.AppendLine($"{indent}            {{");
+                    builder.AppendLine(
+                        $"{indent}                throw new global::System.ArgumentNullException(\"configure\");");
+                    builder.AppendLine($"{indent}            }}");
+                    builder.AppendLine();
+                    builder.AppendLine(
+                        $"{indent}            // Composed eagerly so the factory's own Build-time validation fires at registration");
+                    builder.AppendLine($"{indent}            // time rather than at first resolve.");
+                    builder.AppendLine(
+                        $"{indent}            var cohesionComponentFactory = new {projection.FactoryTypeName}();");
+                    builder.AppendLine($"{indent}            @configure.Invoke(cohesionComponentFactory);");
+                    builder.AppendLine(
+                        $"{indent}            var cohesionComponent = cohesionComponentFactory."
+                        + $"{projection.FactoryMethodName}();");
+                    builder.AppendLine();
+                    builder.AppendLine(
+                        $"{indent}            // Registered through the Func<> sink so the container captures the product for");
+                    builder.AppendLine(
+                        $"{indent}            // disposal (an instance registration would become an uncaptured ConstantCallSite).");
+                    // A bare lambda is convertible only to a delegate or expression-tree target,
+                    // not to the competing TService instance parameter. It therefore proves the
+                    // Func<IServiceProvider, TService> overload binding without an explicit cast.
+                    builder.AppendLine(
+                        $"{indent}            {receiver}.{projection.TargetMethodName}{contract}(_ => cohesionComponent);");
+                }
+                else
+                {
+                    builder.AppendLine(
+                        $"{indent}            {receiver}.{projection.TargetMethodName}{contract}("
+                        + $"{projection.FactoryTypeName}.{projection.FactoryMethodName}({projection.ArgumentList}));");
+                }
                 builder.AppendLine($"{indent}            return {receiver};");
                 builder.AppendLine($"{indent}        }}");
                 builder.AppendLine();
@@ -989,6 +1159,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         string ArgumentList,
         string ContractTypeName,
         bool HasContract,
+        bool IsBuilderTemplate,
         string ParameterNames);
 
     private readonly record struct CollectedProjections(
