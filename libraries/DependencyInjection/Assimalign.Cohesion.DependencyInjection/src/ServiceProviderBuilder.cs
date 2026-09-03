@@ -29,7 +29,7 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
     }
 
     /// <inheritdoc />
-    public IServiceContainer Services
+    public IServiceContainer Container
     {
         get
         {
@@ -44,7 +44,7 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
     {
         ArgumentNullException.ThrowIfNull(serviceDescriptor);
 
-        Services.Register(serviceDescriptor);
+        Container.Register(serviceDescriptor);
 
         return this;
     }

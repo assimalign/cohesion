@@ -7,10 +7,10 @@ public interface IServiceProviderBuilder
     /// <summary>
     /// Represents the collection of services to be used within th IoC Container.
     /// </summary>
-    IServiceContainer Services { get; }
+    IServiceContainer Container { get; }
 
     /// <summary>
-    /// Adds a service to <see cref="IServiceProviderBuilder.Services"/>.
+    /// Adds a service to <see cref="IServiceProviderBuilder.Container"/>.
     /// </summary>
     /// <param name="serviceDescriptor"></param>
     /// <returns></returns>

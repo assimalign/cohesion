@@ -6,8 +6,8 @@ namespace Assimalign.Cohesion.DependencyInjection.Tests;
 
 public class ServiceProviderBuilderTests
 {
-    [Fact(DisplayName = "Cohesion Test [DependencyInjection] - Services: Should not be shared between builders")]
-    public void Services_ForSeparateBuilders_ShouldNotShareAContainer()
+    [Fact(DisplayName = "Cohesion Test [DependencyInjection] - Container: Should not be shared between builders")]
+    public void Container_ForSeparateBuilders_ShouldNotShareAContainer()
     {
         // Arrange
         var first = new ServiceProviderBuilder();
@@ -17,22 +17,22 @@ public class ServiceProviderBuilderTests
         first.AddSingleton<IMarkerService>(new FirstService());
 
         // Assert
-        first.Services.ShouldNotBeSameAs(second.Services);
-        first.Services.Count.ShouldBe(1);
-        second.Services.Count.ShouldBe(0);
+        first.Container.ShouldNotBeSameAs(second.Container);
+        first.Container.Count.ShouldBe(1);
+        second.Container.Count.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [DependencyInjection] - Services: Should return the same container for the same builder")]
-    public void Services_OnRepeatedAccess_ShouldReturnTheSameContainer()
+    [Fact(DisplayName = "Cohesion Test [DependencyInjection] - Container: Should return the same container for the same builder")]
+    public void Container_OnRepeatedAccess_ShouldReturnTheSameContainer()
     {
         // Arrange
         var builder = new ServiceProviderBuilder();
 
         // Act
-        var services = builder.Services;
+        var container = builder.Container;
 
         // Assert
-        builder.Services.ShouldBeSameAs(services);
+        builder.Container.ShouldBeSameAs(container);
     }
 
     [Fact(DisplayName = "Cohesion Test [DependencyInjection] - Build: Should resolve only the owning builder's registrations")]

@@ -639,9 +639,9 @@ public static class ServiceProviderBuilderExtensions
                     "Implementation type cannot be '{0}' because it is indistinguishable from other services registered for '{1}'.",
                     implementationType, descriptor2.ServiceType), "descriptor");
             }
-            if (!builder.Services.Any((ServiceDescriptor d) => d.ServiceType == descriptor2.ServiceType && d.GetImplementationType() == implementationType))
+            if (!builder.Container.Any((ServiceDescriptor d) => d.ServiceType == descriptor2.ServiceType && d.GetImplementationType() == implementationType))
             {
-                builder.Services.Register(descriptor2);
+                builder.Container.Register(descriptor2);
                 return true;
             }
             return false;
@@ -661,7 +661,7 @@ public static class ServiceProviderBuilderExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(descriptor);
 
-            if (!builder.Services.Any((ServiceDescriptor serviceDescriptor) => serviceDescriptor.ServiceType == descriptor.ServiceType))
+            if (!builder.Container.Any((ServiceDescriptor serviceDescriptor) => serviceDescriptor.ServiceType == descriptor.ServiceType))
             {
                 builder.Add(descriptor);
                 return true;
@@ -675,11 +675,11 @@ public static class ServiceProviderBuilderExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(descriptor2);
 
-            ServiceDescriptor? serviceDescriptor = builder.Services.FirstOrDefault((ServiceDescriptor s) => s.ServiceType == descriptor2.ServiceType);
+            ServiceDescriptor? serviceDescriptor = builder.Container.FirstOrDefault((ServiceDescriptor s) => s.ServiceType == descriptor2.ServiceType);
 
             if (serviceDescriptor is not null)
             {
-                builder.Services.Unregister(serviceDescriptor);
+                builder.Container.Unregister(serviceDescriptor);
             }
 
             builder.Add(descriptor2);
@@ -695,13 +695,13 @@ public static class ServiceProviderBuilderExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(serviceType);
 
-            for (int num = builder.Services.Count - 1; num >= 0; num--)
+            for (int num = builder.Container.Count - 1; num >= 0; num--)
             {
-                var serviceDescriptor = builder.Services[num];
+                var serviceDescriptor = builder.Container[num];
 
                 if (serviceDescriptor.ServiceType == serviceType)
                 {
-                    builder.Services.UnregisterAt(num);
+                    builder.Container.UnregisterAt(num);
                 }
             }
             return builder;
