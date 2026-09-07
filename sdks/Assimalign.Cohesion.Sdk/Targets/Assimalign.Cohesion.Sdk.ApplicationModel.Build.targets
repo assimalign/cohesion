@@ -1,6 +1,8 @@
 <Project>
+	<!-- Reserved extension point used by cohesion-platforms container gathering. -->
+	<Import Project="Sdk.Resource.targets" />
 
-    <Target Name="_AfterBuildCopyBinOutput" DependsOnTargets="Build">
-
-    </Target>
+	<PropertyGroup>
+		<CohesionBuildResourceContainersDependsOn>$(CohesionBuildResourceContainersDependsOn)</CohesionBuildResourceContainersDependsOn>
+	</PropertyGroup>
 </Project>

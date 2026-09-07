@@ -1,0 +1,22 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>ForeignProperty</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-web</CohesionResourceName>
+    <CohesionResourceKind>Web</CohesionResourceKind>
+    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
+    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" />
+    <CohesionResourceProperty Include="database.engine" Value="PostgreSql" />
+  </ItemGroup>
+
+</Project>

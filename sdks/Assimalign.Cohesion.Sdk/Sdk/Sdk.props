@@ -6,6 +6,7 @@
 	     "'[]' is not a valid version string" before any pack is extracted. -->
 	<Import Project="..\Targets\Build.Version.props"/>
 	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.props"/>
+	<Import Project="..\Targets\Sdk.Resource.props"/>
 	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.props"/>
 	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.FrameworkReference.props"/>
 </Project>

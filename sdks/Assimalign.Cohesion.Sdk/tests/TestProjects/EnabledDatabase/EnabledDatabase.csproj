@@ -1,0 +1,26 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>EnabledDatabase</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-database</CohesionResourceName>
+    <CohesionResourceKind>Database</CohesionResourceKind>
+    <CohesionResourceApplicationModel>Assimalign.Cohesion.Database.ApplicationModel</CohesionResourceApplicationModel>
+    <CohesionControlPlaneEndpoint>admin</CohesionControlPlaneEndpoint>
+    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Include="admin" Scheme="http" ContainerPort="9080" />
+    <CohesionEndpoint Include="db" Scheme="tcp" ContainerPort="5432" DevPort="15432" />
+    <CohesionMount Include="data" Kind="Volume" Size="10Gi" />
+    <CohesionSetting Include="Database:PoolSize" Default="20" Type="int" />
+    <CohesionResourceProperty Include="database.engine" Value="PostgreSql" />
+  </ItemGroup>
+
+</Project>

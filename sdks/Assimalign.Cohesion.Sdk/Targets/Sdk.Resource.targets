@@ -1,0 +1,163 @@
+<Project>
+	<PropertyGroup>
+		<CohesionApplication Condition="'$(CohesionApplication)' == '' and '$(CohesionApplicationName)' != ''">$(CohesionApplicationName)</CohesionApplication>
+		<CohesionApplicationName Condition="'$(CohesionApplicationName)' == '' and '$(CohesionApplication)' != ''">$(CohesionApplication)</CohesionApplicationName>
+		<_CohesionResourceEnabled Condition="'$(CohesionApplicationModel)' == 'enabled'">true</_CohesionResourceEnabled>
+		<_CohesionGetManifestDependsOn Condition="'$(_CohesionResourceEnabled)' == 'true'">CohesionCreateResourceManifest</_CohesionGetManifestDependsOn>
+		<_CohesionOutputTypeLower>$([System.String]::Copy('$(OutputType)').ToLowerInvariant())</_CohesionOutputTypeLower>
+
+		<_CohesionResolvedResourceKind>$([System.String]::Copy('$(CohesionResourceKind)').Trim())</_CohesionResolvedResourceKind>
+		<_CohesionResourceNameSeed Condition="'$(CohesionResourceName)' == ''">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^[^.]+\.', ''))</_CohesionResourceNameSeed>
+		<_CohesionResourceNameSeed Condition="'$(CohesionResourceName)' != ''">$([System.String]::Copy('$(CohesionResourceName)').Trim())</_CohesionResourceNameSeed>
+		<_CohesionResourceNameLower>$([System.String]::Copy('$(_CohesionResourceNameSeed)').ToLowerInvariant())</_CohesionResourceNameLower>
+		<_CohesionResourceNameSlug>$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionResourceNameLower)', '[^a-z0-9]+', '-'))</_CohesionResourceNameSlug>
+		<_CohesionResolvedResourceName Condition="'$(CohesionResourceName)' == ''">$([System.String]::Copy('$(_CohesionResourceNameSlug)').Trim('-'))</_CohesionResolvedResourceName>
+		<_CohesionResolvedResourceName Condition="'$(CohesionResourceName)' != ''">$(_CohesionResourceNameSeed)</_CohesionResolvedResourceName>
+
+		<_CohesionProjectNameHasTwoSegments>$([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '^[^.]+\.[^.]+$'))</_CohesionProjectNameHasTwoSegments>
+		<_CohesionProjectNameHasThreeOrMoreSegments>$([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '^[^.]+\.[^.]+\..+$'))</_CohesionProjectNameHasThreeOrMoreSegments>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' != ''">$([System.String]::Copy('$(CohesionApplication)').Trim())</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' == '' and '$(_CohesionProjectNameHasTwoSegments)' == 'True'">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^([^.]+)\.[^.]+$', '$1'))</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' == '' and '$(_CohesionProjectNameHasThreeOrMoreSegments)' == 'True'">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^[^.]+\.([^.]+)\..+$', '$1'))</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(_CohesionApplicationSeed)' == ''">$(MSBuildProjectName)</_CohesionApplicationSeed>
+		<_CohesionApplicationLower>$([System.String]::Copy('$(_CohesionApplicationSeed)').ToLowerInvariant())</_CohesionApplicationLower>
+		<_CohesionApplicationSlug>$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionApplicationLower)', '[^a-z0-9]+', '-'))</_CohesionApplicationSlug>
+		<_CohesionResolvedApplicationName>$([System.String]::Copy('$(_CohesionApplicationSlug)').Trim('-'))</_CohesionResolvedApplicationName>
+
+		<CohesionResourceManifestPath Condition="'$(CohesionResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/resource.json</CohesionResourceManifestPath>
+		<CohesionResourceSourcePath Condition="'$(CohesionResourceSourcePath)' == ''">$(IntermediateOutputPath)cohesion/Resource.g.cs</CohesionResourceSourcePath>
+		<CohesionResourceControlPlaneSourcePath Condition="'$(CohesionResourceControlPlaneSourcePath)' == ''">$(IntermediateOutputPath)cohesion/ResourceControlPlane.g.cs</CohesionResourceControlPlaneSourcePath>
+		<_CohesionResourceManifestFullPath>$([System.IO.Path]::GetFullPath('$(CohesionResourceManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionResourceManifestFullPath>
+	</PropertyGroup>
+
+	<Target Name="CohesionValidateApplicationModel" BeforeTargets="PrepareForBuild;CoreCompile">
+		<Error
+			Condition="'$(CohesionApplicationModel)' != 'disabled' and '$(CohesionApplicationModel)' != 'enabled'"
+			Text="CohesionApplicationModel must be 'disabled' or 'enabled'." />
+		<Error
+			Condition="'$(CohesionApplicationModel)' == 'enabled' and '$(_CohesionOutputTypeLower)' != 'exe'"
+			Code="COHSDK008"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) has CohesionApplicationModel enabled but OutputType is '$(OutputType)'; set OutputType to 'Exe'." />
+	</Target>
+
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<_CohesionResourceProjectReference Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))" />
+		<_CohesionResourcePackageReference Include="@(CohesionResourceReference)" Exclude="@(_CohesionResourceProjectReference)" />
+		<ProjectReference
+			Include="@(_CohesionResourceProjectReference)"
+			ReferenceOutputAssembly="false"
+			OutputItemType="CohesionResourceManifest" />
+		<PackageReference
+			Include="@(_CohesionResourcePackageReference)"
+			Version="%(_CohesionResourcePackageReference.Version)"
+			PrivateAssets="all" />
+
+		<Compile Include="$(CohesionResourceSourcePath)" Link="Resource.g.cs" Visible="false" />
+		<Compile Include="$(CohesionResourceControlPlaneSourcePath)" Link="ResourceControlPlane.g.cs" Visible="false" />
+		<EmbeddedResource Include="$(CohesionResourceManifestPath)" LogicalName="cohesion/resource.json" Visible="false" />
+		<ContainerLabel Include="org.cohesion.manifest" Value="cohesion/resource.json" />
+		<CohesionResourceManifest Include="$(CohesionResourceManifestPath)" IsSelf="true" />
+		<CohesionResourcePackAsset Include="$(CohesionResourceManifestPath)" PackagePath="cohesion/resource.json" />
+	</ItemGroup>
+
+	<Target
+		Name="CohesionResolveResourceReferences"
+		AfterTargets="ResolveProjectReferences"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<MSBuild
+			Projects="@(_CohesionResourceProjectReference)"
+			Targets="CohesionGetManifest"
+			BuildInParallel="$(BuildInParallel)"
+			SkipNonexistentTargets="true"
+			Condition="'@(_CohesionResourceProjectReference)' != ''">
+			<Output TaskParameter="TargetOutputs" ItemName="_CohesionReferencedManifest" />
+		</MSBuild>
+	</Target>
+
+	<Target
+		Name="CohesionCreateResourceManifest"
+		BeforeTargets="PrepareResourceNames;CoreCompile"
+		DependsOnTargets="CohesionValidateApplicationModel;ResolveProjectReferences;CohesionResolveResourceReferences"
+		Inputs="$(MSBuildProjectFullPath);$(MSBuildAllProjects);@(_CohesionReferencedManifest)"
+		Outputs="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<CohesionCreateResourceManifest
+			ManifestOutputPath="$(CohesionResourceManifestPath)"
+			ResourceSourceOutputPath="$(CohesionResourceSourcePath)"
+			ControlPlaneSourceOutputPath="$(CohesionResourceControlPlaneSourcePath)"
+			ProjectFullPath="$(MSBuildProjectFullPath)"
+			ProjectName="$(MSBuildProjectName)"
+			RootNamespace="$(RootNamespace)"
+			AssemblyName="$(AssemblyName)"
+			OutputType="$(OutputType)"
+			TargetPath="$(TargetPath)"
+			AppHostPath="$(TargetDir)$(TargetName)$(ExecutableExtension)"
+			ResourceName="$(CohesionResourceName)"
+			ResourceKind="$(CohesionResourceKind)"
+			ApplicationName="$(CohesionApplication)"
+			ApplicationModelName="$(CohesionResourceApplicationModel)"
+			Composable="$(CohesionResourceComposable)"
+			ControlPlaneEndpoint="$(CohesionControlPlaneEndpoint)"
+			ControlPlanePath="$(CohesionControlPlanePath)"
+			WorkloadKind="$(CohesionWorkloadKind)"
+			Replicas="$(CohesionReplicas)"
+			MaxReplicas="$(CohesionMaxReplicas)"
+			StopGraceSeconds="$(CohesionStopGraceSeconds)"
+			RestartPolicy="$(CohesionRestartPolicy)"
+			Endpoints="@(CohesionEndpoint)"
+			Probes="@(CohesionProbe)"
+			Mounts="@(CohesionMount)"
+			Settings="@(CohesionSetting)"
+			ResourceReferences="@(CohesionResourceReference)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
+			ResourceProperties="@(CohesionResourceProperty)">
+			<Output TaskParameter="ResolvedResourceName" PropertyName="_CohesionResolvedResourceName" />
+			<Output TaskParameter="ResolvedApplicationName" PropertyName="_CohesionResolvedApplicationName" />
+			<Output TaskParameter="ResolvedResourceKind" PropertyName="_CohesionResolvedResourceKind" />
+		</CohesionCreateResourceManifest>
+
+		<ItemGroup>
+			<FileWrites Include="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
+		</ItemGroup>
+	</Target>
+
+	<Target
+		Name="CohesionGetManifest"
+		DependsOnTargets="CohesionValidateApplicationModel;$(_CohesionGetManifestDependsOn)"
+		Returns="@(_CohesionGetManifestResult)">
+		<ItemGroup>
+			<_CohesionGetManifestResult
+				Include="$(_CohesionResourceManifestFullPath)"
+				Condition="'$(_CohesionResourceEnabled)' == 'true'">
+				<ManifestPath>$(_CohesionResourceManifestFullPath)</ManifestPath>
+				<ApplicationModel>enabled</ApplicationModel>
+				<ProjectName>$(MSBuildProjectName)</ProjectName>
+				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
+				<TargetPath>$(TargetPath)</TargetPath>
+				<AppHostPath>$(TargetDir)$(TargetName)$(ExecutableExtension)</AppHostPath>
+				<Application>$(_CohesionResolvedApplicationName)</Application>
+				<Resource>$(_CohesionResolvedResourceName)</Resource>
+				<Kind>$(_CohesionResolvedResourceKind)</Kind>
+				<IsSelf>true</IsSelf>
+			</_CohesionGetManifestResult>
+			<_CohesionGetManifestResult
+				Include="$(MSBuildProjectFullPath)"
+				Condition="'$(_CohesionResourceEnabled)' != 'true'">
+				<ApplicationModel>disabled</ApplicationModel>
+				<ProjectName>$(MSBuildProjectName)</ProjectName>
+				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
+				<IsSelf>true</IsSelf>
+			</_CohesionGetManifestResult>
+			<_CohesionGetManifestResult
+				Include="@(_CohesionReferencedManifest)"
+				Condition="'$(_CohesionResourceEnabled)' == 'true' and ('%(_CohesionReferencedManifest.IsSelf)' == 'true' or '%(_CohesionReferencedManifest.Application)' == '$(_CohesionResolvedApplicationName)')">
+				<IsSelf>false</IsSelf>
+			</_CohesionGetManifestResult>
+		</ItemGroup>
+	</Target>
+
+	<Target Name="CohesionCleanResourceManifest" AfterTargets="Clean">
+		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
+	</Target>
+</Project>
