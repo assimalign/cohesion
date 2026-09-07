@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Hosting.Health;
 
 using Shouldly;
 using Xunit;

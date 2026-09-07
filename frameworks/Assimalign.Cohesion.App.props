@@ -95,7 +95,11 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Physical" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
+        <!-- Opt-in resource SDKs emit Hosting.Resources runtime calls from the shared
+             base generator, so both resource siblings travel with Hosting in the base
+             ref/runtime inventory. Filler area hosting projects remain Hosting-only. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Resources" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />

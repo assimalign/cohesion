@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
@@ -16,7 +17,7 @@ using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
-using HostingHealthStatus = Assimalign.Cohesion.Hosting.HealthStatus;
+using HostingHealthStatus = Assimalign.Cohesion.Hosting.Health.HealthStatus;
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Database.Hosting;

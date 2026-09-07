@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Hosting;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// The host context for <see cref="DatabaseApplication"/> — the concrete

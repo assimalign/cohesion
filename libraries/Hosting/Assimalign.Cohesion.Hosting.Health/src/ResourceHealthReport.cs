@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// Represents an aggregated resource health result and its named contributions.

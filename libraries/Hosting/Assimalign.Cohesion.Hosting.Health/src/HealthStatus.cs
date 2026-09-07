@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// Represents the health of a host component, ordered from least to most healthy.

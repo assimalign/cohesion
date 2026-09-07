@@ -4,7 +4,7 @@
 		<Description>Public Web health checks for Cohesion applications, including builder-time registration, Hosting contributor adapters, readiness/liveness filtering, HTTP endpoints, and an AOT-safe JSON response writer. App.Web exposes the API publicly; App.Database carries it privately as part of its Web runtime closure.</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
 </Project>

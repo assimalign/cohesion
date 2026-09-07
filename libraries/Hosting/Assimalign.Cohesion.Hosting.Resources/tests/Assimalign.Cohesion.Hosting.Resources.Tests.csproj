@@ -15,6 +15,7 @@
 		<CohesionPackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources.TestResource" />
 	</ItemGroup>

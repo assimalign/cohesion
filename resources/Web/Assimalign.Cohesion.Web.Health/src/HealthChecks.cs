@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Web.Health;
 /// </summary>
 /// <remarks>
 /// This factory is the container-free composition seam for applications, resources, tests, and
-/// tooling. Register checks or <see cref="Assimalign.Cohesion.Hosting.IHealthContributor"/>
+/// tooling. Register checks or <see cref="Assimalign.Cohesion.Hosting.Health.IHealthContributor"/>
 /// instances on the returned builder, build an <see cref="IHealthCheckService"/>, and supply it
 /// explicitly when mapping health endpoints.
 /// </remarks>

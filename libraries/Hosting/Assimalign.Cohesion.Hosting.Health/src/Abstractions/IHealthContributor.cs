@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// Contributes a named, transport-neutral health snapshot to a Cohesion host.

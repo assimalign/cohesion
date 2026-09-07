@@ -819,6 +819,12 @@
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/tests/">
 		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting/tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Health/src/">
+		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Health/src/Assimalign.Cohesion.Hosting.Health.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Health/tests/">
+		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Health/tests/Assimalign.Cohesion.Hosting.Health.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/">
 		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/Assimalign.Cohesion.Hosting.Resources.csproj" />
 	</Folder>

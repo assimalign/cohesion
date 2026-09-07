@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Hosting.Health;
+
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 internal sealed class DefaultResourceControlPlane : IResourceControlPlane

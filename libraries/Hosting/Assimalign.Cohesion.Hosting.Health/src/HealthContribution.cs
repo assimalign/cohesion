@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// Describes one named host component's transport-neutral health result.

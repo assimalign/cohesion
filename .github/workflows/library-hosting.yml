@@ -17,6 +17,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
             "Assimalign.Cohesion.Hosting",
+            "Assimalign.Cohesion.Hosting.Health",
             "Assimalign.Cohesion.Hosting.Resources"
           ]
     steps:

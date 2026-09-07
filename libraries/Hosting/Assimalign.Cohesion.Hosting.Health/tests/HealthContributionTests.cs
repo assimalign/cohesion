@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Hosting.Tests;
+namespace Assimalign.Cohesion.Hosting.Health.Tests;
 
 public class HealthContributionTests
 {

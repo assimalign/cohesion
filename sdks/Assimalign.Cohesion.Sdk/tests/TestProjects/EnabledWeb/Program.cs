@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Authentication;

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Hosting.Health;
+
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>

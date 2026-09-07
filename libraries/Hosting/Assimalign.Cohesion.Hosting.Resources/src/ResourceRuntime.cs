@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Hosting.Health;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
