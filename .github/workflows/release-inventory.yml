@@ -7,7 +7,7 @@
 # six weeks ago and never added it to the inventory.
 #
 # So it runs here too, on the pull request that causes the drift. No SDK, no restore: the guard
-# reads csproj and workflow files as text, so the whole job is a checkout and one pwsh call.
+# reads csproj and workflow files as text, so the job stays checkout plus PowerShell-only checks.
 name: Release Inventory
 
 on:
@@ -15,18 +15,26 @@ on:
     paths:
       - '.github/workflows/*.yml'
       - 'installer/scripts/**'
-      - 'libraries/**/*.csproj'
-      - 'resources/**/*.csproj'
-      - 'sdks/**/*.csproj'
-      - 'frameworks/**/*.csproj'
+      - 'Directory.Build.props'
+      - 'libraries/**'
+      - 'resources/**'
+      - 'sdks/**'
+      - 'frameworks/**'
+      - 'analyzers/**'
+      - 'tooling/**'
+      - 'extensions/**'
   pull_request:
     paths:
       - '.github/workflows/*.yml'
       - 'installer/scripts/**'
-      - 'libraries/**/*.csproj'
-      - 'resources/**/*.csproj'
-      - 'sdks/**/*.csproj'
-      - 'frameworks/**/*.csproj'
+      - 'Directory.Build.props'
+      - 'libraries/**'
+      - 'resources/**'
+      - 'sdks/**'
+      - 'frameworks/**'
+      - 'analyzers/**'
+      - 'tooling/**'
+      - 'extensions/**'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +49,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Test the release inventory guard
+        shell: pwsh
+        run: Invoke-Pester ./installer/scripts/modules/tests/CohesionPackaging.Tests.ps1 -CI
 
       - name: Assert the inventory matches the repository and CI
         shell: pwsh

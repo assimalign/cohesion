@@ -433,6 +433,61 @@ The embedded registry is a **fallback for locally-published images** (O10 — a 
 
 **Gate order:** 2 → 3 → 5 → 7 → 8 → 10 → 11 → 12 → 13 → 14 → 18 → 19 → 20 → 21 → 22 → 22b → 26 → 23 → 16 → 25a → 25b → 25 → 28 → 29 → 38 (16 depends on 22 and 23; 25 on 25a and 25b; 33 precedes 34/36; 3 and 5 precede 22 — the IR must be publishable before platforms re-pin). Items 15/24/34/35 add Docker/Kubernetes to the same sample. The `preview` promotion gate (nuget.org, `10.0.1-preview.N`) is items 2–26 — build plane + orchestration plane.
 
+
+**Issue map (filed 2026-09-06 after sign-off).** Where a WBS id below differs from the one written in the item text above, the filed id wins; the item text keeps the original for traceability.
+
+| Item | Filed WBS | Issue | Note |
+|---|---|---|---|
+| 1 | `L01.02.02.03` | #943 | cohesion-examples hygiene tracked under the delivery epic; EX.00 in the design |
+| 2 | `L01.02.02.10` | #944 | as written |
+| 3 | `L01.01.02.12` | #945 | as written |
+| 4 | `L01.02.02.11` | #946 | as written |
+| 5 | `L01.02.02.12` | #947 | as written |
+| 6 | `L01.02.01.07` | #948 | as written |
+| 7 | `L01.01.10.05` | #949 | design wrote L01.01.10.03, which is the closed health-check feature #775 |
+| 8 | `L01.01.10.04` | #950 | as written |
+| 9 | `L02.01.02.02` | #304 (reused) | as written |
+| 10 | `L01.01.10.06` | #951 | as written |
+| 11 | `L01.02.01.01` | #94 (reused) | as written |
+| 12 | `L01.02.01.11` | #952 | design wrote L01.02.01.02, which is #95 (analyzers) — different intent |
+| 13 | `L01.02.01.03` | #953 | as written |
+| 14 | `L01.02.01.04` | #954 | as written |
+| 15 | `L01.02.01.05` | #955 | as written |
+| 16 | `L01.02.01.06` | #956 | as written |
+| 17 | `L01.02.01.08` | #957 | as written |
+| 18 | `L01.01.02.03` | #958 | as written |
+| 19 | `L01.01.02.04` | #959 | as written |
+| 20 | `L01.01.02.05` | #960 | as written |
+| 21 | `L01.01.02.06` | #961 | as written |
+| 22 | `L01.01.02.07` | #962 | as written |
+| 22b | `L01.01.02.16` | #963 | as written |
+| 23 | `L01.01.02.08` | #964 | as written |
+| 23a | `L01.01.02.14` | #965 | as written |
+| 23b | `L01.01.02.15` | #966 | as written |
+| 24 | `L01.01.02.09` | #967 | as written |
+| 25 | `L01.01.02.10` | #968 | as written |
+| 25a | `L03.04.01.04` | #969 | assigned at filing |
+| 25b | `L01.01.12.16` | #970 | assigned at filing |
+| 26 | `L01.01.02.11` | #971 | as written |
+| 27 | `L01.01.02.13` | #972 | as written |
+| 28 | `L03.02.01.12` | #973 |  design wrote L03.02.09 (an epic-level id); filed as a feature under the area epic |
+| 29 | `L03.01.01.20` | #974 |  design wrote L03.01.30 (an epic-level id); filed as a feature under the area epic |
+| 30 | `L03.02.06` | #856 (reused) | as written |
+| 31 | `L01.02.01.12` | #975 | assigned at filing |
+| 31b | `L03.04.01.05` | #976 | assigned at filing |
+| 31c | `L01.01.02.17` | #977 | assigned at filing |
+| 31s | `L03.04.01.06` | #982 | substantive half of design item 31 (the filler half is its own feature) |
+| 32 | `L03.06.01.03` | #978 | assigned at filing |
+| 33 | `L04.01.01.05` | cohesion-platforms#30 | as written |
+| 34 | `L04.01.03.09` | cohesion-platforms#31 | assigned at filing |
+| 35 | `L04.01.02.07` | cohesion-platforms#32 | design wrote L04.01.02.06, which is platforms#13 (embedded registry) |
+| 36 | `L04.01.04` | cohesion-platforms#23 (reused) | as written |
+| 37 | `L04.01.03.10` | cohesion-platforms#33 | design wrote L04.01.05 (an epic-level id); filed under the Kubernetes epic |
+| 38 | `L01.02.02.13` | #979 | cohesion-examples rebuild tracked under the delivery epic; EX.01 in the design |
+| 39 | `L01.02.01.01.02` | #266 (reused) | as written |
+| 40 | `L01.02.01.10` | #980 | as written |
+| 41 | `L02.01.00.01` | #981 | assigned at filing |
+
 **Deleted / renamed / kept / created:** `Database.Application` (deleted: provisioner → Hosting, SQL/TCP → the customer's `Program.cs`, E2E host → `resources/Database/samples/Assimalign.Cohesion.Database.SampleHost/`); **created:** `Assimalign.Cohesion.Database.Testing`, `Assimalign.Cohesion.SecretStore.Client` (re-created on net10.0) / `Assimalign.Cohesion.ConfigurationStore.Client`, `credential-guard.yml` in all three repos; generated files: `Resource.g.cs` + `ResourceControlPlane.g.cs` (both by the MSBuild task, only under `CohesionApplicationModel=enabled`; the v4.1 split into `Resource.Constants.g.cs` + `Resource.Host.g.cs` and the `Program.g.cs` entry point are withdrawn by R4); `Web.ApplicationModel` (rebuilt); `Sdk.ApplicationModel.Build.targets` (**kept**, now the import point for `Sdk.Resource.targets`); `.designing/` (deleted; `cohesion.config*.json` **kept**); `REAME.md`, `framework.yml`, `Publish-Nupkg.ps1`, `solution.ps1`, `Sdks.slnx`, the frameworks Exec, `HostBuilderTests.cs`, examples `_old`/slnx/`.vs`, the nested `Example.AppB.Gateway/Example.AppB.*` + copy-pasted `AppC` trees, the orphaned `10.0.1-preview.2` packages on GitHub Packages (deleted); `extensions/dotnet` templates (rewritten); platforms `GatewayResourceStateManager` and cohesion's stale `KubernetesClient` central pin in `Build.References.Packages.targets` (deleted, item 33); `docs/REALIZATION_PLAN.md` (created, item 22b). **Not created:** `frameworks/Assimalign.Cohesion.App.Gateway.*`; `Assimalign.Cohesion.SourceGeneration.Resource` and its `CohesionFrameworkAnalyzer` entry (no Roslyn generator — there is always a user `Main`; an MSBuild task generates everything); `Resource.cs` and `Gateway.cs` as user files, `Program.g.cs`, `Resource.Compose`/`CreateHost`/`ConfigureHealth`, `CohesionResourceEntryPoint`, COHSDK007 and the old COHSDK001 (the code now means "referencing a disabled project"); a user-facing `ResourceHostContext` with `StartupHooks`/`HostStartupHookCollection`/`IHostStartupHook<TBuilder>` (the ambient `ResourceContext`/`ResourceRuntime` replaces it); `WebApplicationStartupHooks` (any process-wide hook list — the R4 mechanism is a registration keyed by assembly plus a per-invocation ambient context, never a shared list applied across hosts).
 
 ## 11. Contradiction ledger

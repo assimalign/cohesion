@@ -30,7 +30,10 @@
         3. it has at least one source file.
 
     Assert-CohesionReleaseInventory enforces all three in both directions, so the inventory and
-    the repository cannot drift apart silently.
+    the repository cannot drift apart silently. It also scans every project under the product,
+    SDK, analyzer, tooling, and extension roots so a packable project with source cannot remain
+    invisible to every workflow matrix. A pre-existing project may be held outside CI only by an
+    exact path entry in the known-exclusion ledger below, with a non-empty reason.
 
     Note what (1) does NOT claim. The per-area workflows run `dotnet test` when a tests csproj
     exists beside the project, and 12 of the shipping entries have none - mostly resource area
@@ -340,13 +343,86 @@ $script:CohesionReleaseSourcelessPackage = @(
 $script:CohesionReleaseUnpublishedDependency = @(
 )
 
-# Workflows under .github/workflows that are not per-area build matrices, and so are not part of
-# the CI cross-check. release.yml builds its matrix FROM this module, so reading it back would be
-# circular; framework.yml drives the SDK/framework smoke test and has no per-project matrix.
+# Packable, source-bearing projects that predate the repository-wide workflow-matrix guard and are
+# deliberately not treated as new blind spots. Keys are repository-relative csproj paths rather
+# than project names so two same-named projects cannot hide behind one matrix entry. Every entry
+# needs a reason; Assert-CohesionReleaseInventory rejects blank and stale entries.
+$script:CohesionCiMatrixExclusion = [ordered]@{
+    'extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/Assimalign.Cohesion.ProjectTemplates.csproj' = 'Legacy extension/template tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
+    'extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/templates/cohesion-configurationstore/9.2/Cohesion.ConfigurationStore.csproj' = 'Legacy extension/template tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
+    'libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/Assimalign.Cohesion.Connections.NamedPipes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Exe/src/Assimalign.Cohesion.Content.Exe.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Media/src/Assimalign.Cohesion.Content.Media.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Mkv/src/Assimalign.Cohesion.Content.Mkv.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Content/Assimalign.Cohesion.Content.Mpeg/src/Assimalign.Cohesion.Content.Mpeg.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Connections.Examples.Http1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
+    'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Connections.Examples.Http2.csproj' = 'Example project is not an independently shipped CI matrix entry.'
+    'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Connections.Examples.Http3.csproj' = 'Example project is not an independently shipped CI matrix entry.'
+    'libraries/Http/Assimalign.Cohesion.Http.DigestFields/src/Assimalign.Cohesion.Http.DigestFields.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Http/Assimalign.Cohesion.Http.InterimResponses/src/Assimalign.Cohesion.Http.InterimResponses.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse.csproj' = 'Example project is not an independently shipped CI matrix entry.'
+    'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/src/Assimalign.Cohesion.Http.ServerSentEvents.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/src/Assimalign.Cohesion.OpenApi.Fluent.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Integration/src/Assimalign.Cohesion.OpenApi.Integration.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/src/Assimalign.Cohesion.OpenApi.Versioning.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/Assimalign.Cohesion.ConfigurationStore.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Blob.Storage/src/Assimalign.Cohesion.Database.Blob.Storage.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.Tests.csproj' = 'Stray duplicate csproj shares the Cache source directory; cleanup or an explicit packability fix is outside #944.'
+    'resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/Assimalign.Cohesion.Database.Documents.Language.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Documents.Storage/src/Assimalign.Cohesion.Database.Documents.Storage.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Documents/src/Assimalign.Cohesion.Database.Documents.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/Assimalign.Cohesion.Database.Graph.Language.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Replication/src/Assimalign.Cohesion.Database.Replication.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Database/Assimalign.Cohesion.Database.Sql.Replication/src/Assimalign.Cohesion.Database.Sql.Replication.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/src/Assimalign.Cohesion.EmailHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/EmailHub/Assimalign.Cohesion.EmailHub/src/Assimalign.Cohesion.EmailHub.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/src/Assimalign.Cohesion.EventHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/src/Assimalign.Cohesion.LoadBalancer.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/Assimalign.Cohesion.LogSpace.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/src/Assimalign.Cohesion.MediaHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/src/Assimalign.Cohesion.MessageHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/src/Assimalign.Cohesion.NatGateway.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/Assimalign.Cohesion.NotificationHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/src/Assimalign.Cohesion.NotificationHub.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/Assimalign.Cohesion.Rezolvr.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr/src/Assimalign.Cohesion.Rezolvr.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/Assimalign.Cohesion.Scheduler.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/Assimalign.Cohesion.SecretStore.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Assimalign.Cohesion.SecretStore.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/src/Assimalign.Cohesion.VpnGateway.Hosting.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
+    'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
+    'sdks/Assimalign.Cohesion.Sdk.Database/Tasks/Assimalign.Cohesion.Sdk.Database.Tasks.csproj' = 'SDK task projects await the dedicated sdk-smoke workflow in design item 4.'
+    'sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.csproj' = 'SDK task projects await the dedicated sdk-smoke workflow in design item 4.'
+    'tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
+    'tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
+}
+
+# Workflows under .github/workflows that are not per-area release-library matrices, and so are not
+# part of the inventory/CI equality check. Names may be reserved before their files land; only
+# workflows present on disk are parsed. The repository-wide blind-spot check still reads static
+# project matrices from every workflow, including entries in this list.
 $script:CohesionNonMatrixWorkflow = @(
     'release.yml'
     'release-inventory.yml'
-    'framework.yml'
+    'analyzers.yml'
+    'sdk-smoke.yml'
+    'credential-guard.yml'
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -611,6 +687,389 @@ function Test-CohesionProjectHasSource {
     return $sourceFile.Count -gt 0
 }
 
+function Test-CohesionProjectIsPackable {
+    <#
+    .SYNOPSIS
+        True when repository-owned MSBuild declarations make a project packable.
+
+    .DESCRIPTION
+        Keeps the inventory guard build-free while honoring the declarations that matter in this
+        repository: SDK-style projects default to packable, the nearest Directory.Build.props and
+        its explicit parent chain may override that default, test projects are non-packable, and
+        the project body wins last. Conditional declarations are interpreted conservatively: if a
+        project can be packable in any configuration, the matrix guard includes it. Non-SDK
+        projects need an explicit IsPackable=true declaration.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepositoryDirectory,
+
+        [Parameter(Mandatory)]
+        [string] $ProjectPath
+    )
+
+    $projectContent = Get-Content -LiteralPath $ProjectPath -Raw
+    $isPackable = $projectContent -match '<Project\b[^>]*\bSdk\s*=' -or
+        $projectContent -match '<Sdk\s+Name\s*='
+
+    $readXml = {
+        param([string] $Path)
+
+        try {
+            return [xml] (Get-Content -LiteralPath $Path -Raw)
+        }
+        catch {
+            # A malformed project will fail its build too. Treating unknown metadata as potentially
+            # packable is the safe direction for a blind-spot guard: it cannot hide the project.
+            return $null
+        }
+    }
+
+    $hasConditionalContext = {
+        param([System.Xml.XmlNode] $Node)
+
+        $context = $Node
+        while ($null -ne $context -and $context.NodeType -ne [System.Xml.XmlNodeType]::Document) {
+            if ($context.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                if (-not [string]::IsNullOrWhiteSpace([string] $context.GetAttribute('Condition')) -or
+                    $context.LocalName -in @('When', 'Otherwise')) {
+                    return $true
+                }
+            }
+
+            $context = $context.ParentNode
+        }
+
+        return $false
+    }
+
+    $applyPackability = {
+        param(
+            [bool] $Current,
+            [string] $Path
+        )
+
+        $xml = & $readXml $Path
+        if ($null -eq $xml) {
+            return $true
+        }
+
+        foreach ($node in @($xml.SelectNodes('//*[local-name()="IsPackable"]'))) {
+            $value = $node.InnerText.Trim()
+            if (& $hasConditionalContext $node) {
+                # A conditional false leaves the other branch unchanged. A conditional true or an
+                # expression can make the project packable, so retain that possibility.
+                if ($value -ine 'false') {
+                    $Current = $true
+                }
+                continue
+            }
+
+            if ($value -ieq 'true') {
+                $Current = $true
+            }
+            elseif ($value -ieq 'false') {
+                $Current = $false
+            }
+            else {
+                $Current = $true
+            }
+        }
+
+        return $Current
+    }
+
+    # MSBuild auto-imports only the nearest Directory.Build.props. Repository props explicitly
+    # import their parent, so follow that declared chain instead of assuming every ancestor loads.
+    $repositoryDirectory = [System.IO.Path]::GetFullPath($RepositoryDirectory).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $pathComparison = if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        [System.StringComparison]::OrdinalIgnoreCase
+    }
+    else {
+        [System.StringComparison]::Ordinal
+    }
+    $pathComparer = if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        [System.StringComparer]::OrdinalIgnoreCase
+    }
+    else {
+        [System.StringComparer]::Ordinal
+    }
+    $repositoryPrefix = $repositoryDirectory + [System.IO.Path]::DirectorySeparatorChar
+    $isRepositoryPath = {
+        param([string] $Path)
+
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        return $fullPath.Equals($repositoryDirectory, $pathComparison) -or
+            $fullPath.StartsWith($repositoryPrefix, $pathComparison)
+    }
+
+    $propertyFile = [System.Collections.Generic.List[string]]::new()
+    $directory = Get-Item -LiteralPath (Split-Path -Parent $ProjectPath)
+    $nearestPropertyFile = $null
+    while ($null -ne $directory -and (& $isRepositoryPath $directory.FullName)) {
+        $candidate = Join-Path $directory.FullName 'Directory.Build.props'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $nearestPropertyFile = $candidate
+            break
+        }
+
+        if ($directory.FullName.Equals($repositoryDirectory, $pathComparison)) {
+            break
+        }
+
+        $directory = $directory.Parent
+    }
+
+    $visitedPropertyFile = [System.Collections.Generic.HashSet[string]]::new($pathComparer)
+    while ($nearestPropertyFile -and $visitedPropertyFile.Add($nearestPropertyFile)) {
+        $propertyFile.Insert(0, $nearestPropertyFile)
+        $propertyXml = & $readXml $nearestPropertyFile
+        $parentPropertyFile = $null
+        if ($null -ne $propertyXml) {
+            foreach ($import in @($propertyXml.DocumentElement.ChildNodes | Where-Object LocalName -eq 'Import')) {
+                $importPath = [string] $import.GetAttribute('Project')
+                if (-not [string]::IsNullOrWhiteSpace([string] $import.GetAttribute('Condition')) -or
+                    [string]::IsNullOrWhiteSpace($importPath) -or
+                    $importPath.Contains('$(')) {
+                    continue
+                }
+
+                $portableImportPath = $importPath -replace '[\\/]', [System.IO.Path]::DirectorySeparatorChar
+                $resolvedImport = [System.IO.Path]::GetFullPath(
+                    (Join-Path (Split-Path -Parent $nearestPropertyFile) $portableImportPath))
+                if ((Split-Path -Leaf $resolvedImport).Equals('Directory.Build.props', $pathComparison) -and
+                    (& $isRepositoryPath $resolvedImport) -and
+                    (Test-Path -LiteralPath $resolvedImport -PathType Leaf)) {
+                    $parentPropertyFile = $resolvedImport
+                    break
+                }
+            }
+        }
+
+        $nearestPropertyFile = $parentPropertyFile
+    }
+
+    foreach ($file in $propertyFile) {
+        $isPackable = & $applyPackability $isPackable $file
+    }
+
+    $projectXml = & $readXml $ProjectPath
+    if ($null -eq $projectXml) {
+        return $true
+    }
+
+    $isTestProject = @(
+        $projectXml.SelectNodes('//*[local-name()="IsTestProject"]') |
+            Where-Object {
+                $_.InnerText.Trim() -ieq 'true' -and
+                -not (& $hasConditionalContext $_)
+            }
+    ).Count -gt 0
+    $hasTestSdk = @(
+        $projectXml.SelectNodes(
+            '//*[local-name()="PackageReference" or local-name()="CohesionPackageReference"]') |
+            Where-Object {
+                $_.GetAttribute('Include') -ieq 'Microsoft.NET.Test.Sdk' -and
+                -not (& $hasConditionalContext $_)
+            }
+    ).Count -gt 0
+    if ($isTestProject -or $hasTestSdk) {
+        $isPackable = $false
+    }
+
+    return & $applyPackability $isPackable $ProjectPath
+}
+
+function Get-CohesionWorkflowMatrixProject {
+    <#
+    .SYNOPSIS
+        Every project entry in a static projects matrix in any repository workflow.
+
+    .DESCRIPTION
+        This is intentionally independent of the release-library matrix parser. A workflow such
+        as analyzers.yml may not participate in release inventory equality but can still prove
+        that a project is visible to CI. Dynamic matrices are represented by their source
+        inventory instead and therefore do not contribute names here.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepositoryDirectory
+    )
+
+    $removeYamlComment = {
+        param([string] $Line)
+
+        $singleQuoted = $false
+        $doubleQuoted = $false
+        $escaped = $false
+        for ($index = 0; $index -lt $Line.Length; $index++) {
+            $character = $Line[$index]
+            if ($doubleQuoted -and $escaped) {
+                $escaped = $false
+                continue
+            }
+
+            if ($doubleQuoted -and $character -eq '\') {
+                $escaped = $true
+                continue
+            }
+
+            if (-not $doubleQuoted -and $character -eq "'") {
+                if ($singleQuoted -and $index + 1 -lt $Line.Length -and $Line[$index + 1] -eq "'") {
+                    $index++
+                    continue
+                }
+
+                $singleQuoted = -not $singleQuoted
+                continue
+            }
+
+            if (-not $singleQuoted -and $character -eq '"') {
+                $doubleQuoted = -not $doubleQuoted
+                continue
+            }
+
+            if (-not $singleQuoted -and -not $doubleQuoted -and $character -eq '#') {
+                return $Line.Substring(0, $index)
+            }
+        }
+
+        return $Line
+    }
+
+    $workflowDirectory = Join-Path $RepositoryDirectory '.github/workflows'
+    $project = [System.Collections.Generic.List[object]]::new()
+    foreach ($workflow in @(Get-ChildItem -LiteralPath $workflowDirectory -Filter '*.yml' -File)) {
+        $context = [System.Collections.Generic.List[object]]::new()
+        $matrixValue = $null
+        foreach ($rawLine in @(Get-Content -LiteralPath $workflow.FullName)) {
+            $line = (& $removeYamlComment $rawLine).TrimEnd()
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+
+            if ($null -ne $matrixValue) {
+                $matrixValue += "`n$line"
+                if ($line -notmatch ']') {
+                    continue
+                }
+
+                foreach ($entry in [regex]::Matches($matrixValue, '[''"]([^''"]+)[''"]')) {
+                    $project.Add([pscustomobject]@{
+                        Project  = $entry.Groups[1].Value
+                        Workflow = $workflow.Name
+                    })
+                }
+                $matrixValue = $null
+                continue
+            }
+
+            $mapping = [regex]::Match($line, '^(?<indent>[ ]*)(?<key>[A-Za-z0-9_-]+):(?<value>.*)$')
+            if (-not $mapping.Success) {
+                continue
+            }
+
+            $indent = $mapping.Groups['indent'].Value.Length
+            while ($context.Count -gt 0 -and $context[$context.Count - 1].Indent -ge $indent) {
+                $context.RemoveAt($context.Count - 1)
+            }
+
+            $key = $mapping.Groups['key'].Value
+            $value = $mapping.Groups['value'].Value.Trim()
+            $isProjectMatrix = $key -eq 'projects' -and
+                $context.Count -ge 2 -and
+                $context[$context.Count - 1].Key -eq 'matrix' -and
+                $context[$context.Count - 2].Key -eq 'strategy'
+
+            if ($isProjectMatrix -and $value.StartsWith('[')) {
+                if ($value -match ']') {
+                    foreach ($entry in [regex]::Matches($value, '[''"]([^''"]+)[''"]')) {
+                        $project.Add([pscustomobject]@{
+                            Project  = $entry.Groups[1].Value
+                            Workflow = $workflow.Name
+                        })
+                    }
+                }
+                else {
+                    $matrixValue = $value
+                }
+            }
+
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                $context.Add([pscustomobject]@{
+                    Indent = $indent
+                    Key    = $key
+                })
+            }
+        }
+    }
+
+    return @($project)
+}
+
+function Get-CohesionPackableSourceProject {
+    <#
+    .SYNOPSIS
+        Every packable, source-bearing project in a repository-owned product or tooling root.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepositoryDirectory
+    )
+
+    $project = [System.Collections.Generic.List[object]]::new()
+    foreach ($rootName in @(
+            'libraries',
+            'resources',
+            'sdks',
+            'frameworks',
+            'analyzers',
+            'tooling',
+            'extensions')) {
+        $rootDirectory = Join-Path $RepositoryDirectory $rootName
+        if (-not (Test-Path -LiteralPath $rootDirectory -PathType Container)) {
+            continue
+        }
+
+        foreach ($projectFile in @(Get-ChildItem -LiteralPath $rootDirectory -Recurse -Filter '*.csproj' -File)) {
+            if ($projectFile.FullName -match '[\\/](bin|obj)[\\/]') {
+                continue
+            }
+
+            if (-not (Test-CohesionProjectIsPackable `
+                    -RepositoryDirectory $RepositoryDirectory `
+                    -ProjectPath $projectFile.FullName) -or
+                -not (Test-CohesionProjectHasSource -ProjectPath $projectFile.FullName)) {
+                continue
+            }
+
+            $relativePath = $projectFile.FullName.Substring($RepositoryDirectory.Length + 1) -replace '\\', '/'
+            $segment = $relativePath.Split('/')
+            $ciKey = $null
+            if ($segment.Count -eq 5 -and
+                $segment[0] -in @('libraries', 'resources') -and
+                $segment[3] -eq 'src' -and
+                $segment[4] -eq "$($segment[2]).csproj") {
+                $ciKey = "$($segment[0])/$($segment[1])/$($segment[2])"
+            }
+
+            $project.Add([pscustomobject]@{
+                Project      = $projectFile.BaseName
+                ProjectPath  = $projectFile.FullName
+                RelativePath = $relativePath
+                CiKey        = $ciKey
+            })
+        }
+    }
+
+    return @($project)
+}
+
 function Get-CohesionSourceProjectPath {
     <#
     .SYNOPSIS
@@ -713,7 +1172,7 @@ function Assert-CohesionReleaseInventory {
         Fails unless the release inventory, the repository, and CI all agree.
 
     .DESCRIPTION
-        Seven checks, each reporting every offender rather than the first:
+        Eight checks, each reporting every offender rather than the first:
 
           1. Every inventory entry's csproj exists on disk.
           2. No inventory entry is marked <IsPackable>false</IsPackable>.
@@ -723,6 +1182,8 @@ function Assert-CohesionReleaseInventory {
              disk is missing from the lists.
           6. The inventory is CLOSED under public package dependencies.
           7. No inventory entry ships without source unless it is a declared reservation.
+          8. Every packable, source-bearing project in a repository-owned product or tooling root
+             appears in a workflow project matrix or has an exact, reason-bearing exclusion.
 
         Checks 3 and 4 are what make the "ships only if CI validates it" contract real in both
         directions. Check 4 is why adding a project to an area workflow without adding it here
@@ -735,6 +1196,10 @@ function Assert-CohesionReleaseInventory {
         package then publishes successfully and restores to NU1101 for every consumer, which is the
         worst failure shape available: green pipeline, broken package, and nuget.org will not let
         you take it back.
+
+        Check 8 closes the remaining blind spot: a project absent from BOTH the release inventory
+        and every matrix was invisible to checks 3 and 4. Exact-path exclusions acknowledge the
+        pre-existing gaps without allowing a new project to disappear behind a wildcard.
     #>
     [CmdletBinding()]
     param(
@@ -742,7 +1207,7 @@ function Assert-CohesionReleaseInventory {
     )
 
     $repositoryDirectory = Resolve-CohesionRepositoryDirectory -RepositoryDirectory $RepositoryDirectory
-    $library = Get-CohesionReleaseLibrary -RepositoryDirectory $repositoryDirectory
+    $library = @(Get-CohesionReleaseLibrary -RepositoryDirectory $repositoryDirectory)
     $failure = [System.Collections.Generic.List[string]]::new()
     $sourceless = [System.Collections.Generic.List[string]]::new()
 
@@ -904,6 +1369,102 @@ function Assert-CohesionReleaseInventory {
         if ($inventoryKey -notmatch "/$([regex]::Escape($reservation))`$") {
             $failure.Add("'$reservation' is declared in `$script:CohesionReleaseSourcelessPackage but is not in `$script:CohesionReleaseLibrary, so nothing reserves the id. Add it to the inventory, or drop the reservation.")
         }
+    }
+
+    # 8: no packable, source-bearing project is invisible to every workflow matrix.
+    #
+    # This is intentionally repository-wide rather than another release-library comparison. The
+    # three-way checks above cannot see a project omitted from both their inventory and their CI
+    # set, while this census also covers SDK, framework, analyzer, tooling, and extension roots.
+    $workflowMatrixProject = @(Get-CohesionWorkflowMatrixProject `
+            -RepositoryDirectory $repositoryDirectory)
+    $matrixProject = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]] @($workflowMatrixProject | ForEach-Object Project),
+        [System.StringComparer]::Ordinal)
+    $nonMatrixProject = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]] @(
+            $workflowMatrixProject |
+                Where-Object { $script:CohesionNonMatrixWorkflow -contains $_.Workflow } |
+                ForEach-Object Project),
+        [System.StringComparer]::Ordinal)
+    $candidateByPath = [System.Collections.Generic.Dictionary[string, object]]::new(
+        [System.StringComparer]::Ordinal)
+    $projectNameCount = [System.Collections.Generic.Dictionary[string, int]]::new(
+        [System.StringComparer]::Ordinal)
+
+    # A name-only matrix entry is usable for a nonstandard project layout only when it identifies
+    # one csproj across the guarded roots. Standard library/resource matrices remain path-safe via
+    # their area/category/project key even when a tests project happens to share the basename.
+    foreach ($rootName in @(
+            'libraries',
+            'resources',
+            'sdks',
+            'frameworks',
+            'analyzers',
+            'tooling',
+            'extensions')) {
+        $rootDirectory = Join-Path $repositoryDirectory $rootName
+        if (-not (Test-Path -LiteralPath $rootDirectory -PathType Container)) {
+            continue
+        }
+
+        foreach ($projectFile in @(
+                Get-ChildItem -LiteralPath $rootDirectory -Recurse -Filter '*.csproj' -File |
+                    Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' })) {
+            if ($projectNameCount.ContainsKey($projectFile.BaseName)) {
+                $projectNameCount[$projectFile.BaseName]++
+            }
+            else {
+                $projectNameCount.Add($projectFile.BaseName, 1)
+            }
+        }
+    }
+
+    foreach ($candidate in @(Get-CohesionPackableSourceProject -RepositoryDirectory $repositoryDirectory)) {
+        $candidateByPath.Add($candidate.RelativePath, $candidate)
+    }
+
+    foreach ($exclusion in $script:CohesionCiMatrixExclusion.GetEnumerator()) {
+        $relativePath = [string] $exclusion.Key
+        $reason = [string] $exclusion.Value
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            $failure.Add("CI matrix exclusion '$relativePath' has no reason. Add a non-empty reason or remove the exclusion.")
+        }
+
+        if (-not $candidateByPath.ContainsKey($relativePath)) {
+            $failure.Add("CI matrix exclusion '$relativePath' is stale: it is not a packable, source-bearing project. Remove the exclusion.")
+            continue
+        }
+
+        $excludedProject = $candidateByPath[$relativePath]
+        $hasUniqueProjectName = $projectNameCount[$excludedProject.Project] -eq 1
+        $isMatrixBuilt = if ($excludedProject.CiKey) {
+            $ciKey.Contains($excludedProject.CiKey) -or
+                ($hasUniqueProjectName -and $nonMatrixProject.Contains($excludedProject.Project))
+        }
+        else {
+            $hasUniqueProjectName -and $matrixProject.Contains($excludedProject.Project)
+        }
+        if ($isMatrixBuilt) {
+            $failure.Add("CI matrix exclusion '$relativePath' is stale: the project now appears in a workflow matrix. Remove the exclusion.")
+        }
+    }
+
+    foreach ($candidate in $candidateByPath.Values) {
+        $hasUniqueProjectName = $projectNameCount[$candidate.Project] -eq 1
+        $isMatrixBuilt = if ($candidate.CiKey) {
+            $ciKey.Contains($candidate.CiKey) -or
+                ($hasUniqueProjectName -and $nonMatrixProject.Contains($candidate.Project))
+        }
+        else {
+            $hasUniqueProjectName -and $matrixProject.Contains($candidate.Project)
+        }
+        if ($isMatrixBuilt -or
+            $script:CohesionCiMatrixExclusion.Contains($candidate.RelativePath)) {
+            continue
+        }
+
+        $failure.Add("Packable source-bearing project '$($candidate.RelativePath)' is absent from every workflow project matrix. Add '$($candidate.Project)' to a workflow's projects matrix, or add the exact project path to `$script:CohesionCiMatrixExclusion with a reason.")
     }
 
     if ($sourceless.Count -gt 0) {
