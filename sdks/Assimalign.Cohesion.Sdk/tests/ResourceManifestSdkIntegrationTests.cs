@@ -38,14 +38,14 @@ public sealed class ResourceManifestSdkIntegrationTests
             .ShouldHaveSingleItem();
 
         string webResourceSource = File.ReadAllText(GeneratedOutput(webProject, "Resource.g.cs"));
-        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetEndpoint");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetEndpoint");
         webResourceSource.ShouldContain("public static global::System.Uri Http =>");
-        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetMount");
-        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetSetting");
-        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetReference");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetMount");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetSetting");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetReference");
         webResourceSource.ShouldContain("public global::System.Uri Url =>");
         webResourceSource.ShouldContain("out global::System.Uri? address");
-        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetConnectionFactory");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory");
         webResourceSource.ShouldNotContain("global::Assimalign.Cohesion.Core.Endpoint" + "Address");
         webResourceSource.ShouldNotContain(" Endpoint =>");
         webResourceSource.ShouldNotContain("Connections.Tcp.TcpConnectionFactory");
@@ -55,8 +55,14 @@ public sealed class ResourceManifestSdkIntegrationTests
         string webControlPlaneSource = File.ReadAllText(GeneratedOutput(webProject, "ResourceControlPlane.g.cs"));
         webControlPlaneSource.ShouldContain("[global::System.Runtime.CompilerServices.ModuleInitializer]");
         webControlPlaneSource.ShouldNotContain("typeof(global::Program)");
-        webControlPlaneSource.ShouldContain("ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
-        webControlPlaneSource.ShouldContain("ResourceRuntime.RegisterControlPlane(");
+        webControlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
+        webControlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterControlPlane(");
+        webControlPlaneSource.ShouldContain(
+            "private static global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane CreateControlPlane()");
+        webControlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceContext context = global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;");
         webControlPlaneSource.ShouldContain(
             "global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane.Create()");
         webControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"http\", \"http\", 18080");
@@ -74,7 +80,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         string databaseResourceSource = File.ReadAllText(GeneratedOutput(databaseProject, "Resource.g.cs"));
         databaseResourceSource.ShouldContain("public static global::System.Uri Admin =>");
         databaseResourceSource.ShouldContain("public static global::System.Uri Db =>");
-        databaseResourceSource.ShouldContain("ResourceRuntime.Current.GetConnectionFactory");
+        databaseResourceSource.ShouldContain(
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory");
         databaseResourceSource.ShouldNotContain("global::Assimalign.Cohesion.Core.Endpoint" + "Address");
         databaseResourceSource.ShouldNotContain("Connections.Tcp.TcpConnectionFactory");
         AssetsContainPackage(webProject, "Assimalign.Cohesion.Web.ApplicationModel").ShouldBeTrue();
@@ -194,7 +201,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         result.ExitCode.ShouldBe(0, result.Output);
         string project = workspace.ProjectDirectory("EnabledWebExplicitMain");
         string controlPlaneSource = File.ReadAllText(GeneratedOutput(project, "ResourceControlPlane.g.cs"));
-        controlPlaneSource.ShouldContain("ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
+        controlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
         controlPlaneSource.ShouldNotContain("global::Program");
         Directory.EnumerateFiles(
                 Path.Combine(project, "bin"),

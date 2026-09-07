@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Represents one invocation of an enabled resource executable's registered entry point.

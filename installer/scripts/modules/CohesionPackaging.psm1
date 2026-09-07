@@ -114,6 +114,7 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/Hosting
     'libraries/Hosting/Assimalign.Cohesion.Hosting'
+    'libraries/Hosting/Assimalign.Cohesion.Hosting.Resources'
 
     # libraries/Http
     'libraries/Http/Assimalign.Cohesion.Http'

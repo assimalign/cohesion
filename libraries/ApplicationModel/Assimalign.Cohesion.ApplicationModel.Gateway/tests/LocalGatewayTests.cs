@@ -729,7 +729,7 @@ public class LocalGatewayTests
                 content.ShouldNotBe(Encoding.UTF8.GetBytes("mount-value"));
                 Encoding.UTF8.GetString(content).ShouldNotContain("mount-value");
                 Encoding.UTF8.GetString(
-                    new Assimalign.Cohesion.Hosting.ResourceMount(path).ReadAllBytes())
+                    new Assimalign.Cohesion.Hosting.Resources.ResourceMount(path).ReadAllBytes())
                     .ShouldBe("mount-value");
             }
             else

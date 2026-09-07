@@ -28,7 +28,7 @@ public sealed class WindowsLocalMountCarrierTests
             string path = Path.Combine(directory, "credentials.mount");
             File.WriteAllBytes(path, protectedBytes);
 
-            new Assimalign.Cohesion.Hosting.ResourceMount(path).ReadAllBytes().ShouldBe(plaintext);
+            new Assimalign.Cohesion.Hosting.Resources.ResourceMount(path).ReadAllBytes().ShouldBe(plaintext);
         }
         finally
         {

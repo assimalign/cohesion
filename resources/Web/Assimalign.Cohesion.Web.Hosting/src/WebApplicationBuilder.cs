@@ -16,6 +16,7 @@ using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;

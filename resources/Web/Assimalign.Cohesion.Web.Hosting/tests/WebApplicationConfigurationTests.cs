@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 
 using Shouldly;
 

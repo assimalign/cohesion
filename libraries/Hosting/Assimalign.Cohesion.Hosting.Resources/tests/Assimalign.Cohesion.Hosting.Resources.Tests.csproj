@@ -4,16 +4,18 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="HostBuilderTests.cs" />
+		<Compile Remove="TestObjects\Assimalign.Cohesion.Hosting.Resources.TestResource\**\*.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources.TestResource" />
 	</ItemGroup>
 </Project>

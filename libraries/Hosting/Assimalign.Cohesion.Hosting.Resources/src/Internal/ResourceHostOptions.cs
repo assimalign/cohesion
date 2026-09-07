@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Core;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 internal enum ResourceHostFailureKind
 {

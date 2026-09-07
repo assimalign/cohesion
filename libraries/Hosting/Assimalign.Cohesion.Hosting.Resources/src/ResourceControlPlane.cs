@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Creates the Core-only control-plane implementation configured by a resource area.

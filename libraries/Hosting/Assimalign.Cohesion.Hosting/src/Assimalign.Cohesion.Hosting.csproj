@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
-		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType Include="ValueTypes\HostId.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.Hosting" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />

@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Core;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Hosting.Tests;
+namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 public class ResourceContextTests
 {

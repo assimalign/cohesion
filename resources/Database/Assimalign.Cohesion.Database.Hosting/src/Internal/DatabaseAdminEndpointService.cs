@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;

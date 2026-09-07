@@ -9,7 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Core;
 
-namespace Assimalign.Cohesion.Hosting.Tests;
+namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 [Collection(nameof(SerialCollection))]
 public class ResourceHostTests

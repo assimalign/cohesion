@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Defines the Core-only surface every enabled resource exposes to its gateway.

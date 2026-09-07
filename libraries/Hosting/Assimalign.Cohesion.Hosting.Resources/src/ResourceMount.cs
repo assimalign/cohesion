@@ -3,7 +3,7 @@ using System.IO;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Provides access to one materialized resource mount.

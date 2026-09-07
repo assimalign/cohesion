@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Hosting.Tests;
+namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 internal sealed class TestResourceHostSignalSource : IResourceHostSignalSource
 {

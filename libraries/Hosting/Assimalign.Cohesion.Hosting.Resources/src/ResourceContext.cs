@@ -8,7 +8,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Core;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Carries one resource invocation's identity, endpoints, mounts, settings, references,

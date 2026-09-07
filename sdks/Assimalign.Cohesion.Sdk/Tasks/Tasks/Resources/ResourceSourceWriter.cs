@@ -76,17 +76,17 @@ internal static class ResourceSourceWriter
         builder.AppendLine("    [global::System.Runtime.CompilerServices.ModuleInitializer]");
         builder.AppendLine("    internal static void Register()");
         builder.AppendLine("    {");
-        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly);");
-        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.ResourceRuntime.RegisterControlPlane(");
+        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly);");
+        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterControlPlane(");
         builder.AppendLine("            typeof(Resource).Assembly,");
         builder.AppendLine("            static () => CreateControlPlane(),");
         builder.AppendLine($"            {manifest.Lifecycle.StopGraceSeconds.ToString(CultureInfo.InvariantCulture)});");
         builder.AppendLine("    }");
         builder.AppendLine();
-        builder.AppendLine("    private static global::Assimalign.Cohesion.Hosting.IResourceControlPlane CreateControlPlane()");
+        builder.AppendLine("    private static global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane CreateControlPlane()");
         builder.AppendLine("    {");
-        builder.AppendLine($"        global::Assimalign.Cohesion.Hosting.IResourceControlPlane controlPlane = global::{controlPlaneType}.Create();");
-        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.ResourceContext context = global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current;");
+        builder.AppendLine($"        global::Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane controlPlane = global::{controlPlaneType}.Create();");
+        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.Resources.ResourceContext context = global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;");
         for (int index = 0; index < manifest.Endpoints.Count; index++)
         {
             ResourceEndpointModel endpoint = manifest.Endpoints[index];
@@ -231,7 +231,7 @@ internal static class ResourceSourceWriter
         builder.AppendLine("                    $\"Cohesion setting '{_key}' is declared as '{typeof(TDeclared).FullName}', not '{typeof(T).FullName}'.\");");
         builder.AppendLine("            }");
         builder.AppendLine();
-        builder.AppendLine("            TDeclared value = _parser(global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetSetting(_key, _fallback));");
+        builder.AppendLine("            TDeclared value = _parser(global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetSetting(_key, _fallback));");
         builder.AppendLine("            return (T)(object)value!;");
         builder.AppendLine("        }");
         builder.AppendLine();
@@ -263,14 +263,14 @@ internal static class ResourceSourceWriter
         builder.AppendLine("        /// <summary>Gets the currently observed endpoint URL.</summary>");
         builder.AppendLine("        /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the endpoint is not currently resolved.</exception>");
         builder.AppendLine("        public global::System.Uri Url =>");
-        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetReference(_resource, _endpoint);");
+        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetReference(_resource, _endpoint);");
         builder.AppendLine();
         builder.AppendLine("        /// <summary>Attempts to get the currently observed endpoint URL.</summary>");
         builder.AppendLine("        /// <param name=\"url\">The endpoint URL when this method returns <see langword=\"true\"/>.</param>");
         builder.AppendLine("        /// <returns><see langword=\"true\"/> when the endpoint is resolved; otherwise, <see langword=\"false\"/>.</returns>");
         builder.AppendLine("        public bool TryGetUrl([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out global::System.Uri? url)");
         builder.AppendLine("        {");
-        builder.AppendLine("            if (global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.TryGetReference(_resource, _endpoint, out global::System.Uri? address))");
+        builder.AppendLine("            if (global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.TryGetReference(_resource, _endpoint, out global::System.Uri? address))");
         builder.AppendLine("            {");
         builder.AppendLine("                url = address;");
         builder.AppendLine("                return true;");
@@ -284,7 +284,7 @@ internal static class ResourceSourceWriter
         builder.AppendLine("        /// <returns>A connection factory for the endpoint transport.</returns>");
         builder.AppendLine("        /// <exception cref=\"global::System.NotSupportedException\">Thrown when the endpoint transport is not a stream connection.</exception>");
         builder.AppendLine("        public global::Assimalign.Cohesion.Connections.IConnectionFactory ConnectionFactory() =>");
-        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetConnectionFactory<global::Assimalign.Cohesion.Connections.IConnectionFactory>(_resource, _endpoint, _protocol);");
+        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory<global::Assimalign.Cohesion.Connections.IConnectionFactory>(_resource, _endpoint, _protocol);");
         builder.AppendLine("    }");
         builder.AppendLine();
     }
@@ -301,7 +301,7 @@ internal static class ResourceSourceWriter
                 : "null";
             builder.AppendLine($"        /// <summary>Gets the {XmlText(endpoint.Name)} endpoint.</summary>");
             builder.AppendLine($"        public static global::System.Uri {Identifier(endpoint.Name)} =>");
-            builder.AppendLine($"            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetEndpoint({Quote(endpoint.Name)}, {Quote(endpoint.Scheme)}, {fallbackPort});");
+            builder.AppendLine($"            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetEndpoint({Quote(endpoint.Name)}, {Quote(endpoint.Scheme)}, {fallbackPort});");
             builder.AppendLine();
         }
         builder.AppendLine("    }");
@@ -316,8 +316,8 @@ internal static class ResourceSourceWriter
         foreach (ResourceMountModel mount in mounts)
         {
             builder.AppendLine($"        /// <summary>Gets the {XmlText(mount.Name)} mount.</summary>");
-            builder.AppendLine($"        public static global::Assimalign.Cohesion.Hosting.ResourceMount {Identifier(mount.Name)} =>");
-            builder.AppendLine($"            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetMount({Quote(mount.Name)}, {Quote(mount.ContainerPath)});");
+            builder.AppendLine($"        public static global::Assimalign.Cohesion.Hosting.Resources.ResourceMount {Identifier(mount.Name)} =>");
+            builder.AppendLine($"            global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetMount({Quote(mount.Name)}, {Quote(mount.ContainerPath)});");
             builder.AppendLine();
         }
         builder.AppendLine("    }");

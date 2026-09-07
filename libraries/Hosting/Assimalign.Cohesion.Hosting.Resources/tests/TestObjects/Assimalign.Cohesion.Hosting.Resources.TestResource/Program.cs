@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Hosting.TestResource;
+namespace Assimalign.Cohesion.Hosting.Resources.TestResource;
 
 /// <summary>
 /// Provides an executable fixture whose host fails during an in-process entry invocation.

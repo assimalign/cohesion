@@ -110,7 +110,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         manifest.Lifecycle.MaxReplicas.ShouldBe(1);
 
         File.ReadAllText(GetSampleGeneratedPath("Resource.g.cs"))
-            .ShouldContain("ResourceRuntime.Current.GetEndpoint");
+            .ShouldContain("global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetEndpoint");
         File.ReadAllText(GetSampleGeneratedPath("ResourceControlPlane.g.cs"))
             .ShouldContain("DatabaseResourceControlPlane.Create()");
     }
@@ -281,7 +281,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     private string ReadBootstrapCredential(ResourceManifest manifest)
     {
         string credentialPath = GetBootstrapCredentialPath(manifest);
-        byte[] content = new Assimalign.Cohesion.Hosting.ResourceMount(credentialPath).ReadAllBytes();
+        byte[] content = new Assimalign.Cohesion.Hosting.Resources.ResourceMount(credentialPath).ReadAllBytes();
         try
         {
             return Encoding.UTF8.GetString(content);

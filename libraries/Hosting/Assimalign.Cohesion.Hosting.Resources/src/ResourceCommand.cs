@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Carries one declarative command to a resource control plane.

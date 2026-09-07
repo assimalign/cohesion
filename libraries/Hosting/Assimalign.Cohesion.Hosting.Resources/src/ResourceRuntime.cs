@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Core;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Provides the ambient context and assembly-keyed default control-plane registrations for

@@ -5,7 +5,8 @@
 		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 	</PropertyGroup>
 	<ItemGroup>
-		<Compile Include="TestObjects\Assimalign.Cohesion.Hosting.TestResource\Program.cs" />
+		<Compile Include="TestObjects\Assimalign.Cohesion.Hosting.Resources.TestResource\Program.cs" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 	</ItemGroup>
 </Project>

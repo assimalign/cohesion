@@ -1,4 +1,5 @@
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Testing;
 
