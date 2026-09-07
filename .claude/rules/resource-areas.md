@@ -138,14 +138,17 @@ sanctioned COHRES001 exemption above.
   child root) pulling in anything feature- or model-specific.
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
-  entry point (`<Area>Application.CreateBuilder()`). Feature/model registration verbs ship with
+  entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
+  when the project opts into orchestration (`CohesionApplicationModel=enabled`) the builder honors the ambient
+  `ResourceContext` and the registered default control plane, otherwise it behaves as a plain application — see
+  `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §2/§4.2). Feature/model registration verbs ship with
   their feature package as `extension(I<Area>ApplicationBuilder)` members and compose against
   the root builder — never against the hosting module — so a feature or model registers itself
   on any composition surface without knowing the hosting layer. Registration stays
   dependency-free (values and options objects; no container, no configuration binding).
-  Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder()`
+  Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)`
   (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
-  (Database root) + `DatabaseApplication.CreateBuilder()` (`Database.Hosting`) +
+  (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
   `AddSqlDatabase` (`Database.Sql`). This pattern is expected to be the same in every area.
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
   non-area infrastructure. **If the hosting module ever appears to need a same-area dependency
