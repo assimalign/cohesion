@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="TestObjects\Assimalign.Cohesion.Hosting.TestResource\Program.cs" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+	</ItemGroup>
+</Project>

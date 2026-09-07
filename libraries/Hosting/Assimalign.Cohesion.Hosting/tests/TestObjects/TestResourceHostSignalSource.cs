@@ -7,6 +7,9 @@ internal sealed class TestResourceHostSignalSource : IResourceHostSignalSource
 {
     private readonly Lock _lock = new();
     private Func<ResourceHostStopSignal, bool>? _callback;
+    private int _subscriptionCount;
+
+    internal int SubscriptionCount => Volatile.Read(ref _subscriptionCount);
 
     internal bool Signal(ResourceHostStopSignal stopSignal)
     {
@@ -24,6 +27,7 @@ internal sealed class TestResourceHostSignalSource : IResourceHostSignalSource
     public IDisposable Subscribe(Func<ResourceHostStopSignal, bool> callback, string? stopEventName)
     {
         ArgumentNullException.ThrowIfNull(callback);
+        Interlocked.Increment(ref _subscriptionCount);
 
         lock (_lock)
         {

@@ -28,7 +28,10 @@ internal static class ResourceHost
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(options);
 
-        var runState = new RunState(host, options.ProtocolLineWriter);
+        bool isProcessRun = options.RunMode is ResourceHostRunMode.Process;
+        var runState = new RunState(
+            host,
+            isProcessRun ? options.ProtocolLineWriter : null);
         int exitCode;
 
         try
@@ -36,9 +39,11 @@ internal static class ResourceHost
             host.SetResourceShutdownTimeout(options.ShutdownTimeout);
             ApplyContentRoot(host.Context.Environment, options.ContentRootPath);
 
-            using IDisposable signalSubscription = options.SignalSource.Subscribe(
-                runState.RequestShutdown,
-                options.StopEventName);
+            using IDisposable? signalSubscription = isProcessRun
+                ? options.SignalSource.Subscribe(
+                    runState.RequestShutdown,
+                    options.StopEventName)
+                : null;
 
             await host.RunResourceAsync(runState, cancellationToken).ConfigureAwait(false);
 
@@ -47,7 +52,7 @@ internal static class ResourceHost
                 ? GetDrainAbortExitCode(runState.StopSignal)
                 : SuccessExitCode;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (isProcessRun)
         {
             // ResourceHost is the executable boundary: every host failure is converted
             // to the frozen sysexits/v1 contract instead of escaping as a platform-
@@ -60,7 +65,10 @@ internal static class ResourceHost
                 runState.StopSignal);
         }
 
-        options.ExitCodeHandler(exitCode);
+        if (isProcessRun)
+        {
+            options.ExitCodeHandler(exitCode);
+        }
     }
 
     internal static int ClassifyExitCode(
@@ -119,7 +127,7 @@ internal static class ResourceHost
     internal sealed class RunState
     {
         private readonly IHost _host;
-        private readonly Action<string> _writeProtocolLine;
+        private readonly Action<string>? _writeProtocolLine;
         private readonly Lock _protocolLock = new();
         private readonly TaskCompletionSource _stopCompletionSource =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -133,7 +141,7 @@ internal static class ResourceHost
         private int _isDrainAborted;
         private int _stopSignal;
 
-        internal RunState(IHost host, Action<string> writeProtocolLine)
+        internal RunState(IHost host, Action<string>? writeProtocolLine)
         {
             _host = host;
             _writeProtocolLine = writeProtocolLine;
@@ -264,6 +272,11 @@ internal static class ResourceHost
 
         private bool TryWriteProtocolLine(string protocolLine)
         {
+            if (_writeProtocolLine is null)
+            {
+                return true;
+            }
+
             try
             {
                 _writeProtocolLine(protocolLine);

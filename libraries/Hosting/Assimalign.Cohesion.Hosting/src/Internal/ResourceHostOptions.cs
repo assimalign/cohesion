@@ -18,6 +18,12 @@ internal enum ResourceHostStopSignal
     Terminate,
 }
 
+internal enum ResourceHostRunMode
+{
+    Process,
+    InProcess,
+}
+
 internal sealed class ResourceHostOptions
 {
     internal const int DefaultStopGraceSeconds = 30;
@@ -32,7 +38,8 @@ internal sealed class ResourceHostOptions
         Action<string>? protocolLineWriter = null,
         Func<Exception, ResourceHostFailureKind?>? exceptionClassifier = null,
         Action<int>? exitCodeHandler = null,
-        IResourceHostSignalSource? signalSource = null)
+        IResourceHostSignalSource? signalSource = null,
+        ResourceHostRunMode runMode = ResourceHostRunMode.Process)
     {
         StopGraceSeconds = ValidateStopGraceSeconds(stopGraceSeconds);
         ContentRootPath = ResolveContentRootPath(contentRootPath);
@@ -41,6 +48,7 @@ internal sealed class ResourceHostOptions
         _exceptionClassifier = exceptionClassifier ?? (static _ => null);
         ExitCodeHandler = exitCodeHandler ?? SetProcessExitCode;
         SignalSource = signalSource ?? ResourceHostSignalSource.Instance;
+        RunMode = runMode;
     }
 
     internal int StopGraceSeconds { get; }
@@ -56,6 +64,8 @@ internal sealed class ResourceHostOptions
     internal Action<int> ExitCodeHandler { get; }
 
     internal IResourceHostSignalSource SignalSource { get; }
+
+    internal ResourceHostRunMode RunMode { get; }
 
     internal ResourceHostFailureKind? ClassifyException(Exception exception)
     {

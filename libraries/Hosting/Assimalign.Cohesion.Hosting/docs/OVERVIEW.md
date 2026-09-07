@@ -35,6 +35,7 @@ transport-neutral health contributions, and service base classes for Cohesion ap
 - HealthContribution
 - HealthStatus
 - IHealthContributor
+- IResourceEntryInvocation
 - IResourceControlPlane
 - ResourceCommand
 - ResourceContext

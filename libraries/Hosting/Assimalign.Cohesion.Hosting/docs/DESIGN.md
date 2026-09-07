@@ -34,12 +34,19 @@ parallel resource invocations cannot overwrite one another. With no scope, `Curr
 frozen `COHESION_*` process environment. Endpoint access falls back to a manifest `DevPort` only
 when `COHESION_GATEWAY` is absent.
 
-Enabled executables register an area control-plane factory and immutable stop-grace metadata by
-resource assembly from their generated module initializer. The registration contains no invocation
-state: each area builder creates a fresh plane, adds host-local health contributors, and calls
-`ResourceRuntime.HostBuilt`. That attaches graceful stop, observed endpoints, and the existing
-`ResourceHost` wrapper to only the built host. Plain executables have no registration and retain
-ordinary host behavior.
+Enabled executables register both their compiler-rooted entry point and an area control-plane
+factory with immutable stop-grace metadata, keyed by resource assembly, from their generated
+module initializer. `InvokeEntry` requires a `CreateScope` frame, captures that frame for one
+invocation, and returns separate host-ready and executable-completion tasks. The only reflection is
+the sanctioned invocation of the compiler-rooted `Assembly.EntryPoint`; generated registration
+does not assume that the user entry type is named `Program`. There is no shared callback or hook
+list.
+
+The control-plane registration contains no invocation state: each area builder creates a fresh
+plane, adds host-local health contributors, and calls `ResourceRuntime.HostBuilt`. That surrenders
+the built host to the current invocation, attaches graceful stop and observed endpoints, and
+installs the existing `ResourceHost` wrapper for only that host. Plain executables have neither
+registration and retain ordinary host behavior.
 
 `ResourceMount` unifies file-backed and in-memory mounts. POSIX file paths contain plaintext with
 gateway-enforced permissions. Windows paths contain raw CurrentUser DPAPI ciphertext; the reader
@@ -71,6 +78,14 @@ Windows SIGQUIT mapping used by `CTRL_BREAK_EVENT`. Each active resource subscri
 Windows out-of-process resources also wait on the fresh named event supplied through
 `COHESION_STOP_EVENT`. A signal is forwarded to `HostContext.Shutdown()` only while that host is
 `Started`, so a pre-start signal never invokes the explicit shutdown API.
+
+An entry point started through `ResourceRuntime.InvokeEntry` selects the wrapper's internal
+in-process run mode when its builder surrenders the host. That mode retains content-root and stop
+budget enforcement but does not write the stdout protocol, subscribe to process signals or named
+events, or mutate `Environment.ExitCode`. Host failures instead escape the wrapper and fault
+`IResourceEntryInvocation.Completion`. Merely creating a `ResourceRuntime.CreateScope` scope does
+not select this mode; directly built hosts and ordinary executable entry points retain the process
+behavior below.
 
 After startup completes, the wrapper writes `cohesion-resource: ready`. A handled stop writes
 `cohesion-resource: stopping` before the drain and `cohesion-resource: stopped` after it completes.

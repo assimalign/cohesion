@@ -144,6 +144,40 @@ public class ResourceHostTests
         hostOptions.ShutdownTimeout.ShouldBe(TimeSpan.FromSeconds(17));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "RunAsync: In-process mode avoids process effects")]
+    public async Task RunAsync_WithInProcessMode_AvoidsProcessEffects()
+    {
+        // Arrange
+        var protocolLines = new List<string>();
+        var exitCodes = new List<int>();
+        var signalSource = new TestResourceHostSignalSource();
+        var host = new TestHost(new TestHostOptions());
+        host.Context.ResourceHostOptions = new ResourceHostOptions(
+            stopEventName: string.Empty,
+            protocolLineWriter: protocolLines.Add,
+            exitCodeHandler: exitCodes.Add,
+            signalSource: signalSource,
+            runMode: ResourceHostRunMode.InProcess);
+
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        // Act
+        Task run = host.RunAsync(cancellationTokenSource.Token);
+        while (host.Context.State is not HostState.Started)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationTokenSource.Token);
+        }
+
+        host.Context.Shutdown();
+        await run.WaitAsync(cancellationTokenSource.Token);
+
+        // Assert
+        protocolLines.ShouldBeEmpty();
+        exitCodes.ShouldBeEmpty();
+        signalSource.SubscriptionCount.ShouldBe(0);
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Exit codes: Converts a typed startup failure at the run boundary")]
     public async Task RunAsync_WithTypedStartupFailure_ReportsConfigurationExitCode()
     {

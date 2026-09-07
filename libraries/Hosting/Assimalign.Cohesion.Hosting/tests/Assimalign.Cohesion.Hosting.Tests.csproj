@@ -5,6 +5,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 	  <Compile Remove="HostBuilderTests.cs" />
+	  <Compile Remove="TestObjects\Assimalign.Cohesion.Hosting.TestResource\**\*.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -16,5 +17,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.TestResource" />
 	</ItemGroup>
 </Project>
