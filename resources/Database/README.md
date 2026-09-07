@@ -44,14 +44,17 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements the root's application builder (`DatabaseApplication.CreateBuilder()`); composition-only — wraps composed `IDatabaseServer` instances as endpoint host services (servers are per-model, implemented inside the model packages, each carrying its own copy of the server machinery — `SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`) |
-| `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-only orchestration resource + `AddDatabase(...)` |
+| `Assimalign.Cohesion.Database.ApplicationModel` | Declarative database resource plus the Core-only default control-plane factory registered by generated executable code |
 | `Assimalign.Cohesion.Database.Application` | **Interim:** the standalone host executable — the artifact `DatabaseResource` declares (composition root: env conventions → engine + endpoint + host; sanctioned COHRES001 exemption). **Target design (pinned, #906):** the manifest-generation project SDK consumers load — build tasks code-gen the application manifest, `Database.ApplicationModel` surfaces it to the gateway (the `<Area>.Application` convention, `.claude/rules/resource-areas.md`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
 
 ## Dependencies on other areas
 
 - `libraries/Core` — foundational primitives (everywhere)
-- `libraries/Hosting` — host lifecycle + per-service execution menu (`Database.Hosting`)
+- `libraries/Hosting` — host lifecycle + per-service execution menu (`Database.Hosting`) and the
+  Core-only default-control-plane seam (`Database.ApplicationModel`); Hosting's Windows mount
+  carrier contributes only the `System.Security.Cryptography.ProtectedData` BCL facade to the
+  guarded ApplicationModel closure
 - `libraries/Connections` — transport drivers for the per-model servers (`Database.Sql`'s `SqlDatabaseServer`, and every future model's server)
 - `libraries/ApplicationModel` — orchestration contracts (`Database.ApplicationModel` only)
 - `resources/Web` — private implementation detail of the root project (HTTP admin surface); hidden from consumers via `CohesionPrivateProjectReference`

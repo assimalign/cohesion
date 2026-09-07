@@ -1,4 +1,4 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
@@ -9,13 +9,6 @@
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
     <CohesionResourceName>inventory-library</CohesionResourceName>
-    <CohesionResourceKind>Web</CohesionResourceKind>
-    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
-    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
   </PropertyGroup>
-
-  <ItemGroup>
-    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" />
-  </ItemGroup>
 
 </Project>

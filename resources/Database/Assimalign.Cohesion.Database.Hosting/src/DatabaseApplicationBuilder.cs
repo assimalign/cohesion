@@ -1,5 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+
+using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Database.Hosting.Internal;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -24,6 +31,9 @@ namespace Assimalign.Cohesion.Database.Hosting;
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
+    private readonly IResourceControlPlane? _controlPlane;
+    private readonly ResourceContext? _resourceContext;
+    private readonly List<IHealthContributor> _healthContributors = new();
 
     // Server registrations resolve in registration order at Build: instances are
     // wrapped as trivial factories so an instance registered after a deferred
@@ -37,10 +47,25 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="options">The application options the builder composes into.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     public DatabaseApplicationBuilder(DatabaseApplicationOptions options)
+        : this(options, resourceAssembly: null)
+    {
+    }
+
+    internal DatabaseApplicationBuilder(DatabaseApplicationOptions options, Assembly? resourceAssembly)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         _options = options;
+
+        if (resourceAssembly is not null &&
+            ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
+        {
+            _controlPlane = controlPlane ?? throw new InvalidOperationException(
+                "The registered database resource control-plane factory returned null.");
+            _resourceContext = ResourceRuntime.Current;
+            _options.Environment = _resourceContext.EnvironmentName;
+            ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
+        }
     }
 
     /// <summary>
@@ -50,8 +75,29 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// </summary>
     public DatabaseApplicationOptions Options => _options;
 
+    /// <summary>
+    /// Gets the generated resource control plane, or null when this is a plain application.
+    /// </summary>
+    internal IResourceControlPlane? ControlPlane => _controlPlane;
+
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseEngine> Engines => _options.Engines as IReadOnlyList<IDatabaseEngine> ?? [.. _options.Engines];
+
+    /// <summary>
+    /// Adds a named contribution to the enabled resource's aggregate health, readiness,
+    /// and liveness reports.
+    /// </summary>
+    /// <param name="name">The stable contribution name.</param>
+    /// <param name="check">The health evaluator.</param>
+    /// <returns>The same builder for chaining.</returns>
+    public DatabaseApplicationBuilder AddHealthCheck(string name, ResourceHealthCheck check)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(check);
+
+        _healthContributors.Add(new DelegateHealthContributor(name, check));
+        return this;
+    }
 
     /// <inheritdoc cref="IDatabaseApplicationBuilder.AddEngine" />
     public DatabaseApplicationBuilder AddEngine(IDatabaseEngine engine)
@@ -110,13 +156,54 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             _options.Servers.Add(server);
         }
 
+        if (_controlPlane is not null)
+        {
+            foreach (IHealthContributor contributor in _healthContributors)
+            {
+                _controlPlane.AddHealthContributor(contributor);
+            }
+
+            var registeredContributors = new HashSet<IHealthContributor>(ReferenceEqualityComparer.Instance);
+            foreach (IHealthContributor contributor in _options.Services
+                .Concat<object>(_options.Engines)
+                .Concat(_options.Servers)
+                .OfType<IHealthContributor>())
+            {
+                if (registeredContributors.Add(contributor))
+                {
+                    _controlPlane.AddHealthContributor(contributor);
+                }
+            }
+
+            if ((_controlPlane.ObservedEndpoints.TryGetValue("admin", out EndpointAddress endpoint) ||
+                (_resourceContext is not null &&
+                 _resourceContext.Endpoints.TryGetValue("admin", out endpoint))))
+            {
+                _controlPlane.ObserveEndpoint("admin", endpoint);
+                _options.Services.Add(new DatabaseAdminEndpointService(endpoint, _controlPlane));
+            }
+        }
+
         _isBuilt = true;
 
-        return new DatabaseApplication(_options, context);
+        var application = new DatabaseApplication(_options, context);
+        if (_controlPlane is not null)
+        {
+            ResourceRuntime.HostBuilt(application, _controlPlane);
+        }
+
+        return application;
     }
 
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(IDatabaseEngine engine) => AddEngine(engine);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(IDatabaseServer server) => AddServer(server);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure) => AddServer(configure);
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
+
+    private static object? CreateConnectionFactory(string protocol)
+    {
+        return string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase)
+            ? new TcpConnectionFactory()
+            : null;
+    }
 }

@@ -41,6 +41,34 @@
 		<TargetsForTfmSpecificContentInPackage Condition="'$(_CohesionPackManifest)' == 'true'">$(TargetsForTfmSpecificContentInPackage);CohesionPackManifest</TargetsForTfmSpecificContentInPackage>
 	</PropertyGroup>
 
+	<!--
+		An enabled resource executable is its composition root, so it receives the
+		area's ApplicationModel package. Repository builds keep the dependency as a
+		name-only CohesionProjectReference; packaged consumers receive the matching
+		CohesionPackageReference at the SDK's frozen CohesionVersion. The base SDK's
+		shared reference converter projects these canonical items after this target
+		has evaluated.
+	-->
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != ''">
+		<_CohesionResourceApplicationModelProject
+			Include="$(CohesionRepositoryDirectory)resources\**\src\$(CohesionResourceApplicationModel).csproj"
+			Condition="'$(CohesionRepositoryDirectory)' != ''" />
+
+		<CohesionProjectReference
+			Include="$(CohesionResourceApplicationModel)"
+			Condition="'@(_CohesionResourceApplicationModelProject)' != ''">
+			<ProjectPath>@(_CohesionResourceApplicationModelProject)</ProjectPath>
+			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
+		</CohesionProjectReference>
+
+		<CohesionPackageReference
+			Include="$(CohesionResourceApplicationModel)"
+			Version="$(CohesionVersion)"
+			Condition="'@(_CohesionResourceApplicationModelProject)' == ''">
+			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
+		</CohesionPackageReference>
+	</ItemGroup>
+
 	<ItemGroup Condition="'$(_CohesionPackManifest)' == 'true'">
 		<FrameworkReference Update="Assimalign.Cohesion.App*" PrivateAssets="all" />
 	</ItemGroup>
@@ -114,6 +142,7 @@
 			ResourceKind="$(CohesionResourceKind)"
 			ApplicationName="$(CohesionApplication)"
 			ApplicationModelName="$(CohesionResourceApplicationModel)"
+			ControlPlaneType="$(CohesionResourceControlPlaneType)"
 			Composable="$(CohesionResourceComposable)"
 			ControlPlaneEndpoint="$(CohesionControlPlaneEndpoint)"
 			ControlPlanePath="$(CohesionControlPlanePath)"

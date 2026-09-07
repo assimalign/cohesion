@@ -45,6 +45,7 @@ public sealed class ResourceManifestPackIntegrationTests
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "EnabledDependency",
             "EnabledDatabase",
             "EnabledWeb",
             "ManifestConsumer");
@@ -167,7 +168,10 @@ public sealed class ResourceManifestPackIntegrationTests
     {
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledDatabase", "EnabledWeb");
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "EnabledDependency",
+            "EnabledDatabase",
+            "EnabledWeb");
         string imageManifestPath = Path.Combine(workspace.ProjectDirectory("EnabledWeb"), "image.json");
         File.WriteAllText(imageManifestPath, "{\"schema\":\"cohesion/image/v1\",\"tag\":\"latest\"}");
 
@@ -192,7 +196,10 @@ public sealed class ResourceManifestPackIntegrationTests
     {
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledDatabase", "EnabledWeb");
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "EnabledDependency",
+            "EnabledDatabase",
+            "EnabledWeb");
 
         // Act
         DotNetBuildResult result = await workspace.PackAsync(
@@ -230,7 +237,10 @@ public sealed class ResourceManifestPackIntegrationTests
     {
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledDatabase", "EnabledWeb");
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "EnabledDependency",
+            "EnabledDatabase",
+            "EnabledWeb");
         string imageManifestPath = Path.Combine(workspace.ProjectDirectory("EnabledWeb"), "image.json");
         string imageArchivePath = Path.Combine(workspace.ProjectDirectory("EnabledWeb"), "inventory-web.oci.tar");
         byte[] expectedArchive = [0x43, 0x4f, 0x48];

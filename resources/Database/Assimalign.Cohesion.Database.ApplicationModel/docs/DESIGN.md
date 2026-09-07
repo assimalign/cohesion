@@ -2,7 +2,19 @@
 
 ## Intent
 
-`libraries/ApplicationModel/DESIGN.md` defines the two-plane split: resources never know they are orchestrated; orchestrators never reference resource runtimes. This project is the database's Layer-3d manifest — the only thing an orchestrator app needs to place a database in its graph.
+The older `libraries/ApplicationModel/DESIGN.md` describes the two-plane split too
+broadly. The signed developer-experience design refines the boundary: runtime
+libraries never reference ApplicationModel packages, and orchestrators never
+reference resource runtimes, while an enabled resource executable is a composition
+root that may reference its area's ApplicationModel package. This project is the
+database's Layer-3d manifest — the only thing an orchestrator app needs to place a
+database in its graph.
+
+It also owns the Database area's default control-plane surface. Enabled resource
+executables reference this package at their composition root and generated code
+registers `DatabaseResourceControlPlane.Create()` with the Core-only
+`ResourceRuntime` seam. `Database.Hosting` reads that registration through
+`Assimalign.Cohesion.Hosting`; neither side references the other.
 
 ## Decisions
 
@@ -46,7 +58,9 @@ manifest itself is responsible for.
 
 - No controller logic — gateways realize the resource with their existing executable controllers.
 - No connection-string builders — client-side concerns belong to `Database.Client`.
+- No HTTP server implementation — `Database.Hosting` serves the registered plane on `admin`.
 
 ## AOT posture
 
-Pure declarative types. Nothing to trim.
+Declarative types and a statically constructed control plane only. There is no
+reflection, assembly scanning, or runtime code generation.

@@ -1,0 +1,18 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>EnabledDependency</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-storage</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Update="db" DevPort="15741" />
+  </ItemGroup>
+
+</Project>

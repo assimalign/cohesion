@@ -2,30 +2,38 @@
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Web.Hosting;
-
+using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
+namespace Assimalign.Cohesion.Web.Hosting;
+
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware;
     private readonly WebApplicationContext _context;
     private readonly WebApplicationOptions _options;
+    private readonly IResourceControlPlane? _controlPlane;
 
     private bool _isBuilt;
 
-    internal WebApplication(WebApplicationContext context, WebApplicationOptions options) : base(options)
+    internal WebApplication(
+        WebApplicationContext context,
+        WebApplicationOptions options,
+        IResourceControlPlane? controlPlane = null) : base(options)
     {
         _context = context;
         _options = options;
+        _controlPlane = controlPlane;
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
     }
 
@@ -53,6 +61,23 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             middleware = _middleware[i].Invoke(middleware);
         }
 
+        if (_controlPlane is not null)
+        {
+            IResourceControlPlane controlPlane = _controlPlane;
+            int? controlPlanePort = controlPlane.ObservedEndpoints.TryGetValue(
+                "http",
+                out EndpointAddress endpoint)
+                ? endpoint.Port
+                : null;
+            WebApplicationMiddleware next = middleware;
+            middleware = new WebApplicationMiddleware(context =>
+                ResourceControlPlaneMiddleware.InvokeAsync(
+                    controlPlane,
+                    controlPlanePort,
+                    context,
+                    next));
+        }
+
         // Seed every application-registered feature (IWebApplicationBuilder.AddFeature, e.g.
         // routing's per-application IRouterFeature) onto each exchange before any user
         // middleware runs. The feature set is snapshotted once here, at pipeline build — per
@@ -75,6 +100,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             });
         }
 
+        _isBuilt = true;
         return new WebApplicationPipeline(middleware);
     }
 
@@ -141,6 +167,29 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
         });
     }
+
+    /// <summary>
+    /// Creates a Web application builder that honors an enabled resource's generated
+    /// control-plane registration and ambient invocation context.
+    /// </summary>
+    /// <param name="args">The application command-line arguments.</param>
+    /// <returns>A new Web application builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static WebApplicationBuilder CreateBuilder(string[] args)
+    {
+        Assembly resourceAssembly = Assembly.GetCallingAssembly();
+        return CreateBuilder(args, resourceAssembly);
+    }
+
+    internal static WebApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new WebApplicationBuilder(new WebApplicationOptions(), resourceAssembly);
+    }
+
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

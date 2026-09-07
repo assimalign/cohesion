@@ -1,4 +1,4 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,13 +9,9 @@
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
     <CohesionResourceName>inventory-web</CohesionResourceName>
-    <CohesionResourceKind>Web</CohesionResourceKind>
-    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
-    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
   </PropertyGroup>
 
   <ItemGroup>
-    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" />
     <CohesionResourceProperty Include="database.engine" Value="PostgreSql" />
   </ItemGroup>
 

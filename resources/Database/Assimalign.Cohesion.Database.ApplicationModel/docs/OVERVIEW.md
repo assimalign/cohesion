@@ -15,11 +15,20 @@ await builder.Build().RunAsync();
 - `DatabaseResource` — `IExecutableResource` + `IEndpointResource` + `IMountResource` manifest
 - `DatabaseResourceOptions` — port (0 = platform-allocated), data mount path, environment variables
 - `AddDatabase(...)` builder extensions
+- `DatabaseResourceControlPlane` — the default control-plane factory registered by enabled database resources
 
 ## Dependencies
 
-- `Assimalign.Cohesion.ApplicationModel` — and nothing else. This project must never reference the database runtime (the manifest/runtime split is the ApplicationModel's core invariant).
+- `Assimalign.Cohesion.ApplicationModel` for the declarative resource model
+- `Assimalign.Cohesion.Hosting` for the Core-only control-plane contract
+
+The project never references `Database.Hosting`. The generated registration and
+the runtime meet through `ResourceRuntime`, preserving the manifest/runtime
+split while allowing every enabled database resource to expose the same default
+control plane on its ambient `admin` endpoint.
 
 ## Consumers
 
-Orchestrator applications. The database host itself never references this package.
+Gateways consume the typed resource model. An SDK-enabled database executable
+also consumes the default control-plane factory through generated code; the
+database runtime itself never references this package.

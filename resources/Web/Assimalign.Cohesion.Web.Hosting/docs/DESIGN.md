@@ -311,6 +311,21 @@ surface at once. The broader server/runtime shape (per-connection dispatch,
 error isolation, graceful stop) is being reworked under issue #762; this file
 currently captures only the design decisions that are settled.
 
+## Enabled-resource control plane
+
+`WebApplication.CreateBuilder(args)` captures the calling resource assembly and
+honors its generated `ResourceRuntime` registration. When enabled, the builder
+binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
+DI-registered `IHealthContributor`s, observes ambient endpoints, and attaches
+the built host for graceful stop. A fixed terminal layer runs before user
+middleware for `/cohesion/v1/healthz`, `/readyz`, `/livez`, `/endpoints`,
+`/stop`, and `/commands`.
+
+This module consumes only the Hosting contract and never references
+`Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and
+options overloads remain plain applications: they install no control-plane
+terminal, so the ordinary bodyless-404 fallback handles those paths.
+
 ## Configuration-bound server limits and endpoints
 
 ### What it is

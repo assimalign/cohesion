@@ -10,5 +10,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Health" />
 	</ItemGroup>
 </Project>

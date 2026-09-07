@@ -130,7 +130,6 @@
         <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 
         <!-- WIP / not yet building - uncomment as each library comes online:
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security" />
         -->
@@ -148,7 +147,8 @@
          (Web-area dependency rule: resources/Web/README.md).
 
          Exclusions: Web.Testing (test harness, not runtime) and
-         Web.ApplicationModel (awaiting its Phase-4 rebuild; no sources).
+         Web.ApplicationModel (NuGet-only; Sdk.Web injects it only for an
+         orchestration-enabled executable).
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
@@ -271,18 +271,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
-        <!-- Orchestration manifest (declarative plane; references no runtime). -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.ApplicationModel" />
-
-        <!-- Outside-area transitive dependency the base App framework does not yet
-             carry: the manifest's public surface (AddDatabase, DatabaseResource) exposes
-             ApplicationModel types, so it must be on the Ref pack or consumers hit CS0012.
-             When ApplicationModel graduates into the base App framework (it is WIP-
-             commented there), remove it here to avoid double delivery. Connections/
-             Hosting/Core the server, client, and host close over are already delivered
-             by the base App framework. -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
-
         <!--
             Deliberately EXCLUDED from the MVP framework:
             - Database.Application - the standalone host EXECUTABLE (the artifact
@@ -294,6 +282,8 @@
               shipping set 2026-07-14; its still-source-less satellites -
               KeyValuePair.Replication and KeyValuePair.Security - stay excluded
               until they ship.)
+            - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
+              package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
             - Database.Replication, Database.Sql.Replication, Database.Sql.Security
               - post-MVP contracts-only/empty shells (replication / #177). Add each
@@ -304,12 +294,19 @@
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never
             see these in IntelliSense, but the host resolves them at run time.
 
-            Pairs with <CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
-            in resources/Database/.../Assimalign.Cohesion.Database.csproj: the library
-            uses Web internally without exposing it in its .nupkg's .nuspec, and the
-            framework Runtime pack carries Web.dll so the host can resolve it.
+            Pairs with the Database area's private Web references: the runtime pack
+            carries the HTTP control-plane implementation without exposing it through
+            the Database reference pack.
         -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
     </ItemGroup>
 
     <!-- ================================================================

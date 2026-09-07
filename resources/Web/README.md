@@ -87,14 +87,15 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.Caching` | Server-owned output caching: `UseOutputCache` serves cacheable GET/HEAD responses from an async, tag-aware store without invoking the endpoint (base + named policies, per-endpoint sealed metadata resolved at the router match, a cache key that honors the response's own `Vary`, `Age` on hit); cache-or-bypass rides the #755 typed `Cache-Control` primitives (no-store/private/`Set-Cookie`/non-200/authenticated bypass); default in-memory store over `Caching.InMemory` with SizeLimit accounting and tag eviction, distributed backends deferred to `IOutputCacheStore` adapters. Register ahead of `UseResponseCompression` so a stored variant is never mis-served across `Accept-Encoding` |
 | `Assimalign.Cohesion.Web.Diagnostics` | HTTP request/response logging middleware (field flags, allowlist redaction, bounded body capture) + the W3C/NCSA access-log file provider riding `Assimalign.Cohesion.Logging` |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |
-| `Assimalign.Cohesion.Web.ApplicationModel` | Placeholder awaiting the ApplicationModel Phase-4 rebuild |
+| `Assimalign.Cohesion.Web.ApplicationModel` | Declarative Web resource model and the enabled resource's default control-plane factory |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
 `libraries/Connections`, `libraries/Security`). The L2 runtime/composition libraries
 (`libraries/Hosting`, `libraries/DependencyInjection`, `libraries/Configuration`,
 `libraries/Logging`) are consumed by the hosting module and by the `Web.Testing` harness (which
 drives the runtime and resolves the server from its service provider) — never by the feature
-libraries. (`Web.ApplicationModel`'s placeholder csproj still lists L2 references pending its
-Phase-4 rebuild.)
+libraries. `Web.ApplicationModel` references only the shared ApplicationModel and Hosting
+contracts; its resolved closure also contains only Hosting's Windows-only ProtectedData BCL
+facade. `Web.Hosting` discovers its generated registration through `ResourceRuntime`.
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.

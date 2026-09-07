@@ -29,8 +29,10 @@ ApplicationModel packages have an additional rollout guard:
 > **COHAM001** — When a non-harness `resources/**` assembly whose name ends in
 > `.ApplicationModel` sets `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`,
 > its entire dependency closure is limited to `Assimalign.Cohesion.Core` (the Core assembly's
-> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`, and BCL
-> assemblies supplied by `Microsoft.NETCore.App`. The opt-in is a migration gate, not an
+> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`, BCL
+> assemblies supplied by `Microsoft.NETCore.App`, and the
+> `System.Security.Cryptography.ProtectedData` BCL facade used by Hosting's Windows-only mount
+> carrier. The opt-in is a migration gate, not an
 > architectural exemption: once enabled, a project cannot add to the allowlist locally.
 
 Cross-references **between feature libraries in an area are fine** — the rule is

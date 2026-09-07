@@ -1,4 +1,4 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,14 +9,9 @@
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
     <CohesionResourceName>manifest-consumer</CohesionResourceName>
-    <CohesionResourceKind>Web</CohesionResourceKind>
-    <CohesionResourceApplicationModel>Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
-    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
-    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
   </PropertyGroup>
 
   <ItemGroup>
-    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" />
     <CohesionResourceReference Include="EnabledWeb.Manifest" Version="1.0.0" Endpoints="http" />
   </ItemGroup>
 

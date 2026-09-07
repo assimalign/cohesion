@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+
 using Shouldly;
 using Xunit;
 
@@ -14,7 +15,10 @@ public sealed class ResourceManifestSdkIntegrationTests
     public async Task Build_EnabledWebReferencesEnabledDatabase_GeneratesValidManifestsAndTypedAccessors()
     {
         // Arrange
-        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledDatabase", "EnabledWeb");
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "EnabledDependency",
+            "EnabledDatabase",
+            "EnabledWeb");
 
         // Act
         DotNetBuildResult result = await workspace.BuildAsync("EnabledWeb");
@@ -32,6 +36,37 @@ public sealed class ResourceManifestSdkIntegrationTests
         File.Exists(GeneratedOutput(databaseProject, "ResourceControlPlane.g.cs")).ShouldBeTrue(result.Output);
         Directory.EnumerateFiles(Path.Combine(webProject, "bin"), "EnabledWeb.dll", SearchOption.AllDirectories)
             .ShouldHaveSingleItem();
+
+        string webResourceSource = File.ReadAllText(GeneratedOutput(webProject, "Resource.g.cs"));
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetEndpoint");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetMount");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetSetting");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetReference");
+        webResourceSource.ShouldContain("global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetConnectionFactory");
+        webResourceSource.ShouldNotContain("Connections.Tcp.TcpConnectionFactory");
+        webResourceSource.ShouldNotContain("ResourceContextShim");
+        webResourceSource.ShouldNotContain("ProcessEnvironmentResourceContext");
+
+        string webControlPlaneSource = File.ReadAllText(GeneratedOutput(webProject, "ResourceControlPlane.g.cs"));
+        webControlPlaneSource.ShouldContain("[global::System.Runtime.CompilerServices.ModuleInitializer]");
+        webControlPlaneSource.ShouldContain("ResourceRuntime.RegisterControlPlane(");
+        webControlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane.Create()");
+        webControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"http\", \"http\", 18080");
+        webControlPlaneSource.ShouldContain("static () => CreateControlPlane(),");
+        webControlPlaneSource.ShouldContain("            30);");
+        webControlPlaneSource.ShouldNotContain("#if");
+
+        string databaseControlPlaneSource = File.ReadAllText(GeneratedOutput(databaseProject, "ResourceControlPlane.g.cs"));
+        databaseControlPlaneSource.ShouldContain(
+            "global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceControlPlane.Create()");
+        databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"db\", \"cohesion-db\", 15740");
+        databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"admin\", \"http\", null");
+        string databaseResourceSource = File.ReadAllText(GeneratedOutput(databaseProject, "Resource.g.cs"));
+        databaseResourceSource.ShouldContain("ResourceRuntime.Current.GetConnectionFactory");
+        databaseResourceSource.ShouldNotContain("Connections.Tcp.TcpConnectionFactory");
+        AssetsContainPackage(webProject, "Assimalign.Cohesion.Web.ApplicationModel").ShouldBeTrue();
+        AssetsContainPackage(databaseProject, "Assimalign.Cohesion.Database.ApplicationModel").ShouldBeTrue();
 
         File.Exists(ConsumerWorkspace.ResourceSchemaPath)
             .ShouldBeTrue($"Resource schema was not found at '{ConsumerWorkspace.ResourceSchemaPath}'.");
@@ -134,6 +169,28 @@ public sealed class ResourceManifestSdkIntegrationTests
         databaseLifecycle.GetProperty("restartPolicy").GetString().ShouldBe("OnFailure");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk] - enabled generic resources keep generated accessors without a control-plane registration")]
+    public async Task Build_EnabledGenericResource_GeneratesAccessorsAndInertControlPlaneSource()
+    {
+        // Arrange
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledGeneric");
+
+        // Act
+        DotNetBuildResult result = await workspace.BuildAsync("EnabledGeneric");
+
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+        string projectDirectory = workspace.ProjectDirectory("EnabledGeneric");
+        File.Exists(GeneratedOutput(projectDirectory, "resource.json")).ShouldBeTrue(result.Output);
+        File.Exists(GeneratedOutput(projectDirectory, "Resource.g.cs")).ShouldBeTrue(result.Output);
+
+        string controlPlaneSource = File.ReadAllText(
+            GeneratedOutput(projectDirectory, "ResourceControlPlane.g.cs"));
+        controlPlaneSource.ShouldNotContain("ModuleInitializer");
+        controlPlaneSource.ShouldNotContain("RegisterControlPlane");
+        AssetsContainPackage(projectDirectory, "Assimalign.Cohesion.Worker.ApplicationModel").ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk] - disabled application model produces no resource outputs")]
     public async Task Build_DisabledApplicationModel_ProducesNoManifestOrGeneratedSources()
     {
@@ -149,6 +206,7 @@ public sealed class ResourceManifestSdkIntegrationTests
         Directory.EnumerateFiles(projectDirectory, "resource.json", SearchOption.AllDirectories).ShouldBeEmpty();
         Directory.EnumerateFiles(projectDirectory, "Resource.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
         Directory.EnumerateFiles(projectDirectory, "ResourceControlPlane.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
+        AssetsContainPackage(projectDirectory, "Assimalign.Cohesion.Web.ApplicationModel").ShouldBeFalse();
         result.Output.ShouldNotContain("COHSDK");
     }
 
@@ -218,5 +276,17 @@ public sealed class ResourceManifestSdkIntegrationTests
         string path = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "cohesion", fileName);
         File.Exists(path).ShouldBeTrue($"Expected generated output '{path}'.");
         return path;
+    }
+
+    private static bool AssetsContainPackage(string projectDirectory, string packageId)
+    {
+        string assetsPath = Path.Combine(projectDirectory, "obj", "project.assets.json");
+        File.Exists(assetsPath).ShouldBeTrue($"Expected restore assets '{assetsPath}'.");
+
+        using JsonDocument assets = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        return assets.RootElement
+            .GetProperty("libraries")
+            .EnumerateObject()
+            .Any(library => library.Name.StartsWith($"{packageId}/", StringComparison.OrdinalIgnoreCase));
     }
 }

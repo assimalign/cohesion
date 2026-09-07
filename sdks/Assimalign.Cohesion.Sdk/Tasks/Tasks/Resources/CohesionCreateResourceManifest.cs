@@ -88,6 +88,9 @@ public sealed class CohesionCreateResourceManifest : Task
     /// <summary>Gets or sets the optional application-model assembly name.</summary>
     public string ApplicationModelName { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the optional fully qualified area default control-plane type.</summary>
+    public string ControlPlaneType { get; set; } = string.Empty;
+
     /// <summary>Gets or sets whether the resource kind supports in-process composition.</summary>
     public bool Composable { get; set; } = true;
 
@@ -188,6 +191,11 @@ public sealed class CohesionCreateResourceManifest : Task
         {
             Log.LogError("CohesionControlPlanePath must be an absolute path beginning with '/'.");
         }
+        if (!string.IsNullOrWhiteSpace(ControlPlaneType) && !IsNamespace(ControlPlaneType.Trim()))
+        {
+            Log.LogError(
+                "CohesionResourceControlPlaneType must be a fully qualified C# type name when specified.");
+        }
         if (!IsNamespace(RootNamespace))
         {
             Log.LogError($"Root namespace '{RootNamespace}' is not a valid C# namespace for Resource.g.cs.");
@@ -227,9 +235,9 @@ public sealed class CohesionCreateResourceManifest : Task
         {
             Log.LogError("CohesionMaxReplicas cannot be less than CohesionReplicas.");
         }
-        if (StopGraceSeconds < 1)
+        if (StopGraceSeconds < 5)
         {
-            Log.LogError("CohesionStopGraceSeconds must be at least 1.");
+            Log.LogError("CohesionStopGraceSeconds must be at least 5.");
         }
         if (!IsOneOf(RestartPolicy, "OnFailure", "Always", "Never"))
         {
@@ -288,7 +296,11 @@ public sealed class CohesionCreateResourceManifest : Task
         {
             ResourceManifestWriter.Write(ManifestOutputPath, manifest);
             ResourceSourceWriter.WriteResource(ResourceSourceOutputPath, RootNamespace, manifest);
-            ResourceSourceWriter.WriteControlPlane(ControlPlaneSourceOutputPath, RootNamespace);
+            ResourceSourceWriter.WriteControlPlane(
+                ControlPlaneSourceOutputPath,
+                RootNamespace,
+                ControlPlaneType.Trim(),
+                manifest);
         }
         catch (IOException exception)
         {

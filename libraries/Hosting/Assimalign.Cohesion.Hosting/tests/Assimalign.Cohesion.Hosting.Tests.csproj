@@ -9,6 +9,7 @@
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />

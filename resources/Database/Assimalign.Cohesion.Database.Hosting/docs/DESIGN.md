@@ -163,21 +163,33 @@ bootstrap registers the SQL engine through `AddSqlDatabase`, fronts it with
 `AddSqlServer` over the TCP listener, and parks the default-database provisioner
 on `builder.Options.Services`.
 
+## Enabled-resource control plane
+
+`DatabaseApplication.CreateBuilder(args)` captures the calling resource
+assembly and asks `ResourceRuntime` for its generated registration. When one is
+present, `Build()` adds builder health checks and registered
+`IHealthContributor`s to the isolated plane, observes the ambient endpoints,
+attaches the database host, and starts a private Web host on the ambient
+`admin` address. That private host serves health, readiness, and liveness under
+`/cohesion/v1/*` through `Web.Health`. A plain application created with the
+no-argument or options overload receives none of this behavior.
+
+The private Web references are the sanctioned cross-area implementation seam;
+no Database public API exposes a Web type, and `Database.Hosting` never
+references `Database.ApplicationModel`.
+
 ## Status and non-goals
 
 - No DI-container surface on the builder — registration stays values/options
   only, per the area composition rules (`*.Hosting` remains the DI seam for
   everything else).
-- No governance/quotas (#167) or health/readiness (#168) surfaces yet — separate
-  features (the health surface will read the engines' and servers' observational
-  contexts; see the area DESIGN.md next-iteration scoping).
+- No governance/quotas (#167). Detailed engine/server contributors remain #168
+  scope; this slice supplies their neutral aggregation and HTTP delivery seam.
 - No server machinery — servers are per-model and live inside the model
   packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
   through the root's `IDatabaseServer` seam.
-- No HTTP admin surface — that is the root `Database` project's private-Web
-  concern, deliberately separate from the wire protocol path.
-- Direct references: the area root and the non-area `Hosting` foundation.
-  Nothing else — no `Connections`, no `CohesionHostingIsolationExemptions`.
+- The admin surface is control-plane-only and separate from every database wire
+  protocol server. It exists only for an enabled resource registration.
 
 ## AOT posture
 

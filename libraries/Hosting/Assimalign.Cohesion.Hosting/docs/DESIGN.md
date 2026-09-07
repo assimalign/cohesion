@@ -21,9 +21,30 @@ Contributors belong to an individual host composition; there is no process-wide 
 `HealthStatus` is ordered from least to most healthy (`Unhealthy = 0`, `Degraded = 1`,
 `Healthy = 2`), so the default contribution fails closed and an aggregator can select its least
 healthy member. `HealthContribution` carries only status, an optional description, and optional
-diagnostic data. Registration, aggregation, timeout policy, exception handling, dependency
-injection, and HTTP probe delivery belong to area Hosting/control-plane integrations delivered by
-later design items.
+diagnostic data. `ResourceControlPlane.Create` supplies a per-resource aggregator that fails to the
+least healthy contribution and records observed endpoints. Area ApplicationModel packages choose
+the accepted command kinds; area Hosting packages register contributors and deliver the surface
+over their transport. Dependency injection and HTTP delivery therefore remain outside this package.
+
+## Ambient resource context
+
+`ResourceRuntime.Current` returns the `ResourceContext` scoped to the current asynchronous flow.
+An in-process gateway installs it with `CreateScope`; disposal restores the preceding context, so
+parallel resource invocations cannot overwrite one another. With no scope, `Current` snapshots the
+frozen `COHESION_*` process environment. Endpoint access falls back to a manifest `DevPort` only
+when `COHESION_GATEWAY` is absent.
+
+Enabled executables register an area control-plane factory and immutable stop-grace metadata by
+resource assembly from their generated module initializer. The registration contains no invocation
+state: each area builder creates a fresh plane, adds host-local health contributors, and calls
+`ResourceRuntime.HostBuilt`. That attaches graceful stop, observed endpoints, and the existing
+`ResourceHost` wrapper to only the built host. Plain executables have no registration and retain
+ordinary host behavior.
+
+`ResourceMount` unifies file-backed and in-memory mounts. POSIX file paths contain plaintext with
+gateway-enforced permissions. Windows paths contain raw CurrentUser DPAPI ciphertext; the reader
+uses `ProtectedData.Unprotect` to return plaintext from `OpenRead`/`ReadAllBytes` while retaining
+the protected raw path for path-only tools. Hosting remains Core-only and NativeAOT-safe.
 
 ## Lifecycle
 
@@ -61,8 +82,9 @@ for an area-classified dependency exception (restartable), 70 for any other pre-
 budget maps to 130; other requested-stop drain cancellations map to 143. The typed classification
 seam uses static type tests supplied by the area registration and performs no reflection.
 `HostStartupException` provides a public envelope for startup and bind failures while retaining the
-original cause in `InnerException`. Classification recursively inspects that cause, so wrapped typed
-configuration and dependency failures retain their 64 and 69 mappings.
+original cause in `InnerException`. Classification recursively inspects that cause. Area-specific
+configuration and dependency exception mappings remain unavailable until those areas define their
+typed exception contracts; unclassified failures retain the generic 70/75 mappings.
 
 Resource shutdown is governed by one declared value: `stopGraceSeconds`, defaulting to 30. The
 wrapper always overwrites `HostOptions.ShutdownTimeout` with
@@ -139,8 +161,8 @@ It is intentionally not shipped until a configuration-varying launch actually ex
 
 - No threading knob or strategy on `Host<TContext>`. The host imposes no execution model; the per-service bases above are the seam.
 - No host-owned execution substrate (process-wide `SynchronizationContext` / `TaskScheduler`). The one genuine substrate case - a thread-per-core server whose sibling services must resume on per-core event loops - should be modeled as a substrate service registered first (serial registration-order start installs it before siblings), not as a `Host<>` strategy.
-- No health registry, scheduler, aggregator, or transport. Hosting owns only the contribution
-  contract; an area's default control plane decides how to collect and expose it.
+- No process-wide health registry, scheduler, or transport. Each default control-plane instance
+  owns only its resource's aggregation; the area decides how to expose it.
 
 ## Layout Example
 

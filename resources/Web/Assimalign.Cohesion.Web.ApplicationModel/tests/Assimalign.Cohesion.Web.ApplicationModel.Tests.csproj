@@ -2,11 +2,9 @@
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector"/>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" />
-	</ItemGroup>
-	<ItemGroup>
-		<Using Include="Xunit" />
 	</ItemGroup>
 </Project>

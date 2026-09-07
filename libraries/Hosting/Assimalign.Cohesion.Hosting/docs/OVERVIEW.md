@@ -8,9 +8,9 @@ transport-neutral health contributions, and service base classes for Cohesion ap
 ## Current Evaluation
 
 - Status: Active
-- Production source files: 20; key type candidates discovered: 12; test files discovered: 17.
+- Production source includes the host lifecycle, ambient resource context, and control-plane contracts.
 - Project references: Assimalign.Cohesion.Core
-- Package references: None
+- Package references: System.Security.Cryptography.ProtectedData (Windows BCL facade)
 - NotImplementedException markers: 0
 
 ## Primary Responsibilities
@@ -35,6 +35,14 @@ transport-neutral health contributions, and service base classes for Cohesion ap
 - HealthContribution
 - HealthStatus
 - IHealthContributor
+- IResourceControlPlane
+- ResourceCommand
+- ResourceContext
+- ResourceControlPlane
+- ResourceHealthCheck
+- ResourceHealthReport
+- ResourceMount
+- ResourceRuntime
 
 ## Source Layout
 

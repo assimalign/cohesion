@@ -1,9 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!--
-		Manifest-only project (ApplicationModel Layer 3d): declares the database
-		resource for orchestration. References the declarative ApplicationModel
-		plane ONLY - never the database runtime. Orchestrator apps reference this
-		package; the database host never does.
+		Declarative ApplicationModel project: describes database resources and supplies
+		the area's default control-plane factory. It references only ApplicationModel
+		and the Core-only Hosting seam, never the database runtime.
 	-->
 	<PropertyGroup>
 		<!-- Enforce the strict ApplicationModel dependency closure (COHAM001). -->
@@ -11,5 +10,6 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>

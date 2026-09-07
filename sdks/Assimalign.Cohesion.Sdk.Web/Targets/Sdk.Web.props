@@ -6,6 +6,8 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Web</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>

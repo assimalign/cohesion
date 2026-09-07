@@ -1,4 +1,4 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
