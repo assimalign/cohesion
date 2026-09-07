@@ -63,7 +63,7 @@ public class ResourceEnvironmentTests
     }
 
     [Fact(DisplayName = DisplayPrefix + "Endpoint reader returns the bind address from a dictionary")]
-    public void TryGetEndpoint_WithBindComponents_ShouldReturnEndpointAddress()
+    public void TryGetEndpoint_WithBindComponents_ShouldReturnUri()
     {
         // Arrange
         IDictionary<string, string?> environment = new Dictionary<string, string?>
@@ -75,11 +75,11 @@ public class ResourceEnvironmentTests
         };
 
         // Act
-        bool found = ResourceEnvironment.TryGetEndpoint(environment, "http", out EndpointAddress address);
+        bool found = ResourceEnvironment.TryGetEndpoint(environment, "http", out Uri? address);
 
         // Assert
         found.ShouldBeTrue();
-        address.ShouldBe(new EndpointAddress("http", "127.0.0.1", 5080));
+        address.ShouldBe(new Uri("http://127.0.0.1:5080"));
     }
 
     [Fact(DisplayName = DisplayPrefix + "Public endpoint URL remains separate from the bind address")]
@@ -92,7 +92,7 @@ public class ResourceEnvironmentTests
         };
 
         // Act
-        bool foundAddress = ResourceEnvironment.TryGetEndpoint(environment, "http", out EndpointAddress address);
+        bool foundAddress = ResourceEnvironment.TryGetEndpoint(environment, "http", out Uri? address);
         bool foundUrl = ResourceEnvironment.TryGetUri(
             environment,
             ResourceEnvironment.Endpoint("http", "PUBLIC_URL"),
@@ -100,13 +100,13 @@ public class ResourceEnvironmentTests
 
         // Assert
         foundAddress.ShouldBeFalse();
-        address.ShouldBe(default);
+        address.ShouldBeNull();
         foundUrl.ShouldBeTrue();
         publicUrl.ShouldBe(new Uri("https://example.test:8443/public"));
     }
 
     [Fact(DisplayName = DisplayPrefix + "Dependency reader returns the observed URL")]
-    public void TryGetDependency_WithObservedUrl_ShouldReturnEndpointAddress()
+    public void TryGetDependency_WithObservedUrl_ShouldReturnUri()
     {
         // Arrange
         IDictionary<string, string?> environment = new Dictionary<string, string?>
@@ -115,11 +115,28 @@ public class ResourceEnvironmentTests
         };
 
         // Act
-        bool found = ResourceEnvironment.TryGetDependency(environment, "orders", "grpc", out EndpointAddress address);
+        bool found = ResourceEnvironment.TryGetDependency(environment, "orders", "grpc", out Uri? address);
 
         // Assert
         found.ShouldBeTrue();
-        address.ShouldBe(new EndpointAddress("https", "orders.test", 7443, "/v1"));
+        address.ShouldBe(new Uri("https://orders.test:7443/v1"));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Dependency reader rejects a custom-scheme URL without a port")]
+    public void TryGetDependency_WithCustomSchemeWithoutPort_ShouldReturnFalse()
+    {
+        // Arrange
+        IDictionary<string, string?> environment = new Dictionary<string, string?>
+        {
+            [ResourceEnvironment.Dependency("orders", "tcp", "URL")] = "tcp://orders.test"
+        };
+
+        // Act
+        bool found = ResourceEnvironment.TryGetDependency(environment, "orders", "tcp", out Uri? address);
+
+        // Assert
+        found.ShouldBeFalse();
+        address.ShouldBeNull();
     }
 
     [Fact(DisplayName = DisplayPrefix + "Typed readers reject malformed ports and accept absolute URIs")]

@@ -42,4 +42,18 @@ var result = await connection.ExecuteAsync(
     new Dictionary<string, object?> { ["id"] = 42 });
 ```
 
+Generated and ambient endpoints stay typed:
+
+```csharp
+Uri endpoint = Resource.Endpoints.Db;
+DatabaseConnectionSettings settings = DatabaseConnectionSettings.For(
+    endpoint,
+    database: "app",
+    principal: Resource.Name);
+```
+
+`For(Uri)` requires a Cohesion endpoint URI—an absolute, host-bearing value with a valid port and
+no user information, query, or fragment—and maps its `IdnHost` and `Port` directly to the socket
+endpoint without formatting and reparsing a string.
+
 See [DESIGN.md](DESIGN.md) for the pooling and settings decisions.

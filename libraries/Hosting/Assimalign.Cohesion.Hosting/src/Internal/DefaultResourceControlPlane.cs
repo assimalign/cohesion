@@ -5,8 +5,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting;
 
 internal sealed class DefaultResourceControlPlane : IResourceControlPlane
@@ -14,7 +12,7 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
     private readonly object _sync = new();
     private readonly IReadOnlyList<string> _acceptedCommandKinds;
     private readonly Dictionary<string, IHealthContributor> _contributors = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, EndpointAddress> _observedEndpoints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Uri> _observedEndpoints = new(StringComparer.OrdinalIgnoreCase);
     private IHost? _host;
 
     internal DefaultResourceControlPlane(IEnumerable<string> acceptedCommandKinds)
@@ -33,14 +31,14 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
 
     public IReadOnlyList<string> AcceptedCommandKinds => _acceptedCommandKinds;
 
-    public IReadOnlyDictionary<string, EndpointAddress> ObservedEndpoints
+    public IReadOnlyDictionary<string, Uri> ObservedEndpoints
     {
         get
         {
             lock (_sync)
             {
-                return new ReadOnlyDictionary<string, EndpointAddress>(
-                    new Dictionary<string, EndpointAddress>(_observedEndpoints, StringComparer.OrdinalIgnoreCase));
+                return new ReadOnlyDictionary<string, Uri>(
+                    new Dictionary<string, Uri>(_observedEndpoints, StringComparer.OrdinalIgnoreCase));
             }
         }
     }
@@ -60,9 +58,10 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
         }
     }
 
-    public void ObserveEndpoint(string name, EndpointAddress address)
+    public void ObserveEndpoint(string name, Uri address)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Uri.ThrowIfNotEndpoint(address);
 
         lock (_sync)
         {

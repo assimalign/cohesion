@@ -225,7 +225,7 @@ public static class ResourceRuntime
         }
 
         ResourceContext context = Current;
-        foreach ((string name, EndpointAddress endpoint) in context.Endpoints)
+        foreach ((string name, Uri endpoint) in context.Endpoints)
         {
             controlPlane.ObserveEndpoint(name, endpoint);
         }
@@ -415,14 +415,14 @@ public static class ResourceRuntime
 
         public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
 
-        public IReadOnlyDictionary<string, EndpointAddress> ObservedEndpoints => _inner.ObservedEndpoints;
+        public IReadOnlyDictionary<string, Uri> ObservedEndpoints => _inner.ObservedEndpoints;
 
         internal int StopGraceSeconds { get; }
 
         public void AddHealthContributor(IHealthContributor contributor) =>
             _inner.AddHealthContributor(contributor);
 
-        public void ObserveEndpoint(string name, EndpointAddress address) =>
+        public void ObserveEndpoint(string name, Uri address) =>
             _inner.ObserveEndpoint(name, address);
 
         public ValueTask<ResourceHealthReport> CheckHealthAsync(

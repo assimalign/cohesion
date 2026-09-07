@@ -44,7 +44,7 @@ public class DatabaseApplicationTestFactoryTests
 
         using var client = new HttpClient
         {
-            BaseAddress = factory.ResourceContext.Endpoints["admin"].Url,
+            BaseAddress = factory.ResourceContext.Endpoints["admin"],
         };
         using HttpResponseMessage response = await client.GetAsync("/healthz", cancellation.Token);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

@@ -3,7 +3,9 @@
 This document is the language-neutral contract between a Cohesion gateway and a resource.
 The contract is frozen at version 1: changing a variable name or its meaning is a breaking
 wire change. .NET consumers use `Assimalign.Cohesion.Core.ResourceEnvironment`; non-.NET
-workloads use this table directly.
+workloads use this table directly. The typed .NET endpoint readers return `System.Uri`, and
+Core's `System.UriExtensions` supplies endpoint validation, construction, parsing, and canonical
+formatting without introducing a Cohesion-specific address type.
 
 Out-of-process resources receive values through process environment variables. In-process
 resources receive the same keys through the ambient resource context introduced by runtime
@@ -45,6 +47,18 @@ underscore. Separators are not collapsed, so `orders--db` becomes `ORDERS__DB`.
 
 Configuration section and key names retain their declared casing. A double underscore is the
 section separator because the configuration bridge maps `__` to `:`.
+
+## Endpoint URI shape
+
+Every value written to a `COHESION_*_URL` or `COHESION_*_PUBLIC_URL` variable uses the canonical
+Cohesion endpoint form `scheme://host:port[/path]`: the URI is absolute, the host is present, the
+port is explicit and between 1 and 65535, and user information, query strings, and fragments are
+not allowed. The root path has no trailing slash; a non-root path is percent-encoded. Gateways and
+other contract writers use `Uri.ToEndpointString()` as the single writer form.
+
+Core readers validate this shape through `Uri.TryParseEndpoint` and return `System.Uri`. Code that
+passes the host to a socket API uses `Uri.IdnHost`, which removes IPv6 brackets and converts an
+internationalized domain name to its ASCII-compatible form.
 
 ## Topology notes
 

@@ -21,7 +21,7 @@ public sealed class Program
         string marker = resource.GetSetting("Test:Marker", fallback: "missing");
         string argument = args.Length == 0 ? "none" : args[0];
         string mount = Encoding.UTF8.GetString(resource.Mounts["fixture"].ReadAllBytes());
-        string reference = resource.References["inventory-database:db"].ToString();
+        string reference = resource.References["inventory-database:db"].ToEndpointString();
         string credential = Convert.ToBase64String(resource.BootstrapCredential.Span);
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);

@@ -51,7 +51,7 @@ await using DatabaseApplicationTestFactory factory =
 
 await factory.StartAsync(testCancellation);
 
-EndpointAddress database = factory.ResourceContext.Endpoints["db"];
+Uri database = factory.ResourceContext.Endpoints["db"];
 DatabaseConnectionSettings settings = DatabaseConnectionSettings.For(
     database,
     database: "app",
@@ -59,6 +59,11 @@ DatabaseConnectionSettings settings = DatabaseConnectionSettings.For(
 
 await factory.StopAsync(testCancellation);
 ```
+
+The context exposes endpoints and references as validated `System.Uri` values. Pass those values
+directly to `DatabaseConnectionSettings.For(Uri)` for clients or
+`SqlDatabaseServerOptions.Listen(Uri)` for server binding; neither path requires string
+reconstruction.
 
 The executable project must have `CohesionApplicationModel=enabled` so its SDK-generated
 module initializer registers the Database default control plane. A

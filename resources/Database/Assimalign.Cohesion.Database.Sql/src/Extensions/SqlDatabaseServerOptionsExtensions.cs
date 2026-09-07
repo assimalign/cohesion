@@ -2,8 +2,6 @@ using System;
 using System.Net;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
@@ -13,23 +11,6 @@ public static class SqlDatabaseServerOptionsExtensions
 {
     extension(SqlDatabaseServerOptions options)
     {
-        /// <summary>
-        /// Configures the server to listen on a resolved Cohesion endpoint.
-        /// </summary>
-        /// <param name="endpoint">The resolved database endpoint.</param>
-        /// <returns><paramref name="options"/> for fluent composition.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="endpoint"/> has no host or a non-positive port.
-        /// </exception>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when the endpoint host is not a literal IP address, <c>localhost</c>, or a wildcard.
-        /// </exception>
-        public SqlDatabaseServerOptions Listen(EndpointAddress endpoint)
-        {
-            return options.Listen(endpoint.Url);
-        }
-
         /// <summary>
         /// Configures the server to listen on a resolved Cohesion endpoint.
         /// </summary>

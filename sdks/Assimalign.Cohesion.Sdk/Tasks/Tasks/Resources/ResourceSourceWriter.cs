@@ -94,7 +94,7 @@ internal static class ResourceSourceWriter
                 ? port.ToString(CultureInfo.InvariantCulture)
                 : "null";
             builder.AppendLine(
-                $"        if (context.TryGetEndpoint({Quote(endpoint.Name)}, {Quote(endpoint.Scheme)}, {devPort}, out global::Assimalign.Cohesion.Core.EndpointAddress endpoint{index.ToString(CultureInfo.InvariantCulture)}))");
+                $"        if (context.TryGetEndpoint({Quote(endpoint.Name)}, {Quote(endpoint.Scheme)}, {devPort}, out global::System.Uri? endpoint{index.ToString(CultureInfo.InvariantCulture)}))");
             builder.AppendLine("        {");
             builder.AppendLine(
                 $"            controlPlane.ObserveEndpoint({Quote(endpoint.Name)}, endpoint{index.ToString(CultureInfo.InvariantCulture)});");
@@ -260,23 +260,19 @@ internal static class ResourceSourceWriter
         builder.AppendLine("            _protocol = protocol;");
         builder.AppendLine("        }");
         builder.AppendLine();
-        builder.AppendLine("        /// <summary>Gets the currently observed endpoint.</summary>");
-        builder.AppendLine("        /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the endpoint is not currently resolved.</exception>");
-        builder.AppendLine("        public global::Assimalign.Cohesion.Core.EndpointAddress Endpoint =>");
-        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetReference(_resource, _endpoint);");
-        builder.AppendLine();
         builder.AppendLine("        /// <summary>Gets the currently observed endpoint URL.</summary>");
         builder.AppendLine("        /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the endpoint is not currently resolved.</exception>");
-        builder.AppendLine("        public global::System.Uri Url => Endpoint.Url;");
+        builder.AppendLine("        public global::System.Uri Url =>");
+        builder.AppendLine("            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetReference(_resource, _endpoint);");
         builder.AppendLine();
         builder.AppendLine("        /// <summary>Attempts to get the currently observed endpoint URL.</summary>");
         builder.AppendLine("        /// <param name=\"url\">The endpoint URL when this method returns <see langword=\"true\"/>.</param>");
         builder.AppendLine("        /// <returns><see langword=\"true\"/> when the endpoint is resolved; otherwise, <see langword=\"false\"/>.</returns>");
         builder.AppendLine("        public bool TryGetUrl([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out global::System.Uri? url)");
         builder.AppendLine("        {");
-        builder.AppendLine("            if (global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.TryGetReference(_resource, _endpoint, out global::Assimalign.Cohesion.Core.EndpointAddress address))");
+        builder.AppendLine("            if (global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.TryGetReference(_resource, _endpoint, out global::System.Uri? address))");
         builder.AppendLine("            {");
-        builder.AppendLine("                url = address.Url;");
+        builder.AppendLine("                url = address;");
         builder.AppendLine("                return true;");
         builder.AppendLine("            }");
         builder.AppendLine();
@@ -304,7 +300,7 @@ internal static class ResourceSourceWriter
                 ? devPort.ToString(CultureInfo.InvariantCulture)
                 : "null";
             builder.AppendLine($"        /// <summary>Gets the {XmlText(endpoint.Name)} endpoint.</summary>");
-            builder.AppendLine($"        public static global::Assimalign.Cohesion.Core.EndpointAddress {Identifier(endpoint.Name)} =>");
+            builder.AppendLine($"        public static global::System.Uri {Identifier(endpoint.Name)} =>");
             builder.AppendLine($"            global::Assimalign.Cohesion.Hosting.ResourceRuntime.Current.GetEndpoint({Quote(endpoint.Name)}, {Quote(endpoint.Scheme)}, {fallbackPort});");
             builder.AppendLine();
         }

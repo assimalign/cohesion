@@ -147,10 +147,10 @@ internal static class ResourceControlPlaneMiddleware
                 writer.WriteStartObject();
                 writer.WritePropertyName("endpoints");
                 writer.WriteStartObject();
-                foreach ((string name, EndpointAddress endpoint) in
+                foreach ((string name, Uri endpoint) in
                     controlPlane.ObservedEndpoints.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
                 {
-                    writer.WriteString(name, endpoint.ToString());
+                    writer.WriteString(name, endpoint.ToEndpointString());
                 }
                 writer.WriteEndObject();
                 writer.WriteEndObject();

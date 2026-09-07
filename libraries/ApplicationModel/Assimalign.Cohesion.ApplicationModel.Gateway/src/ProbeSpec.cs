@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
@@ -31,17 +29,6 @@ public static class ProbeSpec
     }
 
     /// <summary>Creates an HTTP probe against an absolute address.</summary>
-    /// <param name="address">The absolute HTTP or HTTPS address.</param>
-    /// <returns>An HTTP probe specification.</returns>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="address"/> does not use the HTTP or HTTPS scheme.
-    /// </exception>
-    public static IProbeSpec Http(EndpointAddress address)
-    {
-        return Http(address.Url);
-    }
-
-    /// <summary>Creates an HTTP probe against an absolute address.</summary>
     /// <param name="address">The absolute HTTP or HTTPS endpoint URI.</param>
     /// <returns>An HTTP probe specification.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="address"/> is <see langword="null"/>.</exception>
@@ -58,8 +45,7 @@ public static class ProbeSpec
             throw new ArgumentException("An HTTP probe address must use the http or https scheme.", nameof(address));
         }
 
-        var endpointAddress = new EndpointAddress(address.Scheme, address.Host, address.Port, address.EndpointPath);
-        return new ProbeDefinition(ProbeKind.Http, endpoint: null, endpointAddress, address.EndpointPath, Array.Empty<string>());
+        return new ProbeDefinition(ProbeKind.Http, endpoint: null, address, address.EndpointPath, Array.Empty<string>());
     }
 
     /// <summary>Creates a TCP probe against a named resource endpoint.</summary>
@@ -80,7 +66,7 @@ public static class ProbeSpec
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="port"/> is not a valid port.</exception>
     public static IProbeSpec Tcp(string host, int port)
     {
-        var address = new EndpointAddress("tcp", host, port);
+        Uri address = Uri.CreateEndpoint("tcp", host, port);
         return new ProbeDefinition(ProbeKind.Tcp, endpoint: null, address, path: null, Array.Empty<string>());
     }
 

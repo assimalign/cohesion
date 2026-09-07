@@ -23,9 +23,20 @@ value is a breaking wire-contract change rather than an ordinary implementation 
 
 Endpoint, resource, and mount components use one ordinal ASCII normalization rule: lowercase
 ASCII is uppercased, ASCII letters and digits are retained, and each other character becomes one
-underscore. `EndpointAddress` is the immutable parsed form used by the typed readers. A declared
-endpoint's HOST/PORT/SCHEME values describe its bind address; its separately advertised
-PUBLIC_URL remains available through the URI reader. Dependency URLs may carry an optional path.
+underscore. Typed endpoint readers return `System.Uri`: the BCL type already owns scheme, host,
+port, path, parsing, and equality, so Core does not duplicate that state in a framework-specific
+address type. A declared endpoint's HOST/PORT/SCHEME values describe its bind address; its
+separately advertised PUBLIC_URL remains available through the URI reader. Dependency URLs may
+carry an optional path.
+
+`UriExtensions` is a single C# 14 extension block in the `System` namespace for the endpoint
+behavior the BCL does not supply directly: `CreateEndpoint`, `TryCreateEndpoint`,
+`TryParseEndpoint`, `ThrowIfNotEndpoint`, `IsEndpoint`, `EndpointPath`, and
+`ToEndpointString()`. An endpoint is absolute, has a host and an explicit port from 1 through
+65535, and has no user information, query, or fragment. `ToEndpointString()` is the sole writer
+for runtime-contract URL values: `scheme://host:port[/path]`, with an escaped path and no trailing
+slash for the root. Code crossing into socket APIs uses `Uri.IdnHost` by convention so IPv6
+literals are unbracketed and internationalized hosts use their ASCII-compatible form.
 
 `AppEnvironment` owns the single environment-name rule:
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this

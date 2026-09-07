@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
@@ -26,13 +25,14 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
     private readonly WebApplication _application;
 
     internal DatabaseAdminEndpointService(
-        EndpointAddress endpoint,
+        Uri endpoint,
         IResourceControlPlane controlPlane,
         ReadOnlyMemory<byte> bootstrapCredential,
         bool requireAuthentication,
         DatabaseApplicationContext applicationContext,
         IReadOnlyList<IHealthContributor> healthContributors)
     {
+        Uri.ThrowIfNotEndpoint(endpoint);
         ArgumentNullException.ThrowIfNull(controlPlane);
         ArgumentNullException.ThrowIfNull(applicationContext);
         ArgumentNullException.ThrowIfNull(healthContributors);
@@ -43,7 +43,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
                 $"The ambient Database endpoint 'admin' must use the http scheme, not '{endpoint.Scheme}'.");
         }
 
-        IPAddress address = ResolveBindAddress(endpoint.Host);
+        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Server.UseServer(options =>
             options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));

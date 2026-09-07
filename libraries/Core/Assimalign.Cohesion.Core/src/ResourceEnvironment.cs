@@ -274,7 +274,7 @@ public static class ResourceEnvironment
     /// URL with <see cref="TryGetUri"/>.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="endpoint"/> is empty.</exception>
-    public static bool TryGetEndpoint(string endpoint, out EndpointAddress address)
+    public static bool TryGetEndpoint(string endpoint, [NotNullWhen(true)] out Uri? address)
     {
         return TryGetEndpointCore(environment: null, endpoint, out address);
     }
@@ -297,7 +297,7 @@ public static class ResourceEnvironment
     public static bool TryGetEndpoint(
         IDictionary<string, string?> environment,
         string endpoint,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
         ArgumentNullException.ThrowIfNull(environment);
 
@@ -314,7 +314,10 @@ public static class ResourceEnvironment
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="resource"/> or <paramref name="endpoint"/> is empty.
     /// </exception>
-    public static bool TryGetDependency(string resource, string endpoint, out EndpointAddress address)
+    public static bool TryGetDependency(
+        string resource,
+        string endpoint,
+        [NotNullWhen(true)] out Uri? address)
     {
         return TryGetDependencyCore(environment: null, resource, endpoint, out address);
     }
@@ -337,7 +340,7 @@ public static class ResourceEnvironment
         IDictionary<string, string?> environment,
         string resource,
         string endpoint,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
         ArgumentNullException.ThrowIfNull(environment);
 
@@ -380,7 +383,7 @@ public static class ResourceEnvironment
     private static bool TryGetEndpointCore(
         IDictionary<string, string?>? environment,
         string endpoint,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
         string hostVariable = Endpoint(endpoint, "HOST");
         string portVariable = Endpoint(endpoint, "PORT");
@@ -396,12 +399,12 @@ public static class ResourceEnvironment
         IDictionary<string, string?>? environment,
         string resource,
         string endpoint,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
         string? url = ReadValue(environment, Dependency(resource, endpoint, "URL"));
         if (!string.IsNullOrWhiteSpace(url))
         {
-            return EndpointAddress.TryParse(url, out address);
+            return Uri.TryParseEndpoint(url, out address);
         }
 
         return TryCreateAddress(
@@ -415,9 +418,9 @@ public static class ResourceEnvironment
         string? scheme,
         string? host,
         string? portValue,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
-        address = default;
+        address = null;
 
         if (string.IsNullOrWhiteSpace(scheme)
             || string.IsNullOrWhiteSpace(host)
@@ -426,15 +429,7 @@ public static class ResourceEnvironment
             return false;
         }
 
-        try
-        {
-            address = new EndpointAddress(scheme, host, port);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        return Uri.TryCreateEndpoint(scheme, host, port, path: null, out address);
     }
 
     private static string? ReadValue(IDictionary<string, string?>? environment, string variable)

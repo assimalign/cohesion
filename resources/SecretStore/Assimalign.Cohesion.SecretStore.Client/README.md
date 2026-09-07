@@ -8,5 +8,8 @@ ClientCredential)` factory, and the generic command transport that design item 3
 with SecretStore-specific commands. It references Core only; it does not reference
 `Assimalign.Cohesion.SecretStore.Hosting`, shared Hosting, Web, or Microsoft.Extensions packages.
 
+Core supplies the Cohesion endpoint guard for `System.Uri`: the factory requires an absolute HTTP
+or HTTPS URI with a host and valid port, without user information, a query, or a fragment.
+
 See [the overview](./docs/OVERVIEW.md) and [design](./docs/DESIGN.md) for the wire contract and
 scope boundaries.

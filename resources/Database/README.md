@@ -27,7 +27,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 | Model | Root project | Notes |
 |---|---|---|
-| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, the model's wire-protocol server (`SqlDatabaseServer`), and the model builder verbs; declared dialect in `Sql.Language` |
+| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, the model's wire-protocol server (`SqlDatabaseServer`), the `SqlDatabaseServerOptions.Listen(Uri)` endpoint bridge, and the model builder verbs; declared dialect in `Sql.Language` |
 | Documents | `Assimalign.Cohesion.Database.Documents` | OQL-based language contract |
 | Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
 | Blob | `Assimalign.Cohesion.Database.Blob` | API-driven; no `.Language` project |
@@ -39,7 +39,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | Project | Role |
 |---|---|
 | `Assimalign.Cohesion.Database.Protocol` | Child root — wire protocol frames and message contracts (shared client/server), `ProtocolVersion` |
-| `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client, and `DatabaseConnectionSettings.For(EndpointAddress)` for generated or ambient endpoints |
+| `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client, and `DatabaseConnectionSettings.For(Uri)` for generated or ambient endpoints |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |

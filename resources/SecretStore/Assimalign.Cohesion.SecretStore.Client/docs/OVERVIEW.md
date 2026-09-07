@@ -27,5 +27,7 @@ ReadOnlyMemory<byte> value = await client.GetSecretAsync("apps/api/password", ca
 string certificate = await client.GetCertificateAsync("certs/appa-api", cancellationToken);
 ```
 
-The factory accepts only HTTP or HTTPS endpoints. Each request presents the credential as a bearer
-token; the package treats the token as opaque and does not acquire, parse, refresh, or persist it.
+The factory accepts only HTTP or HTTPS Cohesion endpoint URIs: absolute, host-bearing values with a
+valid port and no user information, query, or fragment. Each request presents the credential as a
+bearer token; the package treats the token as opaque and does not acquire, parse, refresh, or persist
+it.

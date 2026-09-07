@@ -52,7 +52,7 @@ public class ResourceControlPlaneTests
         controlPlane.AddHealthContributor(new TestContributor(
             "dependency",
             HealthContribution.Degraded("slow")));
-        controlPlane.ObserveEndpoint("http", new EndpointAddress("http", "localhost", 5080));
+        controlPlane.ObserveEndpoint("http", new Uri("http://localhost:5080"));
 
         // Act
         ResourceHealthReport report = await controlPlane.CheckHealthAsync(CancellationToken.None);
@@ -61,6 +61,32 @@ public class ResourceControlPlaneTests
         report.Status.ShouldBe(HealthStatus.Degraded);
         report.Contributions.Count.ShouldBe(2);
         controlPlane.ObservedEndpoints["http"].Port.ShouldBe(5080);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Endpoint observation rejects a null address")]
+    public void ObserveEndpoint_WithNullAddress_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+
+        // Act
+        Action action = () => controlPlane.ObserveEndpoint("http", null!);
+
+        // Assert
+        Should.Throw<ArgumentNullException>(action).ParamName.ShouldBe("address");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Endpoint observation rejects a relative address")]
+    public void ObserveEndpoint_WithRelativeAddress_ShouldThrowArgumentException()
+    {
+        // Arrange
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+
+        // Act
+        Action action = () => controlPlane.ObserveEndpoint("http", new Uri("relative", UriKind.Relative));
+
+        // Assert
+        Should.Throw<ArgumentException>(action).ParamName.ShouldBe("address");
     }
 
     [Fact(DisplayName = DisplayPrefix + "A contributor failure becomes a named unhealthy result without stopping aggregation")]
@@ -146,7 +172,7 @@ public class ResourceControlPlaneTests
     {
         // Arrange
         string contentRoot = Path.GetFullPath("resource-content");
-        var endpoint = new EndpointAddress("http", "127.0.0.1", 5081);
+        var endpoint = new Uri("http://127.0.0.1:5081");
         ResourceContext context = ResourceContext.FromEnvironment(
             new Dictionary<string, string?>
             {

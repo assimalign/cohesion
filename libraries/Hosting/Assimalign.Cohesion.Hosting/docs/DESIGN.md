@@ -24,7 +24,9 @@ healthy member. `HealthContribution` carries only status, an optional descriptio
 diagnostic data. `ResourceControlPlane.Create` supplies a per-resource aggregator that fails to the
 least healthy contribution and records observed endpoints. Area ApplicationModel packages choose
 the accepted command kinds; area Hosting packages register contributors and deliver the surface
-over their transport. Dependency injection and HTTP delivery therefore remain outside this package.
+over their transport. Observed endpoints are `System.Uri` values, matching Core's typed runtime-
+contract readers without a Hosting-specific address abstraction. Dependency injection and HTTP
+delivery therefore remain outside this package.
 
 ## Ambient resource context
 
@@ -32,7 +34,10 @@ over their transport. Dependency injection and HTTP delivery therefore remain ou
 An in-process gateway installs it with `CreateScope`; disposal restores the preceding context, so
 parallel resource invocations cannot overwrite one another. With no scope, `Current` snapshots the
 frozen `COHESION_*` process environment. Endpoint access falls back to a manifest `DevPort` only
-when `COHESION_GATEWAY` is absent.
+when `COHESION_GATEWAY` is absent. `ResourceContext.Endpoints`, `References`, `GetEndpoint`, and
+`GetReference` all carry `System.Uri`; their `TryGet*` counterparts return nullable `Uri` values
+annotated as non-null on success. Endpoint construction and validation remain Core's
+`UriExtensions` responsibility.
 
 Enabled executables register both their compiler-rooted entry point and an area control-plane
 factory with immutable stop-grace metadata, keyed by resource assembly, from their generated

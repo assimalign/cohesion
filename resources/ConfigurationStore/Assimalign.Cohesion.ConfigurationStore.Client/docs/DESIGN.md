@@ -9,9 +9,11 @@ store's hosting implementation. This keeps a gateway from acquiring a transitive
 
 ## Dependency boundary
 
-The package references only `Assimalign.Cohesion.Core`, solely for `EndpointAddress`. HTTP transport,
-authentication headers, and JSON processing use BCL APIs. The package deliberately does not depend
-on the ConfigurationStore area root, Hosting, DependencyInjection, Web, or ApplicationModel.
+The package references only `Assimalign.Cohesion.Core`, solely for the Cohesion endpoint guard on
+`System.Uri`. The guard requires an absolute, host-bearing URI with a port from 1 through 65535 and
+rejects user information, query strings, and fragments. HTTP transport, authentication headers,
+and JSON processing use BCL APIs. The package deliberately does not depend on the ConfigurationStore
+area root, Hosting, DependencyInjection, Web, or ApplicationModel.
 
 `ResourceCommand` and `ClientCredential` are package-local contracts. Their shapes match the store
 protocol while avoiding a dependency on a runtime assembly merely to send a request.

@@ -29,15 +29,16 @@ await using DatabaseApplicationTestFactory factory =
     DatabaseApplicationTestFactory.FromProgram<global::Program>();
 
 await factory.StartAsync();
-EndpointAddress endpoint = factory.ResourceContext.Endpoints["db"];
+Uri endpoint = factory.ResourceContext.Endpoints["db"];
 
 // Exercise the resource through Database.Client, then stop it gracefully.
 await factory.StopAsync();
 ```
 
 By default, each factory allocates distinct loopback `db` and `admin` endpoints and owns a
-temporary `data` directory. Supply `DatabaseApplicationTestFactoryOptions.ResourceContext`
-when a test needs fixed endpoints, mounts, settings, or references.
+temporary `data` directory. Endpoint and reference dictionaries carry validated `System.Uri`
+values. Supply `DatabaseApplicationTestFactoryOptions.ResourceContext` when a test needs fixed
+endpoints, mounts, settings, or references.
 
 - The package has no assertion helpers and no test-framework dependency.
 - Factories use the generated Database control plane at `/readyz` and

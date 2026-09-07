@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting;
@@ -246,7 +245,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 _controlPlane.AddHealthContributor(contributor);
             }
 
-            if ((_controlPlane.ObservedEndpoints.TryGetValue("admin", out EndpointAddress endpoint) ||
+            if ((_controlPlane.ObservedEndpoints.TryGetValue("admin", out Uri? endpoint) ||
                 (_resourceContext is not null &&
                  _resourceContext.Endpoints.TryGetValue("admin", out endpoint))))
             {

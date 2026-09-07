@@ -2,8 +2,8 @@
 
 ## Summary
 
-Provides the foundational primitives, frozen resource environment contract, typed endpoint
-addresses, environment helpers, glob support, and low-level extensions shared across Cohesion.
+Provides the foundational primitives, frozen resource environment contract, typed `System.Uri`
+endpoints, environment helpers, glob support, and low-level extensions shared across Cohesion.
 
 ## Current Evaluation
 
@@ -27,8 +27,8 @@ addresses, environment helpers, glob support, and low-level extensions shared ac
 - AdaptiveMemoryPoolSnapshot
 - AIMetadataAttribute
 - AppEnvironment
-- EndpointAddress
 - ResourceEnvironment
+- UriExtensions
 - AsyncExtensions
 - CertificateManager
 

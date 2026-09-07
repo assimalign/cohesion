@@ -196,7 +196,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ResourceContext resourceContext,
         IResourceControlPlane controlPlane)
     {
-        if (!controlPlane.ObservedEndpoints.TryGetValue("http", out EndpointAddress endpoint) &&
+        if (!controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) &&
             !resourceContext.Endpoints.TryGetValue("http", out endpoint))
         {
             return;
@@ -210,7 +210,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 $"The ambient Web endpoint 'http' must use the http scheme, not '{endpoint.Scheme}'.");
         }
 
-        IPAddress address = ResolveBindAddress(endpoint.Host);
+        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         Server.UseServer(options =>
             options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
     }

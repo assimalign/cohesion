@@ -18,14 +18,10 @@ using EnabledWeb;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 ISqlClient orders = SqlClient.Create(new SqlClientOptions
 {
-    Settings = new DatabaseConnectionSettings
-    {
-        Database = "orders",
-        Principal = Resource.Name,
-        EndPoint = new System.Net.DnsEndPoint(
-            Resource.References.InventoryDatabase.Db.Endpoint.Host,
-            Resource.References.InventoryDatabase.Db.Endpoint.Port),
-    },
+    Settings = DatabaseConnectionSettings.For(
+        Resource.References.InventoryDatabase.Db.Url,
+        database: "orders",
+        principal: Resource.Name),
     ConnectionFactory = Resource.References.InventoryDatabase.Db.ConnectionFactory(),
 });
 builder.Services.AddSingleton(orders);
@@ -33,7 +29,7 @@ builder.Services.AddSingleton(orders);
 // The IdentityHub reference and JwtBearerOptions.Authority from section 4.2.2 do not
 // exist yet. The real bearer API accepts explicit issuer URLs, so this build-only
 // acceptance fixture uses its own endpoint as the nearest available composition.
-Uri authority = Resource.Endpoints.Http.Url;
+Uri authority = Resource.Endpoints.Http;
 builder.AddAuthentication().AddJwtBearer(options =>
     options.ValidIssuers.Add(authority.AbsoluteUri));
 builder.AddHealthCheck(

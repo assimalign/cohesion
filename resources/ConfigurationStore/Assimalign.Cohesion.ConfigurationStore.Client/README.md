@@ -33,9 +33,10 @@ An endpoint base path is preserved and prepended to both routes. Non-success HTT
 
 ## Dependencies
 
-The package references only `Assimalign.Cohesion.Core` for the `Uri` endpoint guard and uses the BCL HTTP
-and source-generated JSON stacks. It does not reference ConfigurationStore.Hosting, dependency
-injection, or a shared framework.
+The package references only `Assimalign.Cohesion.Core` for the `Uri` endpoint guard and uses the BCL
+HTTP and source-generated JSON stacks. The guard requires an absolute URI with a host and valid port,
+without user information, a query, or a fragment. The package does not reference
+ConfigurationStore.Hosting, dependency injection, or a shared framework.
 
 ## Documentation
 

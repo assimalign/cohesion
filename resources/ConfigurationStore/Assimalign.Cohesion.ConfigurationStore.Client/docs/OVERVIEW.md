@@ -20,6 +20,10 @@ JSON object into `IReadOnlyDictionary<string, string?>`. `SendCommandAsync` issu
 POST request with a camel-case JSON command envelope. Both operations preserve an endpoint base path,
 escape their query values, propagate cancellation, and reject non-success status codes.
 
+`ConfigurationStoreClient.Create` accepts a Cohesion endpoint `Uri`: an absolute URI with a host and
+valid port, without user information, a query, or a fragment. It additionally restricts the scheme
+to HTTP or HTTPS before creating the internal transport client.
+
 ## Links
 
 - [Package README](../README.md)

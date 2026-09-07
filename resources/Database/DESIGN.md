@@ -173,8 +173,10 @@ inventing a framework-owned artifact or injecting resource-specific variables. I
 `DatabaseResource : PlannedResource` delegates to the Database planner, whose platform-neutral
 `ResourcePlan` requires stable workload identity, a sized per-replica claim for every persistent
 volume, and exactly one headless governing service. Platform compilers — not the planner — turn
-that IR into Kubernetes, Docker, or local objects. `DatabaseConnectionSettings.For(EndpointAddress)`
-bridges generated/ambient endpoints to the client without string reconstruction.
+that IR into Kubernetes, Docker, or local objects. `DatabaseConnectionSettings.For(Uri)` bridges
+generated or ambient endpoints to the client, while `SqlDatabaseServerOptions.Listen(Uri)` bridges
+the same typed endpoint into server binding. Both validate the Cohesion endpoint shape before using
+`Uri.IdnHost` and `Uri.Port` at the socket boundary; callers never reconstruct endpoint strings.
 
 The framework-owned `Assimalign.Cohesion.Database.Application` executable is deleted; #973
 supersedes the target described by #906. The resource instance is the customer's ordinary

@@ -12,7 +12,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Testing;
@@ -317,8 +316,8 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task WaitForReadinessAsync(Task program, CancellationToken cancellationToken)
     {
-        EndpointAddress admin = ResourceContext.Endpoints[AdminEndpointName];
-        using var client = new HttpClient { BaseAddress = admin.Url };
+        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        using var client = new HttpClient { BaseAddress = admin };
 
         while (true)
         {
@@ -351,8 +350,8 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task RequestStopAsync(Task program, CancellationToken cancellationToken)
     {
-        EndpointAddress admin = ResourceContext.Endpoints[AdminEndpointName];
-        using var client = new HttpClient { BaseAddress = admin.Url };
+        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        using var client = new HttpClient { BaseAddress = admin };
 
         while (!program.IsCompleted)
         {
@@ -496,10 +495,10 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         }
         while (adminPort == databasePort);
 
-        var endpoints = new Dictionary<string, EndpointAddress>(StringComparer.OrdinalIgnoreCase)
+        var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
         {
-            [DatabaseEndpointName] = new EndpointAddress("cohesion-db", "127.0.0.1", databasePort),
-            [AdminEndpointName] = new EndpointAddress("http", "127.0.0.1", adminPort),
+            [DatabaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
+            [AdminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
         };
         var mounts = new Dictionary<string, ResourceMount>(StringComparer.OrdinalIgnoreCase)
         {

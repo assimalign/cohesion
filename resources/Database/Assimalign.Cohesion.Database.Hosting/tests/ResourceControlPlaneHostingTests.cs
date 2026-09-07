@@ -9,7 +9,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 
 using Shouldly;
@@ -23,11 +22,11 @@ public sealed class ResourceControlPlaneHostingTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - CreateBuilder(args): honors the registered control plane and ambient admin endpoint")]
     public async Task CreateBuilderWithArgs_WhenRegistered_ShouldComposeControlPlane()
     {
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
-        var databaseEndpoint = new EndpointAddress("cohesion-db", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
+        Uri databaseEndpoint = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: "ControlPlaneTest",
-            endpoints: new Dictionary<string, EndpointAddress>
+            endpoints: new Dictionary<string, Uri>
             {
                 ["admin"] = endpoint,
                 ["db"] = databaseEndpoint,
@@ -51,7 +50,7 @@ public sealed class ResourceControlPlaneHostingTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             foreach (string path in new[]
             {
                 "/healthz",
@@ -83,12 +82,12 @@ public sealed class ResourceControlPlaneHostingTests
                 .GetProperty("endpoints")
                 .GetProperty("admin")
                 .GetString()
-                .ShouldBe(endpoint.ToString());
+                .ShouldBe(endpoint.ToEndpointString());
             endpoints.RootElement
                 .GetProperty("endpoints")
                 .GetProperty("db")
                 .GetString()
-                .ShouldBe(databaseEndpoint.ToString());
+                .ShouldBe(databaseEndpoint.ToEndpointString());
 
             using JsonDocument commands = JsonDocument.Parse(await client.GetStringAsync(
                 "/cohesion/v1/commands",
@@ -118,15 +117,15 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task Readiness_WhileServerBindIsPending_ShouldRemainUnavailable()
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["admin"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
         var bindStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
         builder.AddServer(new ControlledStartServer(bindStarted, accepting));
         await using DatabaseApplication application = builder.Build();
-        using var client = new HttpClient { BaseAddress = endpoint.Url };
+        using var client = new HttpClient { BaseAddress = endpoint };
 
         Task start = ((IHost)application).StartAsync(cancellation.Token);
         await bindStarted.Task.WaitAsync(cancellation.Token);
@@ -151,13 +150,13 @@ public sealed class ResourceControlPlaneHostingTests
     {
         // Arrange
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["admin"] = endpoint },
+            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
             bootstrapCredential: Encoding.UTF8.GetBytes("database-bootstrap")));
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
         await using DatabaseApplication application = builder.Build();
-        using var client = new HttpClient { BaseAddress = endpoint.Url };
+        using var client = new HttpClient { BaseAddress = endpoint };
 
         await ((IHost)application).StartAsync(cancellation.Token);
         try
@@ -196,13 +195,13 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task ControlPlane_WithGatewayAndNoBootstrapCredential_ShouldRejectNamespacedRoutes()
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             gatewayName: "local",
-            endpoints: new Dictionary<string, EndpointAddress> { ["admin"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
         await using DatabaseApplication application = builder.Build();
-        using var client = new HttpClient { BaseAddress = endpoint.Url };
+        using var client = new HttpClient { BaseAddress = endpoint };
 
         await ((IHost)application).StartAsync(cancellation.Token);
         try
@@ -279,12 +278,12 @@ public sealed class ResourceControlPlaneHostingTests
     {
         // Arrange
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["admin"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
         await using DatabaseApplication application = builder.Build();
-        using var client = new HttpClient { BaseAddress = endpoint.Url };
+        using var client = new HttpClient { BaseAddress = endpoint };
 
         // Act
         Task runTask = application.RunAsync(cancellation.Token);

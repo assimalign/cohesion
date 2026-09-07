@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
@@ -22,7 +20,7 @@ public interface IProbeSpec
     string? Endpoint { get; }
 
     /// <summary>Gets the absolute address targeted by a manifest-less executable probe, when applicable.</summary>
-    EndpointAddress? Address { get; }
+    Uri? Address { get; }
 
     /// <summary>Gets the HTTP path, when the probe uses a named endpoint.</summary>
     string? Path { get; }

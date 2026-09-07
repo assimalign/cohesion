@@ -8,8 +8,8 @@ DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 await using DatabaseApplication application = builder.Build();
 
 Console.WriteLine($"{Resource.Application}/{Resource.Name}:{Resource.Kind}");
-Assimalign.Cohesion.Core.EndpointAddress adminEndpoint = Resource.Endpoints.Admin;
-Assimalign.Cohesion.Core.EndpointAddress databaseEndpoint = Resource.Endpoints.Db;
+Uri adminEndpoint = Resource.Endpoints.Admin;
+Uri databaseEndpoint = Resource.Endpoints.Db;
 Assimalign.Cohesion.Hosting.ResourceMount dataMount = Resource.Mounts.Data;
 string dataPath = dataMount.Path ?? string.Empty;
 int poolSize = Resource.Settings.DatabasePoolSize.Get<int>();

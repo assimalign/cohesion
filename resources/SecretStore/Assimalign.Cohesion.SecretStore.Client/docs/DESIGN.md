@@ -8,10 +8,12 @@ contract is interface-first and the HTTP implementation remains internal.
 
 ## Dependency boundary
 
-The package references only `Assimalign.Cohesion.Core` for `EndpointAddress`. It deliberately does
-not reference `Assimalign.Cohesion.SecretStore`, `Assimalign.Cohesion.SecretStore.Hosting`, shared
-Hosting, Web, dependency injection, configuration, logging, or Microsoft.Extensions packages.
-It is a standalone NuGet package and is not part of an `App.SecretStore` shared framework.
+The package references only `Assimalign.Cohesion.Core` for the Cohesion endpoint guard on
+`System.Uri`. The guard requires an absolute, host-bearing URI with a port from 1 through 65535 and
+rejects user information, query strings, and fragments. The package deliberately does not reference
+`Assimalign.Cohesion.SecretStore`, `Assimalign.Cohesion.SecretStore.Hosting`, shared Hosting, Web,
+dependency injection, configuration, logging, or Microsoft.Extensions packages. It is a standalone
+NuGet package and is not part of an `App.SecretStore` shared framework.
 
 ## Protocol
 

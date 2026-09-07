@@ -33,7 +33,7 @@ internal sealed class ResourceControlPlanePipeline : IWebApplicationPipeline
         _next = next ?? throw new ArgumentNullException(nameof(next));
         _controlPlanePort = controlPlane.ObservedEndpoints.TryGetValue(
             "http",
-            out EndpointAddress endpoint)
+            out Uri? endpoint)
             ? endpoint.Port
             : null;
     }

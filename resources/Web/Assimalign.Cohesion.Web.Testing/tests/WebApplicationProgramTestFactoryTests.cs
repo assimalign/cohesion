@@ -26,7 +26,7 @@ public sealed class WebApplicationProgramTestFactoryTests
     {
         using var cancellation = new CancellationTokenSource(TestTimeout);
         ResourceContext prior = ResourceRuntime.Current;
-        ResourceContext context = CreateContext("first-host", "alpha", out EndpointAddress endpoint);
+        ResourceContext context = CreateContext("first-host", "alpha", out Uri endpoint);
         await using IWebApplicationProgramTestFactory factory =
             WebApplicationTestFactory.FromProgram<Program>(new WebApplicationProgramTestFactoryOptions
             {
@@ -70,8 +70,8 @@ public sealed class WebApplicationProgramTestFactoryTests
     public async Task FromProgram_WithConcurrentScopes_ShouldKeepHostsIsolated()
     {
         using var cancellation = new CancellationTokenSource(TestTimeout);
-        ResourceContext firstContext = CreateContext("first-host", "alpha", out EndpointAddress firstEndpoint);
-        ResourceContext secondContext = CreateContext("second-host", "beta", out EndpointAddress secondEndpoint);
+        ResourceContext firstContext = CreateContext("first-host", "alpha", out Uri firstEndpoint);
+        ResourceContext secondContext = CreateContext("second-host", "beta", out Uri secondEndpoint);
         await using IWebApplicationProgramTestFactory first =
             WebApplicationTestFactory.FromProgram<Program>(new WebApplicationProgramTestFactoryOptions
             {
@@ -117,10 +117,10 @@ public sealed class WebApplicationProgramTestFactoryTests
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: managed contexts require a bootstrap credential")]
     public void FromProgram_WithManagedContextWithoutCredential_ShouldRejectContext()
     {
-        var endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         var context = new ResourceContext(
             gatewayName: "inprocess",
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint });
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint });
 
         ArgumentException exception = Should.Throw<ArgumentException>(
             () => WebApplicationTestFactory.FromProgram<Program>(
@@ -214,23 +214,23 @@ public sealed class WebApplicationProgramTestFactoryTests
     private static ResourceContext CreateContext(
         string resourceName,
         string marker,
-        out EndpointAddress endpoint)
+        out Uri endpoint)
     {
-        endpoint = new EndpointAddress("http", "127.0.0.1", ReservePort());
+        endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         return new ResourceContext(
             applicationName: "tests",
             resourceName: resourceName,
             environmentName: "Testing",
             gatewayName: "inprocess",
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint },
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
             mounts: new Dictionary<string, ResourceMount>
             {
                 ["fixture"] = ResourceMount.FromBytes("mounted"u8),
             },
             settings: new Dictionary<string, string> { ["Test:Marker"] = marker },
-            references: new Dictionary<string, EndpointAddress>
+            references: new Dictionary<string, Uri>
             {
-                ["inventory-database:db"] = new EndpointAddress(
+                ["inventory-database:db"] = Uri.CreateEndpoint(
                     "cohesion-db",
                     "127.0.0.1",
                     15740),

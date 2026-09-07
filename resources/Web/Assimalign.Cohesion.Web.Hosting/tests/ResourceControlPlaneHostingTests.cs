@@ -24,9 +24,9 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task ControlPlaneRoutes_WhenRegistered_ShouldRunAheadOfUserMiddleware()
     {
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         builder.AddHealthCheck("self", _ => ValueTask.FromResult(HealthContribution.Healthy()));
@@ -42,7 +42,7 @@ public sealed class ResourceControlPlaneHostingTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             foreach (string path in new[]
             {
                 "/healthz",
@@ -61,7 +61,7 @@ public sealed class ResourceControlPlaneHostingTests
             string endpoints = await client.GetStringAsync(
                 "/cohesion/v1/endpoints",
                 CancellationToken.None);
-            endpoints.ShouldContain(endpoint.ToString());
+            endpoints.ShouldContain(endpoint.ToEndpointString());
             userMiddlewareRan.ShouldBeFalse();
         }
         finally
@@ -74,9 +74,9 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task AddPipeline_WhenControlPlaneIsRegistered_ShouldRemainBehindControlPlaneTerminal()
     {
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint },
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
             bootstrapCredential: "pipeline-token"u8.ToArray()));
         RecordingPipeline pipeline = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
@@ -86,7 +86,7 @@ public sealed class ResourceControlPlaneHostingTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using HttpResponseMessage missing = await client.GetAsync(
                 "/cohesion/v1/future",
                 CancellationToken.None);
@@ -126,9 +126,9 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task Readiness_WhenBuilderContributionIsUnhealthy_ShouldReturnServiceUnavailable()
     {
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         builder.AddHealthCheck(
             "database",
@@ -138,7 +138,7 @@ public sealed class ResourceControlPlaneHostingTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using HttpResponseMessage response = await client.GetAsync(
                 "/readyz",
                 CancellationToken.None);
@@ -159,9 +159,9 @@ public sealed class ResourceControlPlaneHostingTests
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         BlockingApplicationServer additionalServer = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         ((IWebApplicationBuilder)builder).AddServer(additionalServer);
@@ -171,7 +171,7 @@ public sealed class ResourceControlPlaneHostingTests
         try
         {
             await additionalServer.StartEntered.WaitAsync(cancellation.Token);
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using HttpResponseMessage starting = await client.GetAsync(
                 "/readyz",
                 cancellation.Token);
@@ -203,9 +203,9 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task ControlPlane_WhenBootstrapCredentialExists_ShouldRequireBearerCredential()
     {
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint },
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
             bootstrapCredential: "secret-token"u8.ToArray()));
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         await using WebApplication application = builder.Build();
@@ -213,7 +213,7 @@ public sealed class ResourceControlPlaneHostingTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using HttpResponseMessage bareProbe = await client.GetAsync(
                 "/readyz",
                 CancellationToken.None);
@@ -247,17 +247,17 @@ public sealed class ResourceControlPlaneHostingTests
     public async Task ControlPlane_WhenManagedContextHasNoCredential_ShouldRejectNamespacedRoutes()
     {
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             gatewayName: "inprocess",
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         await using WebApplication application = builder.Build();
 
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using HttpResponseMessage bareProbe = await client.GetAsync(
                 "/readyz",
                 CancellationToken.None);
@@ -280,16 +280,16 @@ public sealed class ResourceControlPlaneHostingTests
     {
         using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         await using WebApplication application = builder.Build();
 
         Task run = application.RunAsync(cancellation.Token);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             await WaitUntilReadyAsync(client, cancellation.Token);
 
             using HttpResponseMessage response = await client.PostAsync(
@@ -319,8 +319,8 @@ public sealed class ResourceControlPlaneHostingTests
     {
         using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
         (int firstPort, int secondPort) = ReserveDistinctPorts();
-        var firstEndpoint = new EndpointAddress("http", "127.0.0.1", firstPort);
-        var secondEndpoint = new EndpointAddress("http", "127.0.0.1", secondPort);
+        Uri firstEndpoint = Uri.CreateEndpoint("http", "127.0.0.1", firstPort);
+        Uri secondEndpoint = Uri.CreateEndpoint("http", "127.0.0.1", secondPort);
 
         Task<(WebApplication Application, IResourceControlPlane ControlPlane)> firstBuild = Task.Run(
             () => BuildScopedApplication("FirstScope", "first", firstEndpoint),
@@ -344,8 +344,8 @@ public sealed class ResourceControlPlaneHostingTests
 
             try
             {
-                using var firstClient = new HttpClient { BaseAddress = firstEndpoint.Url };
-                using var secondClient = new HttpClient { BaseAddress = secondEndpoint.Url };
+                using var firstClient = new HttpClient { BaseAddress = firstEndpoint };
+                using var secondClient = new HttpClient { BaseAddress = secondEndpoint };
 
                 string firstHealth = await firstClient.GetStringAsync(
                     "/cohesion/v1/healthz",
@@ -364,10 +364,10 @@ public sealed class ResourceControlPlaneHostingTests
                 firstHealth.ShouldNotContain("second");
                 secondHealth.ShouldContain("second");
                 secondHealth.ShouldNotContain("first");
-                firstEndpoints.ShouldContain(firstEndpoint.ToString());
-                firstEndpoints.ShouldNotContain(secondEndpoint.ToString());
-                secondEndpoints.ShouldContain(secondEndpoint.ToString());
-                secondEndpoints.ShouldNotContain(firstEndpoint.ToString());
+                firstEndpoints.ShouldContain(firstEndpoint.ToEndpointString());
+                firstEndpoints.ShouldNotContain(secondEndpoint.ToEndpointString());
+                secondEndpoints.ShouldContain(secondEndpoint.ToEndpointString());
+                secondEndpoints.ShouldNotContain(firstEndpoint.ToEndpointString());
             }
             finally
             {
@@ -381,10 +381,10 @@ public sealed class ResourceControlPlaneHostingTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - CreateBuilder(args): honors the registered control plane and ambient endpoint")]
     public async Task CreateBuilderWithArgs_WhenRegistered_ShouldComposeControlPlane()
     {
-        var endpoint = new EndpointAddress("http", "127.0.0.1", 48123);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", 48123);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: "ControlPlaneTest",
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         builder.AddHealthCheck("builder", _ => ValueTask.FromResult(HealthContribution.Healthy()));
@@ -415,10 +415,10 @@ public sealed class ResourceControlPlaneHostingTests
         int ambientPort = ((IPEndPoint)ambientReservation.LocalEndpoint).Port;
         int applicationPort = ReservePort();
 
-        var ambientEndpoint = new EndpointAddress("http", "127.0.0.1", ambientPort);
+        Uri ambientEndpoint = Uri.CreateEndpoint("http", "127.0.0.1", ambientPort);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: "AmbientOnly",
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = ambientEndpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = ambientEndpoint }));
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             [],
@@ -505,11 +505,11 @@ public sealed class ResourceControlPlaneHostingTests
     private static (WebApplication Application, IResourceControlPlane ControlPlane) BuildScopedApplication(
         string environmentName,
         string healthName,
-        EndpointAddress endpoint)
+        Uri endpoint)
     {
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: environmentName,
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
         builder.AddHealthCheck(
             healthName,

@@ -23,6 +23,9 @@ public static class UriExtensions
         /// <param name="port">The explicit endpoint port in the range 1 through 65535.</param>
         /// <param name="path">The optional endpoint path.</param>
         /// <returns>A normalized absolute endpoint URI.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="scheme"/> or <paramref name="host"/> is <see langword="null"/>.
+        /// </exception>
         /// <exception cref="ArgumentException">
         /// Thrown when <paramref name="scheme"/> or <paramref name="host"/> is empty, when a component
         /// contains a character that is not valid for its endpoint position, or when the supplied values
@@ -155,6 +158,7 @@ public static class UriExtensions
         /// <summary>
         /// Gets the escaped absolute endpoint path, or <see langword="null"/> for the root path.
         /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when <paramref name="uri"/> is relative.</exception>
         public string? EndpointPath => uri.AbsolutePath == "/" ? null : uri.AbsolutePath;
 
         /// <summary>

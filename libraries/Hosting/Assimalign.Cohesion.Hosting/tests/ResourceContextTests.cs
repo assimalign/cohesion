@@ -41,12 +41,12 @@ public class ResourceContextTests
         context.ResourceName.ShouldBe("api");
         context.EnvironmentName.ShouldBe("Development");
         context.GetEndpoint("http", "https", 7443).ShouldBe(
-            new EndpointAddress("http", "127.0.0.1", 5080));
+            new Uri("http://127.0.0.1:5080"));
         context.GetMount("settings", "/settings.json").Path.ShouldBe(
             Path.GetFullPath("settings.json"));
         context.GetSetting("Orders:PageSize", fallback: null).ShouldBe("50");
         context.GetReference("database", "db").ShouldBe(
-            new EndpointAddress("tcp", "database.internal", 5432));
+            new Uri("tcp://database.internal:5432"));
         context.Endpoints.Count.ShouldBe(1);
         context.Mounts.Count.ShouldBe(1);
         context.Settings.Count.ShouldBe(1);
@@ -84,12 +84,32 @@ public class ResourceContextTests
         var gateway = new ResourceContext(gatewayName: "local");
 
         // Act
-        EndpointAddress endpoint = standalone.GetEndpoint("http", "http", 5080);
+        Uri endpoint = standalone.GetEndpoint("http", "http", 5080);
 
         // Assert
-        endpoint.ShouldBe(new EndpointAddress("http", "localhost", 5080));
+        endpoint.ShouldBe(new Uri("http://localhost:5080"));
         standalone.TryGetEndpoint("admin", "http", devPort: null, out _).ShouldBeFalse();
         Should.Throw<InvalidOperationException>(() => gateway.GetEndpoint("http", "http", 5080));
+    }
+
+    [Theory(DisplayName = DisplayPrefix + "Constructor rejects endpoint-shaped dictionary values that are not endpoints")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Constructor_WithInvalidEndpointDictionaryValue_ShouldThrowArgumentException(bool reference)
+    {
+        // Arrange
+        IReadOnlyDictionary<string, Uri> values = new Dictionary<string, Uri>
+        {
+            [reference ? "database:db" : "http"] = new Uri("relative/path", UriKind.Relative)
+        };
+
+        // Act
+        Action action = reference
+            ? () => _ = new ResourceContext(references: values)
+            : () => _ = new ResourceContext(endpoints: values);
+
+        // Assert
+        Should.Throw<ArgumentException>(action);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Nested scopes restore and parallel scopes do not leak")]

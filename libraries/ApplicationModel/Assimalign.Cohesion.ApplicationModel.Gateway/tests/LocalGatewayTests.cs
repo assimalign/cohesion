@@ -30,6 +30,26 @@ public class LocalGatewayTests
         new LocalGateway().Name.ShouldBe((ResourceName)"local");
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - ProbeSpec: Http retains the validated URI and escaped endpoint path")]
+    public void Http_EndpointUri_RetainsAddressAndEscapedPath()
+    {
+        // Arrange
+        var address = new Uri("https://example.test:8443/health%20ready");
+
+        // Act
+        IProbeSpec probe = ProbeSpec.Http(address);
+
+        // Assert
+        probe.Address.ShouldBe(address);
+        probe.Path.ShouldBe("/health%20ready");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - ProbeSpec: Http rejects non-HTTP endpoint schemes")]
+    public void Http_NonHttpEndpoint_ThrowsArgumentException()
+    {
+        Should.Throw<ArgumentException>(() => ProbeSpec.Http(new Uri("tcp://x:1")));
+    }
+
     [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: restart policy preserves final sysexits")]
     [InlineData(RestartPolicy.OnFailure, 0, false)]
     [InlineData(RestartPolicy.OnFailure, 1, true)]
@@ -859,11 +879,11 @@ public class LocalGatewayTests
                 .GetObservedEndpoints(ResourceIdOf(provider.Name))
                 .ShouldHaveSingleItem();
             IReadOnlyDictionary<string, string> environment = ReadStringMap(consumerCapture);
-            var address = new EndpointAddress(observed.Scheme, observed.Host!, observed.Port);
+            Uri address = Uri.CreateEndpoint(observed.Scheme, observed.Host!, observed.Port);
 
             observed.Port.ShouldNotBe(5432);
-            environment[dependencyVariables[0]].ShouldBe(address.ToString());
-            environment[dependencyVariables[1]].ShouldBe(address.Host);
+            environment[dependencyVariables[0]].ShouldBe(address.ToEndpointString());
+            environment[dependencyVariables[1]].ShouldBe(address.IdnHost);
             environment[dependencyVariables[2]].ShouldBe(observed.Port.ToString(CultureInfo.InvariantCulture));
             environment[dependencyVariables[3]].ShouldBe(address.Scheme);
         }
@@ -1069,9 +1089,9 @@ public class LocalGatewayTests
             ResourceEndpoint observed = gateway.ResourceStates
                 .GetObservedEndpoints(ResourceIdOf(composite.Name))
                 .ShouldHaveSingleItem();
-            var address = new EndpointAddress(observed.Scheme, observed.Host!, observed.Port);
-            dependencyEnvironment[dependencyVariables[0]].ShouldBe(address.ToString());
-            dependencyEnvironment[dependencyVariables[1]].ShouldBe(address.Host);
+            Uri address = Uri.CreateEndpoint(observed.Scheme, observed.Host!, observed.Port);
+            dependencyEnvironment[dependencyVariables[0]].ShouldBe(address.ToEndpointString());
+            dependencyEnvironment[dependencyVariables[1]].ShouldBe(address.IdnHost);
             dependencyEnvironment[dependencyVariables[2]].ShouldBe(
                 address.Port.ToString(CultureInfo.InvariantCulture));
             dependencyEnvironment[dependencyVariables[3]].ShouldBe(address.Scheme);

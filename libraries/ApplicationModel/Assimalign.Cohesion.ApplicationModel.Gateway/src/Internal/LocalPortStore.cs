@@ -106,16 +106,16 @@ internal sealed class LocalPortStore
                     changed = true;
                 }
 
-                environment.TryAdd(hostVariable, host);
+                Uri address = Uri.CreateEndpoint(scheme, host, port);
+                environment.TryAdd(hostVariable, address.IdnHost);
                 environment.TryAdd(portVariable, port.ToString(CultureInfo.InvariantCulture));
                 environment.TryAdd(schemeVariable, scheme);
 
-                var address = new EndpointAddress(scheme, host, port);
                 if (endpoint.IsPublic)
                 {
                     environment.TryAdd(
                         ResourceEnvironment.Endpoint(endpoint.Name, "PUBLIC_URL"),
-                        address.ToString());
+                        address.ToEndpointString());
                 }
 
                 observed[index] = new ResourceEndpoint(
@@ -123,7 +123,7 @@ internal sealed class LocalPortStore
                     address.Scheme,
                     address.Port,
                     endpoint.IsPublic,
-                    address.Host);
+                    address.IdnHost);
             }
 
             if (changed || !File.Exists(path))

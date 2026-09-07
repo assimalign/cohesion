@@ -2,8 +2,9 @@
 
 ## Summary
 
-Defines the hosting abstractions, lifecycle orchestration, environment and context types,
-transport-neutral health contributions, and service base classes for Cohesion applications.
+Defines the hosting abstractions, lifecycle orchestration, environment and context types with
+`System.Uri` resource endpoints, transport-neutral health contributions, and service base classes
+for Cohesion applications.
 
 ## Current Evaluation
 

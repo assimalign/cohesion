@@ -38,11 +38,14 @@ selects the bind strategy:
 | Endpoint | Socket | Bind behavior |
 |---|---|---|
 | `IPEndPoint` | `Stream`/`Tcp`, `DualMode` when `IPv6Any` | `Bind` + `Listen` |
+| `DnsEndPoint` | `Stream`/`Tcp`, IPv4 or dual-mode IPv6 selected by the platform | Factory-only: resolve and connect |
 | `UnixDomainSocketEndPoint` | `Stream`/`Unspecified` | delete stale socket file → `Bind` + `Listen` |
 | `FileHandleEndPoint` | adopt the inherited descriptor | **no** `Bind`/`Listen` — already listening |
 
 The factory (`TcpConnectionFactory`) uses the same switch to construct the outbound socket, then
-`ConnectAsync`.
+`ConnectAsync`. A `DnsEndPoint` has `AddressFamily.Unspecified`; its factory branch therefore uses the
+address-family-selecting socket constructor so DNS names and socket-facing URI hosts can resolve to
+IPv4 or IPv6 without attempting to construct an unspecified-family socket.
 
 ### Unix domain socket file lifecycle
 

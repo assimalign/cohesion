@@ -136,7 +136,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 
         try
         {
-            (EndpointAddress database, EndpointAddress admin) = await ReadEndpointsAsync(
+            (Uri database, Uri admin) = await ReadEndpointsAsync(
                 manifest,
                 cancellation.Token);
             await AssertAdminPlaneAsync(manifest, admin, cancellation.Token);
@@ -153,14 +153,14 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 
         try
         {
-            (EndpointAddress database, EndpointAddress admin) = await ReadEndpointsAsync(
+            (Uri database, Uri admin) = await ReadEndpointsAsync(
                 manifest,
                 cancellation.Token);
 
             // Assert: LocalGateway reused the durable volume and the typed client sees the rows.
             await AssertRecoveredDatabaseAsync(database, cancellation.Token);
 
-            using var client = new HttpClient { BaseAddress = admin.Url };
+            using var client = new HttpClient { BaseAddress = admin };
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
                 ReadBootstrapCredential(manifest));
@@ -204,7 +204,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         return builder.Build().Model;
     }
 
-    private async Task<(EndpointAddress Database, EndpointAddress Admin)> ReadEndpointsAsync(
+    private async Task<(Uri Database, Uri Admin)> ReadEndpointsAsync(
         ResourceManifest manifest,
         CancellationToken cancellationToken)
     {
@@ -225,11 +225,11 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             endpoint => endpoint.Name == "db");
         ResourceManifestEndpoint adminManifest = manifest.Endpoints.Single(
             endpoint => endpoint.Name == "admin");
-        var database = new EndpointAddress(
+        Uri database = Uri.CreateEndpoint(
             databaseManifest.Scheme,
             "127.0.0.1",
             ports.GetProperty("db").GetInt32());
-        var admin = new EndpointAddress(
+        Uri admin = Uri.CreateEndpoint(
             adminManifest.Scheme,
             "127.0.0.1",
             ports.GetProperty("admin").GetInt32());
@@ -238,10 +238,10 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 
     private async Task AssertAdminPlaneAsync(
         ResourceManifest manifest,
-        EndpointAddress admin,
+        Uri admin,
         CancellationToken cancellationToken)
     {
-        using var client = new HttpClient { BaseAddress = admin.Url };
+        using var client = new HttpClient { BaseAddress = admin };
 
         foreach (string path in new[] { "/healthz", "/readyz", "/livez" })
         {
@@ -366,7 +366,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     }
 
     private static async Task SeedDatabaseAsync(
-        EndpointAddress endpoint,
+        Uri endpoint,
         CancellationToken cancellationToken)
     {
         await using ISqlClient client = CreateSqlClient(endpoint);
@@ -387,7 +387,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     }
 
     private static async Task AssertRecoveredDatabaseAsync(
-        EndpointAddress endpoint,
+        Uri endpoint,
         CancellationToken cancellationToken)
     {
         await using ISqlClient client = CreateSqlClient(endpoint);
@@ -400,7 +400,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         rows[1].GetString("item").ShouldBe("gadget");
     }
 
-    private static ISqlClient CreateSqlClient(EndpointAddress endpoint)
+    private static ISqlClient CreateSqlClient(Uri endpoint)
     {
         return SqlClient.Create(new SqlClientOptions
         {

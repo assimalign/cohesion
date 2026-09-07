@@ -23,9 +23,9 @@ public sealed class ResourceControlPlaneHealthSerializationTests
     {
         // Arrange
         int port = ReservePort();
-        var endpoint = new EndpointAddress("http", "127.0.0.1", port);
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, EndpointAddress> { ["http"] = endpoint }));
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         var data = new Dictionary<string, object>
         {
             ["empty"] = null!,
@@ -48,7 +48,7 @@ public sealed class ResourceControlPlaneHealthSerializationTests
         await ((IHost)application).StartAsync(CancellationToken.None);
         try
         {
-            using var client = new HttpClient { BaseAddress = endpoint.Url };
+            using var client = new HttpClient { BaseAddress = endpoint };
             using JsonDocument document = JsonDocument.Parse(await client.GetStringAsync(
                 "/healthz",
                 CancellationToken.None));

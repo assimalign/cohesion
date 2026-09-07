@@ -10,8 +10,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class LocalProbeRunner
@@ -78,8 +76,8 @@ internal sealed class LocalProbeRunner
         LocalResourceConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        EndpointAddress address = ResolveAddress(probe, configuration, includePath: true);
-        using var request = new HttpRequestMessage(HttpMethod.Get, address.Url);
+        Uri address = ResolveAddress(probe, configuration, includePath: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
         if (probe is LocalControlPlaneProbe controlPlaneProbe &&
             !controlPlaneProbe.BootstrapCredential.IsEmpty)
         {
@@ -94,12 +92,12 @@ internal sealed class LocalProbeRunner
 
         if (response.StatusCode == HttpStatusCode.OK)
         {
-            return ProbeAttemptResult.Success($"HTTP probe '{address}' returned 200.");
+            return ProbeAttemptResult.Success($"HTTP probe '{address.ToEndpointString()}' returned 200.");
         }
 
         bool failFast = response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
         return ProbeAttemptResult.Failure(
-            $"HTTP probe '{address}' returned {(int)response.StatusCode} ({response.ReasonPhrase})."
+            $"HTTP probe '{address.ToEndpointString()}' returned {(int)response.StatusCode} ({response.ReasonPhrase})."
                 + (failFast ? " Verify the resource control-plane endpoint and path." : string.Empty),
             failFast);
     }
@@ -109,9 +107,9 @@ internal sealed class LocalProbeRunner
         LocalResourceConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        EndpointAddress address = ResolveAddress(probe, configuration, includePath: false);
+        Uri address = ResolveAddress(probe, configuration, includePath: false);
         using var client = new TcpClient();
-        await client.ConnectAsync(address.Host, address.Port, cancellationToken).ConfigureAwait(false);
+        await client.ConnectAsync(address.IdnHost, address.Port, cancellationToken).ConfigureAwait(false);
         return ProbeAttemptResult.Success(
             $"TCP probe '{address.Host}:{address.Port}' connected.");
     }
@@ -182,14 +180,14 @@ internal sealed class LocalProbeRunner
         }
     }
 
-    private static EndpointAddress ResolveAddress(
+    private static Uri ResolveAddress(
         IProbeSpec probe,
         LocalResourceConfiguration configuration,
         bool includePath)
     {
-        if (probe.Address is EndpointAddress absolute)
+        if (probe.Address is Uri absolute)
         {
-            return absolute;
+            return Uri.ThrowIfNotEndpoint(absolute);
         }
 
         if (probe.Endpoint is null)
@@ -201,7 +199,7 @@ internal sealed class LocalProbeRunner
         {
             if (string.Equals(endpoint.Name, probe.Endpoint, StringComparison.Ordinal))
             {
-                return new EndpointAddress(
+                return Uri.CreateEndpoint(
                     endpoint.Scheme,
                     endpoint.Host ?? "127.0.0.1",
                     endpoint.Port,
@@ -219,15 +217,17 @@ internal sealed class LocalProbeRunner
         {
             return probe.Kind switch
             {
-                ProbeKind.Http => $"HTTP probe '{ResolveAddress(probe, configuration, includePath: true)}'",
-                ProbeKind.Tcp => $"TCP probe '{ResolveAddress(probe, configuration, includePath: false)}'",
+                ProbeKind.Http => $"HTTP probe '{ResolveAddress(probe, configuration, includePath: true).ToEndpointString()}'",
+                ProbeKind.Tcp => $"TCP probe '{ToAuthority(ResolveAddress(probe, configuration, includePath: false))}'",
                 ProbeKind.Exec when probe.Command.Count > 0 => $"Exec probe '{probe.Command[0]}'",
                 _ => $"{probe.Kind} probe"
             };
         }
-        catch (InvalidDataException)
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
         {
             return $"{probe.Kind} probe";
         }
     }
+
+    private static string ToAuthority(Uri address) => $"{address.Host}:{address.Port}";
 }

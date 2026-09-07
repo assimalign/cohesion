@@ -114,15 +114,15 @@ internal static class ObservedDependencyEnvironment
                 $"for endpoint '{endpoint.Name}'.");
         }
 
-        var address = new EndpointAddress(endpoint.Scheme, endpoint.Host, endpoint.Port);
+        Uri address = Uri.CreateEndpoint(endpoint.Scheme, endpoint.Host, endpoint.Port);
         GatewayEnvironmentVariables.Set(
             environment,
             ResourceEnvironment.Dependency(dependency, endpoint.Name, "URL"),
-            address.ToString());
+            address.ToEndpointString());
         GatewayEnvironmentVariables.Set(
             environment,
             ResourceEnvironment.Dependency(dependency, endpoint.Name, "HOST"),
-            address.Host);
+            address.IdnHost);
         GatewayEnvironmentVariables.Set(
             environment,
             ResourceEnvironment.Dependency(dependency, endpoint.Name, "PORT"),

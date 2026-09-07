@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading;
 
@@ -42,10 +43,10 @@ public sealed class ResourceContext
         ConfigurationToken);
 
     private readonly Dictionary<string, string?> _environmentVariables;
-    private readonly Dictionary<string, EndpointAddress> _endpoints;
+    private readonly Dictionary<string, Uri> _endpoints;
     private readonly Dictionary<string, ResourceMount> _mounts;
     private readonly Dictionary<string, string> _settings;
-    private readonly Dictionary<string, EndpointAddress> _references;
+    private readonly Dictionary<string, Uri> _references;
     private Func<string, object?>? _connectionFactoryResolver;
 
     /// <summary>
@@ -63,17 +64,24 @@ public sealed class ResourceContext
     /// Observed dependency endpoints keyed as <c>&lt;resource&gt;:&lt;endpoint&gt;</c>.
     /// </param>
     /// <param name="bootstrapCredential">The bootstrap credential bytes for this invocation.</param>
-    /// <exception cref="ArgumentException"><paramref name="contentRootPath"/> is not absolute.</exception>
+    /// <exception cref="ArgumentNullException">
+    /// A value in <paramref name="endpoints"/> or <paramref name="references"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="environmentName"/> is empty, <paramref name="contentRootPath"/> is not absolute,
+    /// a supplied dictionary contains an empty or duplicate key, or a value in <paramref name="endpoints"/>
+    /// or <paramref name="references"/> is not an endpoint URI.
+    /// </exception>
     public ResourceContext(
         string? applicationName = null,
         string? resourceName = null,
         string? environmentName = null,
         string? gatewayName = null,
         string? contentRootPath = null,
-        IReadOnlyDictionary<string, EndpointAddress>? endpoints = null,
+        IReadOnlyDictionary<string, Uri>? endpoints = null,
         IReadOnlyDictionary<string, ResourceMount>? mounts = null,
         IReadOnlyDictionary<string, string>? settings = null,
-        IReadOnlyDictionary<string, EndpointAddress>? references = null,
+        IReadOnlyDictionary<string, Uri>? references = null,
         ReadOnlyMemory<byte> bootstrapCredential = default)
         : this(
             applicationName,
@@ -96,10 +104,10 @@ public sealed class ResourceContext
         string environmentName,
         string? gatewayName,
         string? contentRootPath,
-        IReadOnlyDictionary<string, EndpointAddress>? endpoints,
+        IReadOnlyDictionary<string, Uri>? endpoints,
         IReadOnlyDictionary<string, ResourceMount>? mounts,
         IReadOnlyDictionary<string, string>? settings,
-        IReadOnlyDictionary<string, EndpointAddress>? references,
+        IReadOnlyDictionary<string, Uri>? references,
         ReadOnlyMemory<byte> bootstrapCredential,
         Dictionary<string, string?> environmentVariables)
     {
@@ -122,10 +130,10 @@ public sealed class ResourceContext
         ContentRootPath = Path.GetFullPath(resolvedContentRoot);
         BootstrapCredential = bootstrapCredential.ToArray();
         _environmentVariables = environmentVariables;
-        _endpoints = Copy(endpoints, StringComparer.OrdinalIgnoreCase);
+        _endpoints = CopyEndpoints(endpoints, nameof(endpoints));
         _mounts = Copy(mounts, StringComparer.OrdinalIgnoreCase);
         _settings = Copy(settings, StringComparer.OrdinalIgnoreCase);
-        _references = Copy(references, StringComparer.OrdinalIgnoreCase);
+        _references = CopyEndpoints(references, nameof(references));
     }
 
     /// <summary>Gets the application name, when supplied by a gateway.</summary>
@@ -147,8 +155,8 @@ public sealed class ResourceContext
     public ReadOnlyMemory<byte> BootstrapCredential { get; }
 
     /// <summary>Gets the endpoints supplied directly or discovered from the environment.</summary>
-    public IReadOnlyDictionary<string, EndpointAddress> Endpoints =>
-        new ReadOnlyDictionary<string, EndpointAddress>(_endpoints);
+    public IReadOnlyDictionary<string, Uri> Endpoints =>
+        new ReadOnlyDictionary<string, Uri>(_endpoints);
 
     /// <summary>Gets the mounts supplied directly or discovered from the environment.</summary>
     public IReadOnlyDictionary<string, ResourceMount> Mounts =>
@@ -163,8 +171,8 @@ public sealed class ResourceContext
     /// Environment-backed references remain available through <see cref="GetReference"/> and
     /// <see cref="TryGetReference"/> without guessing how normalized resource names should split.
     /// </summary>
-    public IReadOnlyDictionary<string, EndpointAddress> References =>
-        new ReadOnlyDictionary<string, EndpointAddress>(_references);
+    public IReadOnlyDictionary<string, Uri> References =>
+        new ReadOnlyDictionary<string, Uri>(_references);
 
     /// <summary>Creates a resource context from the current process environment.</summary>
     /// <returns>A snapshot of the frozen resource environment contract.</returns>
@@ -191,7 +199,7 @@ public sealed class ResourceContext
         ArgumentNullException.ThrowIfNull(environment);
 
         var snapshot = new Dictionary<string, string?>(environment, StringComparer.Ordinal);
-        Dictionary<string, EndpointAddress> endpoints = ReadEndpoints(snapshot);
+        Dictionary<string, Uri> endpoints = ReadEndpoints(snapshot);
         Dictionary<string, ResourceMount> mounts = ReadMounts(snapshot);
         Dictionary<string, string> settings = ReadSettings(snapshot);
         ReadOnlyMemory<byte> bootstrapCredential = ReadBootstrapCredential(snapshot);
@@ -215,10 +223,19 @@ public sealed class ResourceContext
     /// <param name="scheme">The declared endpoint scheme.</param>
     /// <param name="devPort">The development port used only when no gateway is present.</param>
     /// <returns>The realized endpoint address.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="name"/> or <paramref name="scheme"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> or <paramref name="scheme"/> is empty, or <paramref name="scheme"/> is invalid.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="devPort"/> is outside the range 1 through 65535 when a standalone fallback is required.
+    /// </exception>
     /// <exception cref="InvalidOperationException">The endpoint is not bound and has no permitted fallback.</exception>
-    public EndpointAddress GetEndpoint(string name, string scheme, int? devPort)
+    public Uri GetEndpoint(string name, string scheme, int? devPort)
     {
-        if (TryGetEndpoint(name, scheme, devPort, out EndpointAddress address))
+        if (TryGetEndpoint(name, scheme, devPort, out Uri? address))
         {
             return address;
         }
@@ -235,6 +252,15 @@ public sealed class ResourceContext
     /// <param name="devPort">The development port used only when no gateway is present.</param>
     /// <param name="address">The realized endpoint when this method returns true.</param>
     /// <returns>True when the endpoint is bound or has a permitted fallback; otherwise, false.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="name"/> or <paramref name="scheme"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> or <paramref name="scheme"/> is empty, or <paramref name="scheme"/> is invalid.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="devPort"/> is outside the range 1 through 65535 when a standalone fallback is required.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A gateway supplied an incomplete endpoint binding.
     /// </exception>
@@ -242,7 +268,7 @@ public sealed class ResourceContext
         string name,
         string scheme,
         int? devPort,
-        out EndpointAddress address)
+        [NotNullWhen(true)] out Uri? address)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(scheme);
@@ -257,11 +283,11 @@ public sealed class ResourceContext
         {
             if (devPort is int standalonePort)
             {
-                address = new EndpointAddress(scheme, "localhost", standalonePort);
+                address = Uri.CreateEndpoint(scheme, "localhost", standalonePort);
                 return true;
             }
 
-            address = default;
+            address = null;
             return false;
         }
 
@@ -321,10 +347,16 @@ public sealed class ResourceContext
     /// <param name="resource">The referenced resource name.</param>
     /// <param name="endpoint">The referenced endpoint name.</param>
     /// <returns>The observed endpoint.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="resource"/> or <paramref name="endpoint"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resource"/> or <paramref name="endpoint"/> is empty.
+    /// </exception>
     /// <exception cref="InvalidOperationException">The reference is not resolved.</exception>
-    public EndpointAddress GetReference(string resource, string endpoint)
+    public Uri GetReference(string resource, string endpoint)
     {
-        return TryGetReference(resource, endpoint, out EndpointAddress address)
+        return TryGetReference(resource, endpoint, out Uri? address)
             ? address
             : throw new InvalidOperationException(
                 $"Cohesion reference '{resource}:{endpoint}' is not currently resolved.");
@@ -335,7 +367,16 @@ public sealed class ResourceContext
     /// <param name="endpoint">The referenced endpoint name.</param>
     /// <param name="address">The observed endpoint when resolved.</param>
     /// <returns>True when the reference is resolved; otherwise, false.</returns>
-    public bool TryGetReference(string resource, string endpoint, out EndpointAddress address)
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="resource"/> or <paramref name="endpoint"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="resource"/> or <paramref name="endpoint"/> is empty.
+    /// </exception>
+    public bool TryGetReference(
+        string resource,
+        string endpoint,
+        [NotNullWhen(true)] out Uri? address)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resource);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
@@ -388,9 +429,9 @@ public sealed class ResourceContext
         Volatile.Write(ref _connectionFactoryResolver, resolver);
     }
 
-    private static Dictionary<string, EndpointAddress> ReadEndpoints(IDictionary<string, string?> environment)
+    private static Dictionary<string, Uri> ReadEndpoints(IDictionary<string, string?> environment)
     {
-        var endpoints = new Dictionary<string, EndpointAddress>(StringComparer.OrdinalIgnoreCase);
+        var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase);
         foreach (string variable in environment.Keys)
         {
             if (!variable.StartsWith(EndpointPrefix, StringComparison.Ordinal)
@@ -400,7 +441,7 @@ public sealed class ResourceContext
             }
 
             string name = variable[EndpointPrefix.Length..^EndpointHostSuffix.Length];
-            if (ResourceEnvironment.TryGetEndpoint(environment, name, out EndpointAddress endpoint))
+            if (ResourceEnvironment.TryGetEndpoint(environment, name, out Uri? endpoint))
             {
                 endpoints[name] = endpoint;
             }
@@ -468,6 +509,25 @@ public sealed class ResourceContext
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(key);
             result.Add(key, value);
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, Uri> CopyEndpoints(
+        IReadOnlyDictionary<string, Uri>? source,
+        string paramName)
+    {
+        var result = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase);
+        if (source is null)
+        {
+            return result;
+        }
+
+        foreach ((string key, Uri value) in source)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+            result.Add(key, Uri.ThrowIfNotEndpoint(value, $"{paramName}[{key}]"));
         }
 
         return result;

@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class LocalControlPlaneProbe : IProbeSpec
@@ -21,7 +19,7 @@ internal sealed class LocalControlPlaneProbe : IProbeSpec
 
     public string? Endpoint => _probe.Endpoint;
 
-    public EndpointAddress? Address => _probe.Address;
+    public Uri? Address => _probe.Address;
 
     public string? Path => _probe.Path;
 

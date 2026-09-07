@@ -48,6 +48,22 @@ public class TcpConnectionFactoryTests
         viaInterface.ShouldBeOfType<TcpConnection>();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - ConnectAsync: DnsEndPoint selects a connectable socket family")]
+    public async Task ConnectAsync_DnsEndPoint_ShouldReturnTcpConnection()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        using Socket listenerSocket = CreateLoopbackListenerSocket(out IPEndPoint endPoint);
+        var dnsEndPoint = new DnsEndPoint(IPAddress.Loopback.ToString(), endPoint.Port);
+        TcpConnectionFactory factory = new();
+
+        // Act
+        await using Connection connection = await factory.ConnectAsync(dnsEndPoint, cancellation.Token);
+
+        // Assert
+        connection.ShouldBeOfType<TcpConnection>();
+    }
+
     [Fact]
     public void Capabilities_OnFactory_ShouldDescribeReliableOrderedTcpStream()
     {

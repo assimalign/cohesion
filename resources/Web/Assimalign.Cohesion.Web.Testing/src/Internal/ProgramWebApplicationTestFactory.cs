@@ -83,7 +83,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
         _probeInterval = options.ProbeInterval;
         ResourceContext = options.ResourceContext ?? CreateDefaultContext(programType);
 
-        if (!ResourceContext.Endpoints.TryGetValue(HttpEndpointName, out EndpointAddress endpoint))
+        if (!ResourceContext.Endpoints.TryGetValue(HttpEndpointName, out Uri? endpoint))
         {
             throw new ArgumentException(
                 $"The test resource context must provide the Web '{HttpEndpointName}' endpoint.",
@@ -398,9 +398,9 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
     {
         int httpPort = ReservePort();
         string bootstrapCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        var endpoints = new Dictionary<string, EndpointAddress>(StringComparer.OrdinalIgnoreCase)
+        var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
         {
-            [HttpEndpointName] = new EndpointAddress("http", "127.0.0.1", httpPort),
+            [HttpEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", httpPort),
         };
 
         return new ResourceContext(
@@ -431,7 +431,7 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
     {
         return new HttpClient
         {
-            BaseAddress = ResourceContext.Endpoints[HttpEndpointName].Url,
+            BaseAddress = ResourceContext.Endpoints[HttpEndpointName],
         };
     }
 

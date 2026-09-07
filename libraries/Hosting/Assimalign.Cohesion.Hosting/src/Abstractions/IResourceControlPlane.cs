@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting;
 
 /// <summary>
@@ -16,7 +14,7 @@ public interface IResourceControlPlane
     IReadOnlyList<string> AcceptedCommandKinds { get; }
 
     /// <summary>Gets the latest observed endpoint snapshot keyed by endpoint name.</summary>
-    IReadOnlyDictionary<string, EndpointAddress> ObservedEndpoints { get; }
+    IReadOnlyDictionary<string, Uri> ObservedEndpoints { get; }
 
     /// <summary>Adds a contributor to health, readiness, and liveness aggregation.</summary>
     /// <param name="contributor">The contributor to add.</param>
@@ -25,7 +23,13 @@ public interface IResourceControlPlane
     /// <summary>Records the realized address of a resource endpoint.</summary>
     /// <param name="name">The endpoint name.</param>
     /// <param name="address">The realized endpoint address.</param>
-    void ObserveEndpoint(string name, EndpointAddress address);
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="name"/> or <paramref name="address"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty, or <paramref name="address"/> is not an endpoint URI.
+    /// </exception>
+    void ObserveEndpoint(string name, Uri address);
 
     /// <summary>Checks the aggregate resource health.</summary>
     /// <param name="cancellationToken">Cancels the check.</param>

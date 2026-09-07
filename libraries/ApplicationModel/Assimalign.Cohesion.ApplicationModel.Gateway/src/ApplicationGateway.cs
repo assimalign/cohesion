@@ -606,7 +606,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         ResourceManifest manifest)
     {
         var order = new List<string>();
-        var addresses = new Dictionary<string, ExportEndpointAddresses>(StringComparer.Ordinal);
+        var addresses = new Dictionary<string, ExportEndpointPair>(StringComparer.Ordinal);
         var declared = new HashSet<string>(StringComparer.Ordinal);
         for (int index = 0; index < manifest.Endpoints.Count; index++)
         {
@@ -626,12 +626,12 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
 
             string internalAddress = CreateAuthority(endpoint.Host, endpoint.Port);
             string? publicAddress = endpoint.IsPublic ? CreateAbsoluteAddress(endpoint) : null;
-            if (!addresses.TryGetValue(endpoint.Name, out ExportEndpointAddresses current))
+            if (!addresses.TryGetValue(endpoint.Name, out ExportEndpointPair current))
             {
                 order.Add(endpoint.Name);
                 addresses.Add(
                     endpoint.Name,
-                    new ExportEndpointAddresses(internalAddress, publicAddress, !endpoint.IsPublic));
+                    new ExportEndpointPair(internalAddress, publicAddress, !endpoint.IsPublic));
                 continue;
             }
 
@@ -655,7 +655,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         var exported = new ApplicationExportEndpoint[order.Count];
         for (int index = 0; index < exported.Length; index++)
         {
-            ExportEndpointAddresses address = addresses[order[index]];
+            ExportEndpointPair address = addresses[order[index]];
             exported[index] = new ApplicationExportEndpoint(
                 order[index],
                 address.Internal,
@@ -675,7 +675,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
     }
 
     private static string CreateAbsoluteAddress(ResourceEndpoint endpoint)
-        => $"{endpoint.Scheme}://{CreateAuthority(endpoint.Host!, endpoint.Port)}";
+        => Uri.CreateEndpoint(endpoint.Scheme, endpoint.Host!, endpoint.Port).ToEndpointString();
 
     private static bool IsExternalPlan(ResourcePlan plan) =>
         plan.Hints.TryGetValue(ExternalResourceController.PlanHint, out string? external) &&
@@ -1341,7 +1341,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         IApplicationResourceController Controller,
         ResourceControlContext Context);
 
-    private readonly record struct ExportEndpointAddresses(
+    private readonly record struct ExportEndpointPair(
         string Internal,
         string? Public,
         bool HasInternalObservation);

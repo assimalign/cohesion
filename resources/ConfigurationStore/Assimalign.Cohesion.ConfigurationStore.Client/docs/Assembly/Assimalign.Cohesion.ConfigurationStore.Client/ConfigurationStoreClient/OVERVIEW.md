@@ -11,7 +11,8 @@ IConfigurationStoreClient client = ConfigurationStoreClient.Create(
 ```
 
 `Create` accepts an HTTP or HTTPS endpoint `Uri` and a non-null `ClientCredential`. It performs
-no network I/O. A malformed endpoint shape or non-HTTP scheme raises `ArgumentException`; a null
+no network I/O. The URI must be absolute, contain a host and valid port, and have no user information,
+query, or fragment. An invalid endpoint shape or non-HTTP scheme raises `ArgumentException`; a null
 endpoint or credential raises `ArgumentNullException`.
 
 The returned client uses a process-shared BCL `HttpMessageInvoker`. Redirects and cookies are
