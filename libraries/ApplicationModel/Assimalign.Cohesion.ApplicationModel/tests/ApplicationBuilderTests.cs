@@ -131,6 +131,135 @@ public class ApplicationBuilderTests
         Should.Throw<InvalidOperationException>(() => builder.Build());
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Build infers manifest dependency edges")]
+    public void Build_ManifestReference_InfersDependencyEdge()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("database")],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        var consumerResource = new CountingPlannedResource(consumer);
+        builder.AddResource(consumerResource);
+        builder.AddResource(TestManifestFactory.Create("database"));
+
+        // Act
+        IApplicationModel model = builder.Build().Model;
+
+        // Assert
+        IApplicationResourceDescriptor dependency = model.Descriptors[0].Dependencies.ShouldHaveSingleItem();
+        dependency.Resource.Name.ShouldBe((ResourceName)"database");
+        consumerResource.LastReferences.ShouldNotBeNull()["database"].Name.ShouldBe((ResourceName)"database");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Explicit dependency edges stay additive to inferred edges")]
+    public void Build_ExplicitAndManifestReferences_MergeDependencyEdges()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("database")],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        var consumerResource = new CountingPlannedResource(consumer);
+        IApplicationResourceDescriptor consumerDescriptor = builder.AddResource(consumerResource);
+        IApplicationResourceDescriptor database = builder.AddResource(TestManifestFactory.Create("database"));
+        IApplicationResourceDescriptor cache = builder.AddResource(TestManifestFactory.Create("cache"));
+        consumerDescriptor.DependsOn(database, cache);
+
+        // Act
+        IApplicationModel model = builder.Build().Model;
+
+        // Assert
+        model.Descriptors[0].Dependencies.Count.ShouldBe(2);
+        model.Descriptors[0].Dependencies[0].Resource.Name.ShouldBe((ResourceName)"database");
+        model.Descriptors[0].Dependencies[1].Resource.Name.ShouldBe((ResourceName)"cache");
+        consumerResource.LastReferences.ShouldNotBeNull().Keys.ShouldHaveSingleItem().ShouldBe("database");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Optional missing manifest references add no edge")]
+    public void Build_OptionalMissingManifestReference_AddsNoDependencyEdge()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("metrics", optional: true)],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        builder.AddResource(consumer);
+
+        // Act
+        IApplicationModel model = builder.Build().Model;
+
+        // Assert
+        model.Descriptors.ShouldHaveSingleItem().Dependencies.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Optional present manifest references remain non-gating")]
+    public void Build_OptionalPresentManifestReference_AddsNoDependencyEdge()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("metrics", optional: true)],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        var consumerResource = new CountingPlannedResource(consumer);
+        builder.AddResource(consumerResource);
+        builder.AddResource(TestManifestFactory.Create("metrics"));
+
+        // Act
+        IApplicationModel model = builder.Build().Model;
+
+        // Assert
+        model.Descriptors[0].Dependencies.ShouldBeEmpty();
+        consumerResource.LastReferences.ShouldNotBeNull()["metrics"].Name.ShouldBe((ResourceName)"metrics");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Cross-application references remain external")]
+    public void Build_RequiredCrossApplicationReference_AddsNoLocalEdge()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("configuration-store", application: "platform")],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        builder.AddResource(consumer);
+
+        // Act
+        IApplicationModel model = builder.Build().Model;
+
+        // Assert
+        model.Descriptors.ShouldHaveSingleItem().Dependencies.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Required missing manifest references fail Build")]
+    public void Build_RequiredMissingManifestReference_ThrowsActionableError()
+    {
+        // Arrange
+        ResourceManifest consumer = TestManifestFactory.Create("api") with
+        {
+            References = [CreateReference("database")],
+        };
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), [])
+            .UseGateway(new FakeGateway());
+        builder.AddResource(consumer);
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        error.Message.ShouldContain("appa/database");
+        error.Message.ShouldContain("mark the reference optional");
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Model projects descriptors and resources one-to-one")]
     public void Build_Model_ProjectsResourcesOneToOneWithDescriptors()
     {
@@ -290,4 +419,16 @@ public class ApplicationBuilderTests
         error.Message.ShouldContain("COHESION_APPLICATION", Case.Sensitive);
         error.Message.ShouldContain("appa", Case.Sensitive);
     }
+
+    private static ResourceManifestReference CreateReference(
+        string resource,
+        bool optional = false,
+        string application = "appa") => new()
+        {
+            Resource = resource,
+            Application = application,
+            Endpoints = ["control"],
+            Optional = optional,
+            Manifest = $"Example.{resource}.Manifest",
+        };
 }

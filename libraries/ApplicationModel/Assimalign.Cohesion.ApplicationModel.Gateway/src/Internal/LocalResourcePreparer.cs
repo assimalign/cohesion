@@ -57,9 +57,12 @@ internal sealed class LocalResourcePreparer
             environment,
             cancellationToken).ConfigureAwait(false);
 
+        ObservedDependencyEnvironment.Apply(context, environment);
+
         await _mounts.MaterializeAsync(
             context.Model.Name,
             resource,
+            GetPlan(context.Model, resource),
             environment,
             cancellationToken).ConfigureAwait(false);
 
@@ -145,6 +148,26 @@ internal sealed class LocalResourcePreparer
         return resource is IEndpointResource endpointResource
             ? endpointResource.Endpoints
             : Array.Empty<ResourceEndpoint>();
+    }
+
+    private static ResourcePlan GetPlan(IApplicationModel model, IApplicationResource resource)
+    {
+        if (model.Descriptors.Count != model.Plans.Count)
+        {
+            throw new InvalidOperationException(
+                "The application model must contain one realization plan for every resource descriptor.");
+        }
+
+        for (int index = 0; index < model.Descriptors.Count; index++)
+        {
+            if (ReferenceEquals(model.Descriptors[index].Resource, resource))
+            {
+                return model.Plans[index];
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Resource '{resource.Name}' is not part of the application model being realized.");
     }
 
     private static IProbeSpec? MapManifestProbe(

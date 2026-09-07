@@ -27,13 +27,35 @@ internal sealed class LocalMountMaterializer
     public async Task MaterializeAsync(
         ApplicationName application,
         IApplicationResource resource,
+        ResourcePlan plan,
         IDictionary<string, string> environment,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<ResourceMount> mounts = GetMounts(resource);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        IReadOnlyList<MountBinding> mounts = plan.Container.Mounts;
         if (mounts.Count == 0)
         {
             return;
+        }
+
+        bool isComposite = string.Equals(plan.Kind, "Composite", StringComparison.OrdinalIgnoreCase);
+        var mountVariables = new string[mounts.Count];
+        var uniqueMountVariables = new HashSet<string>(StringComparer.Ordinal);
+        for (int index = 0; index < mounts.Count; index++)
+        {
+            MountBinding mount = mounts[index];
+            string environmentMountName = isComposite
+                ? $"{resource.Name}-{mount.Mount}"
+                : mount.Mount;
+            string mountVariable = ResourceEnvironment.Mount(environmentMountName);
+            if (!uniqueMountVariables.Add(mountVariable))
+            {
+                throw new InvalidDataException(
+                    $"Mount '{mount.Mount}' collides with another mount after environment-name normalization.");
+            }
+
+            mountVariables[index] = mountVariable;
         }
 
         string applicationDirectory = SafeChild(_stateDirectory, application.ToString(), "application");
@@ -47,25 +69,18 @@ internal sealed class LocalMountMaterializer
                 SafeChild(applicationDirectory, ".state", "gateway metadata"),
                 application)
             : null;
-        var mountVariables = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (ResourceMount mount in mounts)
+        for (int index = 0; index < mounts.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            string mountVariable = ResourceEnvironment.Mount(mount.Name);
-            if (!mountVariables.Add(mountVariable))
-            {
-                throw new InvalidDataException(
-                    $"Mount '{mount.Name}' collides with another mount after environment-name normalization.");
-            }
-
-            string mountPath = SafeChild(resourceDirectory, mount.Name, "mount");
+            MountBinding mount = mounts[index];
+            string mountPath = SafeChild(resourceDirectory, mount.Mount, "mount");
             if (mount.Kind == ResourceMountKind.Volume)
             {
                 if (File.Exists(mountPath))
                 {
-                    throw new IOException($"Mount path '{mountPath}' is a file, but volume mount '{mount.Name}' requires a directory.");
+                    throw new IOException($"Mount path '{mountPath}' is a file, but volume mount '{mount.Mount}' requires a directory.");
                 }
 
                 CreatePrivateDirectory(mountPath);
@@ -74,16 +89,16 @@ internal sealed class LocalMountMaterializer
             {
                 if (Directory.Exists(mountPath))
                 {
-                    throw new IOException($"Mount path '{mountPath}' is a directory, but mount '{mount.Name}' requires a file.");
+                    throw new IOException($"Mount path '{mountPath}' is a directory, but mount '{mount.Mount}' requires a file.");
                 }
 
-                byte[] content = GetInitialContent(resource, mount);
+                byte[] content = GetInitialContent(mount);
                 byte[]? persisted = null;
                 try
                 {
                     persisted = protector is null
                         ? content
-                        : protector.Protect(resource.Name.ToString(), mount.Name, content);
+                        : protector.Protect(resource.Name.ToString(), mount.Mount, content);
                     await WriteFileAsync(mountPath, persisted, cancellationToken).ConfigureAwait(false);
                 }
                 finally
@@ -96,63 +111,35 @@ internal sealed class LocalMountMaterializer
                 }
             }
 
-            environment.TryAdd(mountVariable, mountPath);
+            if (isComposite)
+            {
+                GatewayEnvironmentVariables.Remove(
+                    environment,
+                    ResourceEnvironment.Mount(mount.Mount));
+            }
+
+            GatewayEnvironmentVariables.Set(environment, mountVariables[index], mountPath);
         }
     }
 
-    private static IReadOnlyList<ResourceMount> GetMounts(IApplicationResource resource)
+    private static byte[] GetInitialContent(MountBinding mount)
     {
-        if (resource is IManifestResource manifestResource)
+        if (mount.Source is not null
+            && mount.Source.StartsWith(literalPrefix, StringComparison.Ordinal))
         {
-            IReadOnlyList<ResourceManifestMount> declared = manifestResource.Manifest.Mounts;
-            var mounts = new ResourceMount[declared.Count];
-            for (int index = 0; index < mounts.Length; index++)
+            if (mount.Kind != ResourceMountKind.Configuration)
             {
-                ResourceManifestMount mount = declared[index];
-                mounts[index] = new ResourceMount(mount.Name, mount.ContainerPath, mount.Kind);
+                throw new InvalidDataException(
+                    $"Mount '{mount.Mount}' uses a literal source, which is allowed only for Configuration mounts.");
             }
 
-            return mounts;
+            return Encoding.UTF8.GetBytes(mount.Source[literalPrefix.Length..]);
         }
 
-        return resource is IMountResource mountResource
-            ? mountResource.Mounts
-            : Array.Empty<ResourceMount>();
-    }
-
-    private static byte[] GetInitialContent(IApplicationResource resource, ResourceMount mount)
-    {
-        if (resource is not IManifestResource manifestResource)
+        if (!string.IsNullOrWhiteSpace(mount.Source))
         {
-            return Array.Empty<byte>();
-        }
-
-        foreach (ResourceManifestMount declared in manifestResource.Manifest.Mounts)
-        {
-            if (!string.Equals(declared.Name, mount.Name, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (declared.Source is not null
-                && declared.Source.StartsWith(literalPrefix, StringComparison.Ordinal))
-            {
-                if (mount.Kind != ResourceMountKind.Configuration)
-                {
-                    throw new InvalidDataException(
-                        $"Mount '{mount.Name}' uses a literal source, which is allowed only for Configuration mounts.");
-                }
-
-                return Encoding.UTF8.GetBytes(declared.Source[literalPrefix.Length..]);
-            }
-
-            if (!string.IsNullOrWhiteSpace(declared.Source))
-            {
-                throw new NotSupportedException(
-                    $"Local resolution of mount source '{declared.Source}' is delivered by design item 25.");
-            }
-
-            return Array.Empty<byte>();
+            throw new NotSupportedException(
+                $"Local resolution of mount source '{mount.Source}' is delivered by design item 25.");
         }
 
         return Array.Empty<byte>();

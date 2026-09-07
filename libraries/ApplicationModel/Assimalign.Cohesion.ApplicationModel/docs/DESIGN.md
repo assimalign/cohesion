@@ -56,8 +56,11 @@ orchestration package.
 - **`Descriptors` is authoritative; `Resources` is a projection.** Dependency edges
   live on the descriptors (the gateway topologically sorts them); the model exposes
   `Resources` as a read-only one-to-one projection for convenience, and the mutable
-  working collection lives only on the builder. Surfacing a mutable `IList` on an
-  "immutable desired state" was a contradiction that an early review caught.
+  working collection lives only on the builder. At `Build()`, required same-application
+  manifest references infer edges by exact application/resource identity; explicit C#
+  `DependsOn` edges remain ordering-only and additive. Optional references never infer a
+  gating edge, and cross-application references remain external. Surfacing a mutable `IList`
+  on an "immutable desired state" was a contradiction that an early review caught.
 - **Facts in manifests; realization in plans.** `ResourceManifest` mirrors the
   `cohesion/resource/v1` build artifact and contains resource facts only. At
   `Build()`, every resource produces a `cohesion/plan/v1` `ResourcePlan` from its
@@ -116,7 +119,8 @@ orchestration package.
   per-resource stop budgets. It does not impose one 30-second outer timeout across a
   reverse-ordered resource set, which would truncate later resources' declared grace periods.
 - `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
-  at least one realized resource, all dependencies present, no dependency cycles
+  at least one realized resource, all explicit dependencies and required manifest references
+  present, no dependency cycles
   (DFS), a selected gateway, an RFC 1123 application name, each typed override, and
   every computed plan. Planning deliberately happens here rather than in MSBuild or
   when the resource is added.

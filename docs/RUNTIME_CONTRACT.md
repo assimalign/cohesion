@@ -52,7 +52,13 @@ section separator because the configuration bridge maps `__` to `:`.
   ambient resource context falls back to the declared development port so standalone `dotnet run`
   remains stable; this document does not introduce that context.
 - Dependency values are derived from the observed view, never guessed from desired state, and
-  appear only after the dependency is running.
+  appear only after the dependency is running. Optional references do not gate startup and are
+  omitted unless their target is already running when the dependent is prepared.
+- Composite manifests flatten re-exported endpoints and mounts as `<member>-<name>`. An outer
+  gateway combines those names with the Composite resource name, producing
+  `COHESION_DEPENDENCY_<COMPOSITE>_<MEMBER>_<EP>_*` and
+  `COHESION_MOUNT_<COMPOSITE>_<MEMBER>_<M>_PATH`; the claim path remains rooted under the
+  Composite resource's mount directory.
 - Mount and bootstrap sources are resolved by the gateway. Resources read the delivered value
   and do not pull secrets or configuration from an orchestrator.
 - The telemetry variables are reserved now but remain optional. When none are set, logging is

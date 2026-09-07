@@ -124,13 +124,16 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
 
     private CohesionApplicationModel BuildModel(bool validate)
     {
-        ApplicationResourceDescriptor[] descriptors = _descriptors.ToArray();
+        ApplicationResourceDescriptor[] authoringDescriptors = _descriptors.ToArray();
+        ApplicationResourceDescriptor[] descriptors = authoringDescriptors;
         ApplicationName name = ResolveName(_environment);
+        ResourceManifest[] manifests = CreateManifests(authoringDescriptors, name);
 
         if (validate)
         {
             ValidateApplicationName(name);
-
+            ValidateManifests(authoringDescriptors, manifests);
+            descriptors = MergeManifestDependencies(authoringDescriptors, manifests);
             ValidateGraph(descriptors);
         }
 
@@ -139,7 +142,6 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             : _options.Gateway is not null
                 ? (ResourceName)_options.Gateway
                 : (ResourceName)"unselected";
-        ResourceManifest[] manifests = CreateManifests(descriptors, name);
         ResourcePlan[] plans = validate
             ? CreatePlans(descriptors, manifests, gatewayIdentity)
             : Array.Empty<ResourcePlan>();
@@ -156,12 +158,10 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             _options.RestartOrphans);
     }
 
-    private ResourcePlan[] CreatePlans(
+    private static void ValidateManifests(
         IReadOnlyList<ApplicationResourceDescriptor> descriptors,
-        IReadOnlyList<ResourceManifest> manifests,
-        ResourceName gateway)
+        IReadOnlyList<ResourceManifest> manifests)
     {
-        var manifestByDescriptor = new Dictionary<IApplicationResourceDescriptor, ResourceManifest>(descriptors.Count);
         for (int index = 0; index < descriptors.Count; index++)
         {
             ResourceManifest manifest;
@@ -175,14 +175,89 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
                     $"Resource '{descriptors[index].Resource.Name}' has an invalid manifest: {exception.Message}",
                     exception);
             }
+
             if (manifest.Name != descriptors[index].Resource.Name)
             {
                 throw new InvalidOperationException(
                     $"Resource '{descriptors[index].Resource.Name}' exposes manifest '{manifest.Name}'. " +
                     "A resource and its manifest must have the same name.");
             }
+        }
+    }
 
-            manifestByDescriptor.Add(descriptors[index], manifest);
+    private static ApplicationResourceDescriptor[] MergeManifestDependencies(
+        IReadOnlyList<ApplicationResourceDescriptor> descriptors,
+        IReadOnlyList<ResourceManifest> manifests)
+    {
+        var copies = new Dictionary<IApplicationResourceDescriptor, ApplicationResourceDescriptor>(
+            descriptors.Count,
+            ReferenceEqualityComparer.Instance);
+        var merged = new ApplicationResourceDescriptor[descriptors.Count];
+        var byManifestIdentity = new Dictionary<(ApplicationName Application, ResourceName Resource), ApplicationResourceDescriptor>();
+
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            var copy = new ApplicationResourceDescriptor(descriptors[index].Resource);
+            copies.Add(descriptors[index], copy);
+            merged[index] = copy;
+
+            ResourceManifest manifest = manifests[index];
+            if (!byManifestIdentity.TryAdd((manifest.Application, manifest.Name), copy))
+            {
+                throw new InvalidOperationException(
+                    $"Application model contains more than one manifest for '{manifest.Application}/{manifest.Name}'.");
+            }
+        }
+
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            ApplicationResourceDescriptor source = descriptors[index];
+            ApplicationResourceDescriptor target = merged[index];
+
+            foreach (IApplicationResourceDescriptor dependency in source.Dependencies)
+            {
+                target.DependsOn(copies.TryGetValue(dependency, out ApplicationResourceDescriptor? copy)
+                    ? copy
+                    : dependency);
+            }
+
+            foreach (ResourceManifestReference reference in manifests[index].References)
+            {
+                if (byManifestIdentity.TryGetValue(
+                        (reference.Application, reference.Resource),
+                        out ApplicationResourceDescriptor? dependency))
+                {
+                    if (!reference.Optional)
+                    {
+                        target.DependsOn(dependency);
+                    }
+
+                    continue;
+                }
+
+                if (!reference.Optional && reference.Application == manifests[index].Application)
+                {
+                    throw new InvalidOperationException(
+                        $"Resource '{source.Resource.Name}' requires reference " +
+                        $"'{reference.Application}/{reference.Resource}', but it is not present in the application model. " +
+                        "Add or bind that resource, or mark the reference optional.");
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    private ResourcePlan[] CreatePlans(
+        IReadOnlyList<ApplicationResourceDescriptor> descriptors,
+        IReadOnlyList<ResourceManifest> manifests,
+        ResourceName gateway)
+    {
+        var manifestByIdentity = new Dictionary<(ApplicationName Application, ResourceName Resource), ResourceManifest>(
+            manifests.Count);
+        foreach (ResourceManifest manifest in manifests)
+        {
+            manifestByIdentity.Add((manifest.Application, manifest.Name), manifest);
         }
 
         var plans = new ResourcePlan[descriptors.Count];
@@ -192,10 +267,14 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             ResourceManifest manifest = manifests[index];
             var references = new Dictionary<string, ResourceManifest>(StringComparer.Ordinal);
 
-            foreach (IApplicationResourceDescriptor dependency in descriptor.Dependencies)
+            foreach (ResourceManifestReference reference in manifest.References)
             {
-                ResourceManifest reference = manifestByDescriptor[dependency];
-                references.Add(reference.Name.ToString(), reference);
+                if (manifestByIdentity.TryGetValue(
+                        (reference.Application, reference.Resource),
+                        out ResourceManifest? referencedManifest))
+                {
+                    references.TryAdd(referencedManifest.Name.ToString(), referencedManifest);
+                }
             }
 
             IPlannedResource? plannedResource = descriptor.Resource as IPlannedResource;

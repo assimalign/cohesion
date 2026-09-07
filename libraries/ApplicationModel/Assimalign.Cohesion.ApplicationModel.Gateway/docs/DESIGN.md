@@ -78,7 +78,11 @@ the registration under the same lock.
 - **Endpoints**: each endpoint gets a loopback port persisted in
   `.cohesion/<application>/.state/ports.json`. The gateway injects the frozen `ResourceEnvironment`
   endpoint contract (caller values win), publishes the allocated endpoints atomically with the
-  first `Running` transition. Dependency environment injection remains design item 21.
+  first `Running` transition. Once a manifest-referenced dependency reaches `Running`, the
+  dependent receives `COHESION_DEPENDENCY_<RES>_<EP>_{URL,HOST,PORT,SCHEME}` exclusively from
+  that dependency's observed endpoints. Optional references never gate startup: they inject only
+  when the target is already `Running`, and otherwise inject nothing. An explicit C# `DependsOn`
+  edge remains ordering-only.
 - **Probes**: HTTP (exactly 200 succeeds; 404/405 fail startup immediately), TCP, and exec are
   gateway-side and AOT-safe. Missing manifest probe roles use the resource's default control-plane
   endpoint and role route (`<path>/readyz` for startup/readiness, `<path>/livez` for liveness);
@@ -92,7 +96,10 @@ the registration under the same lock.
   `Degraded → Stopping → Starting → Running`; dependents are never re-gated.
 - **Mounts**: resources receive `COHESION_MOUNT_<M>_PATH` rooted at
   `.cohesion/<application>/<resource>/<mount>`. POSIX directories/files use exact 0700/0600
-  modes. Windows files are DataProtection ciphertext backed by a CurrentUser DPAPI-protected key
+  modes. A Composite plan's flattened `<member>-<mount>` claim instead receives the outer carrier
+  `COHESION_MOUNT_<COMPOSITE>_<MEMBER>_<M>_PATH`, pointing to the same resource-rooted claim;
+  inward remapping belongs to `ProcessHost`.
+  Windows files are DataProtection ciphertext backed by a CurrentUser DPAPI-protected key
   ring; this makes no ACL claim. Gateway-side source resolution and a distinct child-readable
   Windows delivery carrier remain design item 25 work.
 - **Shutdown**: Windows launches use `CreateNewProcessGroup`; POSIX launches use `setsid` when
@@ -122,7 +129,8 @@ for `Running`/`Failed`/`Stopped`/timeout, cancellation propagation and cleanup, 
 algorithm also verifies that post-`Running` degradation does not re-gate dependents. Real
 child-process spawning is exercised by a co-located, BCL-only test apphost. `LocalGateway` tests
 cover persisted ports and contract environment, default and explicit HTTP readiness (including
-404 fail-fast), TCP and exec probes, liveness degradation/restart/backoff, mount materialization,
+404 fail-fast), TCP and exec probes, liveness degradation/restart/backoff, observed dependency
+injection and startup gating, optional absence, Composite re-export names, mount materialization,
 prefixed stdout/stderr, `AddExecutable` marker readiness, the full exponential-backoff sequence,
 graceful and forced stop classification, PID-file re-attachment, and explicit orphan restart.
 

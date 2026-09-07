@@ -794,6 +794,369 @@ public class LocalGatewayTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: observed dependencies gate launch and inject allocated addresses")]
+    public async Task RunAsync_ManifestDependency_WaitsForRunningAndInjectsObservedEndpoint()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string markerGate = Path.Combine(root, "provider-ready");
+        string providerBound = Path.Combine(root, "provider-bound.txt");
+        string consumerCapture = Path.Combine(root, "consumer-env.json");
+        const string dependencyName = "catalog-db";
+        const string endpointName = "sql.main";
+        string[] dependencyVariables = DependencyVariables(dependencyName, endpointName);
+        ResourceManifest provider = CreateManifest(
+            dependencyName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENDPOINT_NAME"] = endpointName,
+                ["TEST_READY_MARKER_GATE_PATH"] = markerGate,
+                ["TEST_BOUND_PATH"] = providerBound,
+            },
+            readiness: NoneProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            Endpoints = [CreateEndpoint(endpointName, 5432)],
+            ControlPlane = CreateControlPlane(endpointName),
+        };
+        ResourceManifest consumer = CreateManifest(
+            "orders-api",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENV_CAPTURE_PATH"] = consumerCapture,
+                ["TEST_CAPTURE_ENV_NAMES"] = string.Join(';', dependencyVariables),
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            References = [CreateReference(dependencyName, endpointName)],
+        };
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, [consumer, provider]);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForFileAsync(providerBound);
+
+            // Assert
+            gateway.ResourceStates.GetState(ResourceIdOf(provider.Name)).ShouldBe(ResourceLifecycle.Starting);
+            File.Exists(consumerCapture).ShouldBeFalse();
+
+            File.WriteAllText(markerGate, string.Empty, Encoding.UTF8);
+            await WaitForStateAsync(gateway, ResourceIdOf(provider.Name), ResourceLifecycle.Running);
+            await WaitForStateAsync(gateway, ResourceIdOf(consumer.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(consumerCapture);
+
+            ResourceEndpoint observed = gateway.ResourceStates
+                .GetObservedEndpoints(ResourceIdOf(provider.Name))
+                .ShouldHaveSingleItem();
+            IReadOnlyDictionary<string, string> environment = ReadStringMap(consumerCapture);
+            var address = new EndpointAddress(observed.Scheme, observed.Host!, observed.Port);
+
+            observed.Port.ShouldNotBe(5432);
+            environment[dependencyVariables[0]].ShouldBe(address.ToString());
+            environment[dependencyVariables[1]].ShouldBe(address.Host);
+            environment[dependencyVariables[2]].ShouldBe(observed.Port.ToString(CultureInfo.InvariantCulture));
+            environment[dependencyVariables[3]].ShouldBe(address.Scheme);
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: optional absent references inject no dependency environment")]
+    public async Task RunAsync_OptionalAbsentReference_InjectsNothing()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string capture = Path.Combine(root, "optional-env.json");
+        string[] dependencyVariables = DependencyVariables("metrics-store", "http");
+        ResourceManifest consumer = CreateManifest(
+            "orders-api",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENV_CAPTURE_PATH"] = capture,
+                ["TEST_CAPTURE_ENV_NAMES"] = string.Join(';', dependencyVariables),
+                [dependencyVariables[0]] = "http://declared.invalid:1234",
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            References = [CreateReference("metrics-store", "http", optional: true)],
+        };
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, consumer);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(consumer.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(capture);
+            IReadOnlyDictionary<string, string> environment = ReadStringMap(capture);
+
+            // Assert
+            foreach (string variable in dependencyVariables)
+            {
+                environment.ContainsKey(variable).ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: optional present references do not gate launch")]
+    public async Task RunAsync_OptionalPresentReference_DoesNotGateOrInjectBeforeRunning()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string capture = Path.Combine(root, "optional-present-env.json");
+        string markerGate = Path.Combine(root, "optional-provider-ready");
+        const string dependencyName = "metrics-store";
+        string[] dependencyVariables = DependencyVariables(dependencyName, "http");
+        ResourceManifest consumer = CreateManifest(
+            "orders-api",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENV_CAPTURE_PATH"] = capture,
+                ["TEST_CAPTURE_ENV_NAMES"] = string.Join(';', dependencyVariables),
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            References = [CreateReference(dependencyName, "http", optional: true)],
+        };
+        ResourceManifest provider = CreateManifest(
+            dependencyName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_READY_MARKER_GATE_PATH"] = markerGate,
+            },
+            readiness: NoneProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, [consumer, provider]);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(consumer.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(capture);
+            IReadOnlyDictionary<string, string> environment = ReadStringMap(capture);
+
+            // Assert
+            gateway.ResourceStates.GetState(ResourceIdOf(provider.Name)).ShouldNotBe(ResourceLifecycle.Running);
+            foreach (string variable in dependencyVariables)
+            {
+                environment.ContainsKey(variable).ShouldBeFalse();
+            }
+
+            File.WriteAllText(markerGate, string.Empty, Encoding.UTF8);
+            await WaitForStateAsync(gateway, ResourceIdOf(provider.Name), ResourceLifecycle.Running);
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: composite re-exports use outer dependency and mount names")]
+    public async Task RunAsync_CompositeReExports_UseOuterEnvironmentNames()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string dependencyCapture = Path.Combine(root, "composite-dependency.json");
+        string compositeEnvironmentCapture = Path.Combine(root, "composite-environment.json");
+        string mountCapture = Path.Combine(root, "composite-mount.json");
+        const string compositeName = "acme-core";
+        const string endpointName = "database-db";
+        const string mountName = "database-data";
+        string[] dependencyVariables = DependencyVariables(compositeName, endpointName);
+        string outerMountName = $"{compositeName}-{mountName}";
+        string outerMountVariable = ResourceEnvironment.Mount(outerMountName);
+        string unqualifiedMountVariable = ResourceEnvironment.Mount(mountName);
+        ResourceManifest composite = CreateManifest(
+            compositeName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENDPOINT_NAME"] = endpointName,
+                ["TEST_ENV_CAPTURE_PATH"] = compositeEnvironmentCapture,
+                ["TEST_CAPTURE_ENV_NAMES"] = $"{outerMountVariable};{unqualifiedMountVariable}",
+                ["TEST_MOUNT_CAPTURE_PATH"] = mountCapture,
+                ["TEST_MOUNT_NAMES"] = outerMountName,
+                [unqualifiedMountVariable] = Path.Combine(root, "spoofed-composite-mount"),
+            },
+            readiness: NoneProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            Kind = "Composite",
+            Endpoints = [CreateEndpoint(endpointName, 5432)],
+            ControlPlane = CreateControlPlane(endpointName),
+            Mounts =
+            [
+                new ResourceManifestMount
+                {
+                    Name = mountName,
+                    Kind = ResourceMountKind.Volume,
+                    ContainerPath = "/database/data",
+                    Size = "1Gi",
+                },
+            ],
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                Workload = WorkloadKind.StatefulSet,
+                RestartPolicy = "Never",
+            },
+        };
+        ResourceManifest consumer = CreateManifest(
+            "acme-api",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_ENV_CAPTURE_PATH"] = dependencyCapture,
+                ["TEST_CAPTURE_ENV_NAMES"] = string.Join(';', dependencyVariables),
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe()) with
+        {
+            References = [CreateReference(compositeName, endpointName)],
+        };
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, [consumer, composite]);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(composite.Name), ResourceLifecycle.Running);
+            await WaitForStateAsync(gateway, ResourceIdOf(consumer.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(dependencyCapture);
+            await WaitForFileAsync(compositeEnvironmentCapture);
+            await WaitForFileAsync(mountCapture);
+
+            // Assert
+            IReadOnlyDictionary<string, string> dependencyEnvironment = ReadStringMap(dependencyCapture);
+            foreach (string variable in dependencyVariables)
+            {
+                dependencyEnvironment.ContainsKey(variable).ShouldBeTrue();
+            }
+
+            ResourceEndpoint observed = gateway.ResourceStates
+                .GetObservedEndpoints(ResourceIdOf(composite.Name))
+                .ShouldHaveSingleItem();
+            var address = new EndpointAddress(observed.Scheme, observed.Host!, observed.Port);
+            dependencyEnvironment[dependencyVariables[0]].ShouldBe(address.ToString());
+            dependencyEnvironment[dependencyVariables[1]].ShouldBe(address.Host);
+            dependencyEnvironment[dependencyVariables[2]].ShouldBe(
+                address.Port.ToString(CultureInfo.InvariantCulture));
+            dependencyEnvironment[dependencyVariables[3]].ShouldBe(address.Scheme);
+
+            IReadOnlyDictionary<string, string> compositeEnvironment = ReadStringMap(compositeEnvironmentCapture);
+            compositeEnvironment.ContainsKey(outerMountVariable).ShouldBeTrue();
+            compositeEnvironment.ContainsKey(unqualifiedMountVariable).ShouldBeFalse();
+
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(mountCapture));
+            JsonElement mount = document.RootElement.GetProperty(outerMountVariable);
+            mount.GetProperty("kind").GetString().ShouldBe("directory");
+            mount.GetProperty("path").GetString().ShouldBe(
+                Path.Combine(root, ".cohesion", ApplicationNameValue, compositeName, mountName));
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: volume and secret mounts inject materialized paths")]
+    public async Task RunAsync_VolumeAndSecretMounts_InjectMaterializedPaths()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string capture = Path.Combine(root, "mount-kinds.json");
+        const string volumeName = "cache.volume";
+        const string secretName = "api-secret";
+        ResourceManifest resource = CreateManifest(
+            "orders-api",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_MOUNT_CAPTURE_PATH"] = capture,
+                ["TEST_MOUNT_NAMES"] = $"{volumeName};{secretName}",
+                [ResourceEnvironment.Mount(volumeName)] = Path.Combine(root, "spoofed-cache"),
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            mounts:
+            [
+                new ResourceManifestMount
+                {
+                    Name = volumeName,
+                    Kind = ResourceMountKind.Volume,
+                    ContainerPath = "/cache",
+                    Size = "1Gi",
+                },
+                new ResourceManifestMount
+                {
+                    Name = secretName,
+                    Kind = ResourceMountKind.Secret,
+                    ContainerPath = "/run/secrets/api",
+                },
+            ]) with
+        {
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                Workload = WorkloadKind.StatefulSet,
+                RestartPolicy = "Never",
+            },
+        };
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, resource);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(resource.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(capture);
+
+            // Assert
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(capture));
+            AssertCapturedMount(document, root, resource.Name, volumeName, "directory");
+            AssertCapturedMount(document, root, resource.Name, secretName, "file");
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
     private static string TestHostPath => Path.Combine(
         AppContext.BaseDirectory,
         TestHostAssembly + (OperatingSystem.IsWindows() ? ".exe" : string.Empty));
@@ -824,6 +1187,21 @@ public class LocalGatewayTests
             .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), args ?? [])
             .UseGateway(gateway);
         builder.AddResource(manifest);
+        return builder.Build();
+    }
+
+    private static IApplication BuildApplication(
+        LocalGateway gateway,
+        IReadOnlyList<ResourceManifest> manifests)
+    {
+        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+            .UseGateway(gateway);
+        foreach (ResourceManifest manifest in manifests)
+        {
+            builder.AddResource(manifest);
+        }
+
         return builder.Build();
     }
 
@@ -893,6 +1271,55 @@ public class LocalGatewayTests
     };
 
     private static ResourceManifestProbe NoneProbe() => new() { None = true };
+
+    private static ResourceManifestEndpoint CreateEndpoint(string name, int containerPort) => new()
+    {
+        Name = name,
+        Scheme = "http",
+        Protocol = "tcp",
+        ContainerPort = containerPort,
+    };
+
+    private static ResourceManifestControlPlane CreateControlPlane(string endpoint) => new()
+    {
+        Endpoint = endpoint,
+        Path = "/cohesion/v1",
+    };
+
+    private static ResourceManifestReference CreateReference(
+        string resource,
+        string endpoint,
+        bool optional = false) => new()
+        {
+            Resource = resource,
+            Application = ApplicationNameValue,
+            Endpoints = [endpoint],
+            Optional = optional,
+            Manifest = $"Assimalign.Cohesion.Test.{resource}.Manifest",
+        };
+
+    private static string[] DependencyVariables(string resource, string endpoint) =>
+    [
+        ResourceEnvironment.Dependency(resource, endpoint, "URL"),
+        ResourceEnvironment.Dependency(resource, endpoint, "HOST"),
+        ResourceEnvironment.Dependency(resource, endpoint, "PORT"),
+        ResourceEnvironment.Dependency(resource, endpoint, "SCHEME"),
+    ];
+
+    private static void AssertCapturedMount(
+        JsonDocument document,
+        string root,
+        ResourceName resource,
+        string mount,
+        string expectedKind)
+    {
+        string variable = ResourceEnvironment.Mount(mount);
+        JsonElement captured = document.RootElement.GetProperty(variable);
+        captured.GetProperty("exists").GetBoolean().ShouldBeTrue();
+        captured.GetProperty("kind").GetString().ShouldBe(expectedKind);
+        captured.GetProperty("path").GetString().ShouldBe(
+            Path.Combine(root, ".cohesion", ApplicationNameValue, resource.ToString(), mount));
+    }
 
     private static async Task RunAndAssertRunningAsync(string root, ResourceManifest manifest)
     {
