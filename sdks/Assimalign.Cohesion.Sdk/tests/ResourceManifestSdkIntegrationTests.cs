@@ -49,6 +49,8 @@ public sealed class ResourceManifestSdkIntegrationTests
 
         string webControlPlaneSource = File.ReadAllText(GeneratedOutput(webProject, "ResourceControlPlane.g.cs"));
         webControlPlaneSource.ShouldContain("[global::System.Runtime.CompilerServices.ModuleInitializer]");
+        webControlPlaneSource.ShouldNotContain("typeof(global::Program)");
+        webControlPlaneSource.ShouldContain("ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
         webControlPlaneSource.ShouldContain("ResourceRuntime.RegisterControlPlane(");
         webControlPlaneSource.ShouldContain(
             "global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane.Create()");
@@ -167,6 +169,28 @@ public sealed class ResourceManifestSdkIntegrationTests
         databaseLifecycle.GetProperty("maxReplicas").GetInt32().ShouldBe(1);
         databaseLifecycle.GetProperty("stopGraceSeconds").GetInt32().ShouldBe(30);
         databaseLifecycle.GetProperty("restartPolicy").GetString().ShouldBe("OnFailure");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk] - enabled Web resource supports a namespaced explicit Main entry point")]
+    public async Task Build_EnabledWebWithNamespacedExplicitMain_ShouldSucceed()
+    {
+        // Arrange
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("EnabledWebExplicitMain");
+
+        // Act
+        DotNetBuildResult result = await workspace.BuildAsync("EnabledWebExplicitMain");
+
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+        string project = workspace.ProjectDirectory("EnabledWebExplicitMain");
+        string controlPlaneSource = File.ReadAllText(GeneratedOutput(project, "ResourceControlPlane.g.cs"));
+        controlPlaneSource.ShouldContain("ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
+        controlPlaneSource.ShouldNotContain("global::Program");
+        Directory.EnumerateFiles(
+                Path.Combine(project, "bin"),
+                "EnabledWebExplicitMain.dll",
+                SearchOption.AllDirectories)
+            .ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk] - enabled generic resources keep generated accessors without a control-plane registration")]

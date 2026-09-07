@@ -137,7 +137,7 @@
 			AssemblyName="$(AssemblyName)"
 			OutputType="$(OutputType)"
 			TargetPath="$(TargetPath)"
-			AppHostPath="$(TargetDir)$(TargetName)$(ExecutableExtension)"
+			AppHostPath="$(TargetDir)$(TargetName)$(_NativeExecutableExtension)"
 			ResourceName="$(CohesionResourceName)"
 			ResourceKind="$(CohesionResourceKind)"
 			ApplicationName="$(CohesionApplication)"
@@ -238,7 +238,7 @@
 				<ProjectName>$(MSBuildProjectName)</ProjectName>
 				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
 				<TargetPath>$(TargetPath)</TargetPath>
-				<AppHostPath>$(TargetDir)$(TargetName)$(ExecutableExtension)</AppHostPath>
+				<AppHostPath>$(TargetDir)$(TargetName)$(_NativeExecutableExtension)</AppHostPath>
 				<Application>$(_CohesionResolvedApplicationName)</Application>
 				<Resource>$(_CohesionResolvedResourceName)</Resource>
 				<Kind>$(_CohesionResolvedResourceKind)</Kind>

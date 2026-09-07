@@ -18,6 +18,7 @@
     "settings",
     "references",
     "commands",
+    "environment",
     "lifecycle",
     "properties"
   ],
@@ -121,6 +122,15 @@
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "environment": {
+      "type": "object",
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string"
       }
     },
     "lifecycle": {

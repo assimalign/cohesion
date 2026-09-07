@@ -145,6 +145,12 @@ internal static class ResourceManifestWriter
         writer.WriteStartArray("commands");
         writer.WriteEndArray();
 
+        // Keep empty environment metadata explicit: ResourceManifest treats every collection
+        // member as required after deserialization, and an omitted object becomes null rather
+        // than the record property's initializer under source-generated System.Text.Json.
+        writer.WriteStartObject("environment");
+        writer.WriteEndObject();
+
         writer.WriteStartObject("lifecycle");
         writer.WriteString("workload", manifest.Lifecycle.Workload);
         writer.WriteNumber("replicas", manifest.Lifecycle.Replicas);

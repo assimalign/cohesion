@@ -76,6 +76,7 @@ internal static class ResourceSourceWriter
         builder.AppendLine("    [global::System.Runtime.CompilerServices.ModuleInitializer]");
         builder.AppendLine("    internal static void Register()");
         builder.AppendLine("    {");
+        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly);");
         builder.AppendLine("        global::Assimalign.Cohesion.Hosting.ResourceRuntime.RegisterControlPlane(");
         builder.AppendLine("            typeof(Resource).Assembly,");
         builder.AppendLine("            static () => CreateControlPlane(),");
