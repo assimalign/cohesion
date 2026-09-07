@@ -29,11 +29,16 @@ ApplicationModel packages have an additional rollout guard:
 > **COHAM001** — When a non-harness `resources/**` assembly whose name ends in
 > `.ApplicationModel` sets `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`,
 > its entire dependency closure is limited to `Assimalign.Cohesion.Core` (the Core assembly's
-> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`, BCL
-> assemblies supplied by `Microsoft.NETCore.App`, and the
-> `System.Security.Cryptography.ProtectedData` BCL facade used by Hosting's Windows-only mount
-> carrier. The opt-in is a migration gate, not an
+> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
+> `Assimalign.Cohesion.Hosting.Health`, `Assimalign.Cohesion.Hosting.Resources`, BCL assemblies
+> supplied by `Microsoft.NETCore.App`, and the `System.Security.Cryptography.ProtectedData` BCL
+> facade used by Hosting.Resources' Windows-only mount carrier. The opt-in is a migration gate, not an
 > architectural exemption: once enabled, a project cannot add to the allowlist locally.
+
+The Hosting-area dependency graph behind that closure is fixed: Hosting.Health references Core
+only; Hosting.Resources references Core, plain Hosting, Hosting.Health, and ProtectedData; plain
+Hosting references neither sibling. An area ApplicationModel reaches the closure through its
+direct Hosting.Resources reference.
 
 Cross-references **between feature libraries in an area are fine** — the rule is
 hosting-centric, not hub-and-spoke. References to anything outside the area (`Http.*`,
@@ -65,9 +70,8 @@ projects outside `resources/` are untouched). Violations fail the build:
   The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error
   names the offending assembly or assemblies.
 - `COHAM001` applies only to opted-in `.ApplicationModel` assemblies. Database.ApplicationModel
-  is guarded now; Web.ApplicationModel remains unguarded until its existing runtime-heavy closure
-  is removed. `COHRES003` applies automatically to every shipped resource project and has no
-  opt-in or exemption.
+  and Web.ApplicationModel are guarded now. `COHRES003` applies automatically to every shipped
+  resource project and has no opt-in or exemption.
 - Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are automatically
   excluded from these guards — the rule constrains shipped libraries, not harnesses. This
   path-based exclusion applies to COHRES001–003 and COHAM001; everything else in an area is
@@ -98,9 +102,10 @@ semicolon-delimited, in its own csproj:
   `resources/Database/Assimalign.Cohesion.Database.Testing`. Any other project needs the
   deviation protocol case-by-case; there is no standing `.Application` exemption.
 - The former standing exemption for `Assimalign.Cohesion.<Area>.ApplicationModel` is retired by
-  the signed-off realization-plan design. An area ApplicationModel may reference the shared
-  `Assimalign.Cohesion.Hosting` contract assembly, but never its area's runtime module
-  `Assimalign.Cohesion.<Area>.Hosting`; `COHAM001` enforces that boundary as each project opts in.
+  the signed-off realization-plan design. An area ApplicationModel directly references
+  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`, but never
+  the plain host directly or its area's runtime module `Assimalign.Cohesion.<Area>.Hosting`;
+  `COHAM001` enforces the complete resolved-assembly boundary as each project opts in.
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
   the missing piece is almost always a seam on the area root (that is how the Web area moved its
   authentication builder verbs out of `Web.Hosting`).
@@ -117,7 +122,8 @@ code, not a generated entry point or a framework-owned apphost.
 Orchestration is an opt-in build behavior on that executable:
 
 - With `<CohesionApplicationModel>enabled</CohesionApplicationModel>`, the SDK emits
-  `resource.json`, typed `Resource.g.cs` accessors over the ambient `ResourceContext`, and
+  `resource.json`, typed `Resource.g.cs` accessors over the ambient
+  `Assimalign.Cohesion.Hosting.Resources.ResourceContext`, and
   `ResourceControlPlane.g.cs`, which registers the default control plane supplied by the area's
   `<Area>.ApplicationModel` package.
 - With the default `disabled` value, the project is a plain application: no manifest, generated
@@ -130,7 +136,8 @@ An SDK consumer is the composition root and may reference `<Area>.Hosting`; it i
 resource-area library governed as an exemption holder. In-repo executable acceptance fixtures
 belong under an automatically excluded `samples/` path, are non-packable, and exercise their
 real `Program.cs`. `<Area>.Testing` invokes that program under a test-scoped
-`ResourceRuntime.CreateScope(...)` and remains the area's sole explicit exemption holder.
+`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(...)` and remains the area's
+sole explicit exemption holder.
 
 ## What every area is expected to provide
 
@@ -152,8 +159,9 @@ real `Program.cs`. `<Area>.Testing` invokes that program under a test-scoped
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
   entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
-  when the project opts into orchestration (`CohesionApplicationModel=enabled`) the builder honors the ambient
-  `ResourceContext` and the registered default control plane, otherwise it behaves as a plain application — see
+  when the project opts into orchestration (`CohesionApplicationModel=enabled`) the builder honors
+  the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` and the registered default
+  control plane, otherwise it behaves as a plain application — see
   `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §2/§4.2). Feature/model registration verbs ship with
   their feature package as `extension(I<Area>ApplicationBuilder)` members and compose against
   the root builder — never against the hosting module — so a feature or model registers itself
@@ -164,13 +172,17 @@ real `Program.cs`. `<Area>.Testing` invokes that program under a test-scoped
   (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
   `AddSqlDatabase` (`Database.Sql`). This pattern is expected to be the same in every area.
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
-  non-area infrastructure. **If the hosting module ever appears to need a same-area dependency
+  non-area infrastructure. Enabled-resource implementations consume the plain lifecycle host,
+  `Assimalign.Cohesion.Hosting.Resources`, and `Assimalign.Cohesion.Hosting.Health` without
+  referencing their area's ApplicationModel package. **If the hosting module ever appears to need a same-area dependency
   beyond the root, that is an architecture revisit — surface it to the user — not a case for
   the exemption property or for pushing the dependency's types into the root.**
-- `Assimalign.Cohesion.<Area>.ApplicationModel` — the Core-only declarative plane: a
+- `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
   manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
-  area's default-control-plane contract/factory. It never references `<Area>.Hosting`; generated
-  code in an enabled consumer executable registers the two sides through `ResourceRuntime`.
+  area's default-control-plane contract/factory. Its direct Cohesion references are
+  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`. It never
+  references `<Area>.Hosting`; generated code in an enabled consumer executable registers the two
+  sides through `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`.
 - `Assimalign.Cohesion.<Area>.Testing` — the optional shippable test factory that invokes a
   consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.

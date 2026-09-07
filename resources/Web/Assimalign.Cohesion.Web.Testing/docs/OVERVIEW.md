@@ -5,8 +5,8 @@
 Full-pipeline integration testing for both manually composed Web applications and enabled Web
 resource executables. The manual factory uses the in-memory connection driver. The
 `FromProgram<Program>()` factory invokes the executable under an invocation-local
-`ResourceContext`, waits for its registered default control plane, and uses its ambient
-loopback `http` endpoint.
+`Hosting.Resources` `ResourceContext`, waits for its registered default control plane, and
+uses its ambient loopback `http` endpoint.
 
 ## Scope
 
@@ -70,8 +70,9 @@ string health = await client.GetStringAsync("/healthz");
   dialing factory).
 - `Assimalign.Cohesion.Connections` — the `Connection` contract and duplex-pipe stream
   adapter the client side rides.
-- `Assimalign.Cohesion.Hosting` — ambient resource scopes, entry registration, and host
-  lifecycle capture for the Program-backed mode.
+- `Assimalign.Cohesion.Hosting` — host lifecycle capture for the Program-backed mode.
+- `Assimalign.Cohesion.Hosting.Resources` — ambient resource scopes, entry registration,
+  resource context, and control-plane bridge for that mode.
 
 The client side is otherwise pure BCL (`SocketsHttpHandler`, `HttpClient`).
 

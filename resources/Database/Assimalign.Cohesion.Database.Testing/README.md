@@ -2,8 +2,9 @@
 
 Integration testing for SDK-enabled Cohesion database resource programs. The package's
 `DatabaseApplicationTestFactory.FromProgram<TProgram>()` entry point invokes the resource's
-real `Program.Main` under an isolated `ResourceContext`, waits for the generated Database
-admin plane to report readiness, and requests graceful shutdown through that same plane.
+real `Program.Main` under an isolated `Hosting.Resources` `ResourceContext`, waits for the
+generated Database admin plane to report readiness, and requests graceful shutdown through that
+same plane.
 
 The resource stays an ordinary top-level `Program.cs`:
 
@@ -37,7 +38,8 @@ await factory.StopAsync();
 
 By default, each factory allocates distinct loopback `db` and `admin` endpoints and owns a
 temporary `data` directory. Endpoint and reference dictionaries carry validated `System.Uri`
-values. Supply `DatabaseApplicationTestFactoryOptions.ResourceContext` when a test needs fixed
+values. Supply `DatabaseApplicationTestFactoryOptions.ResourceContext` (a `Hosting.Resources`
+context) when a test needs fixed
 endpoints, mounts, settings, or references.
 
 - The package has no assertion helpers and no test-framework dependency.

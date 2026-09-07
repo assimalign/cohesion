@@ -94,8 +94,10 @@ Layering: L3 platform. Everything here builds on the L1 protocol stack (`librari
 (`libraries/Hosting`, `libraries/DependencyInjection`, `libraries/Configuration`,
 `libraries/Logging`) are consumed by the hosting module and by the `Web.Testing` harness (which
 drives the runtime and resolves the server from its service provider) — never by the feature
-libraries. `Web.ApplicationModel` references only the shared ApplicationModel and Hosting
-contracts; its resolved closure also contains only Hosting's Windows-only ProtectedData BCL
-facade. `Web.Hosting` discovers its generated registration through `ResourceRuntime`.
+libraries. `Web.ApplicationModel` references only the shared ApplicationModel and
+`Hosting.Resources` contracts; that resource-runtime package brings the plain Hosting lifecycle,
+the `Hosting.Health` contribution contracts, and the Windows-only ProtectedData BCL facade into
+its permitted closure. `Web.Hosting` discovers generated registrations through the
+`Hosting.Resources` `ResourceRuntime`.
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.

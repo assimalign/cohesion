@@ -20,8 +20,10 @@ machines this module never drives (see `docs/DESIGN.md`).
   no part in the host lifecycle; workers are engine-internal and observed through
   the application context's health contribution.
 - Project references: `Assimalign.Cohesion.Database` (area root) and
-  `Assimalign.Cohesion.Hosting` (non-area hosting foundation), plus private
-  cross-area references to `Web.Hosting` and `Web.Health` for the enabled
+  `Assimalign.Cohesion.Hosting` (plain lifecycle),
+  `Assimalign.Cohesion.Hosting.Health` (health contribution contracts), and
+  `Assimalign.Cohesion.Hosting.Resources` (opt-in resource runtime/control plane), plus
+  private cross-area references to `Web.Hosting` and `Web.Health` for the enabled
   resource's `admin` endpoint. No Database model package is referenced and no
   Database hosting-isolation exemption is used.
 
@@ -34,7 +36,7 @@ machines this module never drives (see `docs/DESIGN.md`).
 - `DatabaseApplicationContext` implements the root's
   `IDatabaseApplicationContext`: the registered servers (plural — one per model)
   and the server-less engine registrations. It also implements
-  `IHealthContributor`, folding every distinct registered or server-fronted
+  the `Hosting.Health` `IHealthContributor`, folding every distinct registered or server-fronted
   engine's `State` and `Workers` inventory into one Database contribution.
 - `DatabaseApplicationOptions` collects the servers, the embedded engine
   registrations, and additional `IHostService`s.
@@ -42,7 +44,7 @@ machines this module never drives (see `docs/DESIGN.md`).
   before-accept provisioning; `AddDatabase` retains the completed C# schema.
   Provisioning creates only after `OpenDatabaseAsync` reports
   `DatabaseNotFoundException`; other database failures propagate from startup.
-- Enabled resources host their registered `IResourceControlPlane` on the ambient
+- Enabled resources host their registered `Hosting.Resources` `IResourceControlPlane` on the ambient
   `admin` endpoint. Health routes use `Web.Health`; endpoint observation,
   graceful stop, and command dispatch use the shared Web control-plane middleware.
 
@@ -79,7 +81,6 @@ options remains supported. A custom or embedded host creates a model server
 entirely and uses the engine in-process. `Database.Client` is the counterpart on
 the other end of the wire.
 
-The `string[] args` builder overload is the enabled-resource entry point. It
-honors `ResourceRuntime.Current` and an assembly-keyed generated control-plane
-registration; the no-argument and options overloads stay plain hosts and bind no
-admin listener.
+The `string[] args` builder overload is the enabled-resource entry point. It honors
+`Hosting.Resources` `ResourceRuntime.Current` and an assembly-keyed generated control-plane
+registration; the no-argument and options overloads stay plain hosts and bind no admin listener.

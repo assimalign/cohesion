@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.ApplicationModel — Overview
 
-The Core-only orchestration package for Cohesion databases. It turns an enabled
+The AOT-compatible, dependency-guarded orchestration package for Cohesion databases. It turns an enabled
 database executable's build-produced `ResourceManifest` into a typed
 `DatabaseResource`, applies deployer-owned replica and storage overrides, and emits a
 platform-neutral `ResourcePlan` for the selected gateway compiler.
@@ -36,8 +36,8 @@ to developer-experience item 31c.
 
 - `Assimalign.Cohesion.ApplicationModel` for manifests, planned resources, and the
   platform-neutral realization-plan IR.
-- `Assimalign.Cohesion.Hosting` for the Core-only default control-plane contract.
+- `Assimalign.Cohesion.Hosting.Resources` for the default control-plane contract and runtime seam.
 
 The project is guarded by COHAM001 and never references Database runtime, gateway, or
 platform packages. It emits no legacy resource-specific environment variables; runtime
-endpoint and mount values flow through `ResourceContext`.
+endpoint and mount values flow through the `Hosting.Resources` `ResourceContext`.

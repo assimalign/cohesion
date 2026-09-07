@@ -14,7 +14,9 @@ and implements the root's application-builder seam. It owns no server machinery
 (engines are data machines — operational from creation, disposed by their
 composition root), and no worker scheduling (engines own their loops
 unconditionally). Its same-area references remain the area root only. The
-non-area `Hosting` foundation supplies lifecycle/control-plane contracts, while
+non-area plain `Hosting` package supplies lifecycle, `Hosting.Resources` supplies the
+opt-in resource runtime/control-plane contracts, and `Hosting.Health` supplies health
+contribution contracts, while
 private cross-area `Web.Hosting` and `Web.Health` references implement the
 enabled resource's HTTP admin surface without exposing Web types publicly.
 
@@ -129,8 +131,8 @@ the host stops," which a customer executable does in dependency order
 
 The legacy `DatabaseHostConfiguration` and resource-specific environment conventions are
 removed. `DatabaseApplication.CreateBuilder(args)` consults
-`ResourceRuntime.Current` only when the calling executable has an assembly-keyed
-default-control-plane registration. Its typed ambient endpoints, mounts, settings,
+`Hosting.Resources` `ResourceRuntime.Current` only when the calling executable has an
+assembly-keyed default-control-plane registration. Its typed ambient endpoints, mounts, settings,
 references, and environment are then the resource contract; a plain builder does
 not consume the ambient context. Engine and wire-server options stay code-first in
 the customer's `Program.cs`.
@@ -180,9 +182,9 @@ model's server verb, then builds and runs the host.
 ## Enabled-resource control plane
 
 `DatabaseApplication.CreateBuilder(args)` captures the calling resource
-assembly and asks `ResourceRuntime` for its generated registration. When one is
-present, `Build()` adds builder health checks and registered
-`IHealthContributor`s to the isolated plane, including
+assembly and asks the `Hosting.Resources` `ResourceRuntime` for its generated registration. When
+one is present, `Build()` adds builder health checks and registered
+`Hosting.Health` `IHealthContributor`s to the isolated plane, including
 `DatabaseApplicationContext`. The context de-duplicates registered and
 server-fronted engines by identity: `Running` is healthy, `Faulted` is degraded,
 and `Disposed` (or an unknown state) is unhealthy; its diagnostic data carries the
@@ -213,7 +215,7 @@ references `Database.ApplicationModel`.
   everything else).
 - No governance/quotas (#167). The application-context engine/worker aggregate and
   HTTP delivery seam are present; model-specific diagnostics can contribute
-  additional `IHealthContributor`s later.
+  additional `Hosting.Health` `IHealthContributor`s later.
 - No server machinery — servers are per-model and live inside the model
   packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
   through the root's `IDatabaseServer` seam.

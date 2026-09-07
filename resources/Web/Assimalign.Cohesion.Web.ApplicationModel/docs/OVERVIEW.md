@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Web.ApplicationModel - Overview
 
-The Web area's Core-only orchestration package supplies a typed manifest-backed
+The Web area's AOT-compatible, dependency-guarded orchestration package supplies a typed manifest-backed
 resource, a platform-neutral planner, and the default control-plane factory used by
 enabled Web executables.
 
@@ -19,7 +19,8 @@ enabled Web executables.
 The Web SDK adds this package only for an executable with
 `CohesionApplicationModel=enabled`. Generated code registers the factory by resource
 assembly; `WebApplication.CreateBuilder(args)` consumes that registration and the
-current `ResourceContext`. A disabled executable remains a plain Web application.
+current `Hosting.Resources` `ResourceContext`. A disabled executable remains a plain
+Web application.
 
 Public exposure remains a manifest fact. Plan v1 has no host or certificate override
 fields; platform-specific ingress, load-balancer, and certificate-resolution choices
@@ -28,6 +29,6 @@ remain gateway responsibilities.
 ## Dependencies
 
 - `Assimalign.Cohesion.ApplicationModel`
-- `Assimalign.Cohesion.Hosting`
+- `Assimalign.Cohesion.Hosting.Resources`
 
 No Web runtime or platform assembly enters this dependency closure.

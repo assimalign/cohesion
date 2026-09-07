@@ -9,8 +9,8 @@ explicit API without introducing a DI-specific hosting layer.
 
 ## Public application composition
 
-Web application and resource authors can register typed checks, inline probes, or Hosting
-contributors:
+Web application and resource authors can register typed checks, inline probes, or
+`Hosting.Health` contributors:
 
 ```csharp
 IHealthCheckService health = HealthChecks.CreateBuilder()
@@ -33,12 +33,12 @@ service location is unnecessary.
 
 ## Hosting contributor bridge
 
-`Assimalign.Cohesion.Hosting.IHealthContributor` is the transport-neutral host health contract.
+`Assimalign.Cohesion.Hosting.Health.IHealthContributor` is the transport-neutral host health contract.
 `AddContributor` adapts one contributor into a Web `IHealthCheck` registration:
 
 - `IHealthContributor.Name` becomes the registration name and follows the normal case-insensitive
   duplicate-name rule.
-- Hosting `Healthy`, `Degraded`, and `Unhealthy` values map explicitly to their Web health
+- `Hosting.Health` `Healthy`, `Degraded`, and `Unhealthy` values map explicitly to their Web health
   counterparts.
 - Description and diagnostic data are preserved.
 - The evaluation cancellation token is forwarded to the contributor.

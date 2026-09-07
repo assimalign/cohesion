@@ -3,7 +3,7 @@
 ## Purpose
 
 `Assimalign.Cohesion.Database.Testing` runs an SDK-enabled Database resource's real entry
-point in the test process. It installs a test-owned `ResourceContext`, invokes
+point in the test process. It installs a test-owned `Hosting.Resources` `ResourceContext`, invokes
 `Program.Main`, waits until the Database default control plane reports ready, and shuts the
 resource down through its public graceful-stop endpoint. A test therefore exercises the same
 composition in `Program.cs`—engine, schema/provisioning, servers, generated control plane,
@@ -34,7 +34,8 @@ When no context is supplied, a factory creates:
 | `data` mount | Unique temporary directory, removed on disposal |
 
 The loopback ports are allocated independently per factory, and the context is carried by
-`ResourceRuntime`'s asynchronous invocation scope rather than process environment variables.
+the `Hosting.Resources` `ResourceRuntime` asynchronous invocation scope rather than process
+environment variables.
 Tests that need deterministic ports or additional generated inputs can pass a complete
 `ResourceContext` through the options object. A custom context must include the `admin`
 endpoint because readiness and graceful stop are part of the factory contract.
@@ -72,8 +73,9 @@ the statically rooted generic marker.
 
 ## Relationships
 
-- `Assimalign.Cohesion.Hosting` owns `ResourceContext`, the scoped runtime carrier, and the
-  host/control-plane bridge.
+- `Assimalign.Cohesion.Hosting` owns the plain host lifecycle.
+- `Assimalign.Cohesion.Hosting.Resources` owns `ResourceContext`, the scoped runtime carrier,
+  resource entry registration, and the host/control-plane bridge.
 - `Assimalign.Cohesion.Database.Hosting` owns `DatabaseApplication.CreateBuilder(args)` and
   serves the private admin endpoint the factory probes.
 - `Assimalign.Cohesion.Database.ApplicationModel` is injected into enabled resource

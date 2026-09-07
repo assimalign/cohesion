@@ -17,8 +17,8 @@ the framework already ships:
   in-memory listener's bound `InMemoryConnectionFactory` and speaks over the returned
   duplex-pipe stream.
 - **Resource-program side** — `FromProgram<Program>()` installs a scoped ambient
-  `ResourceContext`, invokes the generated entry registration, waits for the Web default
-  control plane's readiness route, and owns graceful stop for that invocation.
+  `Hosting.Resources` `ResourceContext`, invokes the generated entry registration, waits for
+  the Web default control plane's readiness route, and owns graceful stop for that invocation.
 
 Nothing in the middle is faked. A test request crosses the real HTTP/1.1 or HTTP/2 wire
 format, the real `HttpConnectionListener` receive loop, the real `WebApplicationServer`
@@ -58,8 +58,9 @@ production composition order rather than inventing a test-only one.
 
 **Two explicit drive paths.** The existing constructor preserves mutable, socketless tests and
 starts the default server directly. `FromProgram<Program>()` instead invokes the real resource
-entry point; its `RunAsync()` flows through `ResourceHost`, so every registered host service
-participates and the factory controls it only through the default control plane. The two modes
+entry point; its `RunAsync()` flows through the `Hosting.Resources` `ResourceHost`, so every
+registered host service participates and the factory controls it only through the default control
+plane. The two modes
 do not share hidden hooks or process-wide mutable lists.
 
 **Start-on-first-client.** `CreateClient()` starts the factory when it has not been started
@@ -112,7 +113,8 @@ Web.Hosting.
 | `DisposeAsync` | `StopAsync`, then application disposal, then defensive in-memory listener teardown (idempotent for the never-started factory). Safe to call twice. |
 
 For Program-backed factories, construction reserves an ambient loopback endpoint but starts
-nothing; `StartAsync` creates a `ResourceRuntime` scope, invokes the registered entry, and waits
+nothing; `StartAsync` creates a `Hosting.Resources` `ResourceRuntime` scope, invokes the
+registered entry, and waits
 for `/readyz`; `StopAsync` posts `/cohesion/v1/stop` and joins the entry completion task;
 disposal then releases the captured host. The factory presents the invocation's bootstrap
 credential only on its internal graceful-stop request. Public clients are deliberately
@@ -143,7 +145,8 @@ to that invocation.
 `IsAotCompatible=true` holds. Manual composition is delegate wiring with zero reflection.
 Program-backed composition uses the one reflection operation explicitly sanctioned by the
 developer-experience design: the compiler-rooted `Assembly.EntryPoint`. The generated
-`ResourceControlPlane.g.cs` registers that assembly without naming the user entry type, so both
+`ResourceControlPlane.g.cs` registers that assembly with `Hosting.Resources` without naming the
+user entry type, so both
 top-level statements and an explicitly named `Main` remain valid. There is no assembly scan,
 dynamic load, runtime code generation, or reflection-based serialization.
 

@@ -5,7 +5,7 @@ builder-time registration, readiness/liveness filtering, `/healthz`, `/readyz`, 
 pipeline endpoints, and an AOT-safe JSON response writer.
 
 `App.Web` exposes this assembly publicly, so application authors can register their own
-`IHealthCheck` implementations, inline probes, or transport-neutral Hosting
+`IHealthCheck` implementations, inline probes, or transport-neutral `Hosting.Health`
 `IHealthContributor` instances. `App.Database` also carries the assembly privately as part of
 its Web runtime closure; that private inclusion does not expose the Web health API to Database
 applications.

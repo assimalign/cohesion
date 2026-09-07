@@ -7,8 +7,9 @@ an ApplicationModel package.
 `DatabaseApplication.CreateBuilder(args)` also honors an enabled resource's
 assembly-keyed default control-plane registration. At build time it aggregates
 `AddHealthCheck` registrations and host components implementing
-`IHealthContributor` with the application context's engine/worker health,
-observes ambient endpoints, attaches the host for graceful stop, and binds a
+the `Hosting.Health` `IHealthContributor` contract with the application context's
+engine/worker health, observes ambient `Hosting.Resources` endpoints, attaches the host
+for graceful stop, and binds a
 private Web host to the ambient `admin` endpoint. Web.Health serves `/healthz`,
 `/readyz`, and `/livez`; the registered control plane serves
 `/cohesion/v1/endpoints`, `/cohesion/v1/stop`, and

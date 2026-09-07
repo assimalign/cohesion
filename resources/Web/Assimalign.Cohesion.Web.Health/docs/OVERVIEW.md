@@ -11,7 +11,7 @@ and `/livez` pipeline endpoints.
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
   `HealthReportEntry`, and `HealthCheckRegistration`.
 - **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks,
-  and `AddContributor` for `Assimalign.Cohesion.Hosting.IHealthContributor`.
+  and `AddContributor` for `Assimalign.Cohesion.Hosting.Health.IHealthContributor`.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
 - **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
@@ -20,8 +20,8 @@ and `/livez` pipeline endpoints.
 ## Dependencies
 
 The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts and
-`Assimalign.Cohesion.Hosting` for the transport-neutral contributor bridge. It does not depend on
-a dependency-injection container.
+`Assimalign.Cohesion.Hosting.Health` for the transport-neutral contributor bridge. It does not
+depend on a dependency-injection container.
 
 ## Framework delivery
 

@@ -6,8 +6,8 @@ complementary modes:
 - `new WebApplicationTestFactory()` composes a mutable application over the in-memory
   connection driver for deterministic HTTP/1.1 and HTTP/2 pipeline tests.
 - `WebApplicationTestFactory.FromProgram<Program>()` invokes an enabled resource's real entry
-  point under a test-scoped `ResourceRuntime.CreateScope(...)`, waits for `/readyz`, and stops
-  it through `/cohesion/v1/stop`.
+  point under a test-scoped `Hosting.Resources` `ResourceRuntime.CreateScope(...)`, waits for
+  `/readyz`, and stops it through `/cohesion/v1/stop`.
 
 ```csharp
 await using WebApplicationTestFactory factory = new();

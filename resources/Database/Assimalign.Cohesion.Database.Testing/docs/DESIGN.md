@@ -19,7 +19,7 @@ uses loopback endpoints by default.
 ```text
 DatabaseApplicationTestFactory.FromProgram<Program>()
   -> resolve Program's statically referenced assembly and compiler entry point
-  -> ResourceRuntime.CreateScope(test ResourceContext)
+  -> Hosting.Resources ResourceRuntime.CreateScope(test ResourceContext)
   -> LongRunning Task (captures the scoped ResourceContext)
   -> Assembly.EntryPoint.Invoke(args)
        -> Program.Main
@@ -33,7 +33,7 @@ DatabaseApplicationTestFactory.FromProgram<Program>()
 `IDatabaseApplicationProgram` implementation or a factory delegate would add a test-only API
 to every resource and create a second path around top-level statements. Generated code
 registers an enabled resource's control-plane factory with `ResourceRuntime`; the testing
-package invokes the compiler-rooted entry while that common hosting seam carries the context.
+package invokes the compiler-rooted entry while that `Hosting.Resources` seam carries the context.
 
 The marker must be the actual declaring type of `Assembly.EntryPoint`. For C# top-level
 statements, consumers make the compiler-created type nameable with an empty
@@ -44,9 +44,9 @@ one `string[]`, and may return `void`, `int`, `Task`, or `Task<int>`.
 
 | Phase | Behavior |
 | --- | --- |
-| `FromProgram` | Validates the marker and options; creates or adopts a `ResourceContext`. Nothing runs. |
+| `FromProgram` | Validates the marker and options; creates or adopts a `Hosting.Resources` `ResourceContext`. Nothing runs. |
 | `StartAsync` | Starts one long-running entry invocation inside the scoped context, then polls `GET /readyz` until healthy or the startup budget expires. Repeated calls after readiness are no-ops. |
-| Running | `ResourceRuntime` keeps the context isolated in that invocation's async flow. The test reaches SQL through `db` and management through `admin`. |
+| Running | The `Hosting.Resources` `ResourceRuntime` keeps the context isolated in that invocation's async flow. The test reaches SQL through `db` and management through `admin`. |
 | `StopAsync` | Posts `/cohesion/v1/stop`, waits for `Program.Main` to complete, and clears the invocation so a deliberate restart can use a fresh scope. A never-started stop is a no-op. |
 | `DisposeAsync` | Bounds graceful stop with `ShutdownTimeout`, then best-effort removes a factory-owned temporary data mount. Custom mounts remain caller-owned. |
 
@@ -57,8 +57,9 @@ scope disposal remains responsible for application and engine disposal after gra
 ## Isolation and parallelism
 
 Each default factory owns unique loopback ports and a unique data directory. The
-`ResourceContext` travels through `ResourceRuntime.CreateScope`, which is asynchronous-flow
-local; the factory never edits `COHESION_*` process variables. Generated registrations are
+The `Hosting.Resources` `ResourceContext` travels through `ResourceRuntime.CreateScope`, which is
+asynchronous-flow local; the factory never edits `COHESION_*` process variables. Generated
+registrations are
 assembly keyed and create a new control-plane instance for each builder. Consequently,
 multiple factories can run concurrently when their supplied contexts do not reuse ports or
 mounts.

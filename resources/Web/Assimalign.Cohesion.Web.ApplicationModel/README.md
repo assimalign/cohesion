@@ -1,14 +1,14 @@
 # Assimalign.Cohesion.Web.ApplicationModel
 
-The Web area's Core-only orchestration package. It turns a build-produced
+The Web area's AOT-compatible, dependency-guarded orchestration package. It turns a build-produced
 `ResourceManifest` into a typed `WebResource`, applies deployer-owned options,
 and emits the platform-neutral `cohesion/plan/v1` realization plan consumed by
 the selected gateway compiler. It also supplies the default Web resource
 control plane.
 
-Its dependency closure is deliberately small: `Assimalign.Cohesion.ApplicationModel`
-for manifests and realization-plan records, and `Assimalign.Cohesion.Hosting`
-for the Core-only resource control-plane contract. It never references
+Its direct dependency set is deliberately small: `Assimalign.Cohesion.ApplicationModel`
+for manifests and realization-plan records, and `Assimalign.Cohesion.Hosting.Resources`
+for the resource control-plane contract and runtime registration seam. It never references
 `Web.Hosting`, another Web feature package, or a platform SDK.
 
 ## Planning a Web resource
@@ -39,9 +39,9 @@ endpoints, graceful stop, and the Web area's command kinds. The initial Web
 command-kind set is empty.
 
 The package owns the surface because every enabled Web resource exposes the
-same default. `Web.Hosting` consumes only `IResourceControlPlane` through
-`ResourceRuntime`; the runtime therefore does not acquire an ApplicationModel
-dependency.
+same default. `Web.Hosting` consumes only the `Hosting.Resources`
+`IResourceControlPlane` through `ResourceRuntime`; the runtime therefore does not
+acquire an ApplicationModel dependency.
 
 ## Opt-in boundary
 

@@ -103,6 +103,14 @@ A one-line edit to `App.props`:
 
 The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly.
 
+The Hosting-area package graph is exact: `Assimalign.Cohesion.Hosting.Health` references Core only;
+`Assimalign.Cohesion.Hosting.Resources` references Core, plain Hosting, Hosting.Health, and the
+ProtectedData facade; plain Hosting references neither sibling. The base `Assimalign.Cohesion.App`
+framework carries both opt-in siblings. All 18 resource SDKs emit generated code that references
+`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`, so Resources belongs beside the
+already-shared plain Hosting assembly; Health follows because Resources references it. This
+framework-level delivery does not add direct project references to the 16 filler resource areas.
+
 ## Cross-resource dependencies (private implementation details)
 
 A library sometimes needs another library as an internal implementation detail without exposing that dependency to its consumers (canonical example: `Assimalign.Cohesion.Database` uses `Assimalign.Cohesion.Web` for HTTP transport, but `Sdk.Database` consumers should see database types only). Two coordinated items make this work:
@@ -128,12 +136,16 @@ orchestration gateway:
 
 - **COHAM001** is the strict dependency-closure guard for an assembly under `resources/**` whose
   name ends in `.ApplicationModel`. It activates only when that project sets
-  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; this staged opt-in exists
-  because Web.ApplicationModel still has a runtime-heavy closure. Once active, the only permitted
-  non-BCL assemblies are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
-  `Assimalign.Cohesion.ApplicationModel`, and `Assimalign.Cohesion.Hosting`. BCL means assemblies
-  supplied by the `Microsoft.NETCore.App` reference pack; third-party packages are not implicitly
-  allowed.
+  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; Database.ApplicationModel
+  and Web.ApplicationModel are guarded now. Once active, the only permitted non-BCL assemblies
+  are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
+  `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
+  `Assimalign.Cohesion.Hosting.Health`, and `Assimalign.Cohesion.Hosting.Resources`. The area's
+  ApplicationModel project directly references only `Assimalign.Cohesion.ApplicationModel` and
+  `Assimalign.Cohesion.Hosting.Resources`; the latter brings the plain host and health contracts
+  into the resolved closure. BCL means assemblies supplied by the `Microsoft.NETCore.App`
+  reference pack, plus the `System.Security.Cryptography.ProtectedData` facade used by
+  Hosting.Resources' Windows mount reader; third-party packages are not implicitly allowed.
 - **COHRES003** applies automatically to every non-harness project under `resources/**` and bans
   any `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. It has no opt-in and no exemption.
 

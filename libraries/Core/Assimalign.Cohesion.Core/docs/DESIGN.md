@@ -41,11 +41,11 @@ literals are unbracketed and internationalized hosts use their ASCII-compatible 
 `AppEnvironment` owns the single environment-name rule:
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this
 Core rule rather than parsing process variables itself. Both process-environment and dictionary
-readers live in Core so future ambient `ResourceContext` support can carry the same keys without
-duplicating their parsing rules.
+readers live in Core so the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` can
+carry the same keys without duplicating their parsing rules.
 
-The ambient `ResourceContext` and `ResourceRuntime` are deliberately not part of this change;
-they are the in-process carrier delivered by runtime-contract item 12.
+`ResourceContext` and `ResourceRuntime` live in `Assimalign.Cohesion.Hosting.Resources`, not
+Core; they are the in-process carrier delivered by runtime-contract item 12.
 
 ## AOT posture
 

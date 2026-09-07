@@ -60,7 +60,8 @@ StartAsync ──> await listener.BindAsync ──> AcceptLoopAsync (one stored 
 `BindAsync`. Only after every transport endpoint is bound does it schedule the
 stored accept-loop task and return. A bind failure is surfaced as
 `HostStartupException`, preserving the transport exception as its inner exception;
-`ResourceHost` can therefore classify typed configuration/dependency causes as
+the `ResourceHost` from `Hosting.Resources` can therefore classify typed
+configuration/dependency causes as
 exit 64/69 and other pre-ready bind failures as exit 70. The default server is
 registered as both `IWebApplicationServer` and `IHostService`, resolving to the
 same singleton, so the host lifecycle actually drives this boundary. When an
@@ -322,10 +323,10 @@ currently captures only the design decisions that are settled.
 
 ## Enabled-resource control plane
 
-`WebApplication.CreateBuilder(args)` captures the calling resource assembly and
-honors its generated `ResourceRuntime` registration. When enabled, the builder
+`WebApplication.CreateBuilder(args)` captures the calling resource assembly and honors its
+generated `Hosting.Resources` `ResourceRuntime` registration. When enabled, the builder
 binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
-DI-registered `IHealthContributor`s, observes ambient endpoints, and attaches
+DI-registered `Hosting.Health` `IHealthContributor`s, observes ambient endpoints, and attaches
 the built host for graceful stop. A fixed terminal layer wraps the final resolved
 pipeline — including a pipeline supplied through `IWebApplicationBuilder.AddPipeline` —
 so it always runs before user dispatch. It serves `/healthz`, `/readyz`, and `/livez`
@@ -345,10 +346,11 @@ comparison is constant-time. The bare probe routes remain directly probeable by
 the platform. A standalone resource with no issued credential retains the local
 unauthenticated behavior.
 
-This module consumes only the Hosting contract and never references
-`Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and
-options overloads remain plain applications: they install no control-plane
-terminal, so the ordinary bodyless-404 fallback handles those paths.
+This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
+runtime/control-plane and `Hosting.Health` contribution contracts. It never references
+`Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and options
+overloads remain plain applications: they install no control-plane terminal, so the ordinary
+bodyless-404 fallback handles those paths.
 
 ## Default application configuration
 
@@ -361,9 +363,10 @@ increasing precedence order:
    removed and double underscores become configuration path separators);
 4. command-line arguments.
 
-The JSON files resolve from the ambient `ResourceContext.ContentRootPath` for an
+The JSON files resolve from the ambient `Hosting.Resources`
+`ResourceContext.ContentRootPath` for an
 enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process
-gateway supplies settings directly on the ambient `ResourceContext`, rather than
+gateway supplies settings directly on that ambient `ResourceContext`, rather than
 mutating process-wide environment variables. The builder folds those settings into
 the deployment-setting layer before the caller's command-line arguments, so the
 same keys work in process and out of process while explicit arguments retain the

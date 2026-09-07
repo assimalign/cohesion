@@ -2,7 +2,7 @@
 
 ## Intent
 
-This project is the Database area's Core-only orchestration package. It gives a
+This project is the Database area's AOT-compatible, dependency-guarded orchestration package. It gives a
 gateway a typed database resource, a platform-neutral realization planner, and the
 default control-plane factory that every orchestration-enabled database executable
 registers. It never references `Database.Hosting`, an engine package, a gateway
@@ -40,7 +40,7 @@ exposes only deployer-owned planning overrides:
 Ports, mount paths, durability settings, and arbitrary environment values are resource
 facts owned by the executable manifest, not deployer options. Consequently this
 package no longer declares or emits resource-specific environment variables. Runtime
-values flow through the frozen `ResourceContext` contract instead.
+values flow through the frozen `Hosting.Resources` `ResourceContext` contract instead.
 
 ## Database planner
 
@@ -82,11 +82,12 @@ application authors normally do not load the JSON themselves.
 
 ## Default control plane
 
-`DatabaseResourceControlPlane.Create()` returns a fresh Core-only
+`DatabaseResourceControlPlane.Create()` returns a fresh `Hosting.Resources`
 `IResourceControlPlane`. The enabled resource's generated
-`ResourceControlPlane.g.cs` registers that factory with `ResourceRuntime` and seeds it
+`ResourceControlPlane.g.cs` registers that factory with the `Hosting.Resources`
+`ResourceRuntime` and seeds it
 with the invocation's observed endpoints. `Database.Hosting` reads the registration
-through the shared Hosting contract and serves it on the manifest's `admin` endpoint;
+through the shared `Hosting.Resources` contract and serves it on the manifest's `admin` endpoint;
 neither package references the other.
 
 The accepted command-kind set is intentionally empty in this work item. Database
@@ -97,7 +98,8 @@ resource commands (`AddDatabase`, `AddPrincipal`) belong to developer-experience
 
 COHAM001 constrains the complete production dependency closure to
 `Assimalign.Cohesion.Core`, `Assimalign.Cohesion.ApplicationModel`,
-`Assimalign.Cohesion.Hosting`, and the permitted BCL surface. The planner uses typed
+`Assimalign.Cohesion.Hosting`, `Assimalign.Cohesion.Hosting.Health`,
+`Assimalign.Cohesion.Hosting.Resources`, and the permitted BCL surface. The planner uses typed
 records and ordinary loops only. Golden serialization goes through
 `ResourcePlanJsonContext`; there is no reflection, assembly scanning, runtime code
 generation, runtime database dependency, or platform SDK dependency.

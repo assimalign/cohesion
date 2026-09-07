@@ -116,7 +116,7 @@ the registration under the same lock.
   `COHESION_MOUNT_<COMPOSITE>_<MEMBER>_<M>_PATH`, pointing to the same resource-rooted claim;
   inward remapping belongs to `ProcessHost`.
   Windows files are CurrentUser DPAPI ciphertext; this makes no ACL claim. The
-  `ResourceMount` reader in `Assimalign.Cohesion.Hosting` decrypts that file for the child while
+  `ResourceMount` reader in `Assimalign.Cohesion.Hosting.Resources` decrypts that file for the child while
   retaining the raw path for tools that require one.
 - **Bootstrap credential**: every local reconcile receives a fresh ASCII bearer credential.
   The apply path writes it with the same private file discipline at
