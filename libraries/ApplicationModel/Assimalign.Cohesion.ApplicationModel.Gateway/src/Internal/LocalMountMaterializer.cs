@@ -43,7 +43,9 @@ internal sealed class LocalMountMaterializer
         CreatePrivateDirectory(resourceDirectory);
 
         ILocalFileProtector? protector = OperatingSystem.IsWindows()
-            ? new WindowsLocalFileProtector(applicationDirectory, application)
+            ? new WindowsLocalFileProtector(
+                SafeChild(applicationDirectory, ".state", "gateway metadata"),
+                application)
             : null;
         var mountVariables = new HashSet<string>(StringComparer.Ordinal);
 

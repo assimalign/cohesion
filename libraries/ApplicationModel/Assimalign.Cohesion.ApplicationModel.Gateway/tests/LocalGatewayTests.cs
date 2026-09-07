@@ -115,7 +115,7 @@ public class LocalGatewayTests
             gateway.ResourceStates.GetState(resource).ShouldBe(ResourceLifecycle.Stopped);
             File.Exists(pidPath).ShouldBeFalse();
             ProcessExists(processId).ShouldBeFalse();
-            File.ReadAllText(Path.Combine(root, ".cohesion", ApplicationNameValue, "owner")).Trim()
+            File.ReadAllText(Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", "owner")).Trim()
                 .ShouldBe($"{ApplicationNameValue}@local");
         }
         finally
@@ -337,7 +337,7 @@ public class LocalGatewayTests
             int secondPort = await RunOnceAndGetPortAsync(root, secondCapture);
 
             firstPort.ShouldBe(secondPort);
-            File.Exists(Path.Combine(root, ".cohesion", ApplicationNameValue, "ports.json")).ShouldBeTrue();
+            File.Exists(Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", "ports.json")).ShouldBeTrue();
 
             IReadOnlyDictionary<string, string> environment = ReadStringMap(secondCapture);
             environment[ResourceEnvironment.Application].ShouldBe(ApplicationNameValue);
@@ -1016,7 +1016,7 @@ public class LocalGatewayTests
     }
 
     private static string ProcessPath(string root, ResourceName resource)
-        => Path.Combine(root, ".cohesion", ApplicationNameValue, resource.ToString(), "pid");
+        => Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", resource.ToString(), "pid");
 
     private static int ReadProcessId(string path)
     {

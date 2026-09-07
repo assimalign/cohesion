@@ -76,7 +76,7 @@ the registration under the same lock.
   executable can launch only through `AddExecutable(name, path, options)`, with an explicit
   readiness probe or per-resource stdout marker.
 - **Endpoints**: each endpoint gets a loopback port persisted in
-  `.cohesion/<application>/ports.json`. The gateway injects the frozen `ResourceEnvironment`
+  `.cohesion/<application>/.state/ports.json`. The gateway injects the frozen `ResourceEnvironment`
   endpoint contract (caller values win), publishes the allocated endpoints atomically with the
   first `Running` transition. Dependency environment injection remains design item 21.
 - **Probes**: HTTP (exactly 200 succeeds; 404/405 fail startup immediately), TCP, and exec are
@@ -103,8 +103,10 @@ the registration under the same lock.
   `LocalGatewayOptions.StopGrace` is the
   fallback for opaque executables), then force-kills the whole group/tree. A process that exits
   during grace becomes `Stopped`; one that requires escalation becomes `Failed(forced)`.
-- **Recovery**: `.cohesion/<application>/owner` records the gateway identity and
-  `.cohesion/<application>/<resource>/pid` records PID, process start time, executable path,
+- **Known POSIX limitation**: process grouping depends on the host-provided `setsid` command with
+  a best-effort `setpgid` fallback; no RID-native launch helper is shipped.
+- **Recovery**: `.cohesion/<application>/.state/owner` records the gateway identity and
+  `.cohesion/<application>/.state/<resource>/pid` records PID, process start time, executable path,
   process-group ownership, and the Windows stop-event name. A new gateway independently verifies
   PID + start time + executable before adopting a live child and rebuilds readiness from probes.
   `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each

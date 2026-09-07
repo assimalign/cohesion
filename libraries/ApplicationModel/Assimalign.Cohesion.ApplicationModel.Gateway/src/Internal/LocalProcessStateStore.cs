@@ -171,7 +171,13 @@ internal sealed class LocalProcessStateStore
     }
 
     private string GetApplicationDirectory(ApplicationName application)
-        => GetChildDirectory(_stateDirectory, application.ToString(), "Application");
+    {
+        string applicationDirectory = GetChildDirectory(
+            _stateDirectory,
+            application.ToString(),
+            "Application");
+        return GetChildDirectory(applicationDirectory, ".state", "Gateway metadata");
+    }
 
     private string GetProcessPath(ApplicationName application, ResourceName resource)
     {

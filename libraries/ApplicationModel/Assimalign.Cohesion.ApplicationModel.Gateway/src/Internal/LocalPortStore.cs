@@ -142,7 +142,8 @@ internal sealed class LocalPortStore
 
     private string GetApplicationDirectory(ApplicationName application)
     {
-        string directory = Path.GetFullPath(Path.Combine(_stateDirectory, application.ToString()));
+        string directory = Path.GetFullPath(
+            Path.Combine(_stateDirectory, application.ToString(), ".state"));
         string root = _stateDirectory.EndsWith(Path.DirectorySeparatorChar)
             ? _stateDirectory
             : _stateDirectory + Path.DirectorySeparatorChar;
