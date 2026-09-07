@@ -52,6 +52,13 @@ internal sealed class LocalGatewayProcessSupervisor
             throw new InvalidOperationException("The local process supervisor has not been initialized for an application.");
         }
 
+        if (_resources.ContainsKey(configuration.Resource.Id))
+        {
+            // Reconcile is level-triggered. Mount files have already been refreshed by the
+            // local preparer; an already supervised process does not need a duplicate loop.
+            return;
+        }
+
         var supervised = new SupervisedResource(configuration);
         if (!_resources.TryAdd(configuration.Resource.Id, supervised))
         {
@@ -133,6 +140,83 @@ internal sealed class LocalGatewayProcessSupervisor
 
             supervised.Lifetime.Dispose();
             supervised.ForceStop.Dispose();
+        }
+    }
+
+    public async Task UninstallAsync(
+        IApplicationResource resource,
+        TimeSpan stopGrace,
+        CancellationToken cancellationToken)
+    {
+        if (_resources.ContainsKey(resource.Id))
+        {
+            await StopAsync(resource, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        LocalProcessRegistration? registration = await _processState
+            .LoadAsync(_application, resource.Name, cancellationToken)
+            .ConfigureAwait(false);
+        if (registration is null)
+        {
+            return;
+        }
+
+        Process? process = null;
+        bool verified = false;
+        try
+        {
+            process = Process.GetProcessById(registration.ProcessId);
+            if (process.HasExited
+                || process.StartTime.ToUniversalTime().Ticks != registration.StartTimeUtcTicks)
+            {
+                _processState.DeleteStale(_application, resource.Name);
+                return;
+            }
+
+            string? executablePath = await ObserveExecutablePathAsync(
+                process,
+                cancellationToken).ConfigureAwait(false);
+            if (executablePath is null
+                || !PathEquals(executablePath, registration.ExecutablePath))
+            {
+                _processState.DeleteStale(_application, resource.Name);
+                return;
+            }
+
+            verified = true;
+            var attempt = new ProcessAttempt(process, registration)
+            {
+                Exit = process.WaitForExitAsync(),
+            };
+            ProcessStopResult result = await StopProcessCoreAsync(
+                attempt,
+                stopGrace,
+                cancellationToken).ConfigureAwait(false);
+            await _processState.DeleteIfMatchesAsync(
+                _application,
+                resource.Name,
+                registration).ConfigureAwait(false);
+            _state.SetState(
+                resource.Id,
+                result == ProcessStopResult.Clean
+                    ? ResourceLifecycle.Stopped
+                    : ResourceLifecycle.Failed,
+                result == ProcessStopResult.Forced
+                    ? "Failed(forced): observed process ignored its graceful-stop signal during uninstall."
+                    : null);
+        }
+        catch (ArgumentException) when (!verified)
+        {
+            _processState.DeleteStale(_application, resource.Name);
+        }
+        catch (InvalidOperationException) when (!verified)
+        {
+            _processState.DeleteStale(_application, resource.Name);
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 

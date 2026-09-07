@@ -119,6 +119,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         }
 
         IApplicationModel model = BuildModel(validate: true);
+        _gateway.Validate(model);
         return new CohesionApplication(model, _gateway);
     }
 

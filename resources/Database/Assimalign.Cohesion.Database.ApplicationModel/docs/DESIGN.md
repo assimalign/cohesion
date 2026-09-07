@@ -27,7 +27,8 @@ The manifest is exercised through the generic `ApplicationGateway` realization a
 (which `LocalGateway` inherits): `AddDatabase(...)` with a dependent that `DependsOn` it
 realizes the database **first**, gates the dependent on the database reaching `Running`,
 publishes the database's **observed endpoint** (the concrete allocated port) into the
-state manager for the dependent to consume, tears down in **reverse order**, and marks
+state manager for the dependent to consume, stops runtime activity without deleting
+persistent objects, tears down through `UninstallAsync` in **reverse order**, and marks
 dependents **`Blocked`** if the database fails to become ready. These are covered by
 `DatabaseOrchestrationTests` over a recording controller + state manager.
 

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,7 +11,6 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class LocalMountMaterializer
 {
-    private const string literalPrefix = "literal:";
     private const UnixFileMode PrivateDirectoryMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
@@ -28,10 +26,12 @@ internal sealed class LocalMountMaterializer
         ApplicationName application,
         IApplicationResource resource,
         ResourcePlan plan,
+        ResourceInputs inputs,
         IDictionary<string, string> environment,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(inputs);
 
         IReadOnlyList<MountBinding> mounts = plan.Container.Mounts;
         if (mounts.Count == 0)
@@ -92,7 +92,20 @@ internal sealed class LocalMountMaterializer
                     throw new IOException($"Mount path '{mountPath}' is a directory, but mount '{mount.Mount}' requires a file.");
                 }
 
-                byte[] content = GetInitialContent(mount);
+                if (!inputs.Mounts.TryGetValue(mount.Mount, out ResourceMountInput? input))
+                {
+                    throw new InvalidOperationException(
+                        $"Resource '{resource.Name}' has no input for mount '{mount.Mount}'.");
+                }
+
+                if (!input.IsResolved)
+                {
+                    throw new InvalidOperationException(
+                        input.UnresolvedReason
+                        ?? $"Mount '{mount.Mount}' on resource '{resource.Name}' is unresolved.");
+                }
+
+                byte[] content = input.Content.ToArray();
                 byte[]? persisted = null;
                 try
                 {
@@ -122,27 +135,20 @@ internal sealed class LocalMountMaterializer
         }
     }
 
-    private static byte[] GetInitialContent(MountBinding mount)
+    public Task DeleteAsync(
+        ApplicationName application,
+        ResourceName resource,
+        CancellationToken cancellationToken)
     {
-        if (mount.Source is not null
-            && mount.Source.StartsWith(literalPrefix, StringComparison.Ordinal))
+        cancellationToken.ThrowIfCancellationRequested();
+        string applicationDirectory = SafeChild(_stateDirectory, application.ToString(), "application");
+        string resourceDirectory = SafeChild(applicationDirectory, resource.ToString(), "resource");
+        if (Directory.Exists(resourceDirectory))
         {
-            if (mount.Kind != ResourceMountKind.Configuration)
-            {
-                throw new InvalidDataException(
-                    $"Mount '{mount.Mount}' uses a literal source, which is allowed only for Configuration mounts.");
-            }
-
-            return Encoding.UTF8.GetBytes(mount.Source[literalPrefix.Length..]);
+            Directory.Delete(resourceDirectory, recursive: true);
         }
 
-        if (!string.IsNullOrWhiteSpace(mount.Source))
-        {
-            throw new NotSupportedException(
-                $"Local resolution of mount source '{mount.Source}' is delivered by design item 25.");
-        }
-
-        return Array.Empty<byte>();
+        return Task.CompletedTask;
     }
 
     private static string SafeChild(string parent, string name, string kind)

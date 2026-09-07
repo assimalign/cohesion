@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,7 +24,15 @@ internal sealed class FakeGateway : IApplicationGateway
 
     public IApplicationModel? StartedModel { get; private set; }
 
+    public IApplicationModel? ValidatedModel { get; private set; }
+
     public bool? StopTokenCanBeCanceled { get; private set; }
+
+    public void Validate(IApplicationModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ValidatedModel = model;
+    }
 
     public Task StartAsync(IApplicationModel model, CancellationToken cancellationToken = default)
     {
@@ -36,6 +45,20 @@ internal sealed class FakeGateway : IApplicationGateway
     {
         Calls.Add("stop");
         StopTokenCanBeCanceled = cancellationToken.CanBeCanceled;
+        return Task.CompletedTask;
+    }
+
+    public Task ReconcileAsync(IApplicationModel model, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("reconcile");
+        StartedModel = model;
+        return Task.CompletedTask;
+    }
+
+    public Task UninstallAsync(IApplicationModel model, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("uninstall");
+        StartedModel = model;
         return Task.CompletedTask;
     }
 }

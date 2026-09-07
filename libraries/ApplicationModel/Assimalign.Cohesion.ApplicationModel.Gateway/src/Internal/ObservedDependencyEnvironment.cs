@@ -10,49 +10,42 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 internal static class ObservedDependencyEnvironment
 {
     public static void Apply(
-        IResourceControlContext context,
+        IReadOnlyList<ResourceDependencyObservation> observations,
         IDictionary<string, string> environment)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(observations);
         ArgumentNullException.ThrowIfNull(environment);
 
-        ResourceManifest manifest = GetManifest(context.Model, context.Resource);
-        if (manifest.References.Count == 0)
-        {
-            return;
-        }
-
         var projected = new Dictionary<string, Projection>(StringComparer.Ordinal);
-
-        foreach (ResourceManifestReference reference in manifest.References)
+        foreach (ResourceDependencyObservation observation in observations)
         {
-            foreach (string endpointName in reference.Endpoints)
+            foreach (string endpointName in observation.RequestedEndpoints)
             {
-                string dependencyName = reference.Resource.ToString();
-                string urlVariable = ResourceEnvironment.Dependency(dependencyName, endpointName, "URL");
+                ResourceEndpoint? endpoint = observation.Optional
+                    && observation.State is not ResourceLifecycle.Running
+                    && observation.State is not ResourceLifecycle.Degraded
+                        ? null
+                        : FindObservedEndpoint(observation, endpointName);
+                string dependency = observation.Resource.ToString();
+                string urlVariable = ResourceEnvironment.Dependency(dependency, endpointName, "URL");
                 var projection = new Projection(
-                    reference.Application,
-                    reference.Resource,
+                    observation.Application,
+                    observation.Resource,
                     endpointName,
-                    reference.Optional);
+                    endpoint);
 
                 if (projected.TryGetValue(urlVariable, out Projection previous))
                 {
                     if (previous.Application == projection.Application
                         && previous.Resource == projection.Resource
-                        && string.Equals(previous.Endpoint, projection.Endpoint, StringComparison.Ordinal))
+                        && string.Equals(previous.EndpointName, endpointName, StringComparison.Ordinal))
                     {
-                        if (previous.Optional && !projection.Optional)
-                        {
-                            projected[urlVariable] = projection;
-                        }
-
                         continue;
                     }
 
                     throw new InvalidDataException(
-                        $"Dependency endpoint '{projection.Application}/{projection.Resource}/{projection.Endpoint}' " +
-                        $"collides with '{previous.Application}/{previous.Resource}/{previous.Endpoint}' " +
+                        $"Dependency endpoint '{projection.Application}/{projection.Resource}/{endpointName}' " +
+                        $"collides with '{previous.Application}/{previous.Resource}/{previous.EndpointName}' " +
                         "after environment-name normalization.");
                 }
 
@@ -62,106 +55,30 @@ internal static class ObservedDependencyEnvironment
 
         foreach (Projection projection in projected.Values)
         {
-            RemoveEndpoint(environment, projection.Resource.ToString(), projection.Endpoint);
-        }
-
-        foreach (Projection projection in projected.Values)
-        {
-            IApplicationResource? dependency = ResolveDependency(context, projection);
-            if (dependency is null)
+            string dependency = projection.Resource.ToString();
+            RemoveEndpoint(environment, dependency, projection.EndpointName);
+            if (projection.Endpoint is ResourceEndpoint endpoint)
             {
-                if (projection.Optional)
-                {
-                    continue;
-                }
-
-                throw new InvalidOperationException(
-                    $"Resource '{context.Resource.Name}' cannot resolve required dependency " +
-                    $"'{projection.Application}/{projection.Resource}' from its realized dependency graph.");
-            }
-
-            IReadOnlyList<ResourceEndpoint> observed = context.State.GetObservedEndpoints(dependency.Id);
-            ResourceEndpoint endpoint = FindObservedEndpoint(
-                context.Resource.Name,
-                projection,
-                observed);
-            ApplyEndpoint(environment, projection.Resource.ToString(), endpoint);
-        }
-    }
-
-    private static IApplicationResource? ResolveDependency(
-        IResourceControlContext context,
-        Projection projection)
-    {
-        for (int index = 0; index < context.Model.Descriptors.Count; index++)
-        {
-            ResourceManifest manifest = context.Model.Manifests[index];
-            if (manifest.Application == projection.Application && manifest.Name == projection.Resource)
-            {
-                IApplicationResource dependency = context.Model.Descriptors[index].Resource;
-                if (projection.Optional)
-                {
-                    return context.State.GetState(dependency.Id) == ResourceLifecycle.Running
-                        ? dependency
-                        : null;
-                }
-
-                foreach (IApplicationResource admitted in context.Dependencies)
-                {
-                    if (ReferenceEquals(admitted, dependency))
-                    {
-                        return dependency;
-                    }
-                }
-
-                throw new InvalidOperationException(
-                    $"Resource '{context.Resource.Name}' has required dependency " +
-                    $"'{projection.Application}/{projection.Resource}', but its inferred dependency edge " +
-                    "was not admitted by the gateway.");
+                ApplyEndpoint(environment, dependency, endpoint);
             }
         }
-
-        return null;
-    }
-
-    private static ResourceManifest GetManifest(
-        IApplicationModel model,
-        IApplicationResource resource)
-    {
-        if (model.Descriptors.Count != model.Manifests.Count)
-        {
-            throw new InvalidOperationException(
-                "The application model must contain one manifest for every resource descriptor.");
-        }
-
-        for (int index = 0; index < model.Descriptors.Count; index++)
-        {
-            if (ReferenceEquals(model.Descriptors[index].Resource, resource))
-            {
-                return model.Manifests[index];
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"Resource '{resource.Name}' is not part of the application model being realized.");
     }
 
     private static ResourceEndpoint FindObservedEndpoint(
-        ResourceName dependent,
-        Projection projection,
-        IReadOnlyList<ResourceEndpoint> observed)
+        ResourceDependencyObservation observation,
+        string endpointName)
     {
-        foreach (ResourceEndpoint endpoint in observed)
+        foreach (ResourceEndpoint endpoint in observation.Endpoints)
         {
-            if (string.Equals(endpoint.Name, projection.Endpoint, StringComparison.Ordinal))
+            if (string.Equals(endpoint.Name, endpointName, StringComparison.Ordinal))
             {
                 return endpoint;
             }
         }
 
         throw new InvalidOperationException(
-            $"Resource '{dependent}' requires endpoint '{projection.Endpoint}' from dependency " +
-            $"'{projection.Application}/{projection.Resource}', but the Running dependency did not report it in observed state.");
+            $"Dependency '{observation.Application}/{observation.Resource}' reached " +
+            $"'{observation.State}' without requested endpoint '{endpointName}' in observed state.");
     }
 
     private static void RemoveEndpoint(
@@ -193,7 +110,8 @@ internal static class ObservedDependencyEnvironment
             || endpoint.Port is < 1 or > 65535)
         {
             throw new InvalidOperationException(
-                $"Dependency '{dependency}' reached Running without a complete observed address for endpoint '{endpoint.Name}'.");
+                $"Dependency '{dependency}' reached Running without a complete observed address " +
+                $"for endpoint '{endpoint.Name}'.");
         }
 
         var address = new EndpointAddress(endpoint.Scheme, endpoint.Host, endpoint.Port);
@@ -218,6 +136,6 @@ internal static class ObservedDependencyEnvironment
     private readonly record struct Projection(
         ApplicationName Application,
         ResourceName Resource,
-        string Endpoint,
-        bool Optional);
+        string EndpointName,
+        ResourceEndpoint? Endpoint);
 }

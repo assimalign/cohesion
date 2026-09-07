@@ -8,10 +8,6 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <summary>
 /// Validates a v1 resource plan against the manifest facts from which it was produced.
 /// </summary>
-/// <remarks>
-/// <see cref="WorkloadKind.Job"/> remains deliberately unavailable until roadmap item 26
-/// implements the plan-derived completion gate in the base gateway.
-/// </remarks>
 public static class ResourcePlanValidator
 {
     /// <summary>Validates a plan against its planning context, including typed overrides.</summary>
@@ -74,13 +70,6 @@ public static class ResourcePlanValidator
             plan.Workload.Kind == manifest.Lifecycle.Workload,
             $"Plan workload kind '{plan.Workload.Kind}' does not match manifest workload " +
             $"'{manifest.Lifecycle.Workload}'.");
-
-        if (plan.Workload.Kind is WorkloadKind.Job)
-        {
-            throw new InvalidOperationException(
-                $"Resource '{plan.Resource}' uses workload kind Job, which is not supported until " +
-                "roadmap item 26 implements plan-derived Job completion gating.");
-        }
 
         Require(plan.Workload.Replicas > 0, "Plan replicas must be greater than zero.");
         if (manifest.Lifecycle.MaxReplicas is int maxReplicas)

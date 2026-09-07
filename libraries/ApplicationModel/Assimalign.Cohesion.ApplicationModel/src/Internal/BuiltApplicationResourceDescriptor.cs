@@ -8,12 +8,15 @@ internal sealed class BuiltApplicationResourceDescriptor : IApplicationResourceD
 {
     private IReadOnlyList<IApplicationResourceDescriptor>? _dependencies;
 
-    public BuiltApplicationResourceDescriptor(IApplicationResource resource)
+    public BuiltApplicationResourceDescriptor(IApplicationResource resource, ResourcePlan? plan)
     {
         Resource = resource ?? throw new ArgumentNullException(nameof(resource));
+        Plan = plan;
     }
 
     public IApplicationResource Resource { get; }
+
+    public ResourcePlan? Plan { get; }
 
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies =>
         _dependencies ?? Array.Empty<IApplicationResourceDescriptor>();

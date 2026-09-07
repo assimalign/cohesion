@@ -73,9 +73,29 @@ public class CohesionApplicationTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Apply and Teardown dispatch to their gateway operations")]
+    [InlineData(GatewayRunMode.Apply, "reconcile")]
+    [InlineData(GatewayRunMode.Teardown, "uninstall")]
+    public async Task RunAsync_LifecycleMode_DispatchesToGateway(GatewayRunMode mode, string expectedCall)
+    {
+        // Arrange
+        var gateway = new FakeGateway();
+        IApplicationBuilder builder = Application.CreateBuilder(
+                ApplicationName.Parse("appa"),
+                ["--mode", mode.ToString().ToLowerInvariant()])
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        IApplication app = builder.Build();
+
+        // Act
+        await app.RunAsync();
+
+        // Assert
+        gateway.Calls.ShouldBe(new[] { expectedCall });
+        gateway.StartedModel.ShouldBeSameAs(app.Model);
+    }
+
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Unimplemented modes refuse before gateway contact")]
-    [InlineData(GatewayRunMode.Apply)]
-    [InlineData(GatewayRunMode.Teardown)]
     [InlineData(GatewayRunMode.Bootstrap)]
     [InlineData(GatewayRunMode.Render)]
     public async Task RunAsync_UnimplementedMode_ThrowsWithoutContactingGateway(GatewayRunMode mode)

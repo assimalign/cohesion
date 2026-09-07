@@ -140,6 +140,41 @@ internal sealed class LocalPortStore
         }
     }
 
+    public async Task DeleteAsync(
+        ApplicationName application,
+        ResourceName resource,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string path = Path.Combine(GetApplicationDirectory(application), "ports.json");
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            PortAllocationDocument document = await LoadAsync(path, cancellationToken).ConfigureAwait(false);
+            if (!document.Resources.Remove(resource.ToString()))
+            {
+                return;
+            }
+
+            if (document.Resources.Count == 0)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                await SaveAsync(path, document, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private string GetApplicationDirectory(ApplicationName application)
     {
         string directory = Path.GetFullPath(

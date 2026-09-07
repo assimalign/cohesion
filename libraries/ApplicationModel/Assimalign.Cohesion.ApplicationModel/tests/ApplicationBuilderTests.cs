@@ -85,6 +85,7 @@ public class ApplicationBuilderTests
 
         descriptor.ShouldNotBeNull();
         descriptor.Resource.ShouldBeSameAs(resource);
+        descriptor.Plan.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - AddResource rejects duplicate resource names")]
@@ -108,7 +109,8 @@ public class ApplicationBuilderTests
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Build produces an application for a legacy resource")]
     public void Build_WithGateway_Succeeds()
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(new FakeGateway());
+        var gateway = new FakeGateway();
+        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
         builder.AddResource(new FakeResource("dns"));
 
         IApplication app = builder.Build();
@@ -117,6 +119,8 @@ public class ApplicationBuilderTests
         app.Model.Resources.Count.ShouldBe(1);
         app.Model.Manifests.Count.ShouldBe(1);
         app.Model.Plans.Count.ShouldBe(1);
+        app.Model.Descriptors[0].Plan.ShouldBeSameAs(app.Model.Plans[0]);
+        gateway.ValidatedModel.ShouldBeSameAs(app.Model);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Build rejects a circular dependency")]

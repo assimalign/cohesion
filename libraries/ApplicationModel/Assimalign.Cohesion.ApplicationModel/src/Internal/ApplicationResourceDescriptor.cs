@@ -20,6 +20,8 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
 
     public IApplicationResource Resource { get; }
 
+    public ResourcePlan? Plan => null;
+
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _dependencies;
 
     public IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource)

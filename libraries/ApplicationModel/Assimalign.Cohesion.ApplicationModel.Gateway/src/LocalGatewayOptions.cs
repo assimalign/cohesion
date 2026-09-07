@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// Options controlling how the <see cref="LocalGateway"/> resolves, starts, probes, and stops
 /// child processes.
 /// </summary>
-public sealed class LocalGatewayOptions
+public sealed class LocalGatewayOptions : ApplicationGatewayOptions
 {
     /// <summary>
     /// The directory searched for a resource's executable. Defaults to the orchestrator's
@@ -54,12 +54,6 @@ public sealed class LocalGatewayOptions
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
     /// <summary>
-    /// The maximum time to wait for a resource to become ready before treating startup as failed.
-    /// Defaults to 60&#160;seconds.
-    /// </summary>
-    public TimeSpan ReadinessBudget { get; set; } = TimeSpan.FromSeconds(60);
-
-    /// <summary>
     /// How long to wait for a child process to exit during shutdown before it is force-killed.
     /// This is the fallback for manifest-less executables; manifest-backed resources use
     /// their lifecycle grace. Defaults to 30&#160;seconds.
@@ -75,6 +69,7 @@ public sealed class LocalGatewayOptions
 
     internal void Validate()
     {
+        ValidateCommon();
         ArgumentNullException.ThrowIfNull(TimeProvider);
 
         if (ProbeInterval <= TimeSpan.Zero)
@@ -113,11 +108,6 @@ public sealed class LocalGatewayOptions
             throw new ArgumentOutOfRangeException(
                 nameof(MaximumRestartAttempts),
                 "MaximumRestartAttempts must be zero or greater.");
-        }
-
-        if (ReadinessBudget <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(ReadinessBudget), "ReadinessBudget must be greater than zero.");
         }
 
         if (StopGrace <= TimeSpan.Zero)

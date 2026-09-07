@@ -41,9 +41,9 @@ internal sealed class CohesionApplicationModel : IApplicationModel
                 nameof(plans));
         }
 
-        Descriptors = CopyDescriptors(descriptors);
         Manifests = Copy(manifests);
         Plans = Copy(plans);
+        Descriptors = CopyDescriptors(descriptors, Plans);
         RunMode = runMode;
         GatewayIdentity = gatewayIdentity;
         Adopt = adopt;
@@ -93,15 +93,23 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     }
 
     private static IReadOnlyList<IApplicationResourceDescriptor> CopyDescriptors(
-        IReadOnlyList<IApplicationResourceDescriptor> source)
+        IReadOnlyList<IApplicationResourceDescriptor> source,
+        IReadOnlyList<ResourcePlan> plans)
     {
         var copies = new Dictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor>(
+            ReferenceEqualityComparer.Instance);
+        var descriptorPlans = new Dictionary<IApplicationResourceDescriptor, ResourcePlan?>(
             ReferenceEqualityComparer.Instance);
         var topLevel = new IApplicationResourceDescriptor[source.Count];
 
         for (int index = 0; index < topLevel.Length; index++)
         {
-            topLevel[index] = CopyDescriptor(source[index], copies);
+            descriptorPlans.Add(source[index], plans.Count == 0 ? null : plans[index]);
+        }
+
+        for (int index = 0; index < topLevel.Length; index++)
+        {
+            topLevel[index] = CopyDescriptor(source[index], copies, descriptorPlans);
         }
 
         return new ReadOnlyCollection<IApplicationResourceDescriptor>(topLevel);
@@ -109,20 +117,25 @@ internal sealed class CohesionApplicationModel : IApplicationModel
 
     private static BuiltApplicationResourceDescriptor CopyDescriptor(
         IApplicationResourceDescriptor source,
-        IDictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor> copies)
+        IDictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor> copies,
+        IReadOnlyDictionary<IApplicationResourceDescriptor, ResourcePlan?> descriptorPlans)
     {
         if (copies.TryGetValue(source, out BuiltApplicationResourceDescriptor? existing))
         {
             return existing;
         }
 
-        var copy = new BuiltApplicationResourceDescriptor(source.Resource);
+        descriptorPlans.TryGetValue(source, out ResourcePlan? plan);
+        var copy = new BuiltApplicationResourceDescriptor(source.Resource, plan);
         copies.Add(source, copy);
 
         var dependencies = new IApplicationResourceDescriptor[source.Dependencies.Count];
         for (int index = 0; index < dependencies.Length; index++)
         {
-            dependencies[index] = CopyDescriptor(source.Dependencies[index], copies);
+            dependencies[index] = CopyDescriptor(
+                source.Dependencies[index],
+                copies,
+                descriptorPlans);
         }
 
         copy.SetDependencies(dependencies);

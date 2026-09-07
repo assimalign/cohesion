@@ -28,6 +28,8 @@ internal sealed class CohesionApplication : IApplication
         return Model.RunMode switch
         {
             GatewayRunMode.Run => RunCoreAsync(cancellationToken),
+            GatewayRunMode.Apply => _gateway.ReconcileAsync(Model, cancellationToken),
+            GatewayRunMode.Teardown => _gateway.UninstallAsync(Model, cancellationToken),
             GatewayRunMode.Describe => ApplicationModelDocumentWriter.WriteAsync(Model, cancellationToken),
             _ => throw new NotSupportedException(
                 $"Gateway run mode '{Model.RunMode}' is not implemented until its platform execution/compiler support is available. No gateway operation was attempted."),

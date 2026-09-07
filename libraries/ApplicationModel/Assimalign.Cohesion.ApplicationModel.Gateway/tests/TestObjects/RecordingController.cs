@@ -17,6 +17,7 @@ internal sealed class RecordingController : IApplicationResourceController
 {
     private readonly List<string> _reconciled;
     private readonly List<string> _deleted;
+    private readonly List<string> _stopped;
     private readonly ISet<string> _failing;
     private readonly bool _leaveStarting;
     private readonly IReadOnlyDictionary<string, ResourceLifecycle> _observedStates;
@@ -26,16 +27,22 @@ internal sealed class RecordingController : IApplicationResourceController
         List<string> deleted,
         ISet<string>? failing = null,
         bool leaveStarting = false,
-        IReadOnlyDictionary<string, ResourceLifecycle>? observedStates = null)
+        IReadOnlyDictionary<string, ResourceLifecycle>? observedStates = null,
+        List<string>? stopped = null)
     {
         _reconciled = reconciled;
         _deleted = deleted;
+        _stopped = stopped ?? new List<string>();
         _failing = failing ?? new HashSet<string>();
         _leaveStarting = leaveStarting;
         _observedStates = observedStates ?? new Dictionary<string, ResourceLifecycle>();
     }
 
-    public bool CanControl(IApplicationResource resource) => true;
+    public bool CanRealize(ResourcePlan plan, out string? reason)
+    {
+        reason = null;
+        return true;
+    }
 
     public Task ReconcileAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
     {
@@ -59,6 +66,12 @@ internal sealed class RecordingController : IApplicationResourceController
     public Task DeleteAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
     {
         _deleted.Add(context.Resource.Name.ToString());
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
+    {
+        _stopped.Add(context.Resource.Name.ToString());
         return Task.CompletedTask;
     }
 }

@@ -71,8 +71,8 @@ public class GenericPlannerTests
         Should.NotThrow(() => ResourcePlanValidator.Validate(plan, context));
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject Job workloads until roadmap item 26")]
-    public void Validate_ForJobPlan_ShouldRejectUntilItem26()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should accept the plan-derived Job completion gate")]
+    public void Validate_ForJobPlan_ShouldAcceptStoppedAsSatisfying()
     {
         // Arrange
         ResourceManifest manifest = CreateWebManifest() with
@@ -83,11 +83,13 @@ public class GenericPlannerTests
         ResourcePlan plan = GenericPlanner.CreatePlan(context);
 
         // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
-            () => ResourcePlanValidator.Validate(plan, context));
+        Should.NotThrow(() => ResourcePlanValidator.Validate(plan, context));
 
         // Assert
-        exception.Message.ShouldContain("item 26", Case.Sensitive);
+        plan.Workload.Gate.Terminals.ShouldBe(
+            new[] { ResourceLifecycle.Stopped, ResourceLifecycle.Failed },
+            ignoreOrder: true);
+        plan.Workload.Gate.Satisfying.ShouldBe(new[] { ResourceLifecycle.Stopped });
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: Should round-trip ArtifactRef as a string")]

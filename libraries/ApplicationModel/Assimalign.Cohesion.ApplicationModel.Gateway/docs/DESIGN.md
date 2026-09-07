@@ -13,13 +13,15 @@ This package implements the control-plane contracts defined in
 
 - **`ApplicationGateway`** — the public *guided base* that implements the generic realization
   algorithm once.
+- **`ApplicationGatewayOptions.Controllers`** — the registered-first domain override seam;
+  framework options ship with an empty collection.
 - **`InMemoryResourceStateManager`** — the public, race-free reference implementation of
   `IApplicationResourceStateManager` for gateway authors.
 - **`LocalGateway`** (+ `LocalGatewayOptions`) — the default gateway for local development,
   which realizes each resource as a supervised child process.
 - Internal pieces: `ResourceControlContext`, `LocalResourceResolver`, port and mount
   materializers, the probe runner, `LocalGatewayProcessSupervisor`, `LocalProcessStateStore`,
-  `LocalProcessSignal`, `LocalProcessController`, `ExecutableArtifact`.
+  `LocalProcessSignal`, `LocalPlanController`, `ExecutableArtifact`.
 - **`UseLocalGateway()`** and **`AddExecutable(...)`** builder extensions.
 
 It references the Core-only `Assimalign.Cohesion.ApplicationModel` and
@@ -31,30 +33,44 @@ default; the interface remains the control-plane contract.
 ## The generic algorithm (why the base owns it)
 
 `ApplicationGateway` implements `IApplicationGateway` **explicitly** and forwards to
-strongly-typed `protected` hooks (`GatherAsync`, `Controllers`, `State`, `StartObserverAsync`),
+strongly-typed `protected` hooks (`GatherAsync`, `ResolveInputsAsync`, `Controllers`, `State`,
+`StartObserverAsync`),
 per the repo's interface-first-with-guided-base convention. Every gateway — local, Docker,
 Kubernetes — is the *same* algorithm with different hooks, so it is written once:
 
-1. **Order** `model.Descriptors` topologically (depth-first post-order; the model is already
+1. **Validate** every `descriptor.Plan` during `Build()` by asking registered controllers first,
+   then the platform controller, whether `CanRealize(plan, out reason)`. Failure names the resource
+   and gateway before any gather or target contact.
+2. **Order** `model.Descriptors` topologically (depth-first post-order; the model is already
    validated acyclic at build time, so no cycle guard is needed here).
-2. **Gather** each resource's artifact via `GatherAsync` (local → an executable path; container
+3. **Gather** each resource's artifact via `GatherAsync` (local → an executable path; container
    gateways → a pre-built image). Gathering locates/validates; it never builds.
-3. **Start the single observer** (`StartObserverAsync`) — the only writer of observed status
+4. **Start the single observer** (`StartObserverAsync`) — the only writer of observed status
    into `State`. Controllers only *apply* desired state; they never own steady-state.
-4. **Provision in dependency order**: route each resource to the first controller whose
-   `CanControl` returns true, `ReconcileAsync` (apply, non-blocking), then
-   `State.WaitForStateAsync(id, {Running, Failed, Stopped}, budget)`. `Running` → start
-   dependents; `Failed`/`Stopped`/timeout → mark the dependent subtree `Blocked` and throw
-   an aggregated error. `Degraded` is observed but never gates: it does not satisfy initial
-   readiness, and a later transition to it never re-gates dependents admitted by `Running`.
-5. **Teardown** in reverse order (`DeleteAsync`), best-effort. A failure mid-startup triggers
-   the same reverse teardown of whatever was already provisioned before the error rethrows.
+5. **Reconcile in dependency order**: after dependencies have satisfied their initial gate,
+   resolve `ResourceInputs { Mounts, BootstrapCredential }` for this pass, compile the immutable
+   plan plus artifact, inputs, and observed dependencies, and call `ReconcileAsync`. A controller
+   may set `Skipped`; its dependents become `Skipped` while independent resources continue.
+6. **Gate once from the plan**: call `WaitForStateAsync` with
+   `plan.Workload.Gate.Terminals` and a per-resource budget, then admit the resource exactly when
+   `Gate.Satisfying` contains the reached state. Long-running kinds satisfy on `Running`; a Job
+   satisfies on `Stopped`. `Degraded` is observational and never re-gates an admitted dependent.
+7. **Stop or uninstall in reverse order**: `StopAsync` calls each controller's non-destructive
+   runtime stop hook and retains persistent objects; `UninstallAsync(model)` calls `DeleteAsync`.
+   A failure during initial realization still rolls back whatever was partially applied.
 
 This is why a `Failed`, cleanly `Stopped`, or never-ready dependency can never deadlock the
-graph: the readiness gate is a **terminal-set** membership wait with a budget, not a wait for
-one specific state. The single interim static set is named `InitialReadinessTerminals`; item 26
-replaces it with the plan-derived gate from O30. This is the cohesion-side contract referenced
+graph: readiness is a **plan-owned terminal-set** membership wait with a budget, not an ordinal
+state comparison. Deployment, StatefulSet, and DaemonSet plans terminate on
+`{Running, Failed, Stopped}` and satisfy only on `Running`; Job plans terminate on
+`{Stopped, Failed}` and satisfy only on `Stopped`. This is the cohesion-side contract referenced
 by the `cohesion-platforms` rule 2 amendment; that sibling repository is not edited here.
+
+`LocalPlanController` keeps compilation pure:
+`Compile(plan, artifact, inputs, observedDependencies, options)` only produces the local desired
+process/environment description. Port allocation, claim-directory creation, mount-file writes,
+and process launch happen afterward in the apply path. Platform compilers must preserve the same
+boundary: no target reads, file writes, or process/network operations during compilation.
 
 ## InMemoryResourceStateManager — the race-free contract
 
@@ -116,13 +132,18 @@ the registration under the same lock.
   `.cohesion/<application>/.state/<resource>/pid` records PID, process start time, executable path,
   process-group ownership, and the Windows stop-event name. A new gateway independently verifies
   PID + start time + executable before adopting a live child and rebuilds readiness from probes.
+  A foreign owner is refused before process realization unless this invocation carries
+  `--adopt`. Observed state is rebuilt on every gateway start; the PID file is verified recovery
+  metadata, never persisted lifecycle truth. `UninstallAsync` also verifies an orphan before
+  stopping it and removes the resource's persisted mounts and port allocation.
   `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each
   verified child and launches a fresh attempt.
 
 ## Testing posture
 
 The generic algorithm and the state manager are unit-tested deterministically (a `TestGateway`
-with recording controllers asserts topological start order, reverse-order stop,
+with recording controllers asserts validation-before-gather, controller precedence, topological
+reconcile/input ordering, `Skipped` continuation, plan-derived gates, stop versus uninstall,
 failure→`Blocked`+throw, and readiness-timeout; the state manager asserts terminal-set returns
 for `Running`/`Failed`/`Stopped`/timeout, cancellation propagation and cleanup, non-gating
 `Degraded`, race-free set-before-subscribe, observed endpoints, and the event). The generic

@@ -60,7 +60,9 @@ orchestration package.
   manifest references infer edges by exact application/resource identity; explicit C#
   `DependsOn` edges remain ordering-only and additive. Optional references never infer a
   gating edge, and cross-application references remain external. Surfacing a mutable `IList`
-  on an "immutable desired state" was a contradiction that an early review caught.
+  on an "immutable desired state" was a contradiction that an early review caught. A built
+  descriptor also carries its immutable `Plan`; an authoring descriptor has no plan until
+  `Build()` completes planning.
 - **Facts in manifests; realization in plans.** `ResourceManifest` mirrors the
   `cohesion/resource/v1` build artifact and contains resource facts only. At
   `Build()`, every resource produces a `cohesion/plan/v1` `ResourcePlan` from its
@@ -90,17 +92,19 @@ orchestration package.
   `InvalidOperationException` when no gateway is selected. Any future zero-config
   default must be a compile-time, source-generated registration, never a runtime
   probe.
-- **Readiness is a level-triggered, terminal-set wait.**
+- **Readiness is a level-triggered, plan-gate wait.**
   `IApplicationResourceStateManager.WaitForStateAsync` completes on **any** state in
-  the initial-readiness terminal set `{ Running, Failed, Stopped }` with a time
-  budget, so a failed or cleanly stopped dependency can never deadlock a dependent.
-  `Stopped` before `Running` is a readiness failure. `Degraded` is observed but is
+  `descriptor.Plan.Workload.Gate.Terminals` with a per-resource budget and succeeds
+  exactly when `Gate.Satisfying` contains the reached state. Long-running workloads
+  satisfy on `Running`; a Job satisfies on `Stopped`, while `Stopped` remains a fast
+  failure for every non-Job kind. `Degraded` is observed but is
   non-gating: it does not admit dependents initially and never re-gates them
-  after `Running` admitted them. Item 26 replaces the interim static set with the
-  plan-derived gate described by O30. A timeout returns the last observed state;
+  after initial readiness admitted them. A timeout returns the last observed state;
   caller cancellation throws `OperationCanceledException` and removes the waiter.
   The lifecycle enum is treated as a membership set, never an ordered lattice.
-- **Controllers are pure, level-triggered reconcilers.** `ReconcileAsync` computes
+- **Controllers are plan-selected, level-triggered reconcilers.** `Build()` calls gateway
+  `Validate(model)`, which asks registered overrides and then the platform controller
+  `CanRealize(plan, out reason)` before any artifact gather. `ReconcileAsync` computes
   desired objects and applies them, idempotently, and returns; it does not own
   steady-state observation (that is a gateway's single informer) and does not block
   on readiness (the gateway gates on the state manager).
@@ -122,7 +126,8 @@ orchestration package.
   at least one realized resource, all explicit dependencies and required manifest references
   present, no dependency cycles
   (DFS), a selected gateway, an RFC 1123 application name, each typed override, and
-  every computed plan. Planning deliberately happens here rather than in MSBuild or
+  every computed plan, then asks the selected gateway to validate realizability. Planning
+  deliberately happens here rather than in MSBuild or
   when the resource is added.
   Every failure is an `InvalidOperationException` with an actionable message; there
   are no custom exception types in this library (an area-scoped root can be added
@@ -130,8 +135,8 @@ orchestration package.
 - In Run mode, `IApplication.RunAsync` mirrors `Host<TContext>.RunAsync`: a linked
   `CancellationTokenSource` plus a `TaskCompletionSource` completed on cancellation.
   It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es supervision
-  using the gateway's own resource-aware stop bounds. Stop leaves persistent platform objects
-  running; destructive removal is the separate Teardown mode. Describe emits the model document
+  using the gateway's own resource-aware stop bounds. Stop retains persistent platform objects;
+  Apply performs a reconcile pass and Teardown dispatches `UninstallAsync(model)`. Describe emits the model document
   and never contacts the selected gateway.
 
 ## AOT posture

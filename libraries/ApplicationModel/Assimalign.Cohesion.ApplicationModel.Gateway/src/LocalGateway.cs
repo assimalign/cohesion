@@ -33,6 +33,7 @@ public sealed class LocalGateway : ApplicationGateway
     /// <param name="options">The options controlling resolution, readiness, and shutdown.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     public LocalGateway(LocalGatewayOptions options)
+        : base(options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _options.Validate();
@@ -46,7 +47,7 @@ public sealed class LocalGateway : ApplicationGateway
         _supervisor = new LocalGatewayProcessSupervisor(_state, _options, processState);
         _controllers = new IApplicationResourceController[]
         {
-            new LocalProcessController(preparer, _supervisor),
+            new LocalPlanController(_options, preparer, _supervisor),
         };
     }
 
@@ -58,9 +59,6 @@ public sealed class LocalGateway : ApplicationGateway
 
     /// <inheritdoc/>
     protected override IApplicationResourceStateManager State => _state;
-
-    /// <inheritdoc/>
-    protected override TimeSpan ReadinessBudget => _options.ReadinessBudget;
 
     internal IApplicationResourceStateManager ResourceStates => _state;
 
