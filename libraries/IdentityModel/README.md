@@ -14,7 +14,7 @@ inventing service-local identity types.
 | `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contract branch: discovery/client metadata, authorization/token/ID token/UserInfo/logout contracts, spec-oriented validation. |
 | `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contract branch: assertions, protocol messages, entity metadata, bindings. |
 | `Assimalign.Cohesion.IdentityModel.Token` | Protocol-neutral token and assertion normalization between the root contracts and the concrete token packages. |
-| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior (compact serialization, header and claim fidelity, validation descriptors). |
+| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior (compact parsing, ES256 writing, header and claim fidelity, document validation, reusable RSA/ECDSA signature verification). |
 | `Assimalign.Cohesion.IdentityModel.Token.Saml` | Concrete SAML 2.0 assertion token behavior (statements, conditions, subject confirmation fidelity). |
 
 ## Layering
@@ -39,10 +39,11 @@ touching the shared base or each other:
 
 Protocol *contracts* live in the `Protocols` branch: the shared `…Protocols`
 base plus one project per protocol. Token packages own concrete token
-*document* behavior only. The two branches never reference each other. Future
-implementation packages that *execute* — protocol readers, metadata retrievers,
-crypto validators — are separate descendant projects that depend on the
-contract branch plus the transport/Security areas.
+*document* behavior, including format-specific cryptographic execution that does not require
+transport or key management. The JWT package therefore writes ES256 compact JWS values and
+verifies RSA/ECDSA signatures, while callers still own keys and trust policy. The protocol and
+token branches never reference each other; transport-bound readers, metadata retrievers, and
+key-management implementations remain separate descendant projects.
 
 ## Dependencies
 

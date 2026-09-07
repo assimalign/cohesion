@@ -29,7 +29,7 @@ internal sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId)
     {
-        if (!JwtSignatureAlgorithms.IsHmac(algorithm))
+        if (algorithm is not JoseAlgorithms.HS256 and not JoseAlgorithms.HS384 and not JoseAlgorithms.HS512)
         {
             return false;
         }

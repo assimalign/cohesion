@@ -1,12 +1,15 @@
 using System;
 using System.Security.Cryptography;
 
+using IdentityModelSignatureVerifier = Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.JsonWebTokenSignatureVerifier;
+
 namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
 /// <summary>
 /// Factory for the built-in <see cref="IJwtSignatureVerifier"/> implementations. Each verifier is
 /// bound to concrete key material and, optionally, a <c>kid</c>, so a bearer scheme can register
-/// several keys and let each token select the matching one.
+/// several keys and let each token select the matching one. HMAC verification remains local to
+/// the Bearer package; RSA and ECDSA factories adapt the reusable IdentityModel verifiers.
 /// </summary>
 public static class JwtSignatureVerifier
 {
@@ -29,7 +32,7 @@ public static class JwtSignatureVerifier
     /// <returns>An RSA verifier.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="publicKey"/> is <see langword="null"/>.</exception>
     public static IJwtSignatureVerifier CreateRsa(RSA publicKey, string? keyId = null)
-        => new RsaJwtSignatureVerifier(publicKey, keyId);
+        => new JsonWebTokenSignatureVerifierAdapter(IdentityModelSignatureVerifier.CreateRsa(publicKey, keyId));
 
     /// <summary>
     /// Creates a verifier for ECDSA-signed tokens (<c>ES256</c>/<c>ES384</c>/<c>ES512</c>) with an
@@ -39,6 +42,9 @@ public static class JwtSignatureVerifier
     /// <param name="keyId">The <c>kid</c> this key answers to, or <see langword="null"/> to match any <c>kid</c>.</param>
     /// <returns>An ECDSA verifier.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="publicKey"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="publicKey"/> does not use a NIST curve defined by a JOSE ECDSA algorithm.
+    /// </exception>
     public static IJwtSignatureVerifier CreateEcdsa(ECDsa publicKey, string? keyId = null)
-        => new EcdsaJwtSignatureVerifier(publicKey, keyId);
+        => new JsonWebTokenSignatureVerifierAdapter(IdentityModelSignatureVerifier.CreateEcdsa(publicKey, keyId));
 }
