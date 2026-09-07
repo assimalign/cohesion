@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,7 +64,10 @@ internal sealed class FixtureHostContext : HostContext
     internal FixtureHostContext(FixtureHostOptions options)
     {
         _options = options;
-        Environment = new HostEnvironment("Test");
+        Environment = new HostEnvironment("Test")
+        {
+            ContentRootPath = FileSystemPath.Parse(ResourceRuntime.Current.ContentRootPath),
+        };
     }
 
     public override IHostEnvironment Environment { get; }

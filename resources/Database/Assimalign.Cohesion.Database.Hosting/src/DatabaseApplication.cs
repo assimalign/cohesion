@@ -91,6 +91,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         return new DatabaseApplicationOptions
         {
             Environment = options.Environment,
+            ContentRootPath = options.ContentRootPath,
             StartupTimeout = options.StartupTimeout,
             ShutdownTimeout = options.ShutdownTimeout,
             StartServicesConcurrently = false,

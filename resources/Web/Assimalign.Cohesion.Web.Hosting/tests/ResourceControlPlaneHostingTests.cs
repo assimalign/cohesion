@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -25,10 +26,13 @@ public sealed class ResourceControlPlaneHostingTests
     {
         int port = ReservePort();
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
+        string contentRootPath = Path.GetFullPath("web-resource-content");
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            contentRootPath: contentRootPath,
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        builder.Environment.ContentRootPath.ShouldBe(FileSystemPath.Parse(contentRootPath));
         builder.AddHealthCheck("self", _ => ValueTask.FromResult(HealthContribution.Healthy()));
         await using WebApplication application = builder.Build();
         bool userMiddlewareRan = false;

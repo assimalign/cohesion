@@ -19,58 +19,6 @@ internal static class ResourceHost
     internal const int InterruptedExitCode = 130;
     internal const int TerminatedExitCode = 143;
 
-    internal static async Task RunAsync<TContext>(
-        Host<TContext> host,
-        ResourceHostOptions options,
-        CancellationToken cancellationToken = default)
-        where TContext : HostContext
-    {
-        ArgumentNullException.ThrowIfNull(host);
-        ArgumentNullException.ThrowIfNull(options);
-
-        bool isProcessRun = options.RunMode is ResourceHostRunMode.Process;
-        var runState = new RunState(
-            host,
-            isProcessRun ? options.ProtocolLineWriter : null);
-        int exitCode;
-
-        try
-        {
-            host.SetResourceShutdownTimeout(options.ShutdownTimeout);
-            ApplyContentRoot(host.Context.Environment, options.ContentRootPath);
-
-            using IDisposable? signalSubscription = isProcessRun
-                ? options.SignalSource.Subscribe(
-                    runState.RequestShutdown,
-                    options.StopEventName)
-                : null;
-
-            await host.RunResourceAsync(runState, cancellationToken).ConfigureAwait(false);
-
-            runState.ThrowIfProtocolLineFailed();
-            exitCode = runState.IsDrainAborted
-                ? GetDrainAbortExitCode(runState.StopSignal)
-                : SuccessExitCode;
-        }
-        catch (Exception exception) when (isProcessRun)
-        {
-            // ResourceHost is the executable boundary: every host failure is converted
-            // to the frozen sysexits/v1 contract instead of escaping as a platform-
-            // dependent unhandled-exception exit code.
-            exitCode = ClassifyExitCode(
-                exception,
-                options,
-                runState.HasReachedReady,
-                runState.IsDrainAborted,
-                runState.StopSignal);
-        }
-
-        if (isProcessRun)
-        {
-            options.ExitCodeHandler(exitCode);
-        }
-    }
-
     internal static int ClassifyExitCode(
         Exception exception,
         ResourceHostOptions options,
@@ -100,40 +48,30 @@ internal static class ResourceHost
         return hasReachedReady ? RuntimeExitCode : StartupExitCode;
     }
 
-    private static void ApplyContentRoot(
+    internal static void AssertContentRoot(
         IHostEnvironment environment,
         System.IO.FileSystemPath contentRootPath)
     {
-        if (environment is HostEnvironment hostEnvironment)
-        {
-            hostEnvironment.SetContentRootPath(contentRootPath);
-            return;
-        }
-
         if (!contentRootPath.Equals(environment.ContentRootPath))
         {
             throw new InvalidOperationException(
-                "A resource host requires an environment whose content root can be applied.");
+                "The host content root must match the ambient resource content root.");
         }
     }
 
-    private static int GetDrainAbortExitCode(ResourceHostStopSignal stopSignal)
+    internal static int GetDrainAbortExitCode(ResourceHostStopSignal stopSignal)
     {
         return stopSignal is ResourceHostStopSignal.Interrupt
             ? InterruptedExitCode
             : TerminatedExitCode;
     }
 
-    internal sealed class RunState
+    internal sealed class RunState : IHostRunObserver
     {
-        private readonly IHost _host;
+        private readonly IHostRun _run;
         private readonly Action<string>? _writeProtocolLine;
         private readonly Lock _protocolLock = new();
-        private readonly TaskCompletionSource _stopCompletionSource =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Exception? _protocolLineException;
-        private Exception? _stopException;
-        private Action? _shutdownCallback;
         private int _hasReachedReady;
         private int _isStopping;
         private int _isStoppingLineWritten;
@@ -141,27 +79,20 @@ internal static class ResourceHost
         private int _isDrainAborted;
         private int _stopSignal;
 
-        internal RunState(IHost host, Action<string>? writeProtocolLine)
+        internal RunState(IHostRun run, Action<string>? writeProtocolLine)
         {
-            _host = host;
+            _run = run;
             _writeProtocolLine = writeProtocolLine;
         }
 
         internal bool HasReachedReady => Volatile.Read(ref _hasReachedReady) != 0;
-
-        internal bool HasBegunStopping => Volatile.Read(ref _isStopping) != 0;
 
         internal bool IsDrainAborted => Volatile.Read(ref _isDrainAborted) != 0;
 
         internal ResourceHostStopSignal StopSignal =>
             (ResourceHostStopSignal)Volatile.Read(ref _stopSignal);
 
-        internal void HostStarted(Action? shutdownCallback)
-        {
-            Volatile.Write(ref _shutdownCallback, shutdownCallback);
-        }
-
-        internal void Started()
+        public void Started(IHost host)
         {
             bool writeFailed;
 
@@ -182,7 +113,7 @@ internal static class ResourceHost
             }
         }
 
-        internal void Stopping()
+        public void Stopping(IHost host)
         {
             lock (_protocolLock)
             {
@@ -197,18 +128,7 @@ internal static class ResourceHost
             }
         }
 
-        internal void BeginStopping()
-        {
-            lock (_protocolLock)
-            {
-                if (_isStopped == 0)
-                {
-                    Volatile.Write(ref _isStopping, 1);
-                }
-            }
-        }
-
-        internal void Stopped()
+        public void Stopped(IHost host)
         {
             lock (_protocolLock)
             {
@@ -222,37 +142,14 @@ internal static class ResourceHost
             }
         }
 
-        internal void DrainAborted()
+        public void DrainAborted(IHost host)
         {
             Volatile.Write(ref _isDrainAborted, 1);
         }
 
-        internal void CompleteStop(Exception? exception)
-        {
-            Volatile.Write(ref _stopException, exception);
-            _stopCompletionSource.TrySetResult();
-        }
-
-        internal async Task WaitForStopAsync()
-        {
-            await _stopCompletionSource.Task.ConfigureAwait(false);
-
-            Exception? exception = Volatile.Read(ref _stopException);
-            if (exception is not null)
-            {
-                ExceptionDispatchInfo.Capture(exception).Throw();
-            }
-        }
-
         internal bool RequestShutdown(ResourceHostStopSignal stopSignal)
         {
-            Action? shutdownCallback = Volatile.Read(ref _shutdownCallback);
-            if (_host.Context is not HostContext context || shutdownCallback is null)
-            {
-                return false;
-            }
-
-            return context.TryShutdown(shutdownCallback, () =>
+            return _run.TryShutdown(() =>
             {
                 Interlocked.CompareExchange(
                     ref _stopSignal,

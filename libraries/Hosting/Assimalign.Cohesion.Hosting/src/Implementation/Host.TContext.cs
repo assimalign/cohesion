@@ -27,7 +27,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     // Execution Context Info
     private CancellationTokenSource? _cancellationTokenSource;
     private TaskCompletionSource<Host<TContext>>? _taskCompletionSource;
-    private ResourceHost.RunState? _resourceHostRunState;
+    private HostRun<TContext>? _hostRun;
 
     // State Flags
     private bool _isDisposed;
@@ -126,7 +126,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 ThrowIfError();
             }
 
-            Volatile.Read(ref _resourceHostRunState)?.HostStarted(
+            Volatile.Read(ref _hostRun)?.HostStarted(
                 Context.ShutdownCallback);
             SetState(HostState.Started);
 
@@ -168,21 +168,19 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         // host is a clean no-op rather than a second teardown. Starting/Stopping/Stopped
         // guard re-entrancy. Only a Started host proceeds, which also guarantees the
         // per-run state from Init exists.
-        ResourceHost.RunState? resourceHostRunState = Volatile.Read(ref _resourceHostRunState);
-        Action? beginResourceStop = resourceHostRunState is null
-            ? null
-            : resourceHostRunState.BeginStopping;
-        if (!Context.TryBeginStop(beginResourceStop))
+        HostRun<TContext>? hostRun = Volatile.Read(ref _hostRun);
+        Action? beginRunStop = hostRun is null ? null : hostRun.BeginStopping;
+        if (!Context.TryBeginStop(beginRunStop))
         {
             return;
         }
 
-        resourceHostRunState?.Stopping();
+        hostRun?.Stopping();
 
-        // A direct resource StopAsync wakes its parked RunAsync immediately; RunAsync then
-        // joins RunState's stop-completion signal so it observes the whole drain and any
-        // failure instead of racing ahead of the direct caller.
-        if (resourceHostRunState is not null)
+        // A direct StopAsync wakes its parked RunAsync immediately. The run then joins this
+        // HostRun's stop-completion signal so it observes the whole drain and the same failure
+        // instead of racing ahead of the direct caller.
+        if (hostRun is not null)
         {
             _taskCompletionSource?.TrySetResult(this);
         }
@@ -190,7 +188,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         Exception? stopException = null;
         try
         {
-            await StopCoreAsync(resourceHostRunState, cancellationToken).ConfigureAwait(false);
+            await StopCoreAsync(hostRun, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -199,19 +197,15 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         }
         finally
         {
-            if (resourceHostRunState is not null)
+            if (hostRun is not null)
             {
-                resourceHostRunState.CompleteStop(stopException);
-                Interlocked.CompareExchange(
-                    ref _resourceHostRunState,
-                    value: null,
-                    resourceHostRunState);
+                hostRun.CompleteStop(stopException);
             }
         }
     }
 
     private async Task StopCoreAsync(
-        ResourceHost.RunState? resourceHostRunState,
+        HostRun<TContext>? hostRun,
         CancellationToken cancellationToken)
     {
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -224,11 +218,11 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         cancellationToken = cancellationTokenSource.Token;
 
         using CancellationTokenRegistration drainCancellationRegistration =
-            resourceHostRunState is null
+            hostRun is null
                 ? default
                 : cancellationToken.Register(
-                    static state => ((ResourceHost.RunState)state!).DrainAborted(),
-                    resourceHostRunState);
+                    static state => ((HostRun<TContext>)state!).DrainAborted(),
+                    hostRun);
 
         await OnStoppingAsync(cancellationToken).ConfigureAwait(false);
 
@@ -276,6 +270,11 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 .ConfigureAwait(false);
         }
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            hostRun?.DrainAborted();
+        }
+
         SetState(HostState.Stopped);
 
         // Ensure an ordinary RunAsync that is waiting on the run signal is unparked, then
@@ -286,7 +285,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         Reset();
 
         await OnStoppedAsync(cancellationToken).ConfigureAwait(false);
-        resourceHostRunState?.Stopped();
+        hostRun?.Stopped();
 
         if (exceptions.Count > 0)
         {
@@ -321,83 +320,84 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     /// <returns>A task that represents the complete host run.</returns>
     /// <exception cref="ObjectDisposedException">The host has already been disposed.</exception>
     /// <remarks>
-    /// When an opt-in resource registration is present on the context, this method routes the
-    /// run through the internal resource wrapper. An ordinary host retains the plain lifecycle
-    /// behavior and propagates its failures to the caller.
+    /// When <see cref="HostContext.Runner"/> is set, this method delegates the complete run to
+    /// that pipeline. Otherwise, the host executes its lifecycle directly.
     /// </remarks>
     public Task RunAsync(CancellationToken cancellationToken = default)
     {
-        return Context.ResourceHostOptions is { } resourceHostOptions
-            ? ResourceHost.RunAsync(this, resourceHostOptions, cancellationToken)
-            : RunCoreAsync(resourceHostRunState: null, cancellationToken);
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        var run = new HostRun<TContext>(this, _options);
+        if (Interlocked.CompareExchange(ref _hostRun, run, comparand: null) is not null)
+        {
+            return Task.FromException(new InvalidOperationException("A host run is already active."));
+        }
+
+        IHostRunner? runner = Context.Runner;
+        return RunWithRunnerAsync(run, runner, cancellationToken);
     }
 
-    internal Task RunResourceAsync(
-        ResourceHost.RunState resourceHostRunState,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(resourceHostRunState);
-
-        return RunCoreAsync(resourceHostRunState, cancellationToken);
-    }
-
-    internal void SetResourceShutdownTimeout(TimeSpan shutdownTimeout)
-    {
-        _options.ShutdownTimeout = shutdownTimeout;
-    }
-
-    private async Task RunCoreAsync(
-        ResourceHost.RunState? resourceHostRunState,
+    internal async Task RunCoreAsync(
+        HostRun<TContext> hostRun,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        if (resourceHostRunState is not null &&
-            Interlocked.CompareExchange(
-                ref _resourceHostRunState,
-                resourceHostRunState,
-                comparand: null) is not null)
+        if (!ReferenceEquals(Volatile.Read(ref _hostRun), hostRun))
         {
-            throw new InvalidOperationException("A resource host run is already active.");
+            throw new InvalidOperationException("The host run handle is no longer active.");
         }
 
+        Init(cancellationToken);
+
+        // Capture this run's state locally: a direct StopAsync resets the fields while
+        // this method is parked on the run signal.
+        CancellationTokenSource runTokenSource = _cancellationTokenSource!;
+        TaskCompletionSource<Host<TContext>> runCompletionSource = _taskCompletionSource!;
+
+        await (this as IHost).StartAsync(runTokenSource.Token).ConfigureAwait(false);
+
+        hostRun.Started();
+
+        await runCompletionSource.Task.ConfigureAwait(false);
+
+        // Stop with a fresh token: the run token is cancelled by definition at this point
+        // (its cancellation IS the shutdown signal), so passing it would pre-cancel the
+        // graceful drain. The stop budget comes from ShutdownTimeout inside StopAsync.
+        if (!hostRun.HasBegunStopping)
+        {
+            await (this as IHost).StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        await hostRun.WaitForStopAsync().ConfigureAwait(false);
+    }
+
+    internal bool TryShutdown(HostRun<TContext> hostRun, Action? onAccepted)
+    {
+        return Context.TryShutdown(
+            () => ReferenceEquals(Volatile.Read(ref _hostRun), hostRun),
+            onAccepted);
+    }
+
+    private async Task RunWithRunnerAsync(
+        HostRun<TContext> hostRun,
+        IHostRunner? runner,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            Init(cancellationToken);
-
-            // Capture this run's state locally: a direct StopAsync resets the fields while
-            // this method is parked on the run signal.
-            CancellationTokenSource runTokenSource = _cancellationTokenSource!;
-            TaskCompletionSource<Host<TContext>> runCompletionSource = _taskCompletionSource!;
-
-            await (this as IHost).StartAsync(runTokenSource.Token).ConfigureAwait(false);
-
-            resourceHostRunState?.Started();
-
-            await runCompletionSource.Task.ConfigureAwait(false);
-
-            // Stop with a fresh token: the run token is cancelled by definition at this point
-            // (its cancellation IS the shutdown signal), so passing it would pre-cancel the
-            // graceful drain. The stop budget comes from ShutdownTimeout inside StopAsync.
-            if (resourceHostRunState is null || !resourceHostRunState.HasBegunStopping)
+            if (runner is null)
             {
-                await (this as IHost).StopAsync(CancellationToken.None).ConfigureAwait(false);
+                await hostRun.RunAsync(observer: null, cancellationToken).ConfigureAwait(false);
             }
-
-            if (resourceHostRunState is not null)
+            else
             {
-                await resourceHostRunState.WaitForStopAsync().ConfigureAwait(false);
+                await runner.RunAsync(hostRun, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
         {
-            if (resourceHostRunState is not null)
-            {
-                Interlocked.CompareExchange(
-                    ref _resourceHostRunState,
-                    value: null,
-                    resourceHostRunState);
-            }
+            ClearRun(hostRun);
         }
     }
 
@@ -543,6 +543,11 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         _taskCompletionSource = null;
         Context.ShutdownCallback = null;
         _isInit = false;
+    }
+
+    private void ClearRun(HostRun<TContext> hostRun)
+    {
+        Interlocked.CompareExchange(ref _hostRun, value: null, hostRun);
     }
 
 

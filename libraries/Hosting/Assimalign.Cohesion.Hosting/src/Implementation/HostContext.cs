@@ -34,9 +34,16 @@ public abstract class HostContext : IHostContext
     public abstract IHostEnvironment Environment { get; }
     public abstract IEnumerable<IHostService> HostedServices { get; }
 
-    internal Action? ShutdownCallback { get; set; }
+    /// <summary>
+    /// Gets or sets the optional pipeline that wraps complete runs of this host.
+    /// </summary>
+    /// <remarks>
+    /// The runner is captured when <see cref="Host{TContext}.RunAsync"/> begins. Setting this
+    /// property does not affect a run that is already active.
+    /// </remarks>
+    public IHostRunner? Runner { get; set; }
 
-    internal ResourceHostOptions? ResourceHostOptions { get; set; }
+    internal Action? ShutdownCallback { get; set; }
 
     /// <summary>
     /// Returns a task that completes when the host's run ends - a transition to
@@ -106,7 +113,7 @@ public abstract class HostContext : IHostContext
     }
 
     internal bool TryShutdown(
-        Action expectedShutdownCallback,
+        Func<bool> isCurrentRun,
         Action? onAccepted = null)
     {
         Action? shutdownCallback;
@@ -114,12 +121,13 @@ public abstract class HostContext : IHostContext
         lock (_lock)
         {
             if (_state is not HostState.Started ||
-                !ReferenceEquals(ShutdownCallback, expectedShutdownCallback))
+                !isCurrentRun.Invoke() ||
+                ShutdownCallback is null)
             {
                 return false;
             }
 
-            shutdownCallback = expectedShutdownCallback;
+            shutdownCallback = ShutdownCallback;
             onAccepted?.Invoke();
         }
 

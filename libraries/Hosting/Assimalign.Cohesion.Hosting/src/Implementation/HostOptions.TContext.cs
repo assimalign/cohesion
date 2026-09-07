@@ -33,9 +33,8 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     /// for an ordinary host is 30 seconds.
     /// </summary>
     /// <remarks>
-    /// A resource host derives this value from its declared stop grace period as
-    /// <c>stopGraceSeconds - 5</c> seconds, with a floor of 5 seconds. Resource applications
-    /// configure the stop grace period; they do not configure this timeout independently.
+    /// An installed <see cref="IHostRunner"/> can adjust this value for the run through
+    /// <see cref="IHostRun.ShutdownTimeout"/> before it executes the host lifetime.
     /// </remarks>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 

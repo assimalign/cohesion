@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 
@@ -63,6 +64,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 "The registered database resource control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
             _options.Environment = _resourceContext.EnvironmentName;
+            _options.ContentRootPath = FileSystemPath.Parse(_resourceContext.ContentRootPath);
             ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
         }
     }

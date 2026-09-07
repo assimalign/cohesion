@@ -38,7 +38,8 @@ public class ResourceControlPlaneTests
 
         var host = new TestHost(new TestHostOptions());
         ResourceRuntime.HostBuilt(host, first);
-        host.Context.ResourceHostOptions.ShouldNotBeNull().StopGraceSeconds.ShouldBe(42);
+        ResourceHostRunner runner = host.Context.Runner.ShouldBeOfType<ResourceHostRunner>();
+        runner.Options.StopGraceSeconds.ShouldBe(42);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Health aggregation fails to the least healthy contribution")]
@@ -191,7 +192,8 @@ public class ResourceControlPlaneTests
         ResourceRuntime.HostBuilt(host, controlPlane);
 
         // Assert
-        ResourceHostOptions options = host.Context.ResourceHostOptions.ShouldNotBeNull();
+        ResourceHostRunner runner = host.Context.Runner.ShouldBeOfType<ResourceHostRunner>();
+        ResourceHostOptions options = runner.Options;
         options.ContentRootPath.ShouldBe(FileSystemPath.Parse(contentRoot));
         options.StopEventName.ShouldBe("cohesion-stop-test");
         options.RunMode.ShouldBe(ResourceHostRunMode.Process);

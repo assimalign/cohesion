@@ -235,13 +235,13 @@ public static class ResourceRuntime
             ? registered.StopGraceSeconds
             : ResourceHostOptions.DefaultStopGraceSeconds;
         ResourceContextFrame? frame = AmbientContext.Value;
-        hostContext.ResourceHostOptions = new ResourceHostOptions(
+        hostContext.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopGraceSeconds,
             contentRootPath: context.ContentRootPath,
             stopEventName: context.GetEnvironmentValue(ResourceEnvironment.StopEvent),
             runMode: frame?.HasEntryInvocation is true
                 ? ResourceHostRunMode.InProcess
-                : ResourceHostRunMode.Process);
+                : ResourceHostRunMode.Process));
         frame?.HostBuilt(host);
     }
 

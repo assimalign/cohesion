@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -24,8 +25,10 @@ public sealed class ResourceControlPlaneHostingTests
     {
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         Uri databaseEndpoint = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", ReservePort());
+        string contentRootPath = Path.GetFullPath("database-resource-content");
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: "ControlPlaneTest",
+            contentRootPath: contentRootPath,
             endpoints: new Dictionary<string, Uri>
             {
                 ["admin"] = endpoint,
@@ -43,6 +46,8 @@ public sealed class ResourceControlPlaneHostingTests
         controlPlane.ObservedEndpoints["admin"].ShouldBe(endpoint);
         controlPlane.ObservedEndpoints["db"].ShouldBe(databaseEndpoint);
         application.Context.Environment.Name.ShouldBe("ControlPlaneTest");
+        application.Context.Environment.ContentRootPath.ShouldBe(
+            FileSystemPath.Parse(contentRootPath));
         report.Contributions.Keys.ShouldContain("builder");
         report.Contributions.Keys.ShouldContain("database");
         report.Contributions.Keys.ShouldContain("services");

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -25,6 +26,8 @@ using Assimalign.Cohesion.Hosting;
 /// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
+    internal FileSystemPath? ContentRootPath { get; set; }
+
     /// <summary>
     /// Gets the engines this application holds as server-less, embedded
     /// registrations (exposed through

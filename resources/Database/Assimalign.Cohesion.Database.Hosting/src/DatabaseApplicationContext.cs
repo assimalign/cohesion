@@ -27,7 +27,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
     internal DatabaseApplicationContext(DatabaseApplicationOptions options)
     {
-        _environment = new HostEnvironment(options.Environment ?? "production");
+        _environment = new HostEnvironment(options.Environment ?? "production")
+        {
+            ContentRootPath = options.ContentRootPath,
+        };
         _engines = new ReadOnlyCollection<IDatabaseEngine>(options.Engines);
         _servers = new ReadOnlyCollection<IDatabaseServer>(options.Servers);
     }

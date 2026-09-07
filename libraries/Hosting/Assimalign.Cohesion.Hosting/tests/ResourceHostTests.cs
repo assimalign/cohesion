@@ -39,10 +39,11 @@ public class ResourceHostTests
                 });
                 return Task.CompletedTask;
             }));
-        var host = new TestHost(hostOptions);
         string contentRootPath = Path.GetFullPath("resource-content");
+        hostOptions.ContentRootPath = FileSystemPath.Parse(contentRootPath);
+        var host = new TestHost(hostOptions);
 
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             contentRootPath: contentRootPath,
             stopEventName: string.Empty,
             protocolLineWriter: line =>
@@ -54,7 +55,7 @@ public class ResourceHostTests
                 }
             },
             exitCodeHandler: exitCodes.Add,
-            signalSource: signalSource);
+            signalSource: signalSource));
 
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -93,7 +94,7 @@ public class ResourceHostTests
         }));
 
         var host = new TestHost(hostOptions);
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: line =>
             {
@@ -103,7 +104,7 @@ public class ResourceHostTests
                 }
             },
             exitCodeHandler: static _ => { },
-            signalSource: signalSource);
+            signalSource: signalSource));
 
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         Task run = host.RunAsync(cancellationTokenSource.Token);
@@ -152,12 +153,12 @@ public class ResourceHostTests
         var exitCodes = new List<int>();
         var signalSource = new TestResourceHostSignalSource();
         var host = new TestHost(new TestHostOptions());
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: protocolLines.Add,
             exitCodeHandler: exitCodes.Add,
             signalSource: signalSource,
-            runMode: ResourceHostRunMode.InProcess);
+            runMode: ResourceHostRunMode.InProcess));
 
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -178,6 +179,25 @@ public class ResourceHostTests
         host.Context.State.ShouldBe(HostState.Stopped);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Content root: Rejects a mismatch before host start")]
+    public async Task RunAsync_WhenContentRootDoesNotMatch_ThrowsBeforeStart()
+    {
+        // Arrange
+        var host = new TestHost(new TestHostOptions());
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
+            contentRootPath: Path.GetFullPath("different-resource-content"),
+            runMode: ResourceHostRunMode.InProcess));
+
+        // Act
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.RunAsync());
+
+        // Assert
+        exception.Message.ShouldBe(
+            "The host content root must match the ambient resource content root.");
+        host.Context.State.ShouldBe(HostState.Idle);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Exit codes: Converts a typed startup failure at the run boundary")]
     public async Task RunAsync_WithTypedStartupFailure_ReportsConfigurationExitCode()
     {
@@ -188,14 +208,14 @@ public class ResourceHostTests
         hostOptions.HostedServices.Add(new DelegateHostService(
             static _ => throw new TestResourceConfigurationException()));
         var host = new TestHost(hostOptions);
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: protocolLines.Add,
             exceptionClassifier: ResourceHostOptions.CreateExceptionClassifier<
                 TestResourceConfigurationException,
                 TestResourceDependencyException>(),
             exitCodeHandler: exitCodes.Add,
-            signalSource: new TestResourceHostSignalSource());
+            signalSource: new TestResourceHostSignalSource()));
 
         // Act
         await host.RunAsync().WaitAsync(TimeSpan.FromSeconds(5));
@@ -212,11 +232,11 @@ public class ResourceHostTests
         // Arrange
         var exitCodes = new List<int>();
         var host = new TestHost(new TestHostOptions());
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: static _ => throw new IOException("stdout unavailable"),
             exitCodeHandler: exitCodes.Add,
-            signalSource: new TestResourceHostSignalSource());
+            signalSource: new TestResourceHostSignalSource()));
 
         // Act
         await host.RunAsync().WaitAsync(TimeSpan.FromSeconds(5));
@@ -238,7 +258,7 @@ public class ResourceHostTests
             static _ => Task.CompletedTask,
             static cancellationToken => Task.FromCanceled(cancellationToken)));
         var host = new TestHost(hostOptions);
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: line =>
             {
@@ -249,7 +269,7 @@ public class ResourceHostTests
                 }
             },
             exitCodeHandler: exitCodes.Add,
-            signalSource: new TestResourceHostSignalSource());
+            signalSource: new TestResourceHostSignalSource()));
 
         using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         Task run = host.RunAsync(timeoutSource.Token);
@@ -287,11 +307,11 @@ public class ResourceHostTests
             hostOptions,
             startedHookEntered,
             releaseStartedHook);
-        host.Context.ResourceHostOptions = new ResourceHostOptions(
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopEventName: string.Empty,
             protocolLineWriter: protocolLines.Add,
             exitCodeHandler: exitCodes.Add,
-            signalSource: new TestResourceHostSignalSource());
+            signalSource: new TestResourceHostSignalSource()));
 
         using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         Task run = host.RunAsync(timeoutSource.Token);
@@ -559,7 +579,7 @@ public class ResourceHostTests
         {
             _startedHookEntered = startedHookEntered;
             _releaseStartedHook = releaseStartedHook;
-            Context = new TestHostContext(options.HostedServices);
+            Context = new TestHostContext(options.HostedServices, options.ContentRootPath);
         }
 
         public override TestHostContext Context { get; }

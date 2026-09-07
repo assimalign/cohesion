@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -64,7 +65,12 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             options.Environment = resourceContext.EnvironmentName;
         }
 
-        Environment = new HostEnvironment(options.Environment!);
+        Environment = resourceContext is null
+            ? new HostEnvironment(options.Environment!)
+            : new HostEnvironment(options.Environment!)
+            {
+                ContentRootPath = FileSystemPath.Parse(resourceContext.ContentRootPath),
+            };
         Configuration = new ConfigurationManager();
         if (args is not null)
         {

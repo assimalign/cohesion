@@ -34,7 +34,9 @@ public class ResourceRuntimeEntryInvocationTests
                 typeof(TestResource.Program).Assembly,
                 []);
             IHost host = await invocation.HostReady.WaitAsync(cancellationTokenSource.Token);
-            ResourceHostOptions options = ((HostContext)host.Context).ResourceHostOptions.ShouldNotBeNull();
+            ResourceHostRunner runner = ((HostContext)host.Context).Runner
+                .ShouldBeOfType<ResourceHostRunner>();
+            ResourceHostOptions options = runner.Options;
 
             while (host.Context.State is not HostState.Started)
             {
