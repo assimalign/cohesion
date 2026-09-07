@@ -27,7 +27,8 @@ public class DatabaseOrchestrationTests
         var gateway = new RecordingGateway(state, new RecordingController(reconciled, deleted));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;
@@ -41,7 +42,7 @@ public class DatabaseOrchestrationTests
         state.GetState(database.Resource.Id).ShouldBe(ResourceLifecycle.Running);
 
         ResourceEndpoint observed = state.GetObservedEndpoints(database.Resource.Id).ShouldHaveSingleItem();
-        observed.Scheme.ShouldBe(DatabaseResource.EndpointScheme);
+        observed.Scheme.ShouldBe("cohesion-db");
         observed.Port.ShouldBe(61000);
     }
 
@@ -58,7 +59,8 @@ public class DatabaseOrchestrationTests
             new RecordingController(reconciled, deleted, stopped: stopped));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;
@@ -89,7 +91,8 @@ public class DatabaseOrchestrationTests
         var gateway = new RecordingGateway(state, new RecordingController(reconciled, deleted, failing));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;

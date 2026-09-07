@@ -198,7 +198,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 
             if (!_strategy.StorageExists(name))
             {
-                throw new DatabaseException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
             var storage = ConfigureStorage(_strategy.OpenStorage(name));

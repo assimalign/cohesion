@@ -71,7 +71,7 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The opened database instance.</returns>
-    /// <exception cref="DatabaseException">Thrown when the database does not exist.</exception>
+    /// <exception cref="DatabaseNotFoundException">Thrown when the database does not exist.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the engine has been disposed.</exception>
     ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default);
 

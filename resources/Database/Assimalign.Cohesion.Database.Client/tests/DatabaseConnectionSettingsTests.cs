@@ -3,6 +3,7 @@ using System.Net;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client.Tests;
@@ -12,6 +13,43 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 /// </summary>
 public class DatabaseConnectionSettingsTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: resource endpoints create typed connection settings")]
+    public void For_ResourceEndpoint_ShouldPopulateSettings()
+    {
+        // Act
+        var settings = DatabaseConnectionSettings.For(
+            new EndpointAddress("tcp", "database.internal", 5740),
+            database: "orders",
+            principal: "orders-api");
+
+        // Assert
+        settings.Database.ShouldBe("orders");
+        settings.Principal.ShouldBe("orders-api");
+
+        var endpoint = settings.EndPoint.ShouldBeOfType<DnsEndPoint>();
+        endpoint.Host.ShouldBe("database.internal");
+        endpoint.Port.ShouldBe(5740);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: resource IP literals create socket-ready endpoints")]
+    public void For_ResourceIpEndpoint_ShouldPreserveIpAddress()
+    {
+        // Act
+        var settings = DatabaseConnectionSettings.For(
+            new EndpointAddress("cohesion-db", "127.0.0.1", 5740));
+
+        // Assert
+        var endpoint = settings.EndPoint.ShouldBeOfType<IPEndPoint>();
+        endpoint.Address.ShouldBe(IPAddress.Loopback);
+        endpoint.Port.ShouldBe(5740);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: a default resource endpoint is rejected")]
+    public void For_DefaultResourceEndpoint_ShouldRejectAddress()
+    {
+        Should.Throw<System.ArgumentException>(() => DatabaseConnectionSettings.For(default));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: connection strings parse database, principal, endpoint, and pool size")]
     public void Parse_FullConnectionString_ShouldPopulateSettings()
     {

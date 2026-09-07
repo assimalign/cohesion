@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 
+using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client;
@@ -39,8 +40,9 @@ public sealed class DatabaseConnectionSettings
     /// <summary>
     /// Gets or sets the server endpoint handed to the connection factory. Parsed
     /// connection strings produce a <see cref="DnsEndPoint"/> from the
-    /// <c>Endpoint=host[:port]</c> key; transports with non-network addressing
-    /// take a typed endpoint here instead.
+    /// <c>Endpoint=host[:port]</c> key. Resource endpoints preserve IP literals as
+    /// <see cref="IPEndPoint"/> values and host names as <see cref="DnsEndPoint"/> values;
+    /// transports with non-network addressing take a typed endpoint here instead.
     /// </summary>
     public EndPoint? EndPoint { get; set; }
 
@@ -53,6 +55,43 @@ public sealed class DatabaseConnectionSettings
     /// The default port assumed when a connection string endpoint omits one.
     /// </summary>
     public const int DefaultPort = 5740;
+
+    /// <summary>
+    /// Creates client settings for a resource endpoint supplied by the Cohesion
+    /// application model or ambient resource context.
+    /// </summary>
+    /// <param name="endpoint">The resolved endpoint address.</param>
+    /// <param name="database">The optional database to bind to.</param>
+    /// <param name="principal">The principal to claim during authentication.</param>
+    /// <returns>Connection settings that target <paramref name="endpoint"/>.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="endpoint"/> is uninitialized or
+    /// <paramref name="principal"/> is null or whitespace.
+    /// </exception>
+    public static DatabaseConnectionSettings For(
+        EndpointAddress endpoint,
+        string? database = null,
+        string principal = "anonymous")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        if (string.IsNullOrWhiteSpace(endpoint.Host) || endpoint.Port is <= 0 or > 65535)
+        {
+            throw new ArgumentException(
+                "The database endpoint must have a host and a valid positive port.",
+                nameof(endpoint));
+        }
+
+        EndPoint endPoint = IPAddress.TryParse(endpoint.Host, out IPAddress? address)
+            ? new IPEndPoint(address, endpoint.Port)
+            : new DnsEndPoint(endpoint.Host, endpoint.Port);
+
+        return new DatabaseConnectionSettings
+        {
+            Database = database,
+            Principal = principal,
+            EndPoint = endPoint,
+        };
+    }
 
     /// <summary>
     /// Parses a <c>key=value;</c> connection string. Supported keys
