@@ -1435,10 +1435,6 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Testing/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/src/Assimalign.Cohesion.Database.Testing.csproj" />
 	</Folder>
-	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Testing/tests/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.Tests.csproj" />
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.TestHost.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />
