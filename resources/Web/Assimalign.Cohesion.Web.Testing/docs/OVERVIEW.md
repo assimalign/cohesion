@@ -2,20 +2,18 @@
 
 ## Purpose
 
-Full-pipeline integration testing for Cohesion web applications without an operating-system
-socket. The package's one entry point, `WebApplicationTestFactory`, composes a
-`WebApplication` whose default server listens on the in-memory connection driver, manages the
-server's lifecycle per test (start on first use, graceful drain on dispose), and creates
-`System.Net.Http.HttpClient` instances that dial the in-memory listener through
-`SocketsHttpHandler.ConnectCallback`. A request sent through such a client crosses the real
-HTTP wire format, the real transport receive loop, the real server dispatch, and the
-application's real middleware pipeline — deterministically, on every CI operating system,
-with no ports to allocate or collide on.
+Full-pipeline integration testing for both manually composed Web applications and enabled Web
+resource executables. The manual factory uses the in-memory connection driver. The
+`FromProgram<Program>()` factory invokes the executable under an invocation-local
+`ResourceContext`, waits for its registered default control plane, and uses its ambient
+loopback `http` endpoint.
 
 ## Scope
 
 - `IWebApplicationTestFactory` / `WebApplicationTestFactory` — the per-test application host.
+- `IWebApplicationProgramTestFactory` — exposes the Program invocation's `ResourceContext`.
 - `WebApplicationTestFactoryOptions` — protocol selection and client base address.
+- `WebApplicationProgramTestFactoryOptions` — context, arguments, and lifecycle budgets.
 - `WebApplicationTestProtocol` — `Http1` (default) or prior-knowledge `Http2`. HTTP/3 is a
   documented non-goal (see `DESIGN.md`).
 
@@ -52,6 +50,16 @@ await using WebApplicationTestFactory factory = new(new WebApplicationTestFactor
 });
 ```
 
+Drive the exact Program used in production:
+
+```csharp
+await using IWebApplicationProgramTestFactory factory =
+    WebApplicationTestFactory.FromProgram<Program>();
+
+using HttpClient client = factory.CreateClient();
+string health = await client.GetStringAsync("/healthz");
+```
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Web.Hosting` — the `WebApplicationBuilder` / `WebApplication`
@@ -62,6 +70,8 @@ await using WebApplicationTestFactory factory = new(new WebApplicationTestFactor
   dialing factory).
 - `Assimalign.Cohesion.Connections` — the `Connection` contract and duplex-pipe stream
   adapter the client side rides.
+- `Assimalign.Cohesion.Hosting` — ambient resource scopes, entry registration, and host
+  lifecycle capture for the Program-backed mode.
 
 The client side is otherwise pure BCL (`SocketsHttpHandler`, `HttpClient`).
 

@@ -11,16 +11,17 @@ using Assimalign.Cohesion.Web.Health.Internal;
 /// </summary>
 /// <remarks>
 /// The <see cref="IHealthCheckService"/> is supplied explicitly and built at composition time — the
-/// middleware never performs request-time service location. A resource composes its own built-in
-/// checks internally (gated on its <c>EnableHealthCheck</c> option) and maps the endpoint:
+/// middleware never performs request-time service location. Application and resource authors can
+/// compose checks and map the aggregate, readiness, and liveness endpoints directly:
 /// <code>
-/// // inside the resource's hosting wiring, when options.EnableHealthCheck is set:
 /// IHealthCheckService health = HealthChecks.CreateBuilder()
-///     .AddCheck("database", new DatabaseConnectivityCheck(...), tags: new[] { HealthTags.Ready })
+///     .AddCheck("self", () =&gt; HealthCheckResult.Healthy(),
+///         tags: new[] { HealthTags.Ready, HealthTags.Live })
 ///     .Build();
-/// pipeline.MapHealthChecks(options.HealthCheckPath ?? "/healthz", health);
+/// pipeline.MapHealthChecks(health);
+/// pipeline.MapReadinessCheck(health);
+/// pipeline.MapLivenessCheck(health);
 /// </code>
-/// The application developer sees only the resource's options, never these types.
 /// </remarks>
 public static class WebApplicationExtensions
 {

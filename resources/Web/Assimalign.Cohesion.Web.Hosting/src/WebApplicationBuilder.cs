@@ -1,15 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
+using Assimalign.Cohesion.Configuration.CommandLine;
+using Assimalign.Cohesion.Configuration.Json;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
@@ -24,7 +26,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
+    private readonly ReadOnlyMemory<byte> _bootstrapCredential;
+    private readonly bool _requireControlPlaneAuthentication;
     private readonly List<IHealthContributor> _healthContributors = new();
+
+    private IWebApplicationPipeline? _pipeline;
 
     private bool _isBuilt;
 
@@ -34,6 +40,14 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
 
     internal WebApplicationBuilder(WebApplicationOptions options, Assembly? resourceAssembly)
+        : this(options, resourceAssembly, args: null)
+    {
+    }
+
+    internal WebApplicationBuilder(
+        WebApplicationOptions options,
+        Assembly? resourceAssembly,
+        string[]? args)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -45,11 +59,18 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered Web resource control-plane factory returned null.");
             resourceContext = ResourceRuntime.Current;
+            _bootstrapCredential = resourceContext.BootstrapCredential.ToArray();
+            _requireControlPlaneAuthentication = resourceContext.GatewayName is not null;
             options.Environment = resourceContext.EnvironmentName;
         }
 
         Environment = new HostEnvironment(options.Environment!);
         Configuration = new ConfigurationManager();
+        if (args is not null)
+        {
+            AddDefaultConfiguration(args, resourceContext);
+        }
+
         Logging = new LoggerFactoryBuilder();
         Services = new ServiceProviderBuilder();
         Server = new WebApplicationServerBuilder(this);
@@ -117,8 +138,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     public WebApplication Build()
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The application has already been built.");
+        InvalidOperationException.ThrowIf(
+            _options.StartServicesConcurrently || _options.StopServicesConcurrently,
+            "Web application servers require serial host lifecycle execution so they start in registration order and stop in reverse order.");
 
-        WebApplication app = new WebApplication(_context, _options, _controlPlane);
+        var applicationOptions = new WebApplicationOptions
+        {
+            Environment = _options.Environment,
+            ShutdownTimeout = _options.ShutdownTimeout,
+            StartupTimeout = _options.StartupTimeout,
+        };
+        WebApplication app = new WebApplication(_context, applicationOptions);
 
         Services.AddSingleton<IHostEnvironment>(Environment);
         Services.AddSingleton<IConfiguration>(Configuration);
@@ -127,7 +157,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
         Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
         {
-            return serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
+            IWebApplicationPipeline pipeline = _pipeline ??
+                serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
+
+            return _controlPlane is null
+                ? pipeline
+                : new ResourceControlPlanePipeline(
+                    _controlPlane,
+                    _bootstrapCredential,
+                    _requireControlPlaneAuthentication,
+                    _context,
+                    pipeline);
         });
 
         if (_controlPlane is not null)
@@ -195,6 +235,45 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             : null;
     }
 
+    private void AddDefaultConfiguration(string[] args, ResourceContext? resourceContext)
+    {
+        string contentRootPath = resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+        var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions
+        {
+            Root = contentRootPath,
+            IsReadOnly = true,
+        });
+
+        Configuration
+            .AddJsonFile(contentRoot, "appsettings.json", optional: true)
+            .AddJsonFile(
+                contentRoot,
+                $"appsettings.{Environment.Name}.json",
+                optional: true)
+            .AddEnvironmentVariables("COHESION_CONFIG__")
+            .AddCommandLine(PrependAmbientSettings(args, resourceContext));
+    }
+
+    private static string[] PrependAmbientSettings(
+        string[] args,
+        ResourceContext? resourceContext)
+    {
+        if (resourceContext is null || resourceContext.Settings.Count == 0)
+        {
+            return args;
+        }
+
+        var combinedArgs = new string[resourceContext.Settings.Count + args.Length];
+        int index = 0;
+        foreach ((string key, string value) in resourceContext.Settings)
+        {
+            combinedArgs[index++] = $"--{key}={value}";
+        }
+
+        args.CopyTo(combinedArgs, index);
+        return combinedArgs;
+    }
+
     IWebApplication IWebApplicationBuilder.Build()
     {
         return Build();
@@ -206,20 +285,14 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        //Server.UseServer(server);
+        Services.AddSingleton<IHostService>(new WebApplicationServerLifecycleAdapter(server));
         return this;
     }
 
     IWebApplicationBuilder IWebApplicationBuilder.AddPipeline(IWebApplicationPipeline pipeline)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
-
-        // Remove the default pipeline builder and replace it with the provided pipeline
-        Services.RemoveAll<IWebApplicationPipelineBuilder>();
-
-        // The user is override the default pipeline, so we need to register the provided 
-        // pipeline as the implementation of IWebApplicationPipeline
-        Services.AddSingleton<IWebApplicationPipeline>(pipeline);
+        _pipeline = pipeline;
         return this;
     }
 
@@ -236,6 +309,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(Func<IWebApplicationContext, IWebApplicationServer> server)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(server);
+
+        Services.AddSingleton<IHostService>(_ =>
+        {
+            IWebApplicationServer applicationServer = server.Invoke(_context)
+                ?? throw new InvalidOperationException(
+                    "The web application server factory returned null.");
+
+            return new WebApplicationServerLifecycleAdapter(applicationServer);
+        });
+
+        return this;
     }
 }

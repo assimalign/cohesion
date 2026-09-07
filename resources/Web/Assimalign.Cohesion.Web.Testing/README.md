@@ -1,12 +1,13 @@
 # Assimalign.Cohesion.Web.Testing
 
-Socketless integration testing for Cohesion web applications. `WebApplicationTestFactory`
-composes a `WebApplication` against the in-memory connection driver
-(`Assimalign.Cohesion.Connections.InMemory`) — **no sockets, no ports** — manages its
-lifecycle per test, and hands out `System.Net.Http.HttpClient` instances wired through
-`SocketsHttpHandler.ConnectCallback`, so every request flows the application's full pipeline
-(middleware, routing, features) end to end. This is how Cohesion consumers integration-test
-their services, and how Cohesion itself gets deterministic h1/h2 pipeline tests in CI.
+Integration testing for Cohesion web applications. `WebApplicationTestFactory` supports two
+complementary modes:
+
+- `new WebApplicationTestFactory()` composes a mutable application over the in-memory
+  connection driver for deterministic HTTP/1.1 and HTTP/2 pipeline tests.
+- `WebApplicationTestFactory.FromProgram<Program>()` invokes an enabled resource's real entry
+  point under a test-scoped `ResourceRuntime.CreateScope(...)`, waits for `/readyz`, and stops
+  it through `/cohesion/v1/stop`.
 
 ```csharp
 await using WebApplicationTestFactory factory = new();
@@ -27,6 +28,17 @@ HttpResponseMessage response = await client.GetAsync("/widgets");
   `new WebApplicationTestFactoryOptions { Protocol = WebApplicationTestProtocol.Http2 }`.
   HTTP/3 is out of scope (QUIC-bound — see `docs/DESIGN.md`).
 - Factories are fully isolated: run as many as you like in parallel in one process.
-- AOT/trim-safe: pure builder-time delegate wiring over BCL client types, zero reflection.
+- The Program-backed path uses the compiler-rooted `Assembly.EntryPoint` operation sanctioned
+  by the developer-experience design; generated registration preserves the entry for AOT.
+
+Program-backed use:
+
+```csharp
+await using IWebApplicationProgramTestFactory factory =
+    WebApplicationTestFactory.FromProgram<Program>();
+
+using HttpClient client = factory.CreateClient();
+HttpResponseMessage readiness = await client.GetAsync("/readyz");
+```
 
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).

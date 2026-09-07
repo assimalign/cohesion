@@ -135,8 +135,19 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            HealthContribution contribution =
-                await contributor.CheckAsync(cancellationToken).ConfigureAwait(false);
+            HealthContribution contribution;
+            try
+            {
+                contribution = await contributor.CheckAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                contribution = HealthContribution.Unhealthy(exception.Message);
+            }
 
             results.Add(contributor.Name, contribution);
             if ((int)contribution.Status < (int)status)

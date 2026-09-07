@@ -12,6 +12,7 @@
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
 		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">Deployment</CohesionWorkloadKind>
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
 	</PropertyGroup>
 
 	<ItemGroup>

@@ -52,6 +52,17 @@ symmetric release boundary and does not complete until the endpoints are release
 Hosted restart constructs a fresh server/listener instance after the prior instance
 stops; a disposed listener is not rebound.
 
+`IWebApplicationBuilder.AddServer` accepts that contracts-only server directly or through
+a factory over the final `IWebApplicationContext`. The Hosting implementation supplies its
+own lifecycle adapter, so a server is not required to reference or implement Hosting's
+`IHostService`. Multiple servers start in registration order and stop in reverse order;
+`IWebApplicationContext.Servers` exposes the original server objects rather than their
+runtime adapters.
+
+`AddPipeline` is the complete user-pipeline replacement seam. A Hosting runtime may still
+place fixed runtime terminals ahead of the supplied pipeline; replacing user dispatch does
+not replace host-owned lifecycle or management surfaces.
+
 ## Ordering is registration order
 
 Middleware ordering is positional. Some features carry hard ordering contracts — for

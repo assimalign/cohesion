@@ -16,10 +16,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Every buildable Web project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
-        # each of them - most importantly Web.Hosting, which nothing else pulls in
-        # transitively. Web.ApplicationModel is excluded (source-less placeholder).
+        # each of them - most importantly Web.Hosting and the NuGet-only
+        # Web.ApplicationModel control-plane package.
         projects: [
             'Assimalign.Cohesion.Web',
+            'Assimalign.Cohesion.Web.ApplicationModel',
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',

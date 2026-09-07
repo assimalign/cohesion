@@ -1,8 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
@@ -12,9 +10,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
-	</ItemGroup>
-	<ItemGroup>
-		<Using Include="Xunit" />
 	</ItemGroup>
 </Project>

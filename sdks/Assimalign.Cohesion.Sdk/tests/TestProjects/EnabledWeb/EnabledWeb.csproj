@@ -17,6 +17,8 @@
     <CohesionSetting Include="Orders:PageSize" Default="50" Type="int" />
     <CohesionResourceReference Include="..\EnabledDatabase\EnabledDatabase.csproj" Endpoints="db" />
     <CohesionResourceProperty Include="web.kind" Value="Api" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.Database.Client" Version="$(CohesionVersion)" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.Database.Sql.Client" Version="$(CohesionVersion)" />
   </ItemGroup>
 
 </Project>

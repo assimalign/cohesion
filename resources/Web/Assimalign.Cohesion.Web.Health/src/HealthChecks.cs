@@ -6,10 +6,10 @@ namespace Assimalign.Cohesion.Web.Health;
 /// Entry point for composing health checks without a dependency-injection container.
 /// </summary>
 /// <remarks>
-/// Hosted applications normally compose checks through the <c>AddHealthChecks</c> DI extension
-/// in <c>Assimalign.Cohesion.Web.Health.Hosting</c>. This factory is the container-free seam for
-/// tests, tooling, and lightweight hosts that want an <see cref="IHealthCheckService"/> without
-/// pulling in the hosting stack.
+/// This factory is the container-free composition seam for applications, resources, tests, and
+/// tooling. Register checks or <see cref="Assimalign.Cohesion.Hosting.IHealthContributor"/>
+/// instances on the returned builder, build an <see cref="IHealthCheckService"/>, and supply it
+/// explicitly when mapping health endpoints.
 /// </remarks>
 public static class HealthChecks
 {

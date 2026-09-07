@@ -266,6 +266,7 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/Web
     'resources/Web/Assimalign.Cohesion.Web'
+    'resources/Web/Assimalign.Cohesion.Web.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.Api'
     'resources/Web/Assimalign.Cohesion.Web.Authentication'
     'resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer'

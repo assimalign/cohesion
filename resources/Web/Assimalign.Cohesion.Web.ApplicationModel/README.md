@@ -1,9 +1,33 @@
 # Assimalign.Cohesion.Web.ApplicationModel
 
-The Web area's orchestration package. It has a deliberately small dependency
-closure: `Assimalign.Cohesion.ApplicationModel` for declarative resource types
-and `Assimalign.Cohesion.Hosting` for the Core-only resource control-plane
-contract. It never references `Web.Hosting` or another Web feature package.
+The Web area's Core-only orchestration package. It turns a build-produced
+`ResourceManifest` into a typed `WebResource`, applies deployer-owned options,
+and emits the platform-neutral `cohesion/plan/v1` realization plan consumed by
+the selected gateway compiler. It also supplies the default Web resource
+control plane.
+
+Its dependency closure is deliberately small: `Assimalign.Cohesion.ApplicationModel`
+for manifests and realization-plan records, and `Assimalign.Cohesion.Hosting`
+for the Core-only resource control-plane contract. It never references
+`Web.Hosting`, another Web feature package, or a platform SDK.
+
+## Planning a Web resource
+
+`WebResource` accepts only a `Kind = "Web"`, stateless `Deployment` manifest.
+Persistent `Volume` mounts are rejected. Every manifest endpoint becomes one
+service, and every endpoint marked `Public = true` becomes one exposure.
+
+```csharp
+ResourceManifest manifest = ResourceManifest.Load("resource.json");
+var options = new WebResourceOptions { Replicas = 3 };
+
+IApplicationResourceDescriptor api = builder.AddWeb(manifest, options);
+```
+
+Public exposure remains a build-produced manifest fact in plan v1. Host and
+certificate overrides are not added to the plan because they are not fields in
+the signed `cohesion/plan/v1` contract; platform-specific ingress or
+load-balancer settings never enter this package.
 
 ## Default control plane
 
@@ -35,5 +59,6 @@ unmatched path.
 
 ## AOT posture
 
-The control-plane factory uses static construction only. There is no assembly
-scanning, dynamic activation, or runtime code generation.
+The resource, planner, options, and control-plane factory use static typed
+construction only. Golden serialization uses `ResourcePlanJsonContext`. There
+is no assembly scanning, reflection-based activation, or runtime code generation.

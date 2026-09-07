@@ -1,7 +1,12 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Core;
@@ -14,15 +19,56 @@ internal static class ResourceControlPlaneMiddleware
 {
     private const string HealthJsonContentType = "application/health+json; charset=utf-8";
     private const string HealthPath = "/healthz";
+    private const string CohesionHealthPath = "/cohesion/v1/healthz";
     private const string ReadinessPath = "/readyz";
+    private const string CohesionReadinessPath = "/cohesion/v1/readyz";
     private const string LivenessPath = "/livez";
+    private const string CohesionLivenessPath = "/cohesion/v1/livez";
     private const string EndpointsPath = "/cohesion/v1/endpoints";
     private const string StopPath = "/cohesion/v1/stop";
     private const string CommandsPath = "/cohesion/v1/commands";
+    private const string HostReadinessContributionName = "cohesion.host";
+
+    internal static Task InvokeAsync(
+        IResourceControlPlane controlPlane,
+        int? controlPlanePort,
+        IHttpContext context,
+        WebApplicationMiddleware next)
+    {
+        return InvokeAsync(
+            controlPlane,
+            ReadOnlyMemory<byte>.Empty,
+            requireAuthentication: false,
+            controlPlanePort,
+            isApplicationReady: true,
+            context,
+            next);
+    }
 
     internal static async Task InvokeAsync(
         IResourceControlPlane controlPlane,
+        ReadOnlyMemory<byte> bootstrapCredential,
         int? controlPlanePort,
+        IHttpContext context,
+        WebApplicationMiddleware next)
+    {
+        await InvokeAsync(
+                controlPlane,
+                bootstrapCredential,
+                requireAuthentication: false,
+                controlPlanePort,
+                isApplicationReady: true,
+                context,
+                next)
+            .ConfigureAwait(false);
+    }
+
+    internal static async Task InvokeAsync(
+        IResourceControlPlane controlPlane,
+        ReadOnlyMemory<byte> bootstrapCredential,
+        bool requireAuthentication,
+        int? controlPlanePort,
+        bool isApplicationReady,
         IHttpContext context,
         WebApplicationMiddleware next)
     {
@@ -35,7 +81,16 @@ internal static class ResourceControlPlaneMiddleware
         string path = context.Request.Path.Value;
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
-        if (path == HealthPath)
+        bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
+        if (isNamespacedControlPlanePath &&
+            !IsAuthorized(context, bootstrapCredential.Span, requireAuthentication))
+        {
+            context.Response.StatusCode = HttpStatusCode.Unauthorized;
+            context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
+            return;
+        }
+
+        if (path == HealthPath || path == CohesionHealthPath)
         {
             if (!isRead)
             {
@@ -49,7 +104,7 @@ internal static class ResourceControlPlaneMiddleware
             return;
         }
 
-        if (path == ReadinessPath)
+        if (path == ReadinessPath || path == CohesionReadinessPath)
         {
             if (!isRead)
             {
@@ -57,13 +112,15 @@ internal static class ResourceControlPlaneMiddleware
                 return;
             }
 
+            ResourceHealthReport report =
+                await controlPlane.CheckReadinessAsync(context.RequestCancelled).ConfigureAwait(false);
             await WriteHealthAsync(
                 context,
-                await controlPlane.CheckReadinessAsync(context.RequestCancelled).ConfigureAwait(false));
+                isApplicationReady ? report : MarkHostAsStarting(report));
             return;
         }
 
-        if (path == LivenessPath)
+        if (path == LivenessPath || path == CohesionLivenessPath)
         {
             if (!isRead)
             {
@@ -109,7 +166,22 @@ internal static class ResourceControlPlaneMiddleware
                 return;
             }
 
-            await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
+            ResponseCompletionFeature? responseCompletion =
+                context.Features.Get<ResponseCompletionFeature>();
+
+            if (responseCompletion is not null)
+            {
+                responseCompletion.Register(
+                    () => controlPlane.RequestStopAsync(CancellationToken.None));
+            }
+            else
+            {
+                // A custom IWebApplicationServer may execute this pipeline without the default
+                // server's completion feature. Preserve the control-plane terminal's historical
+                // behavior in that case; the built-in server takes the deterministic deferred path.
+                await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
+            }
+
             context.Response.StatusCode = HttpStatusCode.Accepted;
             return;
         }
@@ -143,7 +215,28 @@ internal static class ResourceControlPlaneMiddleware
             return;
         }
 
+        if (isNamespacedControlPlanePath)
+        {
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            return;
+        }
+
         await next.Invoke(context).ConfigureAwait(false);
+    }
+
+    private static ResourceHealthReport MarkHostAsStarting(ResourceHealthReport report)
+    {
+        var contributions = new Dictionary<string, HealthContribution>(
+            report.Contributions,
+            StringComparer.Ordinal)
+        {
+            [HostReadinessContributionName] = HealthContribution.Unhealthy(
+                "The Web host has not completed startup."),
+        };
+
+        return new ResourceHealthReport(
+            HealthStatus.Unhealthy,
+            new ReadOnlyDictionary<string, HealthContribution>(contributions));
     }
 
     private static async Task WriteHealthAsync(IHttpContext context, ResourceHealthReport report)
@@ -169,11 +262,56 @@ internal static class ResourceControlPlaneMiddleware
                 {
                     writer.WriteString("description", contribution.Description);
                 }
+                if (contribution.Data is { Count: > 0 } data)
+                {
+                    writer.WritePropertyName("data");
+                    writer.WriteStartObject();
+                    foreach (KeyValuePair<string, object> item in data)
+                    {
+                        writer.WritePropertyName(item.Key);
+                        WriteDataValue(writer, item.Value);
+                    }
+                    writer.WriteEndObject();
+                }
                 writer.WriteEndObject();
             }
             writer.WriteEndObject();
             writer.WriteEndObject();
         }, HealthJsonContentType).ConfigureAwait(false);
+    }
+
+    private static void WriteDataValue(Utf8JsonWriter writer, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                writer.WriteNullValue();
+                break;
+            case string text:
+                writer.WriteStringValue(text);
+                break;
+            case bool flag:
+                writer.WriteBooleanValue(flag);
+                break;
+            case int number:
+                writer.WriteNumberValue(number);
+                break;
+            case long number:
+                writer.WriteNumberValue(number);
+                break;
+            case double number:
+                writer.WriteNumberValue(number);
+                break;
+            case float number:
+                writer.WriteNumberValue(number);
+                break;
+            case decimal number:
+                writer.WriteNumberValue(number);
+                break;
+            default:
+                writer.WriteStringValue(value.ToString());
+                break;
+        }
     }
 
     private static async Task ExecuteCommandAsync(
@@ -252,5 +390,42 @@ internal static class ResourceControlPlaneMiddleware
     {
         context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
         context.Response.Headers[HttpHeaderKey.Allow] = allow;
+    }
+
+    private static bool IsNamespacedControlPlanePath(string path)
+    {
+        const string namespacePath = "/cohesion/v1";
+        return path == namespacePath ||
+            path.StartsWith(namespacePath + "/", StringComparison.Ordinal);
+    }
+
+    private static bool IsAuthorized(
+        IHttpContext context,
+        ReadOnlySpan<byte> bootstrapCredential,
+        bool requireAuthentication)
+    {
+        if (bootstrapCredential.IsEmpty)
+        {
+            return !requireAuthentication;
+        }
+
+        if (!context.Request.Headers.TryGetValue(
+                HttpHeaderKey.Authorization,
+                out HttpHeaderValue authorization))
+        {
+            return false;
+        }
+
+        const string bearerPrefix = "Bearer ";
+        string value = authorization.Value;
+        if (!value.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        byte[] presentedCredential = Encoding.UTF8.GetBytes(value[bearerPrefix.Length..]);
+        return CryptographicOperations.FixedTimeEquals(
+            presentedCredential,
+            bootstrapCredential);
     }
 }

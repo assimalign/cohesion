@@ -1,23 +1,32 @@
 # Assimalign.Cohesion.Web.Health
 
-Cohesion health checks, delivered over HTTP. One package owns the health model (`IHealthCheck`,
-`Healthy`/`Degraded`/`Unhealthy` report, a builder-time registry, readiness/liveness tag
-filtering) and the `/healthz` · `/livez` · `/readyz` pipeline endpoint with an AOT-safe
-(`Utf8JsonWriter`) response writer. The produced report is surfaced through
-`IHttpFeatureCollection` as `IHttpHealthFeature`.
+Public HTTP health checks for Cohesion Web applications. The package provides the health model,
+builder-time registration, readiness/liveness filtering, `/healthz`, `/readyz`, and `/livez`
+pipeline endpoints, and an AOT-safe JSON response writer.
 
-Health lives in the Web area because it is delivered over HTTP (Kubernetes probes are HTTP
-endpoints). Resources consume this package as a **private implementation detail**
-(`CohesionPrivateProjectReference` + `CohesionFrameworkPrivateAssembly`) and expose health only
-through their own options (`EnableHealthCheck`, path) — the application developer never sees
-these types.
+`App.Web` exposes this assembly publicly, so application authors can register their own
+`IHealthCheck` implementations, inline probes, or transport-neutral Hosting
+`IHealthContributor` instances. `App.Database` also carries the assembly privately as part of
+its Web runtime closure; that private inclusion does not expose the Web health API to Database
+applications.
 
 ```csharp
-// inside a resource, when its EnableHealthCheck option is set:
 IHealthCheckService health = HealthChecks.CreateBuilder()
-    .AddCheck("database", new DatabaseConnectivityCheck(...), tags: new[] { HealthTags.Ready })
+    .AddCheck(
+        "self",
+        () => HealthCheckResult.Healthy(),
+        tags: new[] { HealthTags.Ready, HealthTags.Live })
+    .AddContributor(databaseContributor)
     .Build();
-pipeline.MapHealthChecks(options.HealthCheckPath ?? "/healthz", health);
+
+pipeline.MapHealthChecks(health);
+pipeline.MapReadinessCheck(health);
+pipeline.MapLivenessCheck(health);
 ```
+
+`AddContributor` adapts the contributor's name, status, description, data, and cancellation
+contract. Contributors participate in readiness and liveness by default. Supply custom tags to
+select a different slice, or an empty collection to include a contributor only in aggregate
+health.
 
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).

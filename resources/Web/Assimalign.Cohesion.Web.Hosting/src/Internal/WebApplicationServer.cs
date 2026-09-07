@@ -316,8 +316,12 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     {
                         try
                         {
+                            var responseCompletion = new ResponseCompletionFeature();
+                            exchange.Features.Set(responseCompletion);
+
                             await _pipeline.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
                             await context.SendAsync(exchange, cancellationToken).ConfigureAwait(false);
+                            await responseCompletion.CompleteAsync().ConfigureAwait(false);
                         }
                         finally
                         {

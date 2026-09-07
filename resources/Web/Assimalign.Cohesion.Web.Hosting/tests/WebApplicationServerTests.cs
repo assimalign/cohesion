@@ -250,6 +250,55 @@ public class WebApplicationServerTests
         await server.StopAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: Response completion callbacks run only after the response write completes")]
+    public async Task ServeConnection_WithResponseCompletionCallback_RunsCallbackAfterSendCompletes()
+    {
+        // Arrange
+        TaskCompletionSource sendEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseSend = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource completionInvoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpContext exchange = new();
+        FakeHttpConnectionContext connectionContext = new(new[] { exchange })
+        {
+            SendHandler = async (_, cancellationToken) =>
+            {
+                sendEntered.TrySetResult();
+                await releaseSend.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new((context, _) =>
+        {
+            ResponseCompletionFeature feature =
+                context.Features.Get<ResponseCompletionFeature>().ShouldNotBeNull();
+            feature.Register(() =>
+            {
+                completionInvoked.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+            return Task.CompletedTask;
+        });
+        WebApplicationServer server = CreateServer(
+            pipeline,
+            new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+        await sendEntered.Task.WaitAsync(Timeout);
+
+        // Assert
+        completionInvoked.Task.IsCompleted.ShouldBeFalse();
+
+        releaseSend.TrySetResult();
+        await completionInvoked.Task.WaitAsync(Timeout);
+        await connection.Disposed.Task.WaitAsync(Timeout);
+
+        connectionContext.SendCount.ShouldBe(1);
+        exchange.DisposeCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A connection that opens and closes without a request is still disposed")]
     public async Task ServeConnection_OnClientDisconnectBeforeRequest_DisposesConnectionAndContext()
     {

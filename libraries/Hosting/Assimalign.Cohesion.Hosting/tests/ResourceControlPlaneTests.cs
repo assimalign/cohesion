@@ -63,6 +63,84 @@ public class ResourceControlPlaneTests
         controlPlane.ObservedEndpoints["http"].Port.ShouldBe(5080);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A contributor failure becomes a named unhealthy result without stopping aggregation")]
+    public async Task CheckHealthAsync_WhenContributorThrows_RecordsFailureAndContinues()
+    {
+        // Arrange
+        int followingInvocations = 0;
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        controlPlane.AddHealthContributor(new CallbackContributor(
+            "database",
+            _ => ValueTask.FromException<HealthContribution>(
+                new InvalidOperationException("database unavailable"))));
+        controlPlane.AddHealthContributor(new CallbackContributor(
+            "worker",
+            _ =>
+            {
+                followingInvocations++;
+                return ValueTask.FromResult(HealthContribution.Healthy("running"));
+            }));
+
+        // Act
+        ResourceHealthReport report = await controlPlane.CheckHealthAsync(CancellationToken.None);
+
+        // Assert
+        report.Status.ShouldBe(HealthStatus.Unhealthy);
+        report.Contributions.Count.ShouldBe(2);
+        report.Contributions["database"].ShouldBe(
+            HealthContribution.Unhealthy("database unavailable"));
+        report.Contributions["worker"].Status.ShouldBe(HealthStatus.Healthy);
+        followingInvocations.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An unrelated contributor cancellation becomes an unhealthy result")]
+    public async Task CheckHealthAsync_WhenContributorCancelsIndependently_RecordsFailure()
+    {
+        // Arrange
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        controlPlane.AddHealthContributor(new CallbackContributor(
+            "queue",
+            _ => ValueTask.FromException<HealthContribution>(
+                new OperationCanceledException("queue probe canceled"))));
+
+        // Act
+        ResourceHealthReport report = await controlPlane.CheckHealthAsync(CancellationToken.None);
+
+        // Assert
+        report.Status.ShouldBe(HealthStatus.Unhealthy);
+        report.Contributions["queue"].ShouldBe(
+            HealthContribution.Unhealthy("queue probe canceled"));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Caller cancellation propagates and stops aggregation")]
+    public async Task CheckHealthAsync_WhenCallerCancels_PropagatesCancellation()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        int followingInvocations = 0;
+        IResourceControlPlane controlPlane = ResourceControlPlane.Create();
+        controlPlane.AddHealthContributor(new CallbackContributor(
+            "blocking",
+            cancellationToken =>
+            {
+                cancellation.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+                return ValueTask.FromResult(HealthContribution.Healthy());
+            }));
+        controlPlane.AddHealthContributor(new CallbackContributor(
+            "following",
+            _ =>
+            {
+                followingInvocations++;
+                return ValueTask.FromResult(HealthContribution.Healthy());
+            }));
+
+        // Act & Assert
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await controlPlane.CheckHealthAsync(cancellation.Token));
+        followingInvocations.ShouldBe(0);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "HostBuilt attaches lifecycle options and observed endpoints")]
     public void HostBuilt_WithAmbientContext_ConfiguresOnlyTheBuiltHost()
     {
@@ -90,6 +168,7 @@ public class ResourceControlPlaneTests
         ResourceHostOptions options = host.Context.ResourceHostOptions.ShouldNotBeNull();
         options.ContentRootPath.ShouldBe(FileSystemPath.Parse(contentRoot));
         options.StopEventName.ShouldBe("cohesion-stop-test");
+        options.RunMode.ShouldBe(ResourceHostRunMode.Process);
         controlPlane.ObservedEndpoints["http"].ShouldBe(endpoint);
     }
 
@@ -109,6 +188,27 @@ public class ResourceControlPlaneTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(_contribution);
+        }
+    }
+
+    private sealed class CallbackContributor : IHealthContributor
+    {
+        private readonly Func<CancellationToken, ValueTask<HealthContribution>> _callback;
+
+        internal CallbackContributor(
+            string name,
+            Func<CancellationToken, ValueTask<HealthContribution>> callback)
+        {
+            Name = name;
+            _callback = callback;
+        }
+
+        public string Name { get; }
+
+        public ValueTask<HealthContribution> CheckAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return _callback.Invoke(cancellationToken);
         }
     }
 }

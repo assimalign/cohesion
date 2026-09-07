@@ -2150,6 +2150,15 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/src/Assimalign.Cohesion.Web.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.ApplicationModel/tests/Assimalign.Cohesion.Web.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/DESIGN.md" />
 		<File Path="resources/Web/Assimalign.Cohesion.Web/docs/OVERVIEW.md" />

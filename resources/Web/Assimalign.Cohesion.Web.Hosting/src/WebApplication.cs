@@ -8,7 +8,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
@@ -22,18 +21,15 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware;
     private readonly WebApplicationContext _context;
     private readonly WebApplicationOptions _options;
-    private readonly IResourceControlPlane? _controlPlane;
 
     private bool _isBuilt;
 
     internal WebApplication(
         WebApplicationContext context,
-        WebApplicationOptions options,
-        IResourceControlPlane? controlPlane = null) : base(options)
+        WebApplicationOptions options) : base(options)
     {
         _context = context;
         _options = options;
-        _controlPlane = controlPlane;
         _middleware = new List<Func<WebApplicationMiddleware, WebApplicationMiddleware>>();
     }
 
@@ -59,23 +55,6 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
             middleware = _middleware[i].Invoke(middleware);
-        }
-
-        if (_controlPlane is not null)
-        {
-            IResourceControlPlane controlPlane = _controlPlane;
-            int? controlPlanePort = controlPlane.ObservedEndpoints.TryGetValue(
-                "http",
-                out EndpointAddress endpoint)
-                ? endpoint.Port
-                : null;
-            WebApplicationMiddleware next = middleware;
-            middleware = new WebApplicationMiddleware(context =>
-                ResourceControlPlaneMiddleware.InvokeAsync(
-                    controlPlane,
-                    controlPlanePort,
-                    context,
-                    next));
         }
 
         // Seed every application-registered feature (IWebApplicationBuilder.AddFeature, e.g.
@@ -187,7 +166,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
-        return new WebApplicationBuilder(new WebApplicationOptions(), resourceAssembly);
+        return new WebApplicationBuilder(new WebApplicationOptions(), resourceAssembly, args);
     }
 
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options)

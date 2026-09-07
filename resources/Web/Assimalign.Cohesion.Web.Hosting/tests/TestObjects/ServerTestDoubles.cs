@@ -172,6 +172,8 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
 
+    public Func<IHttpContext, CancellationToken, ValueTask>? SendHandler { get; init; }
+
     public EndPoint? LocalEndPoint => null;
 
     public EndPoint? RemoteEndPoint => null;
@@ -199,10 +201,14 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
         }
     }
 
-    public ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
+    public async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _sendCount);
-        return ValueTask.CompletedTask;
+
+        if (SendHandler is not null)
+        {
+            await SendHandler(context, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public ValueTask DisposeAsync()
@@ -231,7 +237,7 @@ internal sealed class FakeHttpContext : IHttpContext
 
     public IHttpConnectionInfo ConnectionInfo => throw new NotSupportedException();
 
-    public IHttpFeatureCollection Features => throw new NotSupportedException();
+    public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
 
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
 

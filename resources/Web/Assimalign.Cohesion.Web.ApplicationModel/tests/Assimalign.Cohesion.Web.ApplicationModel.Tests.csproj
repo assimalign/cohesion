@@ -7,4 +7,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" />
 	</ItemGroup>
+	<ItemGroup>
+		<None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>

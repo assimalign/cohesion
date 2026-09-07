@@ -68,6 +68,15 @@ application registers only a custom server and supplies no default-listener
 configuration, the reserved default host-service slot is inert; it does not start an
 empty aggregate alongside the custom server.
 
+The root `IWebApplicationBuilder.AddServer` overloads accept servers that know nothing
+about Hosting. `Web.Hosting` registers one internal `IHostService` adapter per server;
+the adapter delegates start/stop while `WebApplicationContext.Servers` unwraps it back to
+the original Web contract object. The adapter is registered only as a host service, so it
+cannot replace the default server's `IWebApplicationServer` singleton. Consequently a
+configured default and a custom server each start exactly once, in registration order,
+and stop in reverse order. The factory overload is a singleton registration and receives
+the final application context.
+
 **One accept loop, one task per connection.** The loop accepts a connection and
 *hands it off* to `ServeConnectionAsync` on its own `Task`, then loops straight
 back to accept the next one. The loop never awaits a connection's service.
@@ -317,14 +326,50 @@ currently captures only the design decisions that are settled.
 honors its generated `ResourceRuntime` registration. When enabled, the builder
 binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
 DI-registered `IHealthContributor`s, observes ambient endpoints, and attaches
-the built host for graceful stop. A fixed terminal layer runs before user
-middleware for `/cohesion/v1/healthz`, `/readyz`, `/livez`, `/endpoints`,
-`/stop`, and `/commands`.
+the built host for graceful stop. A fixed terminal layer wraps the final resolved
+pipeline — including a pipeline supplied through `IWebApplicationBuilder.AddPipeline` —
+so it always runs before user dispatch. It serves `/healthz`, `/readyz`, and `/livez`
+plus their `/cohesion/v1/healthz`, `/cohesion/v1/readyz`, and
+`/cohesion/v1/livez` aliases, together with `/cohesion/v1/endpoints`,
+`/cohesion/v1/stop`, and `/cohesion/v1/commands`.
+
+The default server installs an internal response-completion feature on each exchange.
+The stop terminal uses it to register the host shutdown signal, returns `202 Accepted`,
+and lets the server invoke that signal only after `SendAsync` has written the response.
+This keeps the control-plane route terminal while preventing server cancellation from
+racing delivery of its own acknowledgement.
+
+When the ambient context carries a bootstrap credential, every `/cohesion/v1/*`
+route requires that exact opaque value as an `Authorization: Bearer` credential;
+comparison is constant-time. The bare probe routes remain directly probeable by
+the platform. A standalone resource with no issued credential retains the local
+unauthenticated behavior.
 
 This module consumes only the Hosting contract and never references
 `Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and
 options overloads remain plain applications: they install no control-plane
 terminal, so the ordinary bodyless-404 fallback handles those paths.
+
+## Default application configuration
+
+`WebApplication.CreateBuilder(args)` composes the application configuration in
+increasing precedence order:
+
+1. optional `appsettings.json`;
+2. optional `appsettings.{Environment}.json`;
+3. process environment variables prefixed with `COHESION_CONFIG__` (the prefix is
+   removed and double underscores become configuration path separators);
+4. command-line arguments.
+
+The JSON files resolve from the ambient `ResourceContext.ContentRootPath` for an
+enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process
+gateway supplies settings directly on the ambient `ResourceContext`, rather than
+mutating process-wide environment variables. The builder folds those settings into
+the deployment-setting layer before the caller's command-line arguments, so the
+same keys work in process and out of process while explicit arguments retain the
+highest precedence. The implementation uses only Cohesion's JSON, environment, and
+command-line configuration providers; it adds no reflection binder or
+`Microsoft.Extensions.*` dependency.
 
 ## Configuration-bound server limits and endpoints
 
