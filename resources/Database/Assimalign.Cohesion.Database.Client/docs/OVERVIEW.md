@@ -16,7 +16,8 @@ results, and pools authenticated connections.
   `DatabaseClientResult` (typed columns + boxed rows, or an affected count).
 - **`DatabaseConnectionSettings`** — typed settings with a minimal `key=value;`
   connection-string parser (`Database`, `Principal`, `Endpoint=host[:port]`,
-  `MaxPoolSize`).
+  `MaxPoolSize`), plus `For(EndpointAddress)` for generated or ambient resource
+  endpoints.
 - **`DatabaseClientException`** — the client error root, carrying the wire's
   stable `ProtocolErrorCode`.
 

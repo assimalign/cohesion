@@ -4,7 +4,7 @@ The area root (architecture: [resources/Database/DESIGN.md](../../DESIGN.md)).
 Everything here must be true for *all five* data models — anything model-specific
 belongs in a model package. The root's job is to make engines substitutable at the
 seams the platform builds on: the server serves any engine, the hosting layer
-starts any engine, a client result looks the same regardless of the engine that
+composes any engine, a client result looks the same regardless of the engine that
 produced it.
 
 The root is also the area's **rollup**: it references every child root — the
@@ -70,8 +70,9 @@ surface. Child roots never reference the root.
   lifecycle enum to three observational conditions: `Running` (from creation),
   `Faulted` (a background-worker fault was recorded; the engine keeps serving —
   grouped commits self-help, checkpoints just stop truncating — but the owner
-  should learn it runs degraded), `Disposed`. The health seam (#168) reads this
-  surface; nothing drives transitions from outside.
+  should learn it runs degraded), `Disposed`. The default control-plane health
+  aggregate delivered by #973 reads this surface; nothing drives transitions
+  from outside.
 - **The application exposes its composition through `IDatabaseApplicationContext`,
   and the context is plural** (owner direction, 2026-07-13 — the Database
   instance of the Web area's `IWebApplicationContext` pattern, converged with
@@ -164,7 +165,7 @@ surface. Child roots never reference the root.
   cost accepted; wire parity held by the protocol contract and per-model E2Es —
   the preserved prediction-vs-evidence table lives in the area DESIGN §3.10).
   The contracts stay here for the same COHRES001 reason as before: feature
-  libraries (quotas #167, health #168, a future `Database.Testing`) must be
+  libraries (quotas #167, health, `Database.Testing`) must be
   able to name the server without referencing any runtime. The context shape
   (`Context` = engine + sessions) mirrors the application context pattern —
   observational composition on a context, lifecycle on the owning object.
@@ -185,6 +186,18 @@ surface. Child roots never reference the root.
   alternative — a builder type in the hosting module — would force every model
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
+- **The C# schema is one retained root model, not a second build-only language**
+  (#973). `IDatabaseSchema` and `IDatabaseSchemaBuilder` describe custom types,
+  tables (columns, keys, indexes, and references), functions, triggers, and
+  database-scoped principals. `DatabaseSchema.Create(name, configure)` produces
+  the immutable declaration; the concrete Hosting builder's
+  `AddDatabase(engine, name, configure)` retains it and registers the same
+  database for before-accept provisioning. Schema compile and migrations
+  (#857–#859) consume this model later. Keeping the vocabulary in the root lets
+  customer `Program.cs`, hosting, and build tooling share the declaration
+  without making a model package reference `Database.Hosting`; the rejected
+  alternatives were administrative wire verbs and a parallel declarative source
+  format, both of which would violate the area's code-first principle.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -202,9 +215,12 @@ the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown
 `DatabaseException`s), the client core (`DatabaseClientException`,
 `SqlClientException`), the server, and `Database.Embedded`.
-The root defines three semantic subtypes, each because the distinction is part
-of the session contract: `DatabaseParseException` (fix-the-text vs.
-fix-the-data — the wire's `ParseFailure`), and the retryable-abort pair
+The root defines four semantic subtypes, each because the distinction is part
+of a public contract: `DatabaseNotFoundException` is the exact absence signal
+from `IDatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
+not confuse an operational failure with a missing database),
+`DatabaseParseException` distinguishes fix-the-text from fix-the-data failures
+(the wire's `ParseFailure`), and the retryable-abort pair
 `DatabaseTransactionAbortedException` / `DatabaseTransactionDeadlockException`
 (the model-boundary surface of the transaction kernel's aborts: a write-write
 conflict or deadlock victim is retryable by construction, and in-process
@@ -249,7 +265,11 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## AOT posture
 
-Contracts, enums, and value objects only — no reflection, no serialization.
+Contracts, enums, value objects, and statically constructed schema declarations only. The schema
+builder reads the member named by a caller-provided selector expression but never compiles the
+expression, scans an assembly, dynamically loads code, or performs reflection-based
+serialization. Function and trigger delegates are retained as declarations for the build-time
+compiler; the root does not discover or activate them dynamically.
 
 ## Non-goals
 

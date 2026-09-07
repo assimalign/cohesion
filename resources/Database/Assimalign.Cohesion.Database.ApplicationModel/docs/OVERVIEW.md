@@ -1,34 +1,43 @@
 # Assimalign.Cohesion.Database.ApplicationModel — Overview
 
-The orchestration manifest for the Cohesion database (ApplicationModel Layer 3d): `DatabaseResource` declares the database to a gateway as an executable resource with a wire-protocol endpoint and a persistent data volume; `AddDatabase(...)` composes it into an application graph.
+The Core-only orchestration package for Cohesion databases. It turns an enabled
+database executable's build-produced `ResourceManifest` into a typed
+`DatabaseResource`, applies deployer-owned replica and storage overrides, and emits a
+platform-neutral `ResourcePlan` for the selected gateway compiler.
 
 ```csharp
-var builder = Application.CreateBuilder(args);
-var db  = builder.AddDatabase("orders-db");
-var api = builder.AddWebApp("orders-api").DependsOn(db);
-builder.UseGateway(new LocalGateway());
-await builder.Build().RunAsync();
+ResourceManifest manifest = ResourceManifest.Load("resource.json");
+
+IApplicationResourceDescriptor database = builder.AddDatabase(
+    manifest,
+    new DatabaseResourceOptions
+    {
+        Replicas = 2,
+        Storage = { Size = "20Gi" },
+    });
 ```
+
+Generated gateway code normally supplies the manifest and exposes these typed options
+to application authors.
 
 ## Scope
 
-- `DatabaseResource` — `IExecutableResource` + `IEndpointResource` + `IMountResource` manifest
-- `DatabaseResourceOptions` — port (0 = platform-allocated), data mount path, environment variables
-- `AddDatabase(...)` builder extensions
-- `DatabaseResourceControlPlane` — the default control-plane factory registered by enabled database resources
+- `DatabaseResource` — a `PlannedResource` over the immutable manifest snapshot.
+- `DatabaseResourceOptions` — typed `Replicas` and `Storage.Size` overrides.
+- `AddDatabase(manifest, options)` — application-graph composition.
+- Database planner — stable workload identity, sized per-replica volume claims, one
+  service per endpoint, and a headless governing service.
+- `DatabaseResourceControlPlane` — the Database default control-plane factory.
+
+The control plane currently accepts no command kinds. Database commands are deferred
+to developer-experience item 31c.
 
 ## Dependencies
 
-- `Assimalign.Cohesion.ApplicationModel` for the declarative resource model
-- `Assimalign.Cohesion.Hosting` for the Core-only control-plane contract
+- `Assimalign.Cohesion.ApplicationModel` for manifests, planned resources, and the
+  platform-neutral realization-plan IR.
+- `Assimalign.Cohesion.Hosting` for the Core-only default control-plane contract.
 
-The project never references `Database.Hosting`. The generated registration and
-the runtime meet through `ResourceRuntime`, preserving the manifest/runtime
-split while allowing every enabled database resource to expose the same default
-control plane on its ambient `admin` endpoint.
-
-## Consumers
-
-Gateways consume the typed resource model. An SDK-enabled database executable
-also consumes the default control-plane factory through generated code; the
-database runtime itself never references this package.
+The project is guarded by COHAM001 and never references Database runtime, gateway, or
+platform packages. It emits no legacy resource-specific environment variables; runtime
+endpoint and mount values flow through `ResourceContext`.

@@ -169,6 +169,7 @@ re-bootstrapping on the next open.
 ## Error model
 
 `DatabaseException` (area root) for misuse and model errors;
+`DatabaseNotFoundException` for an open request whose storage does not exist;
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
 `DatabaseTransactionAbortedException`/`DatabaseTransactionDeadlockException`
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model

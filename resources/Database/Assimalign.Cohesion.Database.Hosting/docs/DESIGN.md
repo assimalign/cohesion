@@ -13,8 +13,10 @@ and implements the root's application-builder seam. It owns no server machinery
 `SqlDatabaseServer` lives in `Database.Sql`), no engine lifecycle
 (engines are data machines — operational from creation, disposed by their
 composition root), and no worker scheduling (engines own their loops
-unconditionally). Its references shrank accordingly: the area root plus the
-non-area `Hosting` foundation — nothing else, not even `Connections`.
+unconditionally). Its same-area references remain the area root only. The
+non-area `Hosting` foundation supplies lifecycle/control-plane contracts, while
+private cross-area `Web.Hosting` and `Web.Health` references implement the
+enabled resource's HTTP admin surface without exposing Web types publicly.
 
 ## Execution model
 
@@ -24,14 +26,17 @@ menu defined by `Assimalign.Cohesion.Hosting` (see
 
 | Service | Menu member | Why |
 | --- | --- | --- |
-| `DatabaseServerHostService` (one per registered server) | `BackgroundService` (pool-scheduled) | an async accept loop belongs on the pool |
-| Composition-root services (`DatabaseApplicationOptions.Services`) | caller's choice | e.g. the Application executable's default-database provisioner |
+| `DatabaseServerHostService` (one per registered server) | direct `IHostService` adapter | awaits `IDatabaseServer.StartAsync`, so the host cannot report `Started` until the listener is accepting; delegates stop to the server's bounded graceful drain |
+| `DatabaseAdminEndpointService` (enabled resources only) | `BackgroundService` | owns the private asynchronous Web control-plane host for the application lifetime |
+| Composition-root services (`DatabaseApplicationOptions.Services`) | caller's choice | includes `DefaultDatabaseProvisioner`, registered by `Provision`/`AddDatabase` |
 
 Registration order is the additional services first, then one endpoint service
 per registered server. A host starts services in registration order and stops
 them in reverse, so **the servers start last and drain first** — the unchanged
 ordering rule — and provisioning-style services complete before any endpoint
-accepts.
+accepts. `DatabaseApplication` rejects inherited concurrent-start/concurrent-stop
+options and snapshots the remaining host lifecycle settings at construction, so
+a retained mutable options object cannot weaken that invariant after `Build()`.
 
 Everything that used to sit between those two rows is gone by design:
 
@@ -41,10 +46,10 @@ Everything that used to sit between those two rows is gone by design:
   stopping it; durability rides engine disposal, not host stop.
 - **No worker slot services.** The engine spawns its own worker loops at
   creation — the latency-critical WAL flusher and page write-back on dedicated
-  threads the engine itself owns (the Lane-H dedicated-thread guardrail is
-  satisfied inside the engine), checkpoint/maintenance on engine-owned timers —
+threads the engine itself owns (the Lane-H dedicated-thread guardrail is
+satisfied inside the engine), checkpoint/maintenance on engine-owned timers —
   and quiesces them on dispose. The host cannot schedule, claim, enable, or
-  disable them. See "Worker ownership" below for the reversal record.
+disable them. See "Worker ownership" below for the reversal record.
 
 ## Worker ownership — engine-owned, always (the claim handshake is gone)
 
@@ -64,8 +69,10 @@ restarts) each needed rules, tests, and documentation. No composition ever neede
 a different scheduler than the engine's own — the host's dedicated-thread slots
 were re-implementing exactly the threads the engine spawns for itself. One owner
 means a worker can never run twice, with no handshake to verify. The execution
-menu still matters — for the services this module *does* compose (endpoint on the
-pool) — but engine durability threading is the engine's internal affair.
+menu still matters for the services this module *does* compose: the admin Web host
+is asynchronous background work, while each database server uses its explicit
+start-ready/stop-drained lifecycle. Engine durability threading remains the
+engine's internal affair.
 
 What survives for hosts: observability. `IDatabaseEngine.Workers` (name, kind,
 interval) and the engine's observational `State` (`Running`/`Faulted`/`Disposed`)
@@ -115,20 +122,18 @@ machines there is nothing to drive: an engine registered on the application
 (`DatabaseApplicationOptions.Engines`) is an **observational** entry on the
 context — the composition root that created it owns it. Durability-on-shutdown
 moved from "host stops engines last" to "composition root disposes engines after
-  the host stops," which the Application executable's composition object does in
-  dependency order (application → server-owned listener → engine).
+the host stops," which a customer executable does in dependency order
+(application → server-owned listener → engine).
 
-## Configuration conventions
+## Ambient resource configuration
 
-`DatabaseHostConfiguration.FromEnvironment()` binds the environment-variable
-conventions a gateway injects when it launches the host —
-`COHESION_DATABASE_DATA_PATH`, `COHESION_DATABASE_ENDPOINT_PORT`,
-`COHESION_DATABASE_DURABILITY`. Binding lives here because the hosting module is
-the area's one Configuration seam; the bound values shape how the composition
-root builds the engine (data path, durability) and the listener (port). The
-`Database.ApplicationModel` resource sets the same variable names on its realized
-process, so the manifest side and the host side agree by convention (the two
-projects share no assembly).
+The legacy `DatabaseHostConfiguration` and resource-specific environment conventions are
+removed. `DatabaseApplication.CreateBuilder(args)` consults
+`ResourceRuntime.Current` only when the calling executable has an assembly-keyed
+default-control-plane registration. Its typed ambient endpoints, mounts, settings,
+references, and environment are then the resource contract; a plain builder does
+not consume the ambient context. Engine and wire-server options stay code-first in
+the customer's `Program.cs`.
 
 ## The builder-first composition surface
 
@@ -154,24 +159,47 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
   `DatabaseApplication` (the guided richer signature; the interface member
   forwards), which implements the root's `IDatabaseApplication` — `Context` +
   start/stop, the Web shape.
+- **Database declarations stay on the concrete builder.** `Provision(engine,
+  name)` registers `DefaultDatabaseProvisioner` as an additional service.
+  `AddDatabase(engine, name, configure)` builds and retains an `IDatabaseSchema`
+  and registers the same provisioning operation. Schema compilation and migration
+  apply are later work; the declaration is retained now so they do not need a
+  second composition model. Because every additional service is materialized
+  before every server wrapper, provisioning precedes accept even when a server
+  verb appears earlier in `Program.cs`. The provisioner creates the database only
+  when open reports the root's exact `DatabaseNotFoundException`; any other
+  `DatabaseException` propagates and fails application startup.
 - Direct construction (`new DatabaseApplication(options)`) remains supported for
   fully manual hosts; the builder is sugar over the same options object, never a
   second composition model.
 
-The `Database.Application` executable is the proof-of-pattern consumer: its
-bootstrap registers the SQL engine through `AddSqlDatabase`, fronts it with
-`AddSqlServer` over the TCP listener, and parks the default-database provisioner
-on `builder.Options.Services`.
+A customer resource executable is the composition root: it registers a model
+engine, declares databases through `AddDatabase`, fronts the engine with its
+model's server verb, then builds and runs the host.
 
 ## Enabled-resource control plane
 
 `DatabaseApplication.CreateBuilder(args)` captures the calling resource
 assembly and asks `ResourceRuntime` for its generated registration. When one is
 present, `Build()` adds builder health checks and registered
-`IHealthContributor`s to the isolated plane, observes the ambient endpoints,
-attaches the database host, and starts a private Web host on the ambient
-`admin` address. That private host serves health, readiness, and liveness under
-`/cohesion/v1/*` through `Web.Health`. A plain application created with the
+`IHealthContributor`s to the isolated plane, including
+`DatabaseApplicationContext`. The context de-duplicates registered and
+server-fronted engines by identity: `Running` is healthy, `Faulted` is degraded,
+and `Disposed` (or an unknown state) is unhealthy; its diagnostic data carries the
+engine state and full worker name/kind/cadence inventory.
+
+`Build()` also observes every ambient endpoint, attaches the database host for
+graceful stop, and starts a private Web host on the ambient `admin` address.
+`Web.Health` maps `/healthz`, `/readyz`, and `/livez`. The exact Web.Hosting
+control-plane middleware handles `/cohesion/v1/endpoints`,
+`/cohesion/v1/stop`, and `/cohesion/v1/commands`; the accepted Database command
+kind list remains empty until item 31c. Readiness has a dedicated outer-host gate:
+the admin listener may report startup progress while servers bind, but `/readyz`
+cannot become healthy until every server has confirmed accept and the Database host
+is `Started`; `/livez` remains process-oriented. Every `/cohesion/v1/*` request
+requires the ambient bootstrap bearer credential for a gateway-scoped invocation
+and fails closed when that credential is absent; bare health/probe routes remain
+unauthenticated for platform probes. A plain application created with the
 no-argument or options overload receives none of this behavior.
 
 The private Web references are the sanctioned cross-area implementation seam;
@@ -183,8 +211,9 @@ references `Database.ApplicationModel`.
 - No DI-container surface on the builder — registration stays values/options
   only, per the area composition rules (`*.Hosting` remains the DI seam for
   everything else).
-- No governance/quotas (#167). Detailed engine/server contributors remain #168
-  scope; this slice supplies their neutral aggregation and HTTP delivery seam.
+- No governance/quotas (#167). The application-context engine/worker aggregate and
+  HTTP delivery seam are present; model-specific diagnostics can contribute
+  additional `IHealthContributor`s later.
 - No server machinery — servers are per-model and live inside the model
   packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
   through the root's `IDatabaseServer` seam.

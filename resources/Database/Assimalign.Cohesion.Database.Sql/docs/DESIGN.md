@@ -386,9 +386,11 @@ record moves with the machinery):
   `ProtocolVersion.Current` (minors are additive by the protocol's contract, so
   no per-minor branching yet).
 - **Database binding** resolves on the server's one engine: already-open
-  databases first (`TryGetDatabase`), then an open attempt; no match →
-  `DatabaseNotFound` and close. (The pre-per-model server probed a *list* of
-  engines in registration order; one engine per server removed that ambiguity.)
+  databases first (`TryGetDatabase`), then an open attempt; an exact
+  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. Other open
+  failures propagate to the handshake's internal-error path. (The pre-per-model
+  server probed a *list* of engines in registration order; one engine per server
+  removed that ambiguity.)
 - **Authenticate exchange (MVP):** the challenge frame carries no payload (the
   trust method); the client's response bytes pass to `IDatabaseAuthenticator`
   as opaque evidence. Method-specific payload schemas arrive with real
@@ -460,7 +462,9 @@ validation, execution errors, constraint violations (nullability). Parse failure
 (`SqlQueryRequest.FromSql`, and therefore the session's text-execute seam) throw
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
-from execution errors without model knowledge. `SqlCatalogException` (a `DatabaseException`) surfaces
+from execution errors without model knowledge. Opening a database absent from the
+storage strategy throws the root's `DatabaseNotFoundException`; other open failures
+retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged.
 
 ## The MVCC integration (scoped under #862)
