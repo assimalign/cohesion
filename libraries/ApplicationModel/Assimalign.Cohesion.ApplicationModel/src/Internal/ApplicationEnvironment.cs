@@ -4,8 +4,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// The default <see cref="IApplicationEnvironment"/>, resolved from the host process
-/// environment variables <c>COHESION_ENVIRONMENT</c> or <c>DOTNET_ENVIRONMENT</c>,
-/// defaulting to <c>Production</c>.
+/// by <see cref="AppEnvironment"/>.
 /// </summary>
 internal sealed class ApplicationEnvironment : IApplicationEnvironment
 {
@@ -23,10 +22,7 @@ internal sealed class ApplicationEnvironment : IApplicationEnvironment
 
     public static ApplicationEnvironment FromHost()
     {
-        string name =
-            Environment.GetEnvironmentVariable("COHESION_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
-            ?? "Production";
+        string name = AppEnvironment.GetEnvironmentName();
 
         bool isDevelopment = string.Equals(name, DevelopmentEnvironment, StringComparison.OrdinalIgnoreCase);
 

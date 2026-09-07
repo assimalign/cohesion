@@ -2,8 +2,24 @@
 
 public static partial class AppEnvironment
 {
-    internal static partial class Keys
+    /// <summary>
+    /// Contains the environment-variable names and defaults used to resolve the application environment.
+    /// </summary>
+    public static class Keys
     {
-        internal static readonly string EnvironmentKey = "COHESION_ENVIRONMENT";
+        /// <summary>
+        /// Gets the Cohesion-specific environment-name variable.
+        /// </summary>
+        public const string EnvironmentKey = Core.ResourceEnvironment.Environment;
+
+        /// <summary>
+        /// Gets the .NET environment-name fallback variable.
+        /// </summary>
+        public const string DotNetEnvironmentKey = "DOTNET_ENVIRONMENT";
+
+        /// <summary>
+        /// Gets the environment name used when neither environment variable is set.
+        /// </summary>
+        public const string DefaultEnvironmentName = "Production";
     }
 }

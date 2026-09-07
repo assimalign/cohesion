@@ -266,7 +266,8 @@ public static class Application
   a computed projection.
 - `ApplicationResourceCollection` — name-unique `List<IApplicationResource>`.
 - `ApplicationResourceDescriptor` — resource + `DependsOn` edges.
-- `ApplicationEnvironment` — reads `DOTNET_ENVIRONMENT`/`COHESION_ENVIRONMENT`.
+- `ApplicationEnvironment` — delegates to Core's `AppEnvironment` so the
+  `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"` rule has one owner.
 - `CohesionApplication` — the only `IApplication`. `RunAsync` mirrors
   `Host<TContext>.RunAsync` (linked `CancellationTokenSource` + a
   `TaskCompletionSource` completed on cancellation):

@@ -14,6 +14,33 @@ Examples below document the intended public shape; some members still throw NotI
 - Exception and system extension helpers centralize small cross-cutting behaviors.
 - The library is dependency-light by design so other Core packages can reference it safely.
 
+## Frozen runtime contract
+
+`ResourceEnvironment` is the canonical .NET expression of the version 1 gateway-to-resource
+contract documented in `docs/RUNTIME_CONTRACT.md`. Its fixed names and parameterized patterns are
+`public const string` values. Constants are inlined into consuming assemblies, so changing any
+value is a breaking wire-contract change rather than an ordinary implementation change.
+
+Endpoint, resource, and mount components use one ordinal ASCII normalization rule: lowercase
+ASCII is uppercased, ASCII letters and digits are retained, and each other character becomes one
+underscore. `EndpointAddress` is the immutable parsed form used by the typed readers. A declared
+endpoint's HOST/PORT/SCHEME values describe its bind address; its separately advertised
+PUBLIC_URL remains available through the URI reader. Dependency URLs may carry an optional path.
+
+`AppEnvironment` owns the single environment-name rule:
+`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this
+Core rule rather than parsing process variables itself. Both process-environment and dictionary
+readers live in Core so future ambient `ResourceContext` support can carry the same keys without
+duplicating their parsing rules.
+
+The ambient `ResourceContext` and `ResourceRuntime` are deliberately not part of this change;
+they are the in-process carrier delivered by runtime-contract item 12.
+
+## AOT posture
+
+Runtime-contract parsing uses direct string, integer, and URI operations. It performs no
+reflection, assembly scanning, dynamic code generation, or runtime serialization.
+
 ## Layout Example
 
 ```text
@@ -47,5 +74,5 @@ Console.WriteLine(payload.Megabytes);
 Glob pattern = Glob.Parse("**/*.json");
 bool isMatch = pattern.IsMatch("settings/appsettings.json");
 
-string? environmentName = AppEnvironment.GetEnvironmentName();
+string environmentName = AppEnvironment.GetEnvironmentName();
 ```

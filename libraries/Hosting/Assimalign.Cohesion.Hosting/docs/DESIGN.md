@@ -11,6 +11,20 @@ The package splits host runtime concerns into explicit contracts: a host orchest
 - BackgroundService is the convenience base class for long-running units of *asynchronous* work inside a host. It is pool-scheduled: `StartAsync` launches `ExecuteAsync` directly and stores the real work task (no `Task.Factory.StartNew` wrapper, no `LongRunning`), so `StopAsync` cancels and then joins that exact task within the caller's shutdown budget, and any fault thrown by `ExecuteAsync` surfaces to the host (synchronous faults during start, post-yield faults on stop) instead of being swallowed. A cooperative cancellation exit is treated as a clean stop.
 - DedicatedThreadService is the base class for *synchronous, blocking* units of work that own a dedicated background OS thread for their entire life.
 
+## Health contribution seam
+
+`IHealthContributor` is the Core-only, transport-neutral carrier for a named component health
+snapshot. `CheckAsync` returns a `ValueTask<HealthContribution>`, allowing synchronous state
+snapshots without allocating a `Task` while still supporting bounded asynchronous checks.
+Contributors belong to an individual host composition; there is no process-wide registry.
+
+`HealthStatus` is ordered from least to most healthy (`Unhealthy = 0`, `Degraded = 1`,
+`Healthy = 2`), so the default contribution fails closed and an aggregator can select its least
+healthy member. `HealthContribution` carries only status, an optional description, and optional
+diagnostic data. Registration, aggregation, timeout policy, exception handling, dependency
+injection, and HTTP probe delivery belong to area Hosting/control-plane integrations delivered by
+later design items.
+
 ## Lifecycle
 
 A start/stop cycle drives four host-level specialization hooks around the service phases, in this order:
@@ -93,6 +107,8 @@ It is intentionally not shipped until a configuration-varying launch actually ex
 
 - No threading knob or strategy on `Host<TContext>`. The host imposes no execution model; the per-service bases above are the seam.
 - No host-owned execution substrate (process-wide `SynchronizationContext` / `TaskScheduler`). The one genuine substrate case - a thread-per-core server whose sibling services must resume on per-core event loops - should be modeled as a substrate service registered first (serial registration-order start installs it before siblings), not as a `Host<>` strategy.
+- No health registry, scheduler, aggregator, or transport. Hosting owns only the contribution
+  contract; an area's default control plane decides how to collect and expose it.
 
 ## Layout Example
 

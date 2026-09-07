@@ -1,5 +1,12 @@
 This is a rough design  implementation I'm looking at
 
+## Runtime-contract boundary
+
+ApplicationModel remains a Core-only orchestration contract. Its internal application-environment
+implementation delegates environment-name resolution to Core's `AppEnvironment`, so this package
+does not declare or parse Cohesion runtime variable names. The ambient in-process resource context
+is delivered separately by runtime-contract item 12.
+
 
 
 ## Dependency Graph 

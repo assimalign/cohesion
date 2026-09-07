@@ -31,6 +31,11 @@ collection/environment/application implementations behind the `Application` stat
 factory, plus the two `CohesionValueType`-generated identity wrappers
 `ResourceName`/`ResourceId` and the new `ApplicationName`/`EnvironmentName`.
 
+The internal application-environment implementation delegates process resolution to Core's
+`AppEnvironment`. That keeps the frozen Cohesion variable name and the
+`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"` precedence rule out of the
+orchestration package.
+
 ## Design intent and why-this-not-that
 
 - **`IApplication` does not extend a host abstraction.** A host runs inside one

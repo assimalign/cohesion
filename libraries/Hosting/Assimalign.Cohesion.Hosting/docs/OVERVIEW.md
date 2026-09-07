@@ -2,12 +2,13 @@
 
 ## Summary
 
-Defines the hosting abstractions, lifecycle orchestration, environment and context types, and background-service base class for Cohesion applications.
+Defines the hosting abstractions, lifecycle orchestration, environment and context types,
+transport-neutral health contributions, and service base classes for Cohesion applications.
 
 ## Current Evaluation
 
 - Status: Active
-- Production source files: 17; key type candidates discovered: 9; test files discovered: 15.
+- Production source files: 20; key type candidates discovered: 12; test files discovered: 17.
 - Project references: Assimalign.Cohesion.Core
 - Package references: None
 - NotImplementedException markers: 0
@@ -30,6 +31,9 @@ Defines the hosting abstractions, lifecycle orchestration, environment and conte
 - HostExtensions
 - HostOptions
 - HostState
+- HealthContribution
+- HealthStatus
+- IHealthContributor
 
 ## Source Layout
 
