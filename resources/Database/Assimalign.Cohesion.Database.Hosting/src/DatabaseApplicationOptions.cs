@@ -19,6 +19,9 @@ using Assimalign.Cohesion.Hosting;
 /// the model packages (for example <c>SqlDatabaseServer</c> via the
 /// <c>AddSqlServer</c> builder verb in <c>Assimalign.Cohesion.Database.Sql</c>) or
 /// directly by the composition root, and assigned here.
+/// The inherited concurrent start and stop switches are unsupported: a database application
+/// requires sequential lifecycle execution to preserve provisioning-before-accept and
+/// drain-before-service-stop.
 /// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {

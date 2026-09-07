@@ -5,7 +5,6 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Core;
-using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting;
@@ -34,6 +33,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private readonly List<IHealthContributor> _healthContributors = new();
+    private readonly List<IDatabaseSchema> _schemas = new();
 
     // Server registrations resolve in registration order at Build: instances are
     // wrapped as trivial factories so an instance registered after a deferred
@@ -80,6 +80,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// </summary>
     internal IResourceControlPlane? ControlPlane => _controlPlane;
 
+    /// <summary>
+    /// Gets the schema declarations retained for later compilation and migration planning.
+    /// </summary>
+    public IReadOnlyList<IDatabaseSchema> Schemas => _schemas.AsReadOnly();
+
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseEngine> Engines => _options.Engines as IReadOnlyList<IDatabaseEngine> ?? [.. _options.Engines];
 
@@ -97,6 +102,61 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
         _healthContributors.Add(new DelegateHealthContributor(name, check));
         return this;
+    }
+
+    /// <summary>
+    /// Registers before-accept provisioning for a database declared by the application.
+    /// </summary>
+    /// <param name="engine">The engine that owns the database.</param>
+    /// <param name="databaseName">The logical database name to open or create.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="databaseName"/> is empty or whitespace.</exception>
+    /// <remarks>
+    /// Provisioning is registered as an additional host service. The built application always
+    /// starts all additional services before its server wrappers, so provisioning completes
+    /// before any server accepts connections regardless of the order in which composition verbs
+    /// were called.
+    /// </remarks>
+    public DatabaseApplicationBuilder Provision(IDatabaseEngine engine, string databaseName)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
+
+        _options.Services.Add(new DefaultDatabaseProvisioner(engine, databaseName));
+        return this;
+    }
+
+    /// <summary>
+    /// Declares a logical database in C#, retains its schema for later compilation, and registers
+    /// the database for before-accept provisioning.
+    /// </summary>
+    /// <param name="engine">The engine that owns the database.</param>
+    /// <param name="name">The logical database name.</param>
+    /// <param name="configure">The callback that declares the database schema.</param>
+    /// <returns>The completed schema declaration.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="engine"/> or <paramref name="configure"/> is null.
+    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
+    /// <remarks>
+    /// Schema compilation and migrations consume the retained declaration in their owning work
+    /// items. This registration already enforces the durable code-first boundary: the database
+    /// is opened or created before any registered server starts accepting connections.
+    /// </remarks>
+    public IDatabaseSchema AddDatabase(
+        IDatabaseEngine engine,
+        string name,
+        Action<IDatabaseSchemaBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        IDatabaseSchema schema = DatabaseSchema.Create(name, configure);
+        _schemas.Add(schema);
+        Provision(engine, name);
+        return schema;
     }
 
     /// <inheritdoc cref="IDatabaseApplicationBuilder.AddEngine" />
@@ -158,12 +218,18 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
         if (_controlPlane is not null)
         {
+            var controlPlaneContributors = new List<IHealthContributor> { context };
+            var registeredContributors = new HashSet<IHealthContributor>(ReferenceEqualityComparer.Instance);
+            registeredContributors.Add(context);
+
             foreach (IHealthContributor contributor in _healthContributors)
             {
-                _controlPlane.AddHealthContributor(contributor);
+                if (registeredContributors.Add(contributor))
+                {
+                    controlPlaneContributors.Add(contributor);
+                }
             }
 
-            var registeredContributors = new HashSet<IHealthContributor>(ReferenceEqualityComparer.Instance);
             foreach (IHealthContributor contributor in _options.Services
                 .Concat<object>(_options.Engines)
                 .Concat(_options.Servers)
@@ -171,8 +237,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             {
                 if (registeredContributors.Add(contributor))
                 {
-                    _controlPlane.AddHealthContributor(contributor);
+                    controlPlaneContributors.Add(contributor);
                 }
+            }
+
+            foreach (IHealthContributor contributor in controlPlaneContributors)
+            {
+                _controlPlane.AddHealthContributor(contributor);
             }
 
             if ((_controlPlane.ObservedEndpoints.TryGetValue("admin", out EndpointAddress endpoint) ||
@@ -180,7 +251,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                  _resourceContext.Endpoints.TryGetValue("admin", out endpoint))))
             {
                 _controlPlane.ObserveEndpoint("admin", endpoint);
-                _options.Services.Add(new DatabaseAdminEndpointService(endpoint, _controlPlane));
+                _options.Services.Add(new DatabaseAdminEndpointService(
+                    endpoint,
+                    _controlPlane,
+                    _resourceContext?.BootstrapCredential ?? ReadOnlyMemory<byte>.Empty,
+                    _resourceContext?.GatewayName is not null,
+                    context,
+                    controlPlaneContributors));
             }
         }
 

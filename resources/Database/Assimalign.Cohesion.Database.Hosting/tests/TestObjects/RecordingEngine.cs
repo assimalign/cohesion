@@ -11,15 +11,27 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// </summary>
 internal sealed class RecordingEngine : IDatabaseEngine
 {
-    private bool _disposed;
+    private readonly string _name;
+    private readonly IReadOnlyList<IDatabaseEngineWorker> _workers;
+    private EngineState _state;
 
-    public string Name => "recording-engine";
+    internal RecordingEngine(
+        string name = "recording-engine",
+        EngineState state = EngineState.Running,
+        IReadOnlyList<IDatabaseEngineWorker>? workers = null)
+    {
+        _name = name;
+        _state = state;
+        _workers = workers ?? Array.Empty<IDatabaseEngineWorker>();
+    }
 
-    public EngineState State => _disposed ? EngineState.Disposed : EngineState.Running;
+    public string Name => _name;
+
+    public EngineState State => _state;
 
     public EngineModel Model => EngineModel.Sql;
 
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
 
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
@@ -41,7 +53,7 @@ internal sealed class RecordingEngine : IDatabaseEngine
 
     public void Dispose()
     {
-        _disposed = true;
+        _state = EngineState.Disposed;
     }
 
     public ValueTask DisposeAsync()

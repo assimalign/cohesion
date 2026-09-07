@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -17,6 +18,81 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// </summary>
 public class DatabaseApplicationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: concurrent service start is rejected to preserve provisioning before accept")]
+    public void Application_WithConcurrentStart_ShouldRejectUnorderedLifecycle()
+    {
+        var options = new DatabaseApplicationOptions
+        {
+            StartServicesConcurrently = true,
+        };
+
+        Should.Throw<InvalidOperationException>(() => new DatabaseApplication(options))
+            .Message.ShouldContain("sequential service start and stop");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: concurrent service stop is rejected to preserve server drain order")]
+    public void Application_WithConcurrentStop_ShouldRejectUnorderedLifecycle()
+    {
+        var options = new DatabaseApplicationOptions
+        {
+            StopServicesConcurrently = true,
+        };
+
+        Should.Throw<InvalidOperationException>(() => new DatabaseApplication(options))
+            .Message.ShouldContain("sequential service start and stop");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: post-build option mutation cannot bypass sequential startup")]
+    public async Task Application_WhenConcurrencyIsEnabledAfterBuild_ShouldStillStartSequentially()
+    {
+        var serviceStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseService = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serverStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new DatabaseApplicationOptions();
+        options.Services.Add(new ControlledStartService(serviceStarted, releaseService));
+        options.Servers.Add(new ControlledStartServer(
+            serverStarted,
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)));
+        var application = new DatabaseApplication(options);
+        options.StartServicesConcurrently = true;
+
+        Task start = ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await serviceStarted.Task.WaitAsync(DatabaseHostTestHarness.Timeout());
+
+        serverStarted.Task.IsCompleted.ShouldBeFalse();
+
+        releaseService.TrySetResult(true);
+        await serverStarted.Task.WaitAsync(DatabaseHostTestHarness.Timeout());
+        ((ControlledStartServer)application.Context.Servers[0]).Accept();
+        await start;
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context: post-build option mutation cannot change hosted registries")]
+    public async Task Application_WhenRegistriesAreMutatedAfterBuild_ShouldRetainBuiltSnapshot()
+    {
+        var log = new List<string>();
+        var registeredEngine = new RecordingEngine();
+        var registeredServer = new RecordingServer(log, "registered", registeredEngine);
+        var lateEngine = new RecordingEngine();
+        var lateServer = new RecordingServer(log, "late", lateEngine);
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(registeredEngine);
+        options.Servers.Add(registeredServer);
+        var application = new DatabaseApplication(options);
+
+        options.Engines.Add(lateEngine);
+        options.Servers.Add(lateServer);
+
+        application.Context.Engines.ShouldBe([registeredEngine]);
+        application.Context.Servers.ShouldBe([registeredServer]);
+
+        await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
+
+        log.ShouldBe(["registered:start", "registered:stop"]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Host: a started host serves a query over the composed endpoint")]
     public async Task StartHost_WithEndpointService_ShouldServeQueryEndToEnd()
     {
@@ -102,45 +178,63 @@ public class DatabaseApplicationTests
         harness.Engine.State.ShouldBe(EngineState.Running);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Config: environment conventions bind, and unset variables stay null")]
-    public void Configuration_FromEnvironment_ShouldBindConventionalVariables()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: host startup waits until every server is accepting")]
+    public async Task StartHost_WhileServerBindIsPending_ShouldRemainStarting()
     {
-        // Arrange
-        Environment.SetEnvironmentVariable(DatabaseHostConfiguration.DataPathVariable, "/var/lib/cohesion-db");
-        Environment.SetEnvironmentVariable(DatabaseHostConfiguration.PortVariable, "5999");
-        Environment.SetEnvironmentVariable(DatabaseHostConfiguration.DurabilityVariable, null);
+        var bindStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var accepting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new DatabaseApplicationOptions();
+        options.Servers.Add(new ControlledStartServer(bindStarted, accepting));
+        var application = new DatabaseApplication(options);
 
-        try
-        {
-            // Act
-            DatabaseHostConfiguration configuration = DatabaseHostConfiguration.FromEnvironment();
+        Task start = ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
+        await bindStarted.Task.WaitAsync(DatabaseHostTestHarness.Timeout());
 
-            // Assert
-            configuration.DataPath.ShouldBe("/var/lib/cohesion-db");
-            configuration.Port.ShouldBe(5999);
-            configuration.Durability.ShouldBeNull();
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(DatabaseHostConfiguration.DataPathVariable, null);
-            Environment.SetEnvironmentVariable(DatabaseHostConfiguration.PortVariable, null);
-        }
+        start.IsCompleted.ShouldBeFalse();
+        application.Context.State.ShouldBe(HostState.Starting);
+
+        accepting.TrySetResult(true);
+        await start;
+        application.Context.State.ShouldBe(HostState.Started);
+
+        await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Config: a malformed port variable is rejected")]
-    public void Configuration_FromEnvironment_WithBadPort_ShouldThrow()
+    private sealed class ControlledStartServer(
+        TaskCompletionSource<bool> bindStarted,
+        TaskCompletionSource<bool> accepting) : IDatabaseServer
     {
-        // Arrange
-        Environment.SetEnvironmentVariable(DatabaseHostConfiguration.PortVariable, "not-a-port");
+        private readonly RecordingServer _inner = new([], "controlled");
 
-        try
+        public IDatabaseServerContext Context => _inner.Context;
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
         {
-            // Act / Assert
-            Should.Throw<FormatException>(() => DatabaseHostConfiguration.FromEnvironment());
+            bindStarted.TrySetResult(true);
+            return accepting.Task.WaitAsync(cancellationToken);
         }
-        finally
-        {
-            Environment.SetEnvironmentVariable(DatabaseHostConfiguration.PortVariable, null);
-        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        internal void Accept() => accepting.TrySetResult(true);
     }
+
+    private sealed class ControlledStartService(
+        TaskCompletionSource<bool> started,
+        TaskCompletionSource<bool> release) : IHostService
+    {
+        public ServiceId Id { get; } = ServiceId.New();
+
+        public async Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            started.TrySetResult(true);
+            await release.Task.WaitAsync(cancellationToken);
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
 }

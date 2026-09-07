@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Hosting;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// The standalone hosting application for the database resource. Composition-only:
@@ -38,12 +37,17 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// </summary>
     /// <param name="options">The application options.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Concurrent service start or stop was enabled. Database applications require ordered
+    /// lifecycle execution to preserve provisioning-before-accept and drain-before-stop.
+    /// </exception>
     public DatabaseApplication(DatabaseApplicationOptions options)
         : this(options, options is null ? null! : new DatabaseApplicationContext(options))
     {
     }
 
-    internal DatabaseApplication(DatabaseApplicationOptions options, DatabaseApplicationContext context) : base(options)
+    internal DatabaseApplication(DatabaseApplicationOptions options, DatabaseApplicationContext context)
+        : base(CreateHostOptionsSnapshot(options))
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(context);
@@ -65,8 +69,33 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
             services.Add(new DatabaseServerHostService(server));
         }
 
+        context.FreezeRegistries(options.Engines, options.Servers);
         context.SetHostedServices(services);
         _context = context;
+    }
+
+    private static DatabaseApplicationOptions CreateHostOptionsSnapshot(DatabaseApplicationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.StartServicesConcurrently || options.StopServicesConcurrently)
+        {
+            throw new InvalidOperationException(
+                "Database applications require sequential service start and stop so provisioning " +
+                "precedes accept and servers drain before additional services stop.");
+        }
+
+        // Host<TContext> reads its options at StartAsync/StopAsync time. Snapshot the lifecycle
+        // values so a caller retaining the mutable builder options cannot enable concurrency
+        // after Build and bypass Database's ordering invariant.
+        return new DatabaseApplicationOptions
+        {
+            Environment = options.Environment,
+            StartupTimeout = options.StartupTimeout,
+            ShutdownTimeout = options.ShutdownTimeout,
+            StartServicesConcurrently = false,
+            StopServicesConcurrently = false,
+        };
     }
 
     /// <summary>

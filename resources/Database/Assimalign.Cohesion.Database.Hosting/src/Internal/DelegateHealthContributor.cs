@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Database.Hosting.Internal;
+namespace Assimalign.Cohesion.Database.Hosting;
 
 internal sealed class DelegateHealthContributor : IHealthContributor
 {
