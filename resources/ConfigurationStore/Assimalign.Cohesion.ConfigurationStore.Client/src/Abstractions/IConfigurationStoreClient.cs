@@ -1,46 +1,35 @@
 using System;
-using System.IO;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.SecretStore.Client;
+namespace Assimalign.Cohesion.ConfigurationStore.Client;
 
 /// <summary>
-/// Resolves secret and certificate material from a secret-store endpoint.
+/// Reads configuration namespaces and sends commands to a configuration-store endpoint.
 /// </summary>
-public interface ISecretStoreClient
+public interface IConfigurationStoreClient
 {
     /// <summary>
-    /// Gets the bytes stored at a secret path.
+    /// Gets the values in a configuration namespace.
     /// </summary>
-    /// <param name="path">The area-defined secret path.</param>
+    /// <param name="name">The area-defined configuration namespace name.</param>
     /// <param name="cancellationToken">The token that cancels the request.</param>
-    /// <returns>A task whose result contains the secret bytes.</returns>
-    /// <exception cref="ArgumentException"><paramref name="path"/> is empty or whitespace.</exception>
-    /// <exception cref="HttpRequestException">The endpoint rejects the request or cannot be reached.</exception>
-    /// <exception cref="OperationCanceledException">The request is cancelled.</exception>
-    Task<ReadOnlyMemory<byte>> GetSecretAsync(
-        string path,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets a PEM-encoded certificate from the secret store.
-    /// </summary>
-    /// <param name="name">The area-defined certificate name.</param>
-    /// <param name="cancellationToken">The token that cancels the request.</param>
-    /// <returns>A task whose result contains the PEM-encoded certificate.</returns>
+    /// <returns>
+    /// A task whose result contains the namespace's configuration keys and nullable values.
+    /// </returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
     /// <exception cref="HttpRequestException">The endpoint rejects the request or cannot be reached.</exception>
-    /// <exception cref="InvalidDataException">The endpoint returns an empty certificate.</exception>
+    /// <exception cref="JsonException">The endpoint returns an invalid namespace document.</exception>
     /// <exception cref="OperationCanceledException">The request is cancelled.</exception>
-    Task<string> GetCertificateAsync(
+    Task<IReadOnlyDictionary<string, string?>> GetNamespaceAsync(
         string name,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sends a generic command envelope to the secret-store control plane.
+    /// Sends a generic command envelope to the configuration-store control plane.
     /// </summary>
     /// <param name="command">The command envelope to send.</param>
     /// <param name="cancellationToken">The token that cancels the request.</param>
