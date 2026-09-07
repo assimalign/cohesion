@@ -707,7 +707,7 @@ public class LocalGatewayTests
             {
                 content.ShouldNotBe(Encoding.UTF8.GetBytes("mount-value"));
                 Encoding.UTF8.GetString(content).ShouldNotContain("mount-value");
-                Directory.GetFiles(Path.Combine(root, ".cohesion", ApplicationNameValue, ".keys"))
+                Directory.GetFiles(Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", ".keys"))
                     .Length.ShouldBeGreaterThan(0);
             }
             else
