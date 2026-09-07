@@ -273,10 +273,11 @@
 
         <!--
             Deliberately EXCLUDED from the MVP framework:
-            - Database.Application - the standalone host EXECUTABLE (the artifact
-              DatabaseResource declares). Frameworks deliver libraries to
-              applications; the executable ships as a deployment artifact
-              (published binary / container image), never through a framework.
+            - Database.Testing - the packaged resource-program test harness. It
+              drives Database.Hosting under a test-scoped ResourceContext but is
+              tooling for tests, never part of an application's runtime closure.
+            - Database.SampleHost - the non-packable real-process E2E resource
+              executable under resources/Database/samples; never shipped.
             - The Documents/Graph/Blob/Cache model families - engine scaffolds
               without shipping surface yet. (KeyValuePair graduated into the
               shipping set 2026-07-14; its still-source-less satellites -
@@ -301,6 +302,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />

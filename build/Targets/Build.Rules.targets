@@ -59,11 +59,9 @@
 	      listed hosting assembly, and COHRES002 for a listed same-area assembly,
 	      in the declaring project only. Setting it is itself the documented
 	      deviation marker - pair it with a comment explaining why. The standing
-	      conventions (the expected holders per area; anything else is case-by-case):
+	      convention (the expected holder per area; anything else is case-by-case):
 	      the test factory Assimalign.Cohesion.<Area>.Testing
-	      (drives the concrete runtime; see Web.Testing's csproj), the
-	      composition-root project <Area>.Application (see Database.Application's
-	      csproj and the <Area>.Application convention in resource-areas.md).
+	      (drives the concrete runtime; see Web.Testing's csproj).
 	      The former <Area>.ApplicationModel exemption is retired: it may reference
 	      shared Assimalign.Cohesion.Hosting, never the area's runtime module.
 

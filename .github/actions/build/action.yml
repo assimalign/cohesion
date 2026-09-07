@@ -20,6 +20,14 @@ inputs:
   project:
     description: The project folder and assembly name to build.
     required: true
+  local-sdk-rids:
+    description: Optional comma-separated runtime IDs for bootstrapping local Cohesion SDK and framework packages before restore.
+    required: false
+    default: ''
+  local-sdk-use-canonical-version:
+    description: Use the exact canonical package identity for a clean release-validation bootstrap.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -42,6 +50,21 @@ runs:
     - name: Build build tasks
       shell: pwsh
       run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
+
+    - name: Pack local SDK and framework closure
+      if: ${{ inputs.local-sdk-rids != '' }}
+      shell: pwsh
+      run: |
+        $rids = '${{ inputs.local-sdk-rids }}' -split ','
+        $install = @{
+          Configuration = 'Release'
+          Rids = $rids
+          SkipLibraries = $true
+        }
+        if ('${{ inputs.local-sdk-use-canonical-version }}' -eq 'true') {
+          $install.UseCanonicalVersion = $true
+        }
+        ./installer/scripts/Install-Local.ps1 @install
 
     - name: Restore ${{ inputs.project }}
       shell: pwsh

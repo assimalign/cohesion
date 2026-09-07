@@ -9,12 +9,15 @@ function Get-CohesionLocalPackageVersion {
         Appends a final .local prerelease identifier so a development pack cannot share an
         id/version pair with a published package. A stable canonical version is rejected because
         adding -local would sort below that stable version; main must receive its post-tag bump
-        before local packing resumes.
+        before local packing resumes. UseCanonicalVersion is the explicit clean-runner validation
+        mode and returns the exact canonical version vector instead.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string] $Version
+        [string] $Version,
+
+        [switch] $UseCanonicalVersion
     )
 
     $versionPattern = '^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<suffix>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
@@ -26,7 +29,7 @@ function Get-CohesionLocalPackageVersion {
         throw "Version '$Version' must be SemVer in the supported form MAJOR.MINOR.PATCH-PRERELEASE."
     }
 
-    if (-not $versionMatch.Groups['suffix'].Success) {
+    if (-not $versionMatch.Groups['suffix'].Success -and -not $UseCanonicalVersion) {
         throw "Canonical version '$Version' is stable. Apply the required post-tag bump to a higher prerelease before creating local packages; a -local prerelease would sort below the stable release."
     }
 
@@ -45,16 +48,23 @@ function Get-CohesionLocalPackageVersion {
     $minorVersion = $versionMatch.Groups['minor'].Value
     $patchVersion = $versionMatch.Groups['patch'].Value
     $versionPrefix = "$majorVersion.$minorVersion.$patchVersion"
-    $versionSuffix = "$canonicalSuffix.local"
+    $versionSuffix = if ($UseCanonicalVersion) { $canonicalSuffix } else { "$canonicalSuffix.local" }
+    $packageVersion = if ($UseCanonicalVersion) { $Version } else { "$versionPrefix-$versionSuffix" }
+    $packagePatchVersion = if ([string]::IsNullOrWhiteSpace($versionSuffix)) {
+        $patchVersion
+    }
+    else {
+        "$patchVersion-$versionSuffix"
+    }
 
     return [pscustomobject]@{
         CanonicalVersion = $Version
-        Version          = "$versionPrefix-$versionSuffix"
+        Version          = $packageVersion
         VersionPrefix    = $versionPrefix
         VersionSuffix    = $versionSuffix
         MajorVersion     = $majorVersion
         MinorVersion     = $minorVersion
-        PatchVersion     = "$patchVersion-$versionSuffix"
+        PatchVersion     = $packagePatchVersion
     }
 }
 

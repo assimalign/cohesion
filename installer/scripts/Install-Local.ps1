@@ -26,6 +26,8 @@
 
     Local packages append a final .local prerelease identifier to the canonical
     version (for example, 10.0.1-preview.3.local). They are never release artifacts.
+    The explicit release-validation mode instead uses the canonical identity on a
+    clean runner and is restricted to the SDK/framework bootstrap closure.
 
     SDK-path consumers write <Project Sdk="Assimalign.Cohesion.Sdk"> and the
     SDK auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
@@ -58,6 +60,11 @@
     and reported at the end instead of aborting the run. Useful for landing
     the working subset of the feed while WIP libraries don't compile.
 
+.PARAMETER UseCanonicalVersion
+    Packs the SDK/framework bootstrap closure at the exact canonical version, including a stable
+    version. Reserved for clean release-validation runners; requires -SkipLibraries so ordinary
+    local development cannot replace shipping library identities in the global NuGet cache.
+
 .EXAMPLE
     pwsh installer\scripts\Install-Local.ps1
         Pack everything (host-RID runtime pack only) into _out/packages.
@@ -83,6 +90,8 @@ param(
     # treats a broken library as a hard failure.
     [switch]$ContinueOnLibraryError,
 
+    [switch]$UseCanonicalVersion,
+
     # Bypass the locked-cache check. Use only if you understand the risk:
     # the new .nupkg is still produced under _out/packages, but the cached
     # extract under ~/.nuget/packages won't be replaced, so consumer restores
@@ -95,12 +104,18 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
 
+if ($UseCanonicalVersion -and -not $SkipLibraries) {
+    throw '-UseCanonicalVersion is a release-validation bootstrap and requires -SkipLibraries.'
+}
+
 # Resolve the canonical version, then derive a local-only prerelease above it. Local packages must
 # never reuse the id/version of a published artifact. A stable canonical line is rejected because
 # adding -local would sort below the stable release; the required post-tag bump must land first.
 Import-Module (Join-Path $PSScriptRoot 'modules/CohesionLocalPackaging.psm1') -Force
 $canonicalVersion = & (Join-Path $PSScriptRoot 'Get-CohesionVersion.ps1') -RepoRoot $repoRoot
-$localVersion = Get-CohesionLocalPackageVersion -Version $canonicalVersion
+$localVersion = Get-CohesionLocalPackageVersion `
+    -Version $canonicalVersion `
+    -UseCanonicalVersion:$UseCanonicalVersion
 $cohesionVersion = $localVersion.Version
 
 # Global MSBuild properties keep every package shape and every generated dependency version on the
@@ -127,7 +142,7 @@ if (-not $Rids -or $Rids.Count -eq 0) {
 
 Write-Host "Cohesion local pack" -ForegroundColor Cyan
 Write-Host "  Source version: $canonicalVersion"
-Write-Host "  Local version : $cohesionVersion"
+Write-Host "  Package version: $cohesionVersion"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  RIDs          : $($Rids -join ', ')"
 Write-Host "  Repo root     : $repoRoot"
@@ -371,6 +386,48 @@ else {
     Write-Host "[5/5] Skipping library/resource packs (-SkipLibraries)." -ForegroundColor DarkYellow
 }
 #endregion
+
+# The package-backed Database E2E sample must pin the exact SDK identity produced above. Keep the
+# versionless template in source and generate global.json only after every requested pack has
+# succeeded, so a failed pack never leaves a pin that names artifacts which do not exist.
+if (-not $SkipSdks) {
+    $consumerTemplatePath = Join-Path $repoRoot `
+        'resources\Database\global.template.json'
+    if (Test-Path -LiteralPath $consumerTemplatePath) {
+        $consumerGlobalJsonPath = Join-Path (Split-Path -Parent $consumerTemplatePath) 'global.json'
+        $consumerGlobalJson = Get-Content -LiteralPath $consumerTemplatePath -Raw | ConvertFrom-Json
+        $sdkVersions = $consumerGlobalJson.PSObject.Properties['msbuild-sdks'].Value
+        if ($null -eq $sdkVersions) {
+            throw "Consumer SDK template '$consumerTemplatePath' has no msbuild-sdks object."
+        }
+
+        foreach ($sdk in $sdkVersions.PSObject.Properties) {
+            $packagePath = Join-Path $feedDir "$($sdk.Name).$cohesionVersion.nupkg"
+            if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+                throw "Consumer SDK '$($sdk.Name)' was not produced at '$packagePath'."
+            }
+
+            $sdk.Value = $cohesionVersion
+        }
+
+        $temporaryGlobalJsonPath = "$consumerGlobalJsonPath.$([Guid]::NewGuid().ToString('N')).tmp"
+        try {
+            $json = $consumerGlobalJson | ConvertTo-Json -Depth 20
+            [System.IO.File]::WriteAllText(
+                $temporaryGlobalJsonPath,
+                $json + [Environment]::NewLine,
+                [System.Text.UTF8Encoding]::new($false))
+            Move-Item -LiteralPath $temporaryGlobalJsonPath -Destination $consumerGlobalJsonPath -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporaryGlobalJsonPath) {
+                Remove-Item -LiteralPath $temporaryGlobalJsonPath -Force
+            }
+        }
+
+        Write-Host "  generated $consumerGlobalJsonPath ($cohesionVersion)" -ForegroundColor DarkGray
+    }
+}
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green

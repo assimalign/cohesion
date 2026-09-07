@@ -222,6 +222,11 @@ jobs:
           area: ${{ matrix.area }}
           category: ${{ matrix.category }}
           project: ${{ matrix.project }}
+          # Database.Testing restores its real Sdk.Database sample before release packages exist.
+          # Bootstrap only that validation leg at the exact release identity; unlike ordinary
+          # local packing, this remains valid when the canonical version is stable.
+          local-sdk-rids: ${{ matrix.project == 'Assimalign.Cohesion.Database.Testing' && 'linux-x64' || '' }}
+          local-sdk-use-canonical-version: ${{ matrix.project == 'Assimalign.Cohesion.Database.Testing' && 'true' || 'false' }}
 
   pack-packages:
     name: pack all NuGet packages

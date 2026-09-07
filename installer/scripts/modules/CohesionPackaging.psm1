@@ -54,10 +54,10 @@ Set-StrictMode -Version 3.0
 # Shipping libraries and resources, as '<area>/<category>/<project>'. The triple is what
 # .github/actions/build takes as inputs, so this list doubles as the release validation matrix.
 #
-# Deliberately absent: resources/Database/Assimalign.Cohesion.Database.Application. It is in CI
-# but carries <IsPackable>false</IsPackable> - the standalone database host is a deployment
-# artifact, not a package. Assert-CohesionReleaseInventory re-checks that claim against the
-# csproj rather than trusting this comment.
+# Deliberately absent: resources/Database/samples/Assimalign.Cohesion.Database.SampleHost. It is
+# built through Database.Testing's E2E project reference but carries <IsPackable>false</IsPackable>;
+# the real resource apphost is a test fixture, never a shipped package. Database.Testing itself is
+# shipped so customer test projects can invoke their own resource Program under an ambient scope.
 $script:CohesionReleaseLibrary = @(
     # libraries/Amqp
     'libraries/Amqp/Assimalign.Cohesion.Amqp.Connections'
@@ -204,6 +204,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Catalog'
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client'
     'resources/Database/Assimalign.Cohesion.Database.ApplicationModel'
+    'resources/Database/Assimalign.Cohesion.Database.Testing'
     'resources/Database/Assimalign.Cohesion.Database.Governance'
 
     # resources/EmailHub

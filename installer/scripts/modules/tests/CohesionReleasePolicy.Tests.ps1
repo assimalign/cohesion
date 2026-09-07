@@ -43,6 +43,27 @@ Describe 'Cohesion local package versions' {
             Should -Throw -ExpectedMessage '*post-tag bump*'
     }
 
+    It 'preserves an exact stable identity only for canonical validation mode' {
+        $version = Get-CohesionLocalPackageVersion `
+            -Version '10.0.1' `
+            -UseCanonicalVersion
+
+        $version.Version | Should -Be '10.0.1'
+        $version.VersionPrefix | Should -Be '10.0.1'
+        $version.VersionSuffix | Should -Be ''
+        $version.PatchVersion | Should -Be '1'
+    }
+
+    It 'preserves an exact prerelease identity in canonical validation mode' {
+        $version = Get-CohesionLocalPackageVersion `
+            -Version '10.0.1-preview.4' `
+            -UseCanonicalVersion
+
+        $version.Version | Should -Be '10.0.1-preview.4'
+        $version.VersionSuffix | Should -Be 'preview.4'
+        $version.PatchVersion | Should -Be '1-preview.4'
+    }
+
     It 'rejects the local identifier on the canonical version line' {
         { Get-CohesionLocalPackageVersion -Version '10.0.1-preview.3.local' } |
             Should -Throw -ExpectedMessage '*reserved local identifier*'
@@ -101,6 +122,7 @@ Describe 'Cohesion local library package pruning' {
 Describe 'Cohesion release policy wiring' {
     BeforeAll {
         $releaseWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/release.yml') -Raw
+        $databaseWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/resource-database.yml') -Raw
         $installLocal = Get-Content -LiteralPath (Join-Path $repositoryDirectory 'installer/scripts/Install-Local.ps1') -Raw
     }
 
@@ -159,5 +181,30 @@ Describe 'Cohesion release policy wiring' {
         $installLocal | Should -Match 'Get-CohesionReleaseLibrary -RepositoryDirectory \$repoRoot'
         $installLocal | Should -Match 'Join-Path \(Join-Path \$globalPackagesRoot \$pkg\) \$cohesionVersion'
         $releaseWorkflow | Should -Match '-RepositoryCommit \$env:COHESION_RELEASE_COMMIT'
+    }
+
+    It 'generates the Database SDK consumer pin only after successful package creation' {
+        $templatePath = Join-Path $repositoryDirectory 'resources/Database/global.template.json'
+        $template = Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json
+        @($template.'msbuild-sdks'.PSObject.Properties.Value) |
+            Should -Be @('', '')
+
+        $lastPack = $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal)
+        $generation = $installLocal.IndexOf('$consumerTemplatePath =', [StringComparison]::Ordinal)
+        $generation | Should -BeGreaterThan $lastPack
+        $installLocal | Should -Match "Consumer SDK '.+?' was not produced"
+        $installLocal | Should -Match 'Move-Item -LiteralPath \$temporaryGlobalJsonPath'
+    }
+
+    It 'keeps the Database SDK consumer on the package-backed local source' {
+        [xml]$nuget = Get-Content -LiteralPath (
+            Join-Path $repositoryDirectory 'resources/Database/samples/Assimalign.Cohesion.Database.SampleHost/NuGet.Config') -Raw
+        $localSource = @($nuget.configuration.packageSourceMapping.packageSource |
+            Where-Object key -EQ 'cohesion-local')[0]
+        $localPatterns = @($localSource.package | ForEach-Object { $_.pattern })
+        $localPatterns | Should -Contain 'Assimalign.Cohesion.*'
+
+        $releaseWorkflow | Should -Match 'local-sdk-use-canonical-version:'
+        $databaseWorkflow | Should -Match 'resources/Database/global.json'
     }
 }
