@@ -27,8 +27,23 @@
 		<CohesionResourceManifestPath Condition="'$(CohesionResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/resource.json</CohesionResourceManifestPath>
 		<CohesionResourceSourcePath Condition="'$(CohesionResourceSourcePath)' == ''">$(IntermediateOutputPath)cohesion/Resource.g.cs</CohesionResourceSourcePath>
 		<CohesionResourceControlPlaneSourcePath Condition="'$(CohesionResourceControlPlaneSourcePath)' == ''">$(IntermediateOutputPath)cohesion/ResourceControlPlane.g.cs</CohesionResourceControlPlaneSourcePath>
+		<CohesionImageManifestPath Condition="'$(CohesionImageManifestPath)' == ''">$(IntermediateOutputPath)cohesion/image.json</CohesionImageManifestPath>
+		<CohesionPackResourceManifestPath Condition="'$(CohesionPackResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/pack/resource.json</CohesionPackResourceManifestPath>
 		<_CohesionResourceManifestFullPath>$([System.IO.Path]::GetFullPath('$(CohesionResourceManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionResourceManifestFullPath>
+
+		<_CohesionPackManifest Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(_CohesionRuntimePack)' != 'true'">true</_CohesionPackManifest>
+		<CohesionManifestPackageId Condition="'$(CohesionManifestPackageId)' == ''">$(AssemblyName).Manifest</CohesionManifestPackageId>
+		<PackageId Condition="'$(_CohesionPackManifest)' == 'true'">$(CohesionManifestPackageId)</PackageId>
+		<PackageType Condition="'$(_CohesionPackManifest)' == 'true'">CohesionResourceManifest</PackageType>
+		<PackageReadmeFile Condition="'$(_CohesionPackManifest)' == 'true'">README.md</PackageReadmeFile>
+		<IncludeBuildOutput Condition="'$(_CohesionPackManifest)' == 'true'">false</IncludeBuildOutput>
+		<SuppressDependenciesWhenPacking Condition="'$(_CohesionPackManifest)' == 'true'">true</SuppressDependenciesWhenPacking>
+		<TargetsForTfmSpecificContentInPackage Condition="'$(_CohesionPackManifest)' == 'true'">$(TargetsForTfmSpecificContentInPackage);CohesionPackManifest</TargetsForTfmSpecificContentInPackage>
 	</PropertyGroup>
+
+	<ItemGroup Condition="'$(_CohesionPackManifest)' == 'true'">
+		<FrameworkReference Update="Assimalign.Cohesion.App*" PrivateAssets="all" />
+	</ItemGroup>
 
 	<Target Name="CohesionValidateApplicationModel" BeforeTargets="PrepareForBuild;CoreCompile">
 		<Error
@@ -50,7 +65,6 @@
 			OutputItemType="CohesionResourceManifest" />
 		<PackageReference
 			Include="@(_CohesionResourcePackageReference)"
-			Version="%(_CohesionResourcePackageReference.Version)"
 			PrivateAssets="all" />
 
 		<Compile Include="$(CohesionResourceSourcePath)" Link="Resource.g.cs" Visible="false" />
@@ -58,7 +72,10 @@
 		<EmbeddedResource Include="$(CohesionResourceManifestPath)" LogicalName="cohesion/resource.json" Visible="false" />
 		<ContainerLabel Include="org.cohesion.manifest" Value="cohesion/resource.json" />
 		<CohesionResourceManifest Include="$(CohesionResourceManifestPath)" IsSelf="true" />
-		<CohesionResourcePackAsset Include="$(CohesionResourceManifestPath)" PackagePath="cohesion/resource.json" />
+		<CohesionResourcePackAsset
+			Include="$(CohesionPackResourceManifestPath)"
+			PackagePath="cohesion/resource.json"
+			Condition="'$(_CohesionPackManifest)' == 'true'" />
 	</ItemGroup>
 
 	<Target
@@ -123,6 +140,63 @@
 	</Target>
 
 	<Target
+		Name="CohesionValidateManifestPackageImage"
+		Condition="'$(_CohesionPackManifest)' == 'true'">
+		<CohesionValidateImageManifest ImageManifestPath="$(CohesionImageManifestPath)">
+			<Output TaskParameter="HasDigestPinnedImage" PropertyName="_CohesionHasDigestPinnedImage" />
+		</CohesionValidateImageManifest>
+		<Warning
+			Condition="'$(_CohesionHasDigestPinnedImage)' != 'true' and '$(CohesionImageRequired)' != 'true'"
+			Code="COHSDK004"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) is packing a Cohesion resource manifest without a digest-pinned image manifest at '$(CohesionImageManifestPath)'; the package will be manifest-only." />
+		<Error
+			Condition="'$(_CohesionHasDigestPinnedImage)' != 'true' and '$(CohesionImageRequired)' == 'true'"
+			Code="COHSDK004"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) requires a digest-pinned image before packing because CohesionImageRequired=true; '$(CohesionImageManifestPath)' is missing or does not contain a valid SHA-256 digest." />
+	</Target>
+
+	<Target
+		Name="CohesionPackManifest"
+		DependsOnTargets="CohesionCreateResourceManifest;CohesionValidateManifestPackageImage"
+		Condition="'$(_CohesionPackManifest)' == 'true'">
+		<CohesionPrepareResourceManifestPackage
+			SourceManifestPath="$(CohesionResourceManifestPath)"
+			PackageManifestPath="$(CohesionPackResourceManifestPath)" />
+
+		<ItemGroup>
+			<CohesionResourcePackAsset
+				Include="$(CohesionImageManifestPath)"
+				PackagePath="cohesion/image.json"
+				Condition="Exists('$(CohesionImageManifestPath)')" />
+			<CohesionResourcePackAsset
+				Include="$(CohesionContainerArchiveOutputPath)"
+				PackagePath="images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
+				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
+			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
+			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Sdk.ResourceManifest.props">
+				<PackagePath>buildTransitive/$(PackageId).props</PackagePath>
+			</TfmSpecificPackageFile>
+			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)RESOURCE_MANIFEST_README.md">
+				<PackagePath>README.md</PackagePath>
+			</TfmSpecificPackageFile>
+			<FileWrites Include="$(CohesionPackResourceManifestPath)" />
+		</ItemGroup>
+	</Target>
+
+	<Target
+		Name="CohesionPackRuntimePackage"
+		AfterTargets="Pack"
+		Condition="'$(_CohesionPackManifest)' == 'true' and '$(CohesionPackRuntime)' == 'true'">
+		<MSBuild
+			Projects="$(MSBuildProjectFullPath)"
+			Targets="Pack"
+			BuildInParallel="false"
+			Properties="_CohesionRuntimePack=true;CohesionPackRuntime=false;PackageId=$(AssemblyName);Configuration=$(Configuration);PackageOutputPath=$(PackageOutputPath)" />
+	</Target>
+
+	<Target
 		Name="CohesionGetManifest"
 		DependsOnTargets="CohesionValidateApplicationModel;$(_CohesionGetManifestDependsOn)"
 		Returns="@(_CohesionGetManifestResult)">
@@ -158,6 +232,6 @@
 	</Target>
 
 	<Target Name="CohesionCleanResourceManifest" AfterTargets="Clean">
-		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
+		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath);$(CohesionPackResourceManifestPath)" />
 	</Target>
 </Project>

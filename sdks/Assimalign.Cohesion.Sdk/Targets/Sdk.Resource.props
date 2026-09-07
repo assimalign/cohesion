@@ -3,6 +3,14 @@
 		TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionCreateResourceManifest"
 		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll"
 		Runtime="NET" />
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionPrepareResourceManifestPackage"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll"
+		Runtime="NET" />
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionValidateImageManifest"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll"
+		Runtime="NET" />
 
 	<PropertyGroup>
 		<CohesionApplicationModel Condition="'$(CohesionApplicationModel)' == ''">disabled</CohesionApplicationModel>
@@ -12,6 +20,9 @@
 		<CohesionReplicas Condition="'$(CohesionReplicas)' == ''">1</CohesionReplicas>
 		<CohesionStopGraceSeconds Condition="'$(CohesionStopGraceSeconds)' == ''">30</CohesionStopGraceSeconds>
 		<CohesionRestartPolicy Condition="'$(CohesionRestartPolicy)' == ''">OnFailure</CohesionRestartPolicy>
+		<CohesionPackRuntime Condition="'$(CohesionPackRuntime)' == ''">false</CohesionPackRuntime>
+		<CohesionImageRequired Condition="'$(CohesionImageRequired)' == ''">false</CohesionImageRequired>
+		<CohesionPackImageArchive Condition="'$(CohesionPackImageArchive)' == ''">false</CohesionPackImageArchive>
 	</PropertyGroup>
 
 	<ItemDefinitionGroup>

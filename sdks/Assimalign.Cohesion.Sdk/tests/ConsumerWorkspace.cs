@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
@@ -22,12 +24,15 @@ internal sealed class ConsumerWorkspace : IDisposable
         "tests",
         "TestProjects");
 
-    private ConsumerWorkspace(string rootDirectory)
+    private ConsumerWorkspace(string rootDirectory, string localPackageFeedDirectory)
     {
         RootDirectory = rootDirectory;
+        LocalPackageFeedDirectory = localPackageFeedDirectory;
     }
 
     public string RootDirectory { get; }
+
+    public string LocalPackageFeedDirectory { get; }
 
     public static string ResourceSchemaPath => Path.Combine(
         RepositoryRoot,
@@ -46,13 +51,20 @@ internal sealed class ConsumerWorkspace : IDisposable
                 "Run ./installer/scripts/Install-Local.ps1 before running this test project.");
         }
 
+        string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
             Path.GetTempPath(),
             "cohesion-sdk-integration",
-            Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            workspaceId);
+        string localPackageFeedDirectory = Path.Combine(
+            RepositoryRoot,
+            "_out",
+            "sdk-tests",
+            workspaceId);
         Directory.CreateDirectory(rootDirectory);
+        Directory.CreateDirectory(localPackageFeedDirectory);
 
-        var workspace = new ConsumerWorkspace(rootDirectory);
+        var workspace = new ConsumerWorkspace(rootDirectory, localPackageFeedDirectory);
         try
         {
             foreach (string fixtureName in fixtureNames)
@@ -81,9 +93,27 @@ internal sealed class ConsumerWorkspace : IDisposable
         return Path.Combine(ProjectDirectory(fixtureName), $"{fixtureName}.csproj");
     }
 
-    public async Task<DotNetBuildResult> BuildAsync(string fixtureName)
+    public Task<DotNetBuildResult> BuildAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
     {
-        string projectFile = ProjectFile(fixtureName);
+        return RunDotNetAsync("build", fixtureName, [], cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> PackAsync(
+        string fixtureName,
+        IEnumerable<string>? properties = null,
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("pack", fixtureName, properties ?? [], cancellationToken);
+    }
+
+    private async Task<DotNetBuildResult> RunDotNetAsync(
+        string command,
+        string fixtureName,
+        IEnumerable<string> properties,
+        CancellationToken cancellationToken)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -92,12 +122,21 @@ internal sealed class ConsumerWorkspace : IDisposable
             RedirectStandardOutput = true,
             UseShellExecute = false
         };
-        startInfo.ArgumentList.Add("build");
-        startInfo.ArgumentList.Add(projectFile);
+        startInfo.ArgumentList.Add(command);
+        startInfo.ArgumentList.Add(ProjectFile(fixtureName));
         startInfo.ArgumentList.Add("--configuration");
         startInfo.ArgumentList.Add("Debug");
+        if (string.Equals(command, "pack", StringComparison.Ordinal))
+        {
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(LocalPackageFeedDirectory);
+        }
         startInfo.ArgumentList.Add("--nologo");
         startInfo.ArgumentList.Add("--verbosity:minimal");
+        foreach (string property in properties)
+        {
+            startInfo.ArgumentList.Add($"-p:{property}");
+        }
         startInfo.Environment["DOTNET_CLI_HOME"] = Path.Combine(RootDirectory, ".dotnet");
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
@@ -109,7 +148,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
         Task<string> standardError = process.StandardError.ReadToEndAsync();
 
-        await process.WaitForExitAsync().ConfigureAwait(false);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         return new DotNetBuildResult(
             process.ExitCode,
             await standardOutput.ConfigureAwait(false),
@@ -118,11 +157,17 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     public void Dispose()
     {
+        DeleteDirectory(RootDirectory);
+        DeleteDirectory(LocalPackageFeedDirectory);
+    }
+
+    private static void DeleteDirectory(string directory)
+    {
         try
         {
-            if (Directory.Exists(RootDirectory))
+            if (Directory.Exists(directory))
             {
-                Directory.Delete(RootDirectory, recursive: true);
+                Directory.Delete(directory, recursive: true);
             }
         }
         catch (IOException)
@@ -235,6 +280,7 @@ internal sealed class ConsumerWorkspace : IDisposable
                 new XElement(
                     "packageSources",
                     new XElement("clear"),
+                    new XElement("add", new XAttribute("key", "cohesion-sdk-test"), new XAttribute("value", LocalPackageFeedDirectory)),
                     new XElement("add", new XAttribute("key", "cohesion-local"), new XAttribute("value", feedDirectory)),
                     new XElement(
                         "add",
@@ -243,6 +289,10 @@ internal sealed class ConsumerWorkspace : IDisposable
                         new XAttribute("protocolVersion", "3"))),
                 new XElement(
                     "packageSourceMapping",
+                    new XElement(
+                        "packageSource",
+                        new XAttribute("key", "cohesion-sdk-test"),
+                        new XElement("package", new XAttribute("pattern", "EnabledWeb.Manifest"))),
                     new XElement(
                         "packageSource",
                         new XAttribute("key", "cohesion-local"),
