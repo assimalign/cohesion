@@ -7,8 +7,19 @@
 	<Folder Name="/LogSpace/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/" />
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/docs/">
+		<File Path="Assimalign.Cohesion.LogSpace/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.LogSpace/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/docs/Assembly/Assimalign.Cohesion.LogSpace/ILogSpaceApplication/">
+		<File Path="Assimalign.Cohesion.LogSpace/docs/Assembly/Assimalign.Cohesion.LogSpace/ILogSpaceApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/docs/Assembly/Assimalign.Cohesion.LogSpace/ILogSpaceApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.LogSpace/docs/Assembly/Assimalign.Cohesion.LogSpace/ILogSpaceApplicationBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace/src/">
 		<Project Path="Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
 	</Folder>
@@ -17,8 +28,14 @@
 		<File Path="Assimalign.Cohesion.LogSpace.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.LogSpace.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/docs/Assembly/Assimalign.Cohesion.LogSpace.Hosting/LogSpaceApplication/">
+		<File Path="Assimalign.Cohesion.LogSpace.Hosting/docs/Assembly/Assimalign.Cohesion.LogSpace.Hosting/LogSpaceApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.LogSpace.Hosting/src/Assimalign.Cohesion.LogSpace.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.LogSpace.Hosting/tests/Assimalign.Cohesion.LogSpace.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/" />
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry/src/">

@@ -2,21 +2,21 @@
 
 ## Summary
 
-Standalone hosting application for the event streaming hub resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Provides the public `EventHubApplication.CreateBuilder(args)` entry point and the internal filler implementation of the EventHub application contracts.
 
 ## Current Evaluation
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+- Status: contract-only filler with an empty lifecycle
+- Project references: Assimalign.Cohesion.EventHub and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
-- EventHubApplication owns the resource process lifecycle (start, run, stop) via Host<EventHubApplicationContext>.
-- EventHubApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: PartitionFlushService (dedicated), IngressEndpointService (pooled).
+- Validate application arguments and return the area-root builder interface.
+- Build an internal `Host<EventHubApplicationContext>` with a production environment and no hosted services.
+- Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
-## Key Types
+The old `PartitionFlushService` and `IngressEndpointService` future-service stubs remain in the project but are not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
 
-- EventHubApplication
-- EventHubApplicationContext
-- EventHubApplicationOptions
+## Public type
+
+- `EventHubApplication` — static creation facade; all runtime implementation types are internal.

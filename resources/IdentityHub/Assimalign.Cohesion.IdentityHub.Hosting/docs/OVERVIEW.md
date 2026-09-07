@@ -2,21 +2,21 @@
 
 ## Summary
 
-Standalone hosting application for the identity provider resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Provides the public `IdentityHubApplication.CreateBuilder(args)` entry point and the internal filler implementation of the IdentityHub application contracts.
 
 ## Current Evaluation
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+- Status: contract-only filler with an empty lifecycle
+- Project references: Assimalign.Cohesion.IdentityHub and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
-- IdentityHubApplication owns the resource process lifecycle (start, run, stop) via Host<IdentityHubApplicationContext>.
-- IdentityHubApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: IdentityEndpointService (pooled).
+- Validate application arguments and return the area-root builder interface.
+- Build an internal `Host<IdentityHubApplicationContext>` with a production environment and no hosted services.
+- Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
-## Key Types
+The old `IdentityEndpointService` future-service stub remains in the project but is not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
 
-- IdentityHubApplication
-- IdentityHubApplicationContext
-- IdentityHubApplicationOptions
+## Public type
+
+- `IdentityHubApplication` — static creation facade; all runtime implementation types are internal.

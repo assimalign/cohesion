@@ -3,6 +3,7 @@
 		<Folder Include="Client\" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 	</ItemGroup>
 	<ItemGroup>

@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.SecretStore;
+
 namespace Assimalign.Cohesion.SecretStore.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.SecretStore.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the secret store resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates secret store application builders.
 /// </summary>
-public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
+public static class SecretStoreApplication
 {
-    private readonly SecretStoreApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="SecretStoreApplication"/> class.
+    /// Creates a builder for a secret store application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public SecretStoreApplication(SecretStoreApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the secret store application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static ISecretStoreApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new SecretStoreApplicationContext(options, new IHostService[]
-        {
-            new SecretsEndpointService(),
-        });
+        return new SecretStoreApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override SecretStoreApplicationContext Context => _context;
 }

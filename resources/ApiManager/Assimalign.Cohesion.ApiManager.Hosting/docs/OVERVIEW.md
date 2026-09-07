@@ -2,21 +2,21 @@
 
 ## Summary
 
-Standalone hosting application for the API gateway and management plane resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Provides the public `ApiManagerApplication.CreateBuilder(args)` entry point and the internal filler implementation of the ApiManager application contracts.
 
 ## Current Evaluation
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+- Status: contract-only filler with an empty lifecycle
+- Project references: Assimalign.Cohesion.ApiManager and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
-- ApiManagerApplication owns the resource process lifecycle (start, run, stop) via Host<ApiManagerApplicationContext>.
-- ApiManagerApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: GatewayEndpointService (pooled).
+- Validate application arguments and return the area-root builder interface.
+- Build an internal `Host<ApiManagerApplicationContext>` with a production environment and no hosted services.
+- Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
-## Key Types
+The old `GatewayEndpointService` future-service stub remains in the project but is not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
 
-- ApiManagerApplication
-- ApiManagerApplicationContext
-- ApiManagerApplicationOptions
+## Public type
+
+- `ApiManagerApplication` — static creation facade; all runtime implementation types are internal.

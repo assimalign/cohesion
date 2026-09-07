@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.NatGateway;
+
 namespace Assimalign.Cohesion.NatGateway.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.NatGateway.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the NAT gateway resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates NAT gateway application builders.
 /// </summary>
-public sealed class NatGatewayApplication : Host<NatGatewayApplicationContext>
+public static class NatGatewayApplication
 {
-    private readonly NatGatewayApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="NatGatewayApplication"/> class.
+    /// Creates a builder for a NAT gateway application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public NatGatewayApplication(NatGatewayApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the NAT gateway application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static INatGatewayApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new NatGatewayApplicationContext(options, new IHostService[]
-        {
-            new TranslationDataPlaneService(),
-        });
+        return new NatGatewayApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override NatGatewayApplicationContext Context => _context;
 }

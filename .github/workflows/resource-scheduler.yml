@@ -1,0 +1,30 @@
+name: Scheduler
+on:
+  push:
+    paths:
+      - 'resources/Scheduler/**'
+      - '.github/workflows/resource-scheduler.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.Scheduler',
+            'Assimalign.Cohesion.Scheduler.Hosting'
+        ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: 'resources'
+          category: 'Scheduler'
+          project: ${{ matrix.projects }}

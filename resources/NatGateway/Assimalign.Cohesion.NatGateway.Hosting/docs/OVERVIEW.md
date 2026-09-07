@@ -2,21 +2,21 @@
 
 ## Summary
 
-Standalone hosting application for the NAT gateway resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Provides the public `NatGatewayApplication.CreateBuilder(args)` entry point and the internal filler implementation of the NatGateway application contracts.
 
 ## Current Evaluation
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+- Status: contract-only filler with an empty lifecycle
+- Project references: Assimalign.Cohesion.NatGateway and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
-- NatGatewayApplication owns the resource process lifecycle (start, run, stop) via Host<NatGatewayApplicationContext>.
-- NatGatewayApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: TranslationDataPlaneService (dataplane).
+- Validate application arguments and return the area-root builder interface.
+- Build an internal `Host<NatGatewayApplicationContext>` with a production environment and no hosted services.
+- Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
-## Key Types
+The old `TranslationDataPlaneService` future-service stub remains in the project but is not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
 
-- NatGatewayApplication
-- NatGatewayApplicationContext
-- NatGatewayApplicationOptions
+## Public type
+
+- `NatGatewayApplication` — static creation facade; all runtime implementation types are internal.

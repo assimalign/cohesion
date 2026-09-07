@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.ApiManager;
+
 namespace Assimalign.Cohesion.ApiManager.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.ApiManager.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the API gateway and management plane resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates API manager application builders.
 /// </summary>
-public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>
+public static class ApiManagerApplication
 {
-    private readonly ApiManagerApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="ApiManagerApplication"/> class.
+    /// Creates a builder for an API manager application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public ApiManagerApplication(ApiManagerApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the API manager application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IApiManagerApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new ApiManagerApplicationContext(options, new IHostService[]
-        {
-            new GatewayEndpointService(),
-        });
+        return new ApiManagerApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override ApiManagerApplicationContext Context => _context;
 }

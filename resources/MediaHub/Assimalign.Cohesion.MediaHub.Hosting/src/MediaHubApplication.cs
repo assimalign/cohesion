@@ -1,37 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.MediaHub;
+
 namespace Assimalign.Cohesion.MediaHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.MediaHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the media hub resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates media hub application builders.
 /// </summary>
-public sealed class MediaHubApplication : Host<MediaHubApplicationContext>
+public static class MediaHubApplication
 {
-    private readonly MediaHubApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="MediaHubApplication"/> class.
+    /// Creates a builder for a media hub application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public MediaHubApplication(MediaHubApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the media hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IMediaHubApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new MediaHubApplicationContext(options, new IHostService[]
-        {
-            new ContentIoService(),
-            new StreamingEndpointService(),
-        });
+        return new MediaHubApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override MediaHubApplicationContext Context => _context;
 }

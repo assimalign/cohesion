@@ -47,7 +47,9 @@
 		<File Path=".github/workflows/resource-api-manager.yml" />
 		<File Path=".github/workflows/resource-configuration-store.yml" />
 		<File Path=".github/workflows/resource-database.yml" />
+		<File Path=".github/workflows/resource-email-hub.yml" />
 		<File Path=".github/workflows/resource-event-hub.yml" />
+		<File Path=".github/workflows/resource-identity-hub.yml" />
 		<File Path=".github/workflows/resource-iot-hub.yml" />
 		<File Path=".github/workflows/resource-load-balancer.yml" />
 		<File Path=".github/workflows/resource-log-space.yml" />
@@ -55,7 +57,10 @@
 		<File Path=".github/workflows/resource-message-hub.yml" />
 		<File Path=".github/workflows/resource-nat-gateway.yml" />
 		<File Path=".github/workflows/resource-notification-hub.yml" />
+		<File Path=".github/workflows/resource-rezolvr.yml" />
+		<File Path=".github/workflows/resource-scheduler.yml" />
 		<File Path=".github/workflows/resource-secret-store.yml" />
+		<File Path=".github/workflows/resource-vpn-gateway.yml" />
 		<File Path=".github/workflows/resource-web.yml" />
 	</Folder>
 	<Folder Name="/cohesion/.obsidian/">
@@ -1341,6 +1346,9 @@
 	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
 		<Project Path="resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/tests/">
+		<Project Path="resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/tests/Assimalign.Cohesion.ApiManager.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/ConfigurationStore/">
 		<File Path="resources/ConfigurationStore/Directory.Build.props" />
 		<File Path="resources/ConfigurationStore/Directory.Build.targets" />
@@ -1348,6 +1356,9 @@
 	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/" />
 	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/">
 		<Project Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/Assimalign.Cohesion.ConfigurationStore.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/tests/">
+		<Project Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/tests/Assimalign.Cohesion.ConfigurationStore.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/">
 		<File Path="resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/README.md" />
@@ -1785,6 +1796,9 @@
 	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/src/">
 		<Project Path="resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/src/Assimalign.Cohesion.EmailHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/tests/">
+		<Project Path="resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/tests/Assimalign.Cohesion.EmailHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/EmailHub/Assimalign.Cohesion.EmailHub/">
 		<File Path="resources/EmailHub/Assimalign.Cohesion.EmailHub/README.md" />
 	</Folder>
@@ -1802,6 +1816,9 @@
 	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/src/">
 		<Project Path="resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/src/Assimalign.Cohesion.EventHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/tests/">
+		<Project Path="resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/tests/Assimalign.Cohesion.EventHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub/" />
 	<Folder Name="/cohesion/resources/EventHub/Assimalign.Cohesion.EventHub/src/">
 		<Project Path="resources/EventHub/Assimalign.Cohesion.EventHub/src/Assimalign.Cohesion.EventHub.csproj" />
@@ -1814,6 +1831,9 @@
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/">
 		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
+		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
@@ -1838,6 +1858,9 @@
 	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/tests/">
+		<Project Path="resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/tests/Assimalign.Cohesion.IoTHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/LoadBalancer/">
 		<File Path="resources/LoadBalancer/Directory.Build.props" />
 		<File Path="resources/LoadBalancer/Directory.Build.targets" />
@@ -1845,6 +1868,9 @@
 	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/" />
 	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/src/">
 		<Project Path="resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/src/Assimalign.Cohesion.LoadBalancer.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/tests/">
+		<Project Path="resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/tests/Assimalign.Cohesion.LoadBalancer.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
 	<Folder Name="/cohesion/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
@@ -1857,6 +1883,9 @@
 	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/" />
 	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/">
 		<Project Path="resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/Assimalign.Cohesion.LogSpace.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/tests/">
+		<Project Path="resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/tests/Assimalign.Cohesion.LogSpace.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace/" />
 	<Folder Name="/cohesion/resources/LogSpace/Assimalign.Cohesion.LogSpace/src/">
@@ -1874,6 +1903,9 @@
 	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/src/">
 		<Project Path="resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/src/Assimalign.Cohesion.MediaHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/tests/">
+		<Project Path="resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/tests/Assimalign.Cohesion.MediaHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub/" />
 	<Folder Name="/cohesion/resources/MediaHub/Assimalign.Cohesion.MediaHub/src/">
 		<Project Path="resources/MediaHub/Assimalign.Cohesion.MediaHub/src/Assimalign.Cohesion.MediaHub.csproj" />
@@ -1885,6 +1917,9 @@
 	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/" />
 	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/src/">
 		<Project Path="resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/src/Assimalign.Cohesion.MessageHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/tests/">
+		<Project Path="resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/tests/Assimalign.Cohesion.MessageHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub/" />
 	<Folder Name="/cohesion/resources/MessageHub/Assimalign.Cohesion.MessageHub/src/">
@@ -1907,6 +1942,9 @@
 	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/src/">
 		<Project Path="resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/src/Assimalign.Cohesion.NatGateway.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/tests/">
+		<Project Path="resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/tests/Assimalign.Cohesion.NatGateway.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/NatGateway/Assimalign.Cohesion.NatGateway/">
 		<File Path="resources/NatGateway/Assimalign.Cohesion.NatGateway/README.md" />
 	</Folder>
@@ -1923,6 +1961,9 @@
 	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/" />
 	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/src/">
 		<Project Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/src/Assimalign.Cohesion.NotificationHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/tests/">
+		<Project Path="resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/tests/Assimalign.Cohesion.NotificationHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/" />
 	<Folder Name="/cohesion/resources/NotificationHub/Assimalign.Cohesion.NotificationHub/src/">
@@ -1944,6 +1985,9 @@
 	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/" />
 	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/">
 		<Project Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/Assimalign.Cohesion.Rezolvr.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/tests/">
+		<Project Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/tests/Assimalign.Cohesion.Rezolvr.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/">
 		<File Path="resources/Rezolvr/Assimalign.Cohesion.Rezolvr/README.md" />
@@ -2002,6 +2046,9 @@
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Assimalign.Cohesion.SecretStore.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/tests/">
+		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/tests/Assimalign.Cohesion.SecretStore.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/" />
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/src/Assimalign.Cohesion.SecretStore.csproj" />
@@ -2022,6 +2069,13 @@
 	<Folder Name="/cohesion/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/" />
 	<Folder Name="/cohesion/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/src/">
 		<Project Path="resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/src/Assimalign.Cohesion.VpnGateway.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/tests/">
+		<Project Path="resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/tests/Assimalign.Cohesion.VpnGateway.Hosting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/VpnGateway/Assimalign.Cohesion.VpnGateway/" />
+	<Folder Name="/cohesion/resources/VpnGateway/Assimalign.Cohesion.VpnGateway/src/">
+		<Project Path="resources/VpnGateway/Assimalign.Cohesion.VpnGateway/src/Assimalign.Cohesion.VpnGateway.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/">
 		<File Path="resources/Web/Directory.Build.props" />

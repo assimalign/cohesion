@@ -2,21 +2,21 @@
 
 ## Summary
 
-Standalone hosting application for the message broker resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Provides the public `MessageHubApplication.CreateBuilder(args)` entry point and the internal filler implementation of the MessageHub application contracts.
 
 ## Current Evaluation
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+- Status: contract-only filler with an empty lifecycle
+- Project references: Assimalign.Cohesion.MessageHub and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
-- MessageHubApplication owns the resource process lifecycle (start, run, stop) via Host<MessageHubApplicationContext>.
-- MessageHubApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: JournalFlushService (dedicated), BrokerEndpointService (pooled).
+- Validate application arguments and return the area-root builder interface.
+- Build an internal `Host<MessageHubApplicationContext>` with a production environment and no hosted services.
+- Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
-## Key Types
+The old `JournalFlushService` and `BrokerEndpointService` future-service stubs remain in the project but are not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
 
-- MessageHubApplication
-- MessageHubApplicationContext
-- MessageHubApplicationOptions
+## Public type
+
+- `MessageHubApplication` — static creation facade; all runtime implementation types are internal.

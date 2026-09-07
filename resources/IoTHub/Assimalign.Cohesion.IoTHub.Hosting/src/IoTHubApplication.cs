@@ -1,37 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.IoTHub;
+
 namespace Assimalign.Cohesion.IoTHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.IoTHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the IoT device hub resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates IoT hub application builders.
 /// </summary>
-public sealed class IoTHubApplication : Host<IoTHubApplicationContext>
+public static class IoTHubApplication
 {
-    private readonly IoTHubApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="IoTHubApplication"/> class.
+    /// Creates a builder for an IoT hub application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public IoTHubApplication(IoTHubApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the IoT hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IIoTHubApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new IoTHubApplicationContext(options, new IHostService[]
-        {
-            new TelemetryJournalService(),
-            new DeviceIngressService(),
-        });
+        return new IoTHubApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override IoTHubApplicationContext Context => _context;
 }

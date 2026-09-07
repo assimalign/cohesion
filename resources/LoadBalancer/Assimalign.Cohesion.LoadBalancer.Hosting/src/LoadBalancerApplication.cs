@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.LoadBalancer;
+
 namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the load balancer resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates load balancer application builders.
 /// </summary>
-public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContext>
+public static class LoadBalancerApplication
 {
-    private readonly LoadBalancerApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="LoadBalancerApplication"/> class.
+    /// Creates a builder for a load balancer application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public LoadBalancerApplication(LoadBalancerApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the load balancer application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static ILoadBalancerApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new LoadBalancerApplicationContext(options, new IHostService[]
-        {
-            new ProxyDataPlaneService(),
-        });
+        return new LoadBalancerApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override LoadBalancerApplicationContext Context => _context;
 }

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.MessageHub" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 </Project>

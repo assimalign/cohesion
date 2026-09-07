@@ -12,6 +12,13 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplication/">
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplicationBuilder/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
@@ -21,8 +28,14 @@
 		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/Assembly/Assimalign.Cohesion.IdentityHub.Hosting/IdentityHubApplication/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/Assembly/Assimalign.Cohesion.IdentityHub.Hosting/IdentityHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">

@@ -7,8 +7,19 @@
 	<Folder Name="/IoTHub/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/" />
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IoTHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub/src/Assimalign.Cohesion.IoTHub.csproj" />
 	</Folder>
@@ -17,8 +28,14 @@
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/">
+		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/tests/Assimalign.Cohesion.IoTHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IoTHub/refs/" >
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />

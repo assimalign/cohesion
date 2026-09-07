@@ -1,37 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.EventHub;
+
 namespace Assimalign.Cohesion.EventHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.EventHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the event streaming hub resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates event hub application builders.
 /// </summary>
-public sealed class EventHubApplication : Host<EventHubApplicationContext>
+public static class EventHubApplication
 {
-    private readonly EventHubApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="EventHubApplication"/> class.
+    /// Creates a builder for an event hub application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public EventHubApplication(EventHubApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the event hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IEventHubApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new EventHubApplicationContext(options, new IHostService[]
-        {
-            new PartitionFlushService(),
-            new IngressEndpointService(),
-        });
+        return new EventHubApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override EventHubApplicationContext Context => _context;
 }

@@ -1,21 +1,17 @@
 # Assimalign.Cohesion.EmailHub.Hosting Design
 
-## Design Intent
+## Design intent
 
-`EmailHubApplication` is the standalone host for the mail hub resource. Per the Cohesion hosting model, each resource type runs as its own `Host<TContext>` subclass owning its own lifecycle in its own process; this project is that hosting shell, composing the resource's units of work as hosted services.
+The hosting module implements the area root's contract-only application seam. Public construction is limited to `EmailHubApplication.CreateBuilder(args)`; the builder, `Host<TContext>` implementation, context, and options are internal.
 
-## Execution model
+## Filler execution model
 
-Threading is a per-service decision made by static dispatch from the execution menu defined by `Assimalign.Cohesion.Hosting` (see `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md`):
+The built host deliberately exposes an empty `HostedServices` collection and a production `HostEnvironment`. It can start, observe cancellation, and stop through the shared host lifecycle without claiming that email-hub behavior exists.
 
-| Service | Menu member | Why |
-| --- | --- | --- |
-| `MailEndpointService` | `BackgroundService` (pool-scheduled) | async loop to accept submissions and dispatch outbound mail |
+`MailEndpointService` remains as a dormant future service stub. The filler builder does not register it.
 
-The mail hub is asynchronous I/O end to end: its loops spend their lives awaiting sockets and queues, so pooled `BackgroundService` is the whole composition - a dedicated thread would sit idle between requests.
+## Boundaries
 
-## Status and non-goals
+The module references only the EmailHub area root and the shared Hosting foundation, preserving the resource hosting-isolation rule. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
-- This is a scaffold: service bodies are placeholders that park until the host stops, so the application starts and drains cleanly today. The real loops land with the resource implementation.
-- No builder or DI surface yet; construct `EmailHubApplication` with `EmailHubApplicationOptions` directly. A `CreateBuilder` surface can follow the `WebApplication` pattern when the resource matures.
-- The project deliberately references only `Assimalign.Cohesion.Hosting` until the resource library's contracts are ready to wire in.
+Command-line arguments are accepted at the canonical entry point. Integration with the ambient `ResourceRuntime` is deferred to design item 12; the explicit `IEmailHubApplication.RunAsync` wrapper records that handoff.

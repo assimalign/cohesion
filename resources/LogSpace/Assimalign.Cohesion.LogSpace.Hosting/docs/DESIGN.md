@@ -1,22 +1,17 @@
 # Assimalign.Cohesion.LogSpace.Hosting Design
 
-## Design Intent
+## Design intent
 
-`LogSpaceApplication` is the standalone host for the log storage engine resource. Per the Cohesion hosting model, each resource type runs as its own `Host<TContext>` subclass owning its own lifecycle in its own process; this project is that hosting shell, composing the resource's units of work as hosted services.
+The hosting module implements the area root's contract-only application seam. Public construction is limited to `LogSpaceApplication.CreateBuilder(args)`; the builder, `Host<TContext>` implementation, context, and options are internal.
 
-## Execution model
+## Filler execution model
 
-Threading is a per-service decision made by static dispatch from the execution menu defined by `Assimalign.Cohesion.Hosting` (see `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md`):
+The built host deliberately exposes an empty `HostedServices` collection and a production `HostEnvironment`. It can start, observe cancellation, and stop through the shared host lifecycle without claiming that log-storage behavior exists.
 
-| Service | Menu member | Why |
-| --- | --- | --- |
-| `SegmentFlushService` | `DedicatedThreadService` (dedicated OS thread) | blocking loop to flush log segments with synchronous file I/O |
-| `IngestEndpointService` | `BackgroundService` (pool-scheduled) | async loop to accept log ingest connections |
+`SegmentFlushService` and `IngestEndpointService` remain as dormant future service stubs. The filler builder does not register them.
 
-The engine splits along the blocking/async seam: durability work is synchronous blocking I/O that must own its thread for its whole life (`DedicatedThreadService`), while the endpoint is an async accept loop that belongs on the pool (`BackgroundService`).
+## Boundaries
 
-## Status and non-goals
+The module references only the LogSpace area root and the shared Hosting foundation, preserving the resource hosting-isolation rule. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
-- This is a scaffold: service bodies are placeholders that park until the host stops, so the application starts and drains cleanly today. The real loops land with the resource implementation.
-- No builder or DI surface yet; construct `LogSpaceApplication` with `LogSpaceApplicationOptions` directly. A `CreateBuilder` surface can follow the `WebApplication` pattern when the resource matures.
-- The project deliberately references only `Assimalign.Cohesion.Hosting` until the resource library's contracts are ready to wire in.
+Command-line arguments are accepted at the canonical entry point. Integration with the ambient `ResourceRuntime` is deferred to design item 12; the explicit `ILogSpaceApplication.RunAsync` wrapper records that handoff.

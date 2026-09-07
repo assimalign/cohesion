@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.ConfigurationStore;
+
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the configuration store resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates configuration store application builders.
 /// </summary>
-public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreApplicationContext>
+public static class ConfigurationStoreApplication
 {
-    private readonly ConfigurationStoreApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="ConfigurationStoreApplication"/> class.
+    /// Creates a builder for a configuration store application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public ConfigurationStoreApplication(ConfigurationStoreApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the configuration store application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IConfigurationStoreApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new ConfigurationStoreApplicationContext(options, new IHostService[]
-        {
-            new ConfigurationEndpointService(),
-        });
+        return new ConfigurationStoreApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override ConfigurationStoreApplicationContext Context => _context;
 }

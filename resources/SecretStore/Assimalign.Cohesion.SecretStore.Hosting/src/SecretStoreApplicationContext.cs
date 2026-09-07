@@ -1,31 +1,16 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
-
 using Assimalign.Cohesion.Hosting;
 
-/// <summary>
-/// The host context for <see cref="SecretStoreApplication"/>.
-/// </summary>
-public sealed class SecretStoreApplicationContext : HostContext
+namespace Assimalign.Cohesion.SecretStore.Hosting;
+
+internal sealed class SecretStoreApplicationContext : HostContext
 {
-    private readonly IHostEnvironment _environment;
-    private readonly IReadOnlyList<IHostService> _hostedServices;
+    private static readonly IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
+    private readonly IHostEnvironment _environment = new HostEnvironment("production");
 
-    internal SecretStoreApplicationContext(SecretStoreApplicationOptions options, IReadOnlyList<IHostService> hostedServices)
-    {
-        _environment = new HostEnvironment(options.Environment ?? "production");
-        _hostedServices = hostedServices;
-    }
-
-    /// <summary>
-    /// Gets the host environment information.
-    /// </summary>
     public override IHostEnvironment Environment => _environment;
 
-    /// <summary>
-    /// Gets the hosted services composed by the application.
-    /// </summary>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
 }

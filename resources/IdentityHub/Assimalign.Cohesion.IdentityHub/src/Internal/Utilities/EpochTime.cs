@@ -52,7 +52,9 @@ public static class EpochTime
         }
 
         if (secondsSinceUnixEpoch > TimeSpan.MaxValue.TotalSeconds)
+        {
             return DateTimeUtil.Add(UnixEpoch, TimeSpan.MaxValue).ToUniversalTime();
+        }
 
         return DateTimeUtil.Add(UnixEpoch, TimeSpan.FromSeconds(secondsSinceUnixEpoch)).ToUniversalTime();
     }

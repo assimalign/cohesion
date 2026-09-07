@@ -1,6 +1,24 @@
-# Overview 
+# Assimalign.Cohesion.IdentityHub Design
 
-This document outlines the data model for a custom identity provider supporting **B2C** (Business-to-Consumer), **B2B** (Business-to-Business), and **Internal Authentication** scenarios. The design is inspired by Microsoft Entra ID (Azure AD).
+## Application seam
+
+The area root owns the contracts that feature packages compose against. `IIdentityHubApplicationBuilder` is the contract-only builder seam, while `IIdentityHubApplication` supplies the host lifecycle expected by an executable resource.
+
+## Hosting isolation
+
+The root retains its existing IdentityModel dependency and now also references the shared Hosting foundation. The concrete builder, host, context, and options remain internal to `Assimalign.Cohesion.IdentityHub.Hosting`; feature libraries must not reference that runtime module.
+
+## Filler lifecycle
+
+The current implementation registers no hosted services and always uses the production host environment. It exists only to complete the SDK/framework path; the existing identity domain types and their historical `Assimalign.Cohesion.Identity` namespace remain unchanged in this slice.
+
+## AOT posture
+
+The application contracts and filler host require no reflection, dynamic code generation, runtime assembly scanning, or container-based activation and remain safe for trimming and NativeAOT.
+
+## Identity data model
+
+The following design outlines the data model for a custom identity provider supporting **B2C** (Business-to-Consumer), **B2B** (Business-to-Business), and **Internal Authentication** scenarios. The design is inspired by Microsoft Entra ID (Azure AD).
 
 ## Key Concepts
 

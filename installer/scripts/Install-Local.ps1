@@ -22,7 +22,7 @@
         Individual library packs (consumed directly via <PackageReference>):
             Assimalign.Cohesion.Core.<ver>.nupkg
             Assimalign.Cohesion.<Library>.<ver>.nupkg
-            ... one per src csproj under libraries/ + resources/
+            ... one per project in the curated release inventory
 
     SDK-path consumers write <Project Sdk="Assimalign.Cohesion.Sdk"> and the
     SDK auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
@@ -288,19 +288,14 @@ else {
 # framework Refs/Runtime packs above triggered those builds transitively. That
 # property is now removed because it races with the build output once any
 # project's graph contains an analyzer-style ProjectReference (NU5026); see
-# libraries/Directory.Build.props for the full reasoning. Packing libraries
-# explicitly here is the replacement.
+# libraries/Directory.Build.props for the full reasoning. Packing the curated
+# release inventory explicitly here is the replacement and keeps the local feed
+# aligned with Pack-Release.ps1.
 if (-not $SkipLibraries) {
     Write-Host "[5/5] Packing libraries + resources..." -ForegroundColor Cyan
-    # Enumerate <src>\*.csproj under libraries/ and resources/, skipping:
-    #   * anything under bin/ or obj/
-    #   * test csprojs (a few unfortunately live under src/ instead of the
-    #     normal tests/ sibling - filename match catches them either way)
     $libraryProjects = @(
-        Get-ChildItem -Path (Join-Path $repoRoot 'libraries')  -Recurse -Filter '*.csproj' -File |
-            Where-Object { $_.Directory.Name -eq 'src' -and $_.FullName -notmatch '[\\/]bin[\\/]|[\\/]obj[\\/]' -and $_.BaseName -notmatch '\.Tests?$' }
-        Get-ChildItem -Path (Join-Path $repoRoot 'resources')  -Recurse -Filter '*.csproj' -File |
-            Where-Object { $_.Directory.Name -eq 'src' -and $_.FullName -notmatch '[\\/]bin[\\/]|[\\/]obj[\\/]' -and $_.BaseName -notmatch '\.Tests?$' }
+        Get-CohesionReleaseLibrary |
+            ForEach-Object { Get-Item -LiteralPath $_.ProjectPath }
     ) | Sort-Object FullName
     Write-Host ("  found {0} project(s)" -f $libraryProjects.Count) -ForegroundColor DarkGray
 

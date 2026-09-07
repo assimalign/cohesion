@@ -7,26 +7,17 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Scheduler;
 
-using Internal;
-
 public abstract class Schedule<TContext> : ISchedule where TContext : IScheduleContext
 {
-    private readonly ScheduleTaskScheduler _taskScheduler;
     private readonly ConcurrentBag<IScheduleJob> _jobs;
-    //private readonly IScheduleStateHandler _state;
 
     private ScheduleId _id;
-    private Task? _task;
-    private CancellationTokenSource? _stoppingToken;
-
-    private volatile ScheduleStatus _state;
 
 
     protected Schedule(IScheduleProvider manager)
     {
         _id = ScheduleId.New();
         _jobs = new ConcurrentBag<IScheduleJob>();
-        _lock = new Lock();
     }
 
     public ScheduleId Id => _id;
@@ -34,6 +25,22 @@ public abstract class Schedule<TContext> : ISchedule where TContext : IScheduleC
     public string? Name { get; set; }
 
     public string? Description { get; set; }
+
+    /// <inheritdoc />
+    public abstract int Retries { get; }
+
+    /// <inheritdoc />
+    public abstract int[] RetryIntervals { get; }
+
+    /// <inheritdoc />
+    public abstract int RetryCount { get; }
+
+    /// <inheritdoc />
+    public abstract DateTime GetNextRunTime { get; }
+
+    /// <inheritdoc />
+    public abstract DateTime GetLastRuntTime { get; }
+
     public ScheduleStatus Status => throw new NotImplementedException();
     public virtual SchedulePriority Priority => throw new NotImplementedException();
 

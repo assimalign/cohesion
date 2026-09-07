@@ -47,7 +47,9 @@ public static class DateTimeUtil
     public static DateTime GetMaxValue(DateTimeKind kind)
     {
         if (kind == DateTimeKind.Unspecified)
+        {
             return new DateTime(DateTime.MaxValue.Ticks, DateTimeKind.Utc);
+        }
 
         return new DateTime(DateTime.MaxValue.Ticks, kind);
     }
@@ -60,7 +62,9 @@ public static class DateTimeUtil
     public static DateTime GetMinValue(DateTimeKind kind)
     {
         if (kind == DateTimeKind.Unspecified)
+        {
             return new DateTime(DateTime.MinValue.Ticks, DateTimeKind.Utc);
+        }
 
         return new DateTime(DateTime.MinValue.Ticks, kind);
     }
@@ -73,7 +77,9 @@ public static class DateTimeUtil
     public static DateTime? ToUniversalTime(DateTime? value)
     {
         if (value == null || value.Value.Kind == DateTimeKind.Utc)
+        {
             return value;
+        }
 
         return ToUniversalTime(value.Value);
     }
@@ -87,7 +93,9 @@ public static class DateTimeUtil
     {
 
         if (value.Kind == DateTimeKind.Utc)
+        {
             return value;
+        }
 
         return value.ToUniversalTime();
     }

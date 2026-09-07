@@ -1,36 +1,24 @@
 using System;
 
+using Assimalign.Cohesion.IdentityHub;
+
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.IdentityHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the identity provider resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Creates identity hub application builders.
 /// </summary>
-public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>
+public static class IdentityHubApplication
 {
-    private readonly IdentityHubApplicationContext _context;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="IdentityHubApplication"/> class.
+    /// Creates a builder for an identity hub application.
     /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public IdentityHubApplication(IdentityHubApplicationOptions options) : base(options)
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the identity hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IIdentityHubApplicationBuilder CreateBuilder(string[] args)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(args);
 
-        _context = new IdentityHubApplicationContext(options, new IHostService[]
-        {
-            new IdentityEndpointService(),
-        });
+        return new IdentityHubApplicationBuilder(args);
     }
-
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
-    public override IdentityHubApplicationContext Context => _context;
 }

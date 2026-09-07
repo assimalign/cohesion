@@ -321,81 +321,97 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ApiManager'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ApiManager" />
-        <!-- Add resources/ApiManager/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ConfigurationStore'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
-        <!-- Add resources/ConfigurationStore/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EmailHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EmailHub" />
-        <!-- Add resources/EmailHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EventHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EventHub" />
-        <!-- Add resources/EventHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IdentityHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
-        <!-- Add resources/IdentityHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IoTHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IoTHub" />
-        <!-- Add resources/IoTHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LoadBalancer'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LoadBalancer" />
-        <!-- Add resources/LoadBalancer/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LogSpace'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LogSpace" />
-        <!-- Add resources/LogSpace/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MediaHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MediaHub" />
-        <!-- Add resources/MediaHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MessageHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MessageHub" />
-        <!-- Add resources/MessageHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NatGateway'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NatGateway" />
-        <!-- Add resources/NatGateway/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NotificationHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NotificationHub" />
-        <!-- Add resources/NotificationHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NotificationHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NotificationHub.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Rezolvr'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Rezolvr" />
-        <!-- Add resources/Rezolvr/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Scheduler'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Scheduler" />
-        <!-- Add resources/Scheduler/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.SecretStore'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.SecretStore" />
-        <!-- Add resources/SecretStore/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.VpnGateway'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.VpnGateway" />
-        <!-- Add resources/VpnGateway/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway.Hosting" />
     </ItemGroup>
 </Project>

@@ -7,9 +7,20 @@
 	<Folder Name="/EmailHub/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/">
 		<File Path="Assimalign.Cohesion.EmailHub/README.md" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/docs/">
+		<File Path="Assimalign.Cohesion.EmailHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.EmailHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/docs/Assembly/Assimalign.Cohesion.EmailHub/IEmailHubApplication/">
+		<File Path="Assimalign.Cohesion.EmailHub/docs/Assembly/Assimalign.Cohesion.EmailHub/IEmailHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/docs/Assembly/Assimalign.Cohesion.EmailHub/IEmailHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.EmailHub/docs/Assembly/Assimalign.Cohesion.EmailHub/IEmailHubApplicationBuilder/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub/src/">
 		<Project Path="Assimalign.Cohesion.EmailHub/src/Assimalign.Cohesion.EmailHub.csproj" />
@@ -22,8 +33,14 @@
 		<File Path="Assimalign.Cohesion.EmailHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.EmailHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/docs/Assembly/Assimalign.Cohesion.EmailHub.Hosting/EmailHubApplication/">
+		<File Path="Assimalign.Cohesion.EmailHub.Hosting/docs/Assembly/Assimalign.Cohesion.EmailHub.Hosting/EmailHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.EmailHub.Hosting/src/Assimalign.Cohesion.EmailHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.EmailHub.Hosting/tests/Assimalign.Cohesion.EmailHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/EmailHub/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
