@@ -62,9 +62,14 @@ factory, plus the two `CohesionValueType`-generated identity wrappers
   probe.
 - **Readiness is a level-triggered, terminal-set wait.**
   `IApplicationResourceStateManager.WaitForStateAsync` completes on **any** state in
-  a supplied terminal set (for example `{ Running, Failed }`) with a time budget, so
-  a failed or crash-looping dependency can never deadlock a dependent. The lifecycle
-  enum is treated as a membership set, never an ordered lattice.
+  the initial-readiness terminal set `{ Running, Failed, Stopped }` with a time
+  budget, so a failed or cleanly stopped dependency can never deadlock a dependent.
+  `Stopped` before `Running` is a readiness failure. `Degraded` is observed but is
+  non-gating: it does not admit dependents initially and never re-gates them
+  after `Running` admitted them. Item 26 replaces the interim static set with the
+  plan-derived gate described by O30. A timeout returns the last observed state;
+  caller cancellation throws `OperationCanceledException` and removes the waiter.
+  The lifecycle enum is treated as a membership set, never an ordered lattice.
 - **Controllers are pure, level-triggered reconcilers.** `ReconcileAsync` computes
   desired objects and applies them, idempotently, and returns; it does not own
   steady-state observation (that is a gateway's single informer) and does not block

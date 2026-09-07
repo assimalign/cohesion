@@ -20,8 +20,14 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </remarks>
 public abstract class ApplicationGateway : IApplicationGateway
 {
-    private static readonly IReadOnlySet<ResourceLifecycle> ReadyOrFailed =
-        new HashSet<ResourceLifecycle> { ResourceLifecycle.Running, ResourceLifecycle.Failed };
+    // Design item 26 replaces this static v1 set with each resource plan's readiness gate.
+    private static readonly IReadOnlySet<ResourceLifecycle> InitialReadinessTerminals =
+        new HashSet<ResourceLifecycle>
+        {
+            ResourceLifecycle.Running,
+            ResourceLifecycle.Failed,
+            ResourceLifecycle.Stopped,
+        };
 
     private readonly List<Provisioned> _provisioned = new();
 
@@ -92,7 +98,7 @@ public abstract class ApplicationGateway : IApplicationGateway
                 _provisioned.Add(new Provisioned(descriptor, controller, context));
 
                 ResourceLifecycle reached = await State
-                    .WaitForStateAsync(resource.Id, ReadyOrFailed, ReadinessBudget, cancellationToken)
+                    .WaitForStateAsync(resource.Id, InitialReadinessTerminals, ReadinessBudget, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (reached != ResourceLifecycle.Running)

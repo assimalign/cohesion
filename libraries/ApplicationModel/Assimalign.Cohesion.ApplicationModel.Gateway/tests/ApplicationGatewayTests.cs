@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -82,6 +83,119 @@ public class ApplicationGatewayTests
 
         await Should.ThrowAsync<InvalidOperationException>(
             async () => await ((IApplicationGateway)gateway).StartAsync(model));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should fail when a resource stops before Running")]
+    public async Task StartAsync_WhenResourceStopsBeforeRunning_ShouldFailAndBlockDependents()
+    {
+        // Arrange
+        var reconciled = new List<string>();
+        var deleted = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var observedStates = new Dictionary<string, ResourceLifecycle>
+        {
+            ["a"] = ResourceLifecycle.Stopped,
+        };
+        var controller = new RecordingController(reconciled, deleted, observedStates: observedStates);
+        var gateway = new TestGateway(state, new[] { controller });
+        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
+        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
+        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
+        b.DependsOn(a);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        // Act
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token));
+
+        // Assert
+        exception.Message.ShouldContain("'Stopped'");
+        cancellation.IsCancellationRequested.ShouldBeFalse();
+        reconciled.ShouldBe(new[] { "a" });
+        state.GetState(b.Resource.Id).ShouldBe(ResourceLifecycle.Blocked);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should not re-gate a dependent after initial readiness degrades")]
+    public async Task StartAsync_WhenDependencyDegradesAfterRunning_ShouldNotRegateDependent()
+    {
+        // Arrange
+        var reconciled = new List<string>();
+        var deleted = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var observedStates = new Dictionary<string, ResourceLifecycle>
+        {
+            ["a"] = ResourceLifecycle.Degraded,
+        };
+        var controller = new RecordingController(reconciled, deleted, observedStates: observedStates);
+        var gateway = new TestGateway(state, new[] { controller });
+        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
+        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
+        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
+        b.DependsOn(a);
+        IApplicationModel model = builder.Build().Model;
+        ResourceStateChangedEventArgs? degradation = null;
+        state.StateChanged += (_, args) =>
+        {
+            if (args.Resource == a.Resource.Id && args.Current == ResourceLifecycle.Degraded)
+            {
+                degradation = args;
+            }
+        };
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        // Act
+        Task start = ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+        ResourceLifecycle initial = await state.WaitForStateAsync(
+            a.Resource.Id,
+            new HashSet<ResourceLifecycle> { ResourceLifecycle.Degraded },
+            TimeSpan.FromSeconds(1),
+            cancellation.Token);
+
+        // Assert
+        initial.ShouldBe(ResourceLifecycle.Degraded);
+        reconciled.ShouldBe(new[] { "a" });
+
+        state.SetState(a.Resource.Id, ResourceLifecycle.Running);
+        await start.WaitAsync(TimeSpan.FromSeconds(1));
+        reconciled.ShouldBe(new[] { "a", "b" });
+
+        state.SetState(a.Resource.Id, ResourceLifecycle.Degraded, "Liveness probe failed.");
+        degradation.ShouldNotBeNull();
+        degradation!.Previous.ShouldBe(ResourceLifecycle.Running);
+        state.GetState(a.Resource.Id).ShouldBe(ResourceLifecycle.Degraded);
+        state.GetState(b.Resource.Id).ShouldBe(ResourceLifecycle.Running);
+
+        await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should propagate readiness cancellation")]
+    public async Task StartAsync_WhenReadinessWaitIsCanceled_ShouldPropagateOperationCanceledException()
+    {
+        // Arrange
+        var reconciled = new List<string>();
+        var deleted = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var controller = new RecordingController(reconciled, deleted, leaveStarting: true);
+        var gateway = new TestGateway(state, new[] { controller });
+        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
+        IApplicationResourceDescriptor resource = builder.AddResource(new TestResource("a"));
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource();
+        Task start = ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+        ResourceLifecycle reached = await state.WaitForStateAsync(
+            resource.Resource.Id,
+            new HashSet<ResourceLifecycle> { ResourceLifecycle.Starting },
+            TimeSpan.FromSeconds(1));
+        reached.ShouldBe(ResourceLifecycle.Starting);
+
+        // Act
+        cancellation.Cancel();
+
+        // Assert
+        OperationCanceledException exception = await Should.ThrowAsync<OperationCanceledException>(
+            async () => await start.WaitAsync(TimeSpan.FromSeconds(2)));
+        exception.CancellationToken.ShouldBe(cancellation.Token);
     }
 
     private static IApplicationModel BuildChain(IApplicationGateway gateway)

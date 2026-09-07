@@ -2,7 +2,4 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 	</ItemGroup>
-	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.Tests" />
-	</ItemGroup>
 </Project>

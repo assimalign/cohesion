@@ -5,21 +5,29 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
+// Deviates from the repo interface-first rule per signed-off design item 18: the concrete
+// reference state manager is intentionally public alongside its existing interface contract.
 /// <summary>
-/// The default in-memory <see cref="IApplicationResourceStateManager"/>: a level-triggered
+/// The reference in-memory <see cref="IApplicationResourceStateManager"/>: a level-triggered
 /// store whose reads, writes, and waiter registration all happen under one lock, so a
 /// <see cref="SetState"/> racing a <see cref="WaitForStateAsync"/> can never be lost.
 /// </summary>
-internal sealed class InMemoryResourceStateManager : IApplicationResourceStateManager
+public sealed class InMemoryResourceStateManager : IApplicationResourceStateManager
 {
-    // A value the enum never legitimately carries; used only to signal a wait budget/token elapsed.
-    private const ResourceLifecycle TimedOut = (ResourceLifecycle)(-1);
-
     private readonly object _gate = new();
     private readonly Dictionary<ResourceId, Entry> _entries = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="InMemoryResourceStateManager"/> class.
+    /// </summary>
+    public InMemoryResourceStateManager()
+    {
+    }
+
+    /// <inheritdoc/>
     public event EventHandler<ResourceStateChangedEventArgs>? StateChanged;
 
+    /// <inheritdoc/>
     public ResourceLifecycle GetState(ResourceId id)
     {
         lock (_gate)
@@ -28,6 +36,7 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
         }
     }
 
+    /// <inheritdoc/>
     public IReadOnlyList<ResourceEndpoint> GetObservedEndpoints(ResourceId id)
     {
         lock (_gate)
@@ -38,6 +47,7 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
         }
     }
 
+    /// <inheritdoc/>
     public void SetState(
         ResourceId id,
         ResourceLifecycle state,
@@ -73,6 +83,11 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
                         entry.Waiters.RemoveAt(i);
                     }
                 }
+
+                if (entry.Waiters.Count == 0)
+                {
+                    entry.Waiters = null;
+                }
             }
         }
 
@@ -91,6 +106,7 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
         }
     }
 
+    /// <inheritdoc/>
     public async Task<ResourceLifecycle> WaitForStateAsync(
         ResourceId id,
         IReadOnlySet<ResourceLifecycle> terminals,
@@ -98,6 +114,10 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(terminals);
+        cancellationToken.ThrowIfCancellationRequested();
+        using CancellationTokenSource? timeout = budget == Timeout.InfiniteTimeSpan
+            ? null
+            : new CancellationTokenSource(budget);
 
         Waiter waiter;
         lock (_gate)
@@ -117,36 +137,67 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
                 _entries[id] = existing;
             }
 
-            waiter = new Waiter(terminals);
+            waiter = new Waiter(this, id, terminals, cancellationToken);
             (existing.Waiters ??= new List<Waiter>()).Add(waiter);
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (budget != Timeout.InfiniteTimeSpan)
+        try
         {
-            timeout.CancelAfter(budget);
+            using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
+                static state => ((Waiter)state!).Cancel(),
+                waiter);
+            using CancellationTokenRegistration timeoutRegistration = timeout is null
+                ? default
+                : timeout.Token.Register(
+                    static state => ((Waiter)state!).Timeout(),
+                    waiter);
+
+            return await waiter.Completion.Task.ConfigureAwait(false);
         }
-
-        using (timeout.Token.Register(static state => ((Waiter)state!).Completion.TrySetResult(TimedOut), waiter))
+        finally
         {
-            ResourceLifecycle reached = await waiter.Completion.Task.ConfigureAwait(false);
+            TryRemoveWaiter(waiter, out _);
+        }
+    }
 
-            if (reached != TimedOut)
+    private void CancelWaiter(Waiter waiter)
+    {
+        if (TryRemoveWaiter(waiter, out _))
+        {
+            waiter.Completion.TrySetCanceled(waiter.CancellationToken);
+        }
+    }
+
+    private void TimeoutWaiter(Waiter waiter)
+    {
+        if (TryRemoveWaiter(waiter, out ResourceLifecycle current))
+        {
+            waiter.Completion.TrySetResult(current);
+        }
+    }
+
+    private bool TryRemoveWaiter(Waiter waiter, out ResourceLifecycle current)
+    {
+        lock (_gate)
+        {
+            current = ResourceLifecycle.Unknown;
+            if (!_entries.TryGetValue(waiter.Id, out Entry? entry) || entry.Waiters is null)
             {
-                return reached;
+                return false;
             }
 
-            // Budget or token elapsed: drop the waiter and report the last observed state.
-            lock (_gate)
+            current = entry.State;
+            if (!entry.Waiters.Remove(waiter))
             {
-                if (_entries.TryGetValue(id, out Entry? entry))
-                {
-                    entry.Waiters?.Remove(waiter);
-                    return entry.State;
-                }
-
-                return ResourceLifecycle.Unknown;
+                return false;
             }
+
+            if (entry.Waiters.Count == 0)
+            {
+                entry.Waiters = null;
+            }
+
+            return true;
         }
     }
 
@@ -161,14 +212,31 @@ internal sealed class InMemoryResourceStateManager : IApplicationResourceStateMa
 
     private sealed class Waiter
     {
-        public Waiter(IReadOnlySet<ResourceLifecycle> terminals)
+        public Waiter(
+            InMemoryResourceStateManager owner,
+            ResourceId id,
+            IReadOnlySet<ResourceLifecycle> terminals,
+            CancellationToken cancellationToken)
         {
+            Owner = owner;
+            Id = id;
             Terminals = terminals;
+            CancellationToken = cancellationToken;
         }
+
+        public InMemoryResourceStateManager Owner { get; }
+
+        public ResourceId Id { get; }
 
         public IReadOnlySet<ResourceLifecycle> Terminals { get; }
 
+        public CancellationToken CancellationToken { get; }
+
         public TaskCompletionSource<ResourceLifecycle> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Cancel() => Owner.CancelWaiter(this);
+
+        public void Timeout() => Owner.TimeoutWaiter(this);
     }
 }

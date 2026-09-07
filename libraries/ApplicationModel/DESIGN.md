@@ -344,8 +344,11 @@ IEndpointResource`; the local one matches `IExecutableResource` only).
 
 The **level-triggered source of truth** for observed state — *not* an event log.
 A single per-gateway informer (§5.3) is its only writer. The readiness wait
-completes on **any terminal in a set** (so a `Failed` dependency cannot deadlock a
-dependent) and is race-free.
+completes on **any terminal in a set** (so a `Failed` or cleanly `Stopped`
+dependency cannot deadlock a dependent) and is race-free. The Gateway package
+publishes `InMemoryResourceStateManager` as the reference implementation beside
+this interface; making that concrete type public is the signed-off, narrowly
+scoped exception to the repository's interface-first default.
 
 ```csharp
 public interface IApplicationResourceStateManager
@@ -362,8 +365,9 @@ public interface IApplicationResourceStateManager
     IReadOnlyList<ResourceEndpoint> GetObservedEndpoints(ResourceId id);
 
     /// <summary>Completes when the resource reaches ANY state in
-    /// <paramref name="terminals"/> (e.g. {Running, Failed}) or the budget/token
-    /// elapses; returns the reached state. Concurrency contract: a waiter is
+    /// <paramref name="terminals"/> (e.g. {Running, Failed, Stopped}) or the budget
+    /// elapses; returns the reached state. Caller cancellation throws
+    /// OperationCanceledException. Concurrency contract: a waiter is
     /// registered under the same lock that guards the current-state read, so a
     /// SetState racing the wait cannot be lost.</summary>
     Task<ResourceLifecycle> WaitForStateAsync(
@@ -380,9 +384,11 @@ public enum ResourceLifecycle
 }
 ```
 
-`Blocked`/`Skipped` mark dependents of a failed prerequisite (§5.3). The enum is
-**not** treated as an ordered lattice — waits are membership tests, never "reached
-or passed".
+`Blocked`/`Skipped` mark dependents of a prerequisite that did not satisfy
+readiness (§5.3). The enum is **not** treated as an ordered lattice — waits are
+membership tests, never "reached or passed". `Degraded` is an observed
+post-readiness health state: it is never a readiness terminal and never re-gates
+dependents that already passed initial readiness.
 
 ### 5.3 `IApplicationGateway` (refined) **[R]**
 
@@ -426,11 +432,18 @@ The generic algorithm (`StartCoreAsync`):
    status into `State` (§5.2), and the sole owner of the platform watch.
 4. For each resource in topo order: route to its controller (§5.1), `ReconcileAsync`
    (apply only — non-blocking), then
-   `await State.WaitForStateAsync(id, {Running, Failed}, budget, ct)`:
+   `await State.WaitForStateAsync(id, {Running, Failed, Stopped}, budget, ct)`:
    - `Running` → start dependents.
-   - `Failed`/timeout → mark the dependent subtree `Blocked`/`Skipped`, and per the
+   - `Failed`/`Stopped`/timeout → mark the dependent subtree `Blocked`/`Skipped`, and per the
      configured policy either **fail fast** (throw an aggregated error naming the
      resource + detail) or continue with the reachable subgraph.
+   - `Degraded` is observed but does not satisfy initial readiness. Once `Running`
+     has admitted dependents, a later `Degraded` observation never re-gates them.
+
+   The interim static set is named `InitialReadinessTerminals` so item 26 can
+   replace it with `plan.Workload.Gate.Terminals` (O30). This is the cohesion-side
+   contract referenced by the `cohesion-platforms` rule 2 amendment; no rule file
+   in that sibling repository is changed here.
 5. **Reconcile loop** until `StopAsync`: a periodic re-list + the informer keep
    `State` level-true; on drift (observed ≠ desired by `observedGeneration`),
    re-`ReconcileAsync` with bounded backoff. Controllers use **server-side apply
@@ -487,8 +500,8 @@ Contents:
   child stdout/stderr with a `[ResourceName]` prefix.
 - `LocalGatewayProcessSupervisor.cs` — process lifetimes, restart policy, SIGTERM
   (Ctrl-C on Windows) → grace → SIGKILL.
-- `Internal/InMemoryResourceStateManager.cs` — the default level-truth store
-  (the §5.2 lock/wait contract), reused by all gateways.
+- `InMemoryResourceStateManager.cs` — the public reference level-truth store
+  (the §5.2 lock/wait contract), reusable by all gateways.
 - `Extensions/LocalGatewayExtensions.cs` — `UseLocalGateway()` on `IApplicationBuilder`.
 
 ### 6.4 Gateway selection (no reflection) **[R]**
@@ -855,12 +868,15 @@ Orchestrator references: `ApplicationModel` + one
   duplicate name / cycle / **missing gateway** (actionable message, no reflection);
   `DependsOn` (single + params); `Dependencies` read-only; `Descriptors`/`Resources`
   1:1 invariant; `CohesionApplication.RunAsync` starts then stops the gateway on
-  cancellation (fake gateway records calls); **`WaitForStateAsync` returns on the
-  first terminal in the set, on timeout, and is race-free** (SetState racing a wait
-  is never lost).
-- **Gateway tests:** topo order on start, reverse on stop; readiness gating returns
-  `Failed` and marks the subtree `Blocked` without deadlock; local resolver finds an
-  adjacent exe; observed-endpoint injection ordering for dynamic ports.
+  cancellation (fake gateway records calls).
+- **Gateway tests:** topo order on start, reverse on stop; **`WaitForStateAsync`
+  returns on the first terminal in the set, returns the last observation on timeout, throws
+  `OperationCanceledException` on caller cancellation, removes abandoned waiters,
+  and arbitrates terminal-state/cancellation races under one lock**; readiness
+  gating returns `Failed` or `Stopped` and marks the subtree `Blocked` without
+  deadlock; a later `Degraded` observation does not re-gate admitted dependents;
+  local resolver finds an adjacent exe; observed-endpoint injection ordering for
+  dynamic ports.
 - **Kubernetes gateway tests:** registry serves a known blob/manifest by digest;
   controllers emit expected `k8s.Models` for a capability set with a `@sha256` image
   ref; informer relists on `410` and keeps state level-true (fake API).
