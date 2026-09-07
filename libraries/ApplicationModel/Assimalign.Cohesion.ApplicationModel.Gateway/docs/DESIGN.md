@@ -139,6 +139,77 @@ the registration under the same lock.
   `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each
   verified child and launches a fresh attempt.
 
+## Item #964 — external resolution and multi-model composition
+
+This package implements the gateway-side half of the item 23 contracts. It does not implement
+item 23a's HTTP control-plane package or a platform's Kubernetes importer/exposure.
+
+### Resolver controller and lifecycle
+
+`ApplicationGateway` owns one internal `ExternalResourceController`. Controller selection remains
+deterministic: application-registered overrides first, then the external controller, then the
+gateway's platform controllers. A plan with the `cohesion.external=true` hint is accepted by the
+external controller and receives an artifact-free `ExternalResourceArtifact`; `GatherAsync` is
+not called while it stays external. A Development `--realize` removes that hint, so the selected
+platform gathers and reconciles the resource like any other planned workload.
+
+On every reconcile pass the controller invokes the resource's `IExternalResourceResolver` with
+its immutable `ExternalResourceDeclaration` and the optional
+`ApplicationGatewayOptions.ControlPlaneClient`:
+
+- a resolved result containing all referenced endpoint names becomes `Running` and publishes the
+  observed endpoints;
+- an optional unresolved result becomes `Skipped`, allowing independent branches to continue;
+- a required unresolved result becomes `Starting`; the common plan gate waits the resource's
+  readiness budget (60 seconds by default), then records `Failed`, aborts startup, and marks its
+  dependents `Blocked` if the resolver has not produced a terminal/satisfying state;
+- a result missing any referenced endpoint becomes `Failed`. Its detail names the missing
+  endpoint and the expected/observed manifest hashes and export schema versions;
+- differing non-null manifest hashes or reported export schema versions with compatible endpoints
+  remain `Running` and append the stable `ManifestDrift` warning to the state detail. A changed
+  detail is observable even when the lifecycle remains `Running`.
+
+Resolver calls are one-shot within a reconcile pass; a resolver that needs polling owns that work.
+The readiness budget is the gateway gate after resolution, not an implicit resolver retry loop.
+`StopAsync` and `DeleteAsync` only set the local external observation to `Stopped`; they never ask
+the peer application to stop or delete its resource.
+
+The built-in `Gateway(...)` resolver remains transport-neutral. It returns an actionable
+unresolved result when no `IControlPlaneClient` was configured, and otherwise asks that client for
+an `ApplicationExportDocument`. Supplying the actual HTTP client/server belongs to item 23a.
+
+### One gateway session for several models
+
+`ApplicationGateway` implements `IMultiModelApplicationGateway`; its existing single-model
+`IApplicationGateway` methods delegate to singleton batches. A batch is validated before target
+contact, preserves application declaration order and each model's topological resource order, and
+starts exactly one observer for the complete collection. Reconcile follows that combined order;
+stop and uninstall reverse both resource and application order.
+
+The active-session key is `(ApplicationName, ResourceId)`. When a batch contains more than one
+model, `ApplicationScopedResourceStateManager` projects every member through an
+application-scoped state view so identical resource names/identifiers in two applications cannot
+share lifecycle or endpoint observations. Multi-model observers obtain the correct view through
+`GetApplicationState(model)`. A gateway cannot begin supervising a different model collection
+until the active collection has stopped.
+
+`IApplicationSet` itself lives in the Core-only contract package. It resolves each
+`ApplicationDeclaration` at run start (local `--mode describe`, file export, or a supplied
+control-plane client), then invokes this batch seam for `Run`, `Apply`, or `Teardown`. No
+`Gateway.CreateModel` reflection or runtime assembly scan is involved. SDK-generated
+`Applications.<Name>` declarations, HTTP endpoints, and Kubernetes ConfigMap import/export are
+outside this package's #964 implementation.
+
+After each successful start or reconcile pass, the base gateway creates one validated,
+source-generated `ApplicationExportDocument` per active model from its observed endpoint state.
+Its default publication hook atomically replaces
+`.cohesion/<application>/export.json`; `LocalGatewayOptions.StateDirectory` supplies the local
+root unless `ApplicationGatewayOptions.ExportDirectory` is set explicitly. Platform gateways can
+override `PublishApplicationExportAsync` to publish the identical document through their native
+control plane without changing the model or wire contract. Successful stop and teardown withdraw
+the document through `RemoveApplicationExportAsync`, preventing a resolver from advertising
+endpoints after their resources are no longer running.
+
 ## Testing posture
 
 The generic algorithm and the state manager are unit-tested deterministically (a `TestGateway`

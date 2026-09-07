@@ -55,6 +55,7 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         IReadOnlyList<ResourceEndpoint>? observedEndpoints = null)
     {
         ResourceLifecycle previous;
+        bool detailChanged;
         List<Waiter>? completed = null;
 
         lock (_gate)
@@ -66,7 +67,9 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
             }
 
             previous = entry.State;
+            detailChanged = !string.Equals(entry.Detail, detail, StringComparison.Ordinal);
             entry.State = state;
+            entry.Detail = detail;
 
             if (observedEndpoints is not null)
             {
@@ -100,7 +103,7 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
             }
         }
 
-        if (previous != state)
+        if (previous != state || detailChanged)
         {
             StateChanged?.Invoke(this, new ResourceStateChangedEventArgs(id, previous, state, detail));
         }
@@ -206,6 +209,8 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         public ResourceLifecycle State { get; set; } = ResourceLifecycle.Unknown;
 
         public IReadOnlyList<ResourceEndpoint>? Endpoints { get; set; }
+
+        public string? Detail { get; set; }
 
         public List<Waiter>? Waiters { get; set; }
     }

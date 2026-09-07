@@ -1,9 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
 internal sealed class GatewayCommandLineOptions
 {
+    private readonly List<string> _externalBindings = new();
+    private readonly List<ResourceName> _realize = new();
+
     public GatewayRunMode RunMode { get; private set; } = GatewayRunMode.Run;
 
     public string? Gateway { get; private set; }
@@ -13,6 +18,12 @@ internal sealed class GatewayCommandLineOptions
     public bool Adopt { get; private set; }
 
     public bool RestartOrphans { get; private set; }
+
+    public IReadOnlyList<string> ExternalBindings =>
+        new ReadOnlyCollection<string>(_externalBindings);
+
+    public IReadOnlyList<ResourceName> Realize =>
+        new ReadOnlyCollection<ResourceName>(_realize);
 
     public static GatewayCommandLineOptions Parse(string[]? args)
     {
@@ -51,6 +62,19 @@ internal sealed class GatewayCommandLineOptions
                     ref index,
                     "--restart-orphans",
                     inlineValue);
+            }
+            else if (TrySplit(argument, "--external", out inlineValue))
+            {
+                options._externalBindings.Add(
+                    ReadRequiredValue(args, ref index, "--external", inlineValue));
+            }
+            else if (TrySplit(argument, "--realize", out inlineValue))
+            {
+                options._realize.Add((ResourceName)ReadRequiredValue(
+                    args,
+                    ref index,
+                    "--realize",
+                    inlineValue));
             }
         }
 

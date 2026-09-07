@@ -15,8 +15,8 @@ public abstract class PlannedResource :
     IEndpointResource,
     IMountResource
 {
-    private readonly IReadOnlyList<ResourceEndpoint> endpoints;
-    private readonly IReadOnlyList<ResourceMount> mounts;
+    private IReadOnlyList<ResourceEndpoint> endpoints = Array.Empty<ResourceEndpoint>();
+    private IReadOnlyList<ResourceMount> mounts = Array.Empty<ResourceMount>();
 
     /// <summary>Initializes a manifest-backed resource with optional deployer overrides.</summary>
     /// <param name="manifest">The build-produced resource manifest.</param>
@@ -29,8 +29,19 @@ public abstract class PlannedResource :
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
-        Manifest = ResourceManifestSnapshot.Create(manifest);
         Options = options ?? new ResourceOptions();
+        UpdateManifest(manifest);
+    }
+
+    /// <summary>
+    /// Replaces the manifest snapshot and its derived resource capabilities.
+    /// </summary>
+    /// <param name="manifest">The updated build-produced resource manifest.</param>
+    private protected void UpdateManifest(ResourceManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        Manifest = ResourceManifestSnapshot.Create(manifest);
 
         var endpointCopy = new ResourceEndpoint[Manifest.Endpoints.Count];
         for (int index = 0; index < Manifest.Endpoints.Count; index++)
@@ -59,7 +70,7 @@ public abstract class PlannedResource :
     public ResourceName Name => Manifest.Name;
 
     /// <inheritdoc />
-    public ResourceManifest Manifest { get; }
+    public ResourceManifest Manifest { get; private set; } = null!;
 
     /// <inheritdoc />
     public virtual string PlannerName => nameof(GenericPlanner);

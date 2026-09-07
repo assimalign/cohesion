@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 internal sealed class LocalResourceConfiguration
 {
     public LocalResourceConfiguration(
+        ApplicationName application,
+        IApplicationResourceStateManager state,
         IApplicationResource resource,
         IExecutableArtifact artifact,
         IReadOnlyDictionary<string, string> environment,
@@ -19,6 +21,8 @@ internal sealed class LocalResourceConfiguration
         TimeSpan stopGrace,
         bool useStopEvent)
     {
+        Application = application;
+        State = state ?? throw new ArgumentNullException(nameof(state));
         Resource = resource;
         Artifact = artifact;
         Environment = environment;
@@ -32,6 +36,10 @@ internal sealed class LocalResourceConfiguration
         StopGrace = stopGrace;
         UseStopEvent = useStopEvent;
     }
+
+    public ApplicationName Application { get; }
+
+    public IApplicationResourceStateManager State { get; }
 
     public IApplicationResource Resource { get; }
 

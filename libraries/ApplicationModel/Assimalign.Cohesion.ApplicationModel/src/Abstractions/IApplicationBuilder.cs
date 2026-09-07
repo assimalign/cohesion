@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
@@ -73,6 +74,25 @@ public interface IApplicationBuilder
     /// <returns>The descriptor wrapping the produced resource.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
     IApplicationResourceDescriptor AddResource(Func<IApplicationModel, IApplicationResource> configure);
+
+    /// <summary>
+    /// Registers a build-produced application-boundary declaration. Generated gateway code
+    /// uses this infrastructure seam; application code binds it through <c>RemoteReference</c>.
+    /// </summary>
+    /// <param name="declaration">The generated external declaration.</param>
+    /// <param name="resolver">The code binding, or <see langword="null"/> to leave it unbound.</param>
+    /// <returns>The descriptor representing the external node.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="declaration"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The declaration conflicts with another external of the same name, or its embedded
+    /// manifest identity does not match the declaration.
+    /// </exception>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    IApplicationResourceDescriptor AddExternal(
+        ExternalResourceDeclaration declaration,
+        IExternalResourceResolver? resolver = null);
 
     /// <summary>
     /// Selects the gateway that will realize the model. Required: <see cref="Build"/>

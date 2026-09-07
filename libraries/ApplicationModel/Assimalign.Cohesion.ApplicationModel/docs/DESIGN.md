@@ -1,10 +1,10 @@
 # Assimalign.Cohesion.ApplicationModel — DESIGN
 
 > This is the per-library design record for the **Layer 1** ApplicationModel
-> contract package. The full multi-package architecture (gateways, the Kubernetes
-> build-override + self-hosted registry, resource manifest packages, MSBuild
-> codegen) lives in the ApplicationModel area-root `../../DESIGN.md`. Read that for
-> the whole picture; read this for why *this* package looks the way it does.
+> contract package. The current cross-package direction of record is
+> [`DEVELOPER_EXPERIENCE_DESIGN.md`](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md);
+> the ApplicationModel area-root `../../DESIGN.md` is an older plan. Read this file
+> for the contracts that are implemented in this package and why they have this shape.
 
 ## What this library is
 
@@ -20,14 +20,17 @@ Two planes share one vocabulary here:
   `IApplicationResource`, `ResourceManifest`, `IManifestResource`,
   `IPlannedResource`, the platform-neutral `ResourcePlan` records,
   `IApplicationResourceDescriptor`, `IApplicationResourceCollection`, and
-  `IApplicationEnvironment`. The older `IExecutableResource` /
+  `IApplicationEnvironment`; plus the application-boundary contracts
+  `ExternalResourceDeclaration`, `IExternalResource`, `IExternalResourceResolver`,
+  and `RemoteReferenceOptions`. The older `IExecutableResource` /
   `IEndpointResource` / `IMountResource` capability interfaces remain as a
   compatibility surface for gateways and hand-written resources while resource
   areas move to generated manifests and plans.
 - **Control plane** (contracts only; implementations live in the `…Gateway.*`
   packages) — `IApplicationGateway`, `IApplicationResourceController`,
   `IResourceControlContext`, `IApplicationResourceStateManager`,
-  `IApplicationResourcePackager`, and the `IResourceArtifact` family.
+  `IApplicationResourcePackager`, `IControlPlaneClient`,
+  `IMultiModelApplicationGateway`, and the `IResourceArtifact` family.
 
 The guided implementation surface is `PlannedResource`; resource-area types derive
 from it and override `CreatePlan(PlanContext)` only when the generic trait mapping
@@ -112,6 +115,90 @@ orchestration package.
   `IExecutableArtifact` / `IContainerImageArtifact`; consumers request the concrete
   shape by type rather than switching on a kind enum and casting.
 
+## External references and exported models
+
+An application-boundary reference is represented by an ordinary resource node, not by a side
+table. `ExternalResourceDeclaration` snapshots the target application, consumed endpoint names,
+optionality, embedded manifest, and available same-application closure. Its `ManifestHash` and
+`ClosureHash` are computed from the portable canonical manifest contract, excluding local paths
+and other machine-specific artifact facts.
+
+Generated gateway code may register a declaration through the infrastructure-only
+`IApplicationBuilder.AddExternal` seam. Application code binds it with
+`RemoteReference(ExternalResourceDeclaration, ...)`; the string overload creates a manifest-less
+declaration. Both return the same `IApplicationResourceDescriptor` used by `DependsOn`, so the
+external participates in topological ordering, readiness, and observed-endpoint injection like
+any locally realized resource.
+
+A manifest-less declaration has no build-time application identity to authenticate. Its selected
+file or gateway binding is therefore the authority; resolution still requires the named resource
+to be present in the export and in that export's embedded model. Manifest-backed declarations
+add the stronger owner and canonical-hash checks.
+
+The base bindings are static endpoints, an `export.json` file, a peer gateway address, or an
+arbitrary `IExternalResourceResolver`. The effective resolver is selected in this order:
+
+1. matching `--external` command-line binding;
+2. matching `Cohesion__External__...` process-environment binding (colon aliases are accepted);
+3. the resolver supplied by `RemoteReference`;
+4. the unresolved resolver.
+
+This makes deployment/environment input authoritative over source while leaving the C# binding
+as a useful local default. A peer-gateway binding uses the transport-neutral
+`IControlPlaneClient`; this package deliberately does not take an HTTP dependency. A
+platform-specific importer can be supplied through `RemoteReferenceOptions.Bind` without adding
+platform types to the contract package.
+
+`IExternalResourceResolver.ResolveAsync` returns endpoints plus the provider manifest hash and
+export schema version when known. The gateway controller owns policy: compatible resolutions are
+`Running`; optional unresolved declarations are `Skipped`; required unresolved declarations stay
+nonterminal until the per-resource readiness budget fails the startup gate; and a missing
+referenced endpoint is `Failed`. A changed manifest hash with all referenced endpoints still
+present is reported as `ManifestDrift` while remaining `Running`. Stop and delete detach only the
+consumer's observed external state; they do not operate on the provider application.
+
+There are two portable documents with different jobs:
+
+- `ApplicationModelDocument` (`cohesion/model/v1`) is the immutable graph: invocation intent,
+  dependencies, manifests, platform-neutral plans, and external declaration/closure/realization/
+  binding metadata. Describe mode writes this document without contacting a platform, and an
+  import retains static, file, and gateway `RemoteReference` bindings. An arbitrary resolver
+  supplied through `Bind(...)` is deliberately emitted as unbound because executable code is not
+  portable; the importing platform must contribute its binding again.
+- `ApplicationExportDocument` (`schemaVersion: 1`) is public discovery: application/environment
+  version, optional public JWK, resource manifest hashes, observed internal/public endpoints, and
+  the complete model document. It has source-generated `Create`/`Parse`/`Load`/`Save`/`ToModel`
+  paths and validates cross-document identity, hashes, kinds, and endpoint names.
+
+`export.json` is a storage convention, not an automatic side effect of this Layer-1 package. The
+HTTP endpoints that publish or fetch the document are item 23a, not part of the item 23 contract
+implementation. Likewise, Kubernetes export/import is a platform integration, not implemented
+here.
+
+## Application-set composition
+
+`Application.CreateSet(gateway, args)` requires an `IMultiModelApplicationGateway` and creates an
+`IApplicationSet`. Each generated or hand-written `ApplicationDeclaration` pairs an application
+identity with an `IApplicationModelResolver`. The supplied resolvers cover:
+
+- `Executable(path)` — invoke the member gateway with `--mode describe`;
+- `File(path)` — reconstruct the model embedded in an application export;
+- `Gateway(address, client)` — obtain that export through `IControlPlaneClient`;
+- `ControlPlane(executablePath, exportPath)` — use executable describe in Development and the
+  exported model otherwise.
+
+Member models are resolved at `RunAsync` start in declaration order. The set rejects duplicate
+declarations and a resolver returning the wrong application identity, applies invocation-level
+external overrides to each imported model, validates one ordered batch, and dispatches `Run`,
+`Apply`, or `Teardown` through the shared gateway. The base multi-model contract preserves model
+order and requires state to be scoped by `(application, resource)`; equal resource identifiers in
+different applications must not collide. SDK generation of `Applications.<Name>` is a consumer
+convenience over this seam and is not required by the contract itself.
+
+In Development, executable resolution applies `--realize` only after the first description shows
+that the member declares the requested external. An imported export must already record a matching
+external as realized, and the set rejects any requested name that no member realized.
+
 ## Lifecycle and error model
 
 - `Application.CreateBuilder(ApplicationName, args)` → fluent
@@ -119,6 +206,11 @@ orchestration package.
   remains available for callers that start from the parameterless overload. Invocation intent
   carried by the immutable model includes `--adopt` ownership consent and
   `--restart-orphans` local-process recovery policy; platform gateways decide how to realize it.
+- `--realize <external>` is validated during `Build()`. It is accepted only in Development for
+  gateway identities `local`, `inprocess`, and `docker`, requires an embedded target manifest,
+  and replaces the requested external plus its reachable same-application closure with ordinary
+  planned resources. Cross-application references discovered within that closure remain external,
+  and realized members retain their original application identity for runtime naming.
 - After run cancellation, `CohesionApplication` lets the selected gateway apply its own
   per-resource stop budgets. It does not impose one 30-second outer timeout across a
   reverse-ordered resource set, which would truncate later resources' declared grace periods.
@@ -148,17 +240,16 @@ fallback is used only in Development and is slugged before validation; assembly
 attributes are never read at run time. The generated value types use
 `System.Text.Json` converters that are source-emitted, not reflection-based.
 
-**Note on the family:** the sibling `…Gateway` base and `…Gateway.Docker` packages
-are also AOT-gated, but `…Gateway.Kubernetes` is a **documented AOT exception**
-because `KubernetesClient` pulls `YamlDotNet` and serializes via runtime reflection.
-That exception is scoped to the Kubernetes gateway package and does not affect this
-contract library. See the area-root `../../DESIGN.md` §13.
+**Note on the family:** the sibling `…Gateway` base is also AOT-gated. Platform packages own
+their own AOT posture; this package neither references nor asserts an implementation status for
+Docker or Kubernetes integrations.
 
 ## Family relationships
 
 - `…ApplicationModel.Gateway` (Layer 2a) — the guided `ApplicationGateway` base +
   `LocalGateway`; implements the control-plane contracts defined here.
-- `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — Kubernetes, Docker, … .
+- `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — platform compilers and controllers supplied
+  outside this contract package.
 - `{Resource}.ApplicationModel` (Layer 3d) — Core-only manifest packages that
   provide a typed `PlannedResource`, `Add{Resource}(manifest, options)`, the area's
   planner when it differs from `GenericPlanner`, and the resource-side default
@@ -166,11 +257,11 @@ contract library. See the area-root `../../DESIGN.md` §13.
 
 ## Non-goals
 
-- Hosting a process (DI/Config/Logging composition stays in `{Resource}.Application`).
+- Hosting a process (DI/Config/Logging composition stays in `{Resource}.Hosting`).
 - Building container images (delegated to the SDK container tooling, upstream, per
   resource).
-- Referencing or rebuilding any `{Resource}.Application` runtime — the orchestrator
-  only ever references contract + manifest packages.
+- Referencing or rebuilding any `{Resource}.Hosting` runtime — an out-of-process orchestrator
+  only needs contracts, manifests/plans, and deployable artifacts.
 - Platform object formats, Kubernetes types, and process supervision — those live
   in gateway/compiler packages. The platform-neutral resource manifest, realization
   plan, and describe-mode model document are contracts of this package.

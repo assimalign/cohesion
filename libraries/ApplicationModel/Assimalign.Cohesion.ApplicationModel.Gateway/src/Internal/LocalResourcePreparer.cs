@@ -33,20 +33,23 @@ internal sealed class LocalResourcePreparer
     {
         IApplicationResource resource = context.Resource;
         IExecutableArtifact artifact = compilation.Artifact;
+        ApplicationName application = resource is IManifestResource identifiedManifest
+            ? identifiedManifest.Manifest.Application
+            : context.Model.Name;
         var environment = new Dictionary<string, string>(
             compilation.Environment,
             StringComparer.Ordinal);
 
         IReadOnlyList<ResourceEndpoint> declaredEndpoints = GetDeclaredEndpoints(resource);
         IReadOnlyList<ResourceEndpoint> observedEndpoints = await _ports.ResolveAsync(
-            context.Model.Name,
+            application,
             resource.Name,
             declaredEndpoints,
             environment,
             cancellationToken).ConfigureAwait(false);
 
         await _mounts.MaterializeAsync(
-            context.Model.Name,
+            application,
             resource,
             compilation.Plan,
             compilation.Inputs,
@@ -60,6 +63,8 @@ internal sealed class LocalResourcePreparer
                     || localExecutable.ReadinessProbe.Kind == ProbeKind.None);
 
             return new LocalResourceConfiguration(
+                application,
+                context.State,
                 resource,
                 artifact,
                 environment,
@@ -89,6 +94,8 @@ internal sealed class LocalResourcePreparer
             "livez");
 
         return new LocalResourceConfiguration(
+            application,
+            context.State,
             resource,
             artifact,
             environment,
@@ -107,11 +114,14 @@ internal sealed class LocalResourcePreparer
         IResourceControlContext context,
         CancellationToken cancellationToken)
     {
+        ApplicationName application = context.Resource is IManifestResource manifestResource
+            ? manifestResource.Manifest.Application
+            : context.Model.Name;
         await _mounts
-            .DeleteAsync(context.Model.Name, context.Resource.Name, cancellationToken)
+            .DeleteAsync(application, context.Resource.Name, cancellationToken)
             .ConfigureAwait(false);
         await _ports
-            .DeleteAsync(context.Model.Name, context.Resource.Name, cancellationToken)
+            .DeleteAsync(application, context.Resource.Name, cancellationToken)
             .ConfigureAwait(false);
     }
 

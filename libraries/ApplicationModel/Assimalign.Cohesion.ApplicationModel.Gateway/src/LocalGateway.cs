@@ -32,6 +32,12 @@ public sealed class LocalGateway : ApplicationGateway
     /// </summary>
     /// <param name="options">The options controlling resolution, readiness, and shutdown.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// A string, trust key, or controller registration in <paramref name="options"/> is invalid.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A duration, threshold, or retry count in <paramref name="options"/> is outside its supported range.
+    /// </exception>
     public LocalGateway(LocalGatewayOptions options)
         : base(options)
     {
@@ -40,11 +46,12 @@ public sealed class LocalGateway : ApplicationGateway
         _resolver = new LocalResourceResolver(_options.BaseDirectory ?? AppContext.BaseDirectory);
         string stateDirectory = _options.StateDirectory
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion");
+        _options.ExportDirectory ??= stateDirectory;
         var ports = new LocalPortStore(stateDirectory);
         var mounts = new LocalMountMaterializer(stateDirectory);
         var processState = new LocalProcessStateStore(stateDirectory);
         var preparer = new LocalResourcePreparer(ports, mounts, _options);
-        _supervisor = new LocalGatewayProcessSupervisor(_state, _options, processState);
+        _supervisor = new LocalGatewayProcessSupervisor(_options, processState);
         _controllers = new IApplicationResourceController[]
         {
             new LocalPlanController(_options, preparer, _supervisor),
@@ -63,8 +70,10 @@ public sealed class LocalGateway : ApplicationGateway
     internal IApplicationResourceStateManager ResourceStates => _state;
 
     /// <inheritdoc/>
-    protected override Task StartObserverAsync(IApplicationModel model, CancellationToken cancellationToken)
-        => _supervisor.InitializeAsync(model, cancellationToken);
+    protected override Task StartObserverAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken) =>
+        _supervisor.InitializeAsync(models, cancellationToken);
 
     /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)

@@ -16,6 +16,11 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
     private readonly ApplicationEnvironment _environment;
     private readonly ApplicationResourceCollection _resources = new();
     private readonly List<ApplicationResourceDescriptor> _descriptors = new();
+    private readonly Dictionary<ResourceName, (
+        ExternalResource Resource,
+        ApplicationResourceDescriptor Descriptor,
+        IExternalResourceResolver? CodeResolver)>
+        _externals = new();
     private ApplicationName? _name;
     private IApplicationGateway? _gateway;
 
@@ -89,6 +94,31 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         return AddResource(resource);
     }
 
+    public IApplicationResourceDescriptor AddExternal(
+        ExternalResourceDeclaration declaration,
+        IExternalResourceResolver? resolver = null)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        ValidateExternalDeclaration(declaration);
+
+        if (_externals.TryGetValue(declaration.Name, out var existing))
+        {
+            ExternalResourceDeclaration merged = MergeExternalDeclarations(
+                existing.Resource.Declaration,
+                declaration);
+            IExternalResourceResolver? codeResolver = resolver ?? existing.CodeResolver;
+            existing.Resource.Update(merged, ResolveExternalBinding(merged, codeResolver));
+            _externals[declaration.Name] = (existing.Resource, existing.Descriptor, codeResolver);
+            return existing.Descriptor;
+        }
+
+        IExternalResourceResolver effectiveResolver = ResolveExternalBinding(declaration, resolver);
+        var resource = new ExternalResource(declaration, effectiveResolver);
+        var descriptor = (ApplicationResourceDescriptor)AddResource(resource);
+        _externals.Add(declaration.Name, (resource, descriptor, resolver));
+        return descriptor;
+    }
+
     public IApplicationBuilder UseGateway(IApplicationGateway gateway)
     {
         ArgumentNullException.ThrowIfNull(gateway);
@@ -98,7 +128,11 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
 
     public IApplication Build()
     {
-        if (_descriptors.Count == 0)
+        EnsureBoundaryExternals();
+        ApplyRequestedRealizations();
+        EnsureBoundaryExternals();
+
+        if (!HasRealizedResource())
         {
             ApplicationName emptyApplicationName = ResolveName(_environment);
             throw new InvalidOperationException(
@@ -121,6 +155,308 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         IApplicationModel model = BuildModel(validate: true);
         _gateway.Validate(model);
         return new CohesionApplication(model, _gateway);
+    }
+
+    private bool HasRealizedResource()
+    {
+        for (int index = 0; index < _descriptors.Count; index++)
+        {
+            if (_descriptors[index].Resource is not ExternalResource external || external.IsRealized)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureBoundaryExternals()
+    {
+        ApplicationResourceDescriptor[] snapshot = _descriptors.ToArray();
+        for (int index = 0; index < snapshot.Length; index++)
+        {
+            if (snapshot[index].Resource is ExternalResource external && !external.IsRealized)
+            {
+                continue;
+            }
+
+            if (snapshot[index].Resource is not IManifestResource manifestResource)
+            {
+                continue;
+            }
+
+            ResourceManifest manifest = manifestResource.Manifest;
+            foreach (ResourceManifestReference reference in manifest.References)
+            {
+                if (reference.Application == manifest.Application)
+                {
+                    continue;
+                }
+
+                AddExternal(new ExternalResourceDeclaration(
+                    reference.Resource,
+                    reference.Application,
+                    reference.Endpoints,
+                    reference.Optional));
+            }
+        }
+    }
+
+    private static ExternalResourceDeclaration MergeExternalDeclarations(
+        ExternalResourceDeclaration existing,
+        ExternalResourceDeclaration incoming)
+    {
+        if (existing.Application != incoming.Application)
+        {
+            throw new InvalidOperationException(
+                $"External '{incoming.Name}' is already declared by application " +
+                $"'{existing.Application}', not '{incoming.Application}'.");
+        }
+
+        var endpointNames = new HashSet<string>(StringComparer.Ordinal);
+        AddEndpointNames(existing.ReferencedEndpoints);
+        AddEndpointNames(incoming.ReferencedEndpoints);
+        var endpoints = new List<string>(endpointNames);
+        endpoints.Sort(StringComparer.Ordinal);
+
+        ResourceManifest? manifest = MergeManifest(existing.Manifest, incoming.Manifest);
+        var manifests = new Dictionary<(
+            ApplicationName Application,
+            ResourceName Resource), ResourceManifest>();
+        AddManifests(existing.Closure);
+        AddManifests(incoming.Closure);
+
+        var closure = new List<ResourceManifest>(manifests.Values);
+        closure.Sort(static (left, right) =>
+        {
+            int application = string.CompareOrdinal(
+                left.Application.ToString(),
+                right.Application.ToString());
+            return application != 0
+                ? application
+                : string.CompareOrdinal(left.Name.ToString(), right.Name.ToString());
+        });
+
+        return new ExternalResourceDeclaration(
+            existing.Name,
+            existing.Application,
+            endpoints,
+            existing.Optional && incoming.Optional,
+            manifest,
+            closure);
+
+        void AddEndpointNames(IReadOnlyList<string> names)
+        {
+            for (int index = 0; index < names.Count; index++)
+            {
+                endpointNames.Add(names[index]);
+            }
+        }
+
+        void AddManifests(IReadOnlyList<ResourceManifest> source)
+        {
+            for (int index = 0; index < source.Count; index++)
+            {
+                ResourceManifest candidate = source[index];
+                var identity = (candidate.Application, candidate.Name);
+                if (manifests.TryGetValue(identity, out ResourceManifest? current))
+                {
+                    EnsureSameManifest(current, candidate);
+                }
+                else
+                {
+                    manifests.Add(identity, candidate);
+                }
+            }
+        }
+    }
+
+    private static ResourceManifest? MergeManifest(
+        ResourceManifest? existing,
+        ResourceManifest? incoming)
+    {
+        if (existing is null)
+        {
+            return incoming;
+        }
+
+        if (incoming is null)
+        {
+            return existing;
+        }
+
+        EnsureSameManifest(existing, incoming);
+        return existing;
+    }
+
+    private static void EnsureSameManifest(ResourceManifest existing, ResourceManifest incoming)
+    {
+        if (!string.Equals(
+                ResourceManifestCanonicalizer.ComputeHash(existing),
+                ResourceManifestCanonicalizer.ComputeHash(incoming),
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"External manifest '{incoming.Application}/{incoming.Name}' has conflicting definitions.");
+        }
+    }
+
+    private static void ValidateExternalDeclaration(ExternalResourceDeclaration declaration)
+    {
+        if (declaration.Manifest is ResourceManifest manifest &&
+            (manifest.Application != declaration.Application || manifest.Name != declaration.Name))
+        {
+            throw new InvalidOperationException(
+                $"External '{declaration.Application}/{declaration.Name}' embeds manifest " +
+                $"'{manifest.Application}/{manifest.Name}'. The declaration and manifest identities must match.");
+        }
+    }
+
+    private void ApplyRequestedRealizations()
+    {
+        if (_options.Realize.Count == 0)
+        {
+            return;
+        }
+
+        if (!_environment.IsDevelopment)
+        {
+            throw new InvalidOperationException(
+                "--realize is Development-only and cannot be used in this application environment.");
+        }
+
+        if (_gateway is null || !SupportsExternalRealization(_gateway.Name))
+        {
+            throw new InvalidOperationException(
+                $"Gateway '{_gateway?.Name.ToString() ?? "unselected"}' cannot honor --realize. " +
+                "Use the Local, InProcess, or Docker gateway in Development.");
+        }
+
+        foreach (ResourceName requested in _options.Realize)
+        {
+            if (!_externals.TryGetValue(requested, out var root))
+            {
+                throw new InvalidOperationException(
+                    $"--realize names external '{requested}', but the application closure does not declare it.");
+            }
+
+            RealizeClosure(root.Resource);
+        }
+    }
+
+    private void RealizeClosure(ExternalResource root)
+    {
+        ExternalResourceDeclaration declaration = root.Declaration;
+        if (declaration.Manifest is null)
+        {
+            throw new InvalidOperationException(
+                $"External '{declaration.Name}' cannot be realized because its declaration has no embedded manifest.");
+        }
+
+        var manifests = new Dictionary<ResourceName, ResourceManifest>();
+        manifests[declaration.Manifest.Name] = declaration.Manifest;
+        foreach (ResourceManifest manifest in declaration.Closure)
+        {
+            if (manifest.Application == declaration.Application)
+            {
+                manifests[manifest.Name] = manifest;
+            }
+        }
+
+        var reachable = new List<ResourceManifest>();
+        var visited = new HashSet<ResourceName>();
+        Visit(declaration.Manifest);
+
+        for (int index = 0; index < reachable.Count; index++)
+        {
+            ResourceManifest manifest = reachable[index];
+            if (manifest.Name == declaration.Name)
+            {
+                root.Realize();
+                continue;
+            }
+
+            if (_externals.TryGetValue(manifest.Name, out var external) &&
+                external.Resource.Declaration.Application == declaration.Application)
+            {
+                AddExternal(
+                    new ExternalResourceDeclaration(
+                        manifest.Name,
+                        manifest.Application,
+                        Array.Empty<string>(),
+                        optional: true,
+                        manifest,
+                        declaration.Closure),
+                    external.CodeResolver);
+                external.Resource.Realize();
+                continue;
+            }
+
+            if (!ContainsResource(manifest.Name))
+            {
+                AddResource(manifest);
+            }
+        }
+
+        void Visit(ResourceManifest manifest)
+        {
+            if (!visited.Add(manifest.Name))
+            {
+                return;
+            }
+
+            reachable.Add(manifest);
+            foreach (ResourceManifestReference reference in manifest.References)
+            {
+                if (reference.Application != declaration.Application)
+                {
+                    continue;
+                }
+
+                if (manifests.TryGetValue(reference.Resource, out ResourceManifest? dependency))
+                {
+                    Visit(dependency);
+                }
+                else if (!reference.Optional)
+                {
+                    throw new InvalidOperationException(
+                        $"External '{declaration.Name}' closure is missing required same-application resource " +
+                        $"'{reference.Application}/{reference.Resource}'.");
+                }
+            }
+        }
+    }
+
+    private IExternalResourceResolver ResolveExternalBinding(
+        ExternalResourceDeclaration declaration,
+        IExternalResourceResolver? codeResolver)
+    {
+        IExternalResourceResolver? configured = ExternalBindingOverrides.FromEnvironment(declaration);
+        IExternalResourceResolver? commandLine = ExternalBindingOverrides.FromCommandLine(
+            declaration,
+            _options.ExternalBindings);
+        return commandLine ?? configured ?? codeResolver ?? UnboundExternalResourceResolver.Instance;
+    }
+
+    private static bool SupportsExternalRealization(ResourceName gateway)
+    {
+        string value = gateway.ToString();
+        return string.Equals(value, "local", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "inprocess", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "docker", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool ContainsResource(ResourceName name)
+    {
+        for (int index = 0; index < _resources.Count; index++)
+        {
+            if (_resources[index].Name == name)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private CohesionApplicationModel BuildModel(bool validate)
@@ -220,6 +556,13 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
                 target.DependsOn(copies.TryGetValue(dependency, out ApplicationResourceDescriptor? copy)
                     ? copy
                     : dependency);
+            }
+
+            if (source.Resource is ExternalResource external && !external.IsRealized)
+            {
+                // The provider owns an unresolved external's internal graph. Its closure is
+                // retained only so an explicit Development --realize can expand it later.
+                continue;
             }
 
             foreach (ResourceManifestReference reference in manifests[index].References)

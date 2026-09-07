@@ -22,18 +22,37 @@ internal sealed class LocalProcessStateStore
     }
 
     public async Task InitializeAsync(IApplicationModel model, CancellationToken cancellationToken)
+        => await InitializeAsync(
+            model.Name,
+            model.Owner,
+            model.Adopt,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task InitializeAsync(
+        ApplicationName application,
+        string owner,
+        bool adopt,
+        CancellationToken cancellationToken)
     {
-        string applicationDirectory = GetApplicationDirectory(model.Name);
+        string applicationDirectory = GetApplicationDirectory(application);
         Directory.CreateDirectory(applicationDirectory);
         string ownerPath = Path.Combine(applicationDirectory, "owner");
         string? observedOwner = File.Exists(ownerPath)
             ? (await File.ReadAllTextAsync(ownerPath, cancellationToken).ConfigureAwait(false)).Trim()
             : null;
 
-        model.AssertOwner(observedOwner);
-        if (!string.Equals(observedOwner, model.Owner, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(observedOwner)
+            && !string.Equals(observedOwner, owner, StringComparison.Ordinal)
+            && !adopt)
         {
-            await WriteTextAtomicallyAsync(ownerPath, model.Owner, cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"Target is owned by '{observedOwner}', but this gateway expects '{owner}'. " +
+                "Refusing to take ownership; pass --adopt to adopt the existing target explicitly.");
+        }
+
+        if (!string.Equals(observedOwner, owner, StringComparison.Ordinal))
+        {
+            await WriteTextAtomicallyAsync(ownerPath, owner, cancellationToken).ConfigureAwait(false);
         }
     }
 

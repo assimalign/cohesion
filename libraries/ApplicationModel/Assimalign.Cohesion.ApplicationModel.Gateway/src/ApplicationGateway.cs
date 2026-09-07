@@ -17,19 +17,21 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// readiness is admitted once per start and later <see cref="ResourceLifecycle.Degraded"/>
 /// observations never re-gate dependents.
 /// </remarks>
-public abstract class ApplicationGateway : IApplicationGateway
+public abstract class ApplicationGateway : IMultiModelApplicationGateway
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";
 
     private readonly ApplicationGatewayOptions _options;
+    private readonly ExternalResourceController _externalController;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
-    private readonly Dictionary<ResourceId, IResourceArtifact> _artifacts = new();
-    private readonly HashSet<ResourceId> _admitted = new();
+    private readonly Dictionary<ApplicationResourceKey, IResourceArtifact> _artifacts = new();
+    private readonly HashSet<ApplicationResourceKey> _admitted = new();
     private readonly List<RealizedResource> _realized = new();
-    private IReadOnlyList<IApplicationResourceDescriptor> _order =
-        Array.Empty<IApplicationResourceDescriptor>();
-    private IApplicationModel? _activeModel;
+    private IReadOnlyList<ModelResource> _order = Array.Empty<ModelResource>();
+    private IReadOnlyList<IApplicationModel> _activeModels = Array.Empty<IApplicationModel>();
+    private IReadOnlyList<ApplicationStateView> _applicationStates =
+        Array.Empty<ApplicationStateView>();
     private bool _observerStarted;
 
     /// <summary>Initializes the gateway with empty common options.</summary>
@@ -44,6 +46,7 @@ public abstract class ApplicationGateway : IApplicationGateway
     protected ApplicationGateway(ApplicationGatewayOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _externalController = new ExternalResourceController(_options.ControlPlaneClient);
     }
 
     /// <inheritdoc/>
@@ -79,6 +82,9 @@ public abstract class ApplicationGateway : IApplicationGateway
     /// </summary>
     /// <param name="plan">The resource plan about to be gated.</param>
     /// <returns>The readiness budget for this resource.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="plan"/> is <see langword="null"/>.
+    /// </exception>
     protected virtual TimeSpan GetReadinessBudget(ResourcePlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -94,6 +100,15 @@ public abstract class ApplicationGateway : IApplicationGateway
     /// <param name="context">The control context for this reconcile pass.</param>
     /// <param name="cancellationToken">Signals that input resolution should be abandoned.</param>
     /// <returns>The resolved inputs for this pass.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="descriptor"/> or <paramref name="context"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="descriptor"/> has no realization plan.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> is canceled.
+    /// </exception>
     protected virtual ValueTask<ResourceInputs> ResolveInputsAsync(
         IApplicationResourceDescriptor descriptor,
         IResourceControlContext context,
@@ -163,7 +178,32 @@ public abstract class ApplicationGateway : IApplicationGateway
             new ResourceInputs(resolved, ReadOnlyMemory<byte>.Empty));
     }
 
-    /// <summary>Starts the single observer that feeds observed status into <see cref="State"/>. No-op by default.</summary>
+    /// <summary>
+    /// Starts the single observer that feeds observed status for an ordered model collection
+    /// into the state managers returned by <see cref="GetApplicationState"/>. The default
+    /// dispatches the existing single-model hook for a singleton collection and is otherwise
+    /// a no-op.
+    /// </summary>
+    /// <param name="models">The ordered models being realized.</param>
+    /// <param name="cancellationToken">Signals that the observer should not start.</param>
+    /// <returns>A task that completes once the observer is running.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="models"/> is <see langword="null"/>.
+    /// </exception>
+    protected virtual Task StartObserverAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        return models.Count == 1
+            ? StartObserverAsync(models[0], cancellationToken)
+            : Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Starts the single observer for a singleton gateway session. Existing gateway
+    /// implementations can continue to override this hook.
+    /// </summary>
     /// <param name="model">The model being realized.</param>
     /// <param name="cancellationToken">Signals that the observer should not start.</param>
     /// <returns>A task that completes once the observer is running.</returns>
@@ -171,56 +211,85 @@ public abstract class ApplicationGateway : IApplicationGateway
         IApplicationModel model,
         CancellationToken cancellationToken) => Task.CompletedTask;
 
-    /// <summary>Stops the observer started by <see cref="StartObserverAsync"/>. No-op by default.</summary>
+    /// <summary>Stops the observer started for the current gateway session. No-op by default.</summary>
     /// <param name="cancellationToken">Bounds how long the observer may take to stop.</param>
     /// <returns>A task that completes once the observer has stopped.</returns>
     protected virtual Task StopObserverAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    void IApplicationGateway.Validate(IApplicationModel model) => ValidateCore(model);
+    /// <summary>
+    /// Publishes one validated application export after a successful reconcile pass. The
+    /// default writes <c>.cohesion/&lt;application&gt;/export.json</c>; platform gateways may
+    /// override this seam to publish the same document through their native control plane.
+    /// </summary>
+    /// <param name="document">The export document to publish.</param>
+    /// <param name="cancellationToken">Signals that publication should be abandoned.</param>
+    /// <returns>A task that completes after the export is published.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="document"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="System.IO.InvalidDataException">
+    /// <paramref name="document"/> violates the application-export contract.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> is canceled.
+    /// </exception>
+    protected virtual Task PublishApplicationExportAsync(
+        ApplicationExportDocument document,
+        CancellationToken cancellationToken) =>
+        ApplicationExportWriter.WriteAsync(document, _options.ExportDirectory, cancellationToken);
 
-    async Task IApplicationGateway.StartAsync(
-        IApplicationModel model,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Withdraws an application's discovery export after its resources stop or are deleted.
+    /// The default removes the local <c>export.json</c>; platform gateways may override this
+    /// seam to withdraw the same document from their native control plane.
+    /// </summary>
+    /// <param name="application">The application whose export must be withdrawn.</param>
+    /// <param name="cancellationToken">Bounds export withdrawal.</param>
+    /// <returns>A task that completes after the export is no longer discoverable.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> is canceled.
+    /// </exception>
+    protected virtual Task RemoveApplicationExportAsync(
+        ApplicationName application,
+        CancellationToken cancellationToken) =>
+        ApplicationExportWriter.DeleteAsync(application, _options.ExportDirectory, cancellationToken);
+
+    /// <summary>
+    /// Gets the application-scoped state view for <paramref name="model"/> in the active
+    /// gateway session. Multi-model observers must use this view so equal resource identifiers
+    /// in different applications remain isolated.
+    /// </summary>
+    /// <param name="model">A model in the active gateway session.</param>
+    /// <returns>The model's application-scoped observed-state view.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The gateway has no active session for <paramref name="model"/>.
+    /// </exception>
+    protected IApplicationResourceStateManager GetApplicationState(IApplicationModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+
+        for (int index = 0; index < _applicationStates.Count; index++)
         {
-            ValidateCore(model);
-            await EnsureSessionAsync(model, cancellationToken).ConfigureAwait(false);
-            try
+            if (ReferenceEquals(_applicationStates[index].Model, model))
             {
-                await ReconcilePassAsync(model, cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                await RollBackAsync(cancellationToken).ConfigureAwait(false);
-                throw;
+                return _applicationStates[index].State;
             }
         }
-        finally
-        {
-            _lifecycle.Release();
-        }
+
+        throw new InvalidOperationException(
+            $"Application '{model.Name}' is not part of the active gateway '{Name}' session.");
     }
 
-    async Task IApplicationGateway.ReconcileAsync(
+    void IApplicationGateway.Validate(IApplicationModel model) => Validate(Singleton(model));
+
+    Task IApplicationGateway.StartAsync(
         IApplicationModel model,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(model);
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            ValidateCore(model);
-            await EnsureSessionAsync(model, cancellationToken).ConfigureAwait(false);
-            await ReconcilePassAsync(model, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _lifecycle.Release();
-        }
-    }
+        CancellationToken cancellationToken) => StartAsync(Singleton(model), cancellationToken);
+
+    Task IApplicationGateway.ReconcileAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken) => ReconcileAsync(Singleton(model), cancellationToken);
 
     async Task IApplicationGateway.StopAsync(CancellationToken cancellationToken)
     {
@@ -235,16 +304,41 @@ public abstract class ApplicationGateway : IApplicationGateway
         }
     }
 
-    async Task IApplicationGateway.UninstallAsync(
+    Task IApplicationGateway.UninstallAsync(
         IApplicationModel model,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) => UninstallAsync(Singleton(model), cancellationToken);
+
+    /// <inheritdoc/>
+    public void Validate(IReadOnlyList<IApplicationModel> models)
     {
-        ArgumentNullException.ThrowIfNull(model);
+        IApplicationModel[] snapshot = SnapshotModels(models);
+        ValidateCore(snapshot);
+    }
+
+    /// <inheritdoc/>
+    public async Task StartAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken = default)
+    {
+        IApplicationModel[] snapshot = SnapshotModels(models);
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ValidateCore(model);
-            await UninstallCoreAsync(model, cancellationToken).ConfigureAwait(false);
+            ValidateCore(snapshot);
+            await EnsureSessionAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await ReconcilePassAsync(cancellationToken).ConfigureAwait(false);
+                // Run-mode cancellation is also the application lifetime signal. Once every
+                // resource is ready, finish publishing the matching discovery snapshot; the
+                // subsequent StopAsync call withdraws it.
+                await PublishApplicationExportsAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                await RollBackAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
         }
         finally
         {
@@ -252,68 +346,118 @@ public abstract class ApplicationGateway : IApplicationGateway
         }
     }
 
-    private void ValidateCore(IApplicationModel model)
+    /// <inheritdoc/>
+    public async Task ReconcileAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(model);
-        _options.ValidateCommon();
-
-        if (model.Descriptors.Count != model.Plans.Count)
+        IApplicationModel[] snapshot = SnapshotModels(models);
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException(
-                $"Application '{model.Name}' cannot be validated by gateway '{Name}' because its " +
-                "descriptor and plan counts differ.");
+            ValidateCore(snapshot);
+            await EnsureSessionAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            await ReconcilePassAsync(cancellationToken).ConfigureAwait(false);
+            await PublishApplicationExportsAsync(cancellationToken).ConfigureAwait(false);
         }
-
-        for (int index = 0; index < model.Descriptors.Count; index++)
+        finally
         {
-            IApplicationResourceDescriptor descriptor = model.Descriptors[index];
-            ResourcePlan plan = descriptor.Plan ?? throw new InvalidOperationException(
-                $"Resource '{descriptor.Resource.Name}' has no plan for gateway '{Name}'.");
+            _lifecycle.Release();
+        }
+    }
 
-            if (!ReferenceEquals(plan, model.Plans[index]) && plan != model.Plans[index])
+    /// <inheritdoc/>
+    public async Task UninstallAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken = default)
+    {
+        IApplicationModel[] snapshot = SnapshotModels(models);
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ValidateCore(snapshot);
+            await UninstallCoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private void ValidateCore(IReadOnlyList<IApplicationModel> models)
+    {
+        _options.ValidateCommon();
+        var names = new HashSet<ApplicationName>();
+
+        foreach (IApplicationModel model in models)
+        {
+            if (!names.Add(model.Name))
             {
                 throw new InvalidOperationException(
-                    $"Resource '{descriptor.Resource.Name}' has a descriptor plan that does not match " +
-                    $"the application plan supplied to gateway '{Name}'.");
+                    $"Application '{model.Name}' occurs more than once in the model collection " +
+                    $"supplied to gateway '{Name}'.");
             }
 
-            ResolveController(plan);
+            if (model.Descriptors.Count != model.Plans.Count ||
+                model.Descriptors.Count != model.Manifests.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Application '{model.Name}' cannot be validated by gateway '{Name}' because its " +
+                    "descriptor, manifest, and plan counts differ.");
+            }
+
+            for (int index = 0; index < model.Descriptors.Count; index++)
+            {
+                IApplicationResourceDescriptor descriptor = model.Descriptors[index];
+                ResourcePlan plan = descriptor.Plan ?? throw new InvalidOperationException(
+                    $"Resource '{descriptor.Resource.Name}' has no plan for gateway '{Name}'.");
+
+                if (!ReferenceEquals(plan, model.Plans[index]) && plan != model.Plans[index])
+                {
+                    throw new InvalidOperationException(
+                        $"Resource '{descriptor.Resource.Name}' has a descriptor plan that does not match " +
+                        $"the application plan supplied to gateway '{Name}'.");
+                }
+
+                ResolveController(plan);
+            }
         }
     }
 
     private async Task EnsureSessionAsync(
-        IApplicationModel model,
+        IReadOnlyList<IApplicationModel> models,
         CancellationToken cancellationToken)
     {
-        if (_activeModel is not null)
+        if (_activeModels.Count != 0)
         {
-            if (!ReferenceEquals(_activeModel, model))
+            if (!SessionMatches(models))
             {
                 throw new InvalidOperationException(
-                    $"Gateway '{Name}' is already supervising application '{_activeModel.Name}'. " +
-                    "Stop it before realizing another model.");
+                    $"Gateway '{Name}' is already supervising a different model collection. " +
+                    "Stop it before realizing another collection.");
             }
 
             return;
         }
 
         ResetSession();
-        _activeModel = model;
-        _order = OrderTopologically(model.Descriptors);
+        InitializeSession(models);
 
         try
         {
-            foreach (IApplicationResourceDescriptor descriptor in _order)
+            foreach (ModelResource item in _order)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                IApplicationResource resource = descriptor.Resource;
-                State.SetState(resource.Id, ResourceLifecycle.Building);
-                _artifacts.Add(
-                    resource.Id,
-                    await GatherAsync(resource, cancellationToken).ConfigureAwait(false));
+                IApplicationResource resource = item.Descriptor.Resource;
+                IApplicationResourceStateManager state = GetApplicationState(item.Model);
+                state.SetState(resource.Id, ResourceLifecycle.Building);
+                IResourceArtifact artifact = IsExternalPlan(item.Descriptor.Plan!)
+                    ? new ExternalResourceArtifact(resource.Id)
+                    : await GatherAsync(resource, cancellationToken).ConfigureAwait(false);
+                _artifacts.Add(item.Key, artifact);
             }
 
-            await StartObserverAsync(model, cancellationToken).ConfigureAwait(false);
+            await StartObserverAsync(_activeModels, cancellationToken).ConfigureAwait(false);
             _observerStarted = true;
         }
         catch
@@ -323,17 +467,19 @@ public abstract class ApplicationGateway : IApplicationGateway
         }
     }
 
-    private async Task ReconcilePassAsync(
-        IApplicationModel model,
-        CancellationToken cancellationToken)
+    private async Task ReconcilePassAsync(CancellationToken cancellationToken)
     {
-        foreach (IApplicationResourceDescriptor descriptor in _order)
+        foreach (ModelResource item in _order)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!DependenciesAreAdmitted(descriptor, out IApplicationResourceDescriptor? unsatisfied))
+            IApplicationModel model = item.Model;
+            IApplicationResourceDescriptor descriptor = item.Descriptor;
+            IApplicationResourceStateManager state = GetApplicationState(model);
+
+            if (!DependenciesAreAdmitted(item, out IApplicationResourceDescriptor? unsatisfied))
             {
-                State.SetState(
+                state.SetState(
                     descriptor.Resource.Id,
                     ResourceLifecycle.Skipped,
                     $"Dependency '{unsatisfied!.Resource.Name}' was skipped or did not satisfy readiness.");
@@ -343,13 +489,13 @@ public abstract class ApplicationGateway : IApplicationGateway
             ResourcePlan plan = descriptor.Plan!;
             IApplicationResourceController controller = ResolveController(plan);
             IReadOnlyList<ResourceDependencyObservation> observedDependencies =
-                SnapshotObservedDependencies(model, descriptor);
+                SnapshotObservedDependencies(model, descriptor, state);
             var context = new ResourceControlContext(
                 descriptor,
                 model,
-                State,
+                state,
                 ResolveDependencies(descriptor),
-                _artifacts[descriptor.Resource.Id],
+                _artifacts[item.Key],
                 observedDependencies);
             ResourceInputs inputs = await ResolveInputsAsync(
                     descriptor,
@@ -359,13 +505,13 @@ public abstract class ApplicationGateway : IApplicationGateway
             context.SetInputs(inputs ?? throw new InvalidOperationException(
                 $"Gateway '{Name}' returned null inputs for resource '{descriptor.Resource.Name}'."));
 
-            bool wasAdmitted = _admitted.Contains(descriptor.Resource.Id);
+            bool wasAdmitted = _admitted.Contains(item.Key);
             if (!wasAdmitted)
             {
-                State.SetState(descriptor.Resource.Id, ResourceLifecycle.Provisioning);
+                state.SetState(descriptor.Resource.Id, ResourceLifecycle.Provisioning);
             }
 
-            UpsertRealized(descriptor, controller, context);
+            UpsertRealized(item, controller, context);
             await controller.ReconcileAsync(context, cancellationToken).ConfigureAwait(false);
 
             if (wasAdmitted)
@@ -373,7 +519,7 @@ public abstract class ApplicationGateway : IApplicationGateway
                 continue;
             }
 
-            ResourceLifecycle current = State.GetState(descriptor.Resource.Id);
+            ResourceLifecycle current = state.GetState(descriptor.Resource.Id);
             if (current is ResourceLifecycle.Skipped)
             {
                 continue;
@@ -389,7 +535,7 @@ public abstract class ApplicationGateway : IApplicationGateway
                     $"'{plan.Resource}'.");
             }
 
-            ResourceLifecycle reached = await State
+            ResourceLifecycle reached = await state
                 .WaitForStateAsync(
                     descriptor.Resource.Id,
                     terminals,
@@ -399,11 +545,20 @@ public abstract class ApplicationGateway : IApplicationGateway
 
             if (Contains(plan.Workload.Gate.Satisfying, reached))
             {
-                _admitted.Add(descriptor.Resource.Id);
+                _admitted.Add(item.Key);
                 continue;
             }
 
-            MarkDependentsBlocked(_order, descriptor);
+            if (!terminals.Contains(reached))
+            {
+                state.SetState(
+                    descriptor.Resource.Id,
+                    ResourceLifecycle.Failed,
+                    $"Resource '{descriptor.Resource.Name}' exceeded its readiness budget of " +
+                    $"'{budget}' while observed as '{reached}'.");
+            }
+
+            MarkDependentsBlocked(item);
             throw new InvalidOperationException(
                 $"Resource '{descriptor.Resource.Name}' did not reach Running or another state " +
                 $"satisfying the {plan.Workload.Kind} " +
@@ -411,9 +566,126 @@ public abstract class ApplicationGateway : IApplicationGateway
         }
     }
 
+    private async Task PublishApplicationExportsAsync(CancellationToken cancellationToken)
+    {
+        for (int modelIndex = 0; modelIndex < _activeModels.Count; modelIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IApplicationModel model = _activeModels[modelIndex];
+            IApplicationResourceStateManager state = GetApplicationState(model);
+            var endpoints = new Dictionary<ResourceName, IReadOnlyList<ApplicationExportEndpoint>>();
+
+            for (int resourceIndex = 0; resourceIndex < model.Descriptors.Count; resourceIndex++)
+            {
+                IApplicationResource resource = model.Descriptors[resourceIndex].Resource;
+                if (IsExternalPlan(model.Plans[resourceIndex]))
+                {
+                    continue;
+                }
+
+                IReadOnlyList<ApplicationExportEndpoint> observed = CreateExportEndpoints(
+                    state.GetObservedEndpoints(resource.Id),
+                    model.Manifests[resourceIndex]);
+                if (observed.Count != 0)
+                {
+                    endpoints.Add(resource.Name, observed);
+                }
+            }
+
+            ApplicationExportDocument document = ApplicationExportDocument.Create(
+                model,
+                _options.ApplicationVersion,
+                endpoints,
+                _options.TrustKey);
+            await PublishApplicationExportAsync(document, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static IReadOnlyList<ApplicationExportEndpoint> CreateExportEndpoints(
+        IReadOnlyList<ResourceEndpoint> observed,
+        ResourceManifest manifest)
+    {
+        var order = new List<string>();
+        var addresses = new Dictionary<string, ExportEndpointAddresses>(StringComparer.Ordinal);
+        var declared = new HashSet<string>(StringComparer.Ordinal);
+        for (int index = 0; index < manifest.Endpoints.Count; index++)
+        {
+            declared.Add(manifest.Endpoints[index].Name);
+        }
+
+        for (int index = 0; index < observed.Count; index++)
+        {
+            ResourceEndpoint endpoint = observed[index];
+            if (!declared.Contains(endpoint.Name) ||
+                string.IsNullOrWhiteSpace(endpoint.Scheme) ||
+                string.IsNullOrWhiteSpace(endpoint.Host) ||
+                endpoint.Port <= 0)
+            {
+                continue;
+            }
+
+            string internalAddress = CreateAuthority(endpoint.Host, endpoint.Port);
+            string? publicAddress = endpoint.IsPublic ? CreateAbsoluteAddress(endpoint) : null;
+            if (!addresses.TryGetValue(endpoint.Name, out ExportEndpointAddresses current))
+            {
+                order.Add(endpoint.Name);
+                addresses.Add(
+                    endpoint.Name,
+                    new ExportEndpointAddresses(internalAddress, publicAddress, !endpoint.IsPublic));
+                continue;
+            }
+
+            if (!endpoint.IsPublic && !current.HasInternalObservation)
+            {
+                current = current with
+                {
+                    Internal = internalAddress,
+                    HasInternalObservation = true,
+                };
+            }
+
+            if (endpoint.IsPublic && current.Public is null)
+            {
+                current = current with { Public = publicAddress };
+            }
+
+            addresses[endpoint.Name] = current;
+        }
+
+        var exported = new ApplicationExportEndpoint[order.Count];
+        for (int index = 0; index < exported.Length; index++)
+        {
+            ExportEndpointAddresses address = addresses[order[index]];
+            exported[index] = new ApplicationExportEndpoint(
+                order[index],
+                address.Internal,
+                address.Public);
+        }
+
+        return exported;
+    }
+
+    private static string CreateAuthority(string host, int port)
+    {
+        string formattedHost = host.Contains(":", StringComparison.Ordinal) &&
+            !host.StartsWith("[", StringComparison.Ordinal)
+                ? $"[{host}]"
+                : host;
+        return $"{formattedHost}:{port}";
+    }
+
+    private static string CreateAbsoluteAddress(ResourceEndpoint endpoint)
+        => $"{endpoint.Scheme}://{CreateAuthority(endpoint.Host!, endpoint.Port)}";
+
+    private static bool IsExternalPlan(ResourcePlan plan) =>
+        plan.Hints.TryGetValue(ExternalResourceController.PlanHint, out string? external) &&
+        bool.TryParse(external, out bool isExternal) &&
+        isExternal;
+
     private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         Exception? failure = null;
+        bool exportsRemoved = false;
         try
         {
             for (int index = _realized.Count - 1; index >= 0; index--)
@@ -422,7 +694,9 @@ public abstract class ApplicationGateway : IApplicationGateway
                 RealizedResource realized = _realized[index];
                 try
                 {
-                    State.SetState(realized.Descriptor.Resource.Id, ResourceLifecycle.Stopping);
+                    realized.Context.State.SetState(
+                        realized.Item.Descriptor.Resource.Id,
+                        ResourceLifecycle.Stopping);
                     await realized.Controller
                         .StopAsync(realized.Context, cancellationToken)
                         .ConfigureAwait(false);
@@ -441,55 +715,77 @@ public abstract class ApplicationGateway : IApplicationGateway
 
             if (_observerStarted)
             {
-                await StopObserverAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await StopObserverAsync(cancellationToken).ConfigureAwait(false);
+                    _observerStarted = false;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    failure ??= exception;
+                }
             }
+
+            Exception? exportFailure = await RemoveApplicationExportsAsync(cancellationToken)
+                .ConfigureAwait(false);
+            failure ??= exportFailure;
+            exportsRemoved = exportFailure is null;
         }
         finally
         {
-            ResetSession();
+            if (exportsRemoved)
+            {
+                ResetSession();
+            }
         }
 
         if (failure is not null)
         {
             throw new InvalidOperationException(
-                $"Gateway '{Name}' could not stop every runtime-scoped resource.",
+                $"Gateway '{Name}' could not stop every runtime-scoped resource or withdraw every export.",
                 failure);
         }
     }
 
     private async Task UninstallCoreAsync(
-        IApplicationModel model,
+        IReadOnlyList<IApplicationModel> models,
         CancellationToken cancellationToken)
     {
-        if (_activeModel is not null && !ReferenceEquals(_activeModel, model))
+        if (_activeModels.Count != 0 && !SessionMatches(models))
         {
             throw new InvalidOperationException(
-                $"Gateway '{Name}' is supervising application '{_activeModel.Name}' and cannot " +
-                $"uninstall '{model.Name}'.");
+                $"Gateway '{Name}' is supervising a different model collection and cannot " +
+                "uninstall the supplied collection.");
         }
 
         Exception? failure = null;
+        bool exportsRemoved = false;
         try
         {
-            if (_activeModel is null)
+            if (_activeModels.Count == 0)
             {
-                _activeModel = model;
-                _order = OrderTopologically(model.Descriptors);
-                await StartObserverAsync(model, cancellationToken).ConfigureAwait(false);
+                InitializeSession(models);
+                await StartObserverAsync(_activeModels, cancellationToken).ConfigureAwait(false);
                 _observerStarted = true;
             }
 
             for (int index = _order.Count - 1; index >= 0; index--)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                IApplicationResourceDescriptor descriptor = _order[index];
+                ModelResource item = _order[index];
+                IApplicationResourceDescriptor descriptor = item.Descriptor;
+                IApplicationResourceStateManager state = GetApplicationState(item.Model);
                 IApplicationResourceController controller = ResolveController(descriptor.Plan!);
-                ResourceControlContext context = FindContext(descriptor.Resource.Id)
-                    ?? CreateUninstallContext(model, descriptor);
+                ResourceControlContext context = FindContext(item.Key)
+                    ?? CreateUninstallContext(item, state);
 
                 try
                 {
-                    State.SetState(descriptor.Resource.Id, ResourceLifecycle.Stopping);
+                    state.SetState(descriptor.Resource.Id, ResourceLifecycle.Stopping);
                     await controller.DeleteAsync(context, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -505,20 +801,67 @@ public abstract class ApplicationGateway : IApplicationGateway
 
             if (_observerStarted)
             {
-                await StopObserverAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await StopObserverAsync(cancellationToken).ConfigureAwait(false);
+                    _observerStarted = false;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    failure ??= exception;
+                }
             }
+
+            Exception? exportFailure = await RemoveApplicationExportsAsync(cancellationToken)
+                .ConfigureAwait(false);
+            failure ??= exportFailure;
+            exportsRemoved = exportFailure is null;
         }
         finally
         {
-            ResetSession();
+            if (exportsRemoved)
+            {
+                ResetSession();
+            }
         }
 
         if (failure is not null)
         {
             throw new InvalidOperationException(
-                $"Gateway '{Name}' could not uninstall every resource.",
+                $"Gateway '{Name}' could not uninstall every resource or withdraw every export.",
                 failure);
         }
+    }
+
+    private async Task<Exception?> RemoveApplicationExportsAsync(CancellationToken cancellationToken)
+    {
+        Exception? failure = null;
+        for (int index = 0; index < _activeModels.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await RemoveApplicationExportAsync(
+                    _activeModels[index].Name,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // Export withdrawal is best-effort across applications, while retaining
+                // the first error so the active session can be retried by the caller.
+                failure ??= exception;
+            }
+        }
+
+        return failure;
     }
 
     private async Task RollBackAsync(CancellationToken cancellationToken)
@@ -528,7 +871,9 @@ public abstract class ApplicationGateway : IApplicationGateway
             RealizedResource realized = _realized[index];
             try
             {
-                State.SetState(realized.Descriptor.Resource.Id, ResourceLifecycle.Stopping);
+                realized.Context.State.SetState(
+                    realized.Item.Descriptor.Resource.Id,
+                    ResourceLifecycle.Stopping);
                 await realized.Controller
                     .DeleteAsync(realized.Context, cancellationToken)
                     .ConfigureAwait(false);
@@ -544,6 +889,7 @@ public abstract class ApplicationGateway : IApplicationGateway
             try
             {
                 await StopObserverAsync(cancellationToken).ConfigureAwait(false);
+                _observerStarted = false;
             }
             catch (Exception)
             {
@@ -551,25 +897,35 @@ public abstract class ApplicationGateway : IApplicationGateway
             }
         }
 
-        ResetSession();
+        Exception? exportFailure = await RemoveApplicationExportsAsync(CancellationToken.None)
+            .ConfigureAwait(false);
+        if (exportFailure is null)
+        {
+            ResetSession();
+        }
     }
 
     private bool DependenciesAreAdmitted(
-        IApplicationResourceDescriptor descriptor,
+        ModelResource item,
         out IApplicationResourceDescriptor? unsatisfied)
     {
+        IApplicationResourceDescriptor descriptor = item.Descriptor;
+        IApplicationResourceStateManager state = GetApplicationState(item.Model);
         foreach (IApplicationResourceDescriptor dependency in descriptor.Dependencies)
         {
-            if (_admitted.Contains(dependency.Resource.Id))
+            var dependencyKey = new ApplicationResourceKey(
+                item.Model.Name,
+                dependency.Resource.Id);
+            if (_admitted.Contains(dependencyKey))
             {
                 continue;
             }
 
-            ResourceLifecycle state = State.GetState(dependency.Resource.Id);
+            ResourceLifecycle lifecycle = state.GetState(dependency.Resource.Id);
             if (dependency.Plan is ResourcePlan plan
-                && Contains(plan.Workload.Gate.Satisfying, state))
+                && Contains(plan.Workload.Gate.Satisfying, lifecycle))
             {
-                _admitted.Add(dependency.Resource.Id);
+                _admitted.Add(dependencyKey);
                 continue;
             }
 
@@ -583,7 +939,8 @@ public abstract class ApplicationGateway : IApplicationGateway
 
     private IReadOnlyList<ResourceDependencyObservation> SnapshotObservedDependencies(
         IApplicationModel model,
-        IApplicationResourceDescriptor descriptor)
+        IApplicationResourceDescriptor descriptor,
+        IApplicationResourceStateManager state)
     {
         int descriptorIndex = IndexOfDescriptor(model.Descriptors, descriptor);
         ResourceManifest manifest = model.Manifests[descriptorIndex];
@@ -610,14 +967,14 @@ public abstract class ApplicationGateway : IApplicationGateway
             }
 
             IApplicationResource dependency = model.Descriptors[dependencyIndex].Resource;
-            ResourceLifecycle state = State.GetState(dependency.Id);
+            ResourceLifecycle lifecycle = state.GetState(dependency.Id);
             observations.Add(
                 new ResourceDependencyObservation(
                     reference.Application,
                     reference.Resource,
-                    state,
+                    lifecycle,
                     reference.Endpoints,
-                    State.GetObservedEndpoints(dependency.Id),
+                    state.GetObservedEndpoints(dependency.Id),
                     reference.Optional));
         }
 
@@ -668,6 +1025,8 @@ public abstract class ApplicationGateway : IApplicationGateway
             yield return _options.Controllers[index];
         }
 
+        yield return _externalController;
+
         for (int index = 0; index < Controllers.Count; index++)
         {
             yield return Controllers[index];
@@ -675,21 +1034,21 @@ public abstract class ApplicationGateway : IApplicationGateway
     }
 
     private ResourceControlContext CreateUninstallContext(
-        IApplicationModel model,
-        IApplicationResourceDescriptor descriptor) =>
+        ModelResource item,
+        IApplicationResourceStateManager state) =>
         new(
-            descriptor,
-            model,
-            State,
-            ResolveDependencies(descriptor),
-            new UnavailableResourceArtifact(descriptor.Resource.Id),
+            item.Descriptor,
+            item.Model,
+            state,
+            ResolveDependencies(item.Descriptor),
+            new UnavailableResourceArtifact(item.Descriptor.Resource.Id),
             Array.Empty<ResourceDependencyObservation>());
 
-    private ResourceControlContext? FindContext(ResourceId resource)
+    private ResourceControlContext? FindContext(ApplicationResourceKey key)
     {
         for (int index = 0; index < _realized.Count; index++)
         {
-            if (_realized[index].Descriptor.Resource.Id == resource)
+            if (_realized[index].Item.Key == key)
             {
                 return _realized[index].Context;
             }
@@ -699,30 +1058,137 @@ public abstract class ApplicationGateway : IApplicationGateway
     }
 
     private void UpsertRealized(
-        IApplicationResourceDescriptor descriptor,
+        ModelResource item,
         IApplicationResourceController controller,
         ResourceControlContext context)
     {
         for (int index = 0; index < _realized.Count; index++)
         {
-            if (_realized[index].Descriptor.Resource.Id == descriptor.Resource.Id)
+            if (_realized[index].Item.Key == item.Key)
             {
-                _realized[index] = new RealizedResource(descriptor, controller, context);
+                _realized[index] = new RealizedResource(item, controller, context);
                 return;
             }
         }
 
-        _realized.Add(new RealizedResource(descriptor, controller, context));
+        _realized.Add(new RealizedResource(item, controller, context));
     }
 
     private void ResetSession()
     {
+        for (int index = 0; index < _applicationStates.Count; index++)
+        {
+            _applicationStates[index].OwnedState?.Dispose();
+        }
+
         _artifacts.Clear();
         _admitted.Clear();
         _realized.Clear();
-        _order = Array.Empty<IApplicationResourceDescriptor>();
-        _activeModel = null;
+        _order = Array.Empty<ModelResource>();
+        _activeModels = Array.Empty<IApplicationModel>();
+        _applicationStates = Array.Empty<ApplicationStateView>();
         _observerStarted = false;
+    }
+
+    private void InitializeSession(IReadOnlyList<IApplicationModel> models)
+    {
+        var activeModels = new IApplicationModel[models.Count];
+        var applicationStates = new ApplicationStateView[models.Count];
+        var order = new List<ModelResource>();
+        bool scopeResourceIds = models.Count > 1;
+
+        try
+        {
+            for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
+            {
+                IApplicationModel model = models[modelIndex];
+                activeModels[modelIndex] = model;
+
+                if (scopeResourceIds)
+                {
+                    var scopedState = new ApplicationScopedResourceStateManager(
+                        State,
+                        model.Name,
+                        model.Resources);
+                    applicationStates[modelIndex] =
+                        new ApplicationStateView(model, scopedState, scopedState);
+                }
+                else
+                {
+                    applicationStates[modelIndex] =
+                        new ApplicationStateView(model, State, null);
+                }
+
+                IReadOnlyList<IApplicationResourceDescriptor> modelOrder =
+                    OrderTopologically(model.Descriptors);
+                foreach (IApplicationResourceDescriptor descriptor in modelOrder)
+                {
+                    order.Add(new ModelResource(model, descriptor));
+                }
+            }
+        }
+        catch
+        {
+            for (int index = 0; index < applicationStates.Length; index++)
+            {
+                applicationStates[index].OwnedState?.Dispose();
+            }
+
+            throw;
+        }
+
+        _activeModels = activeModels;
+        _applicationStates = applicationStates;
+        _order = order;
+    }
+
+    private bool SessionMatches(IReadOnlyList<IApplicationModel> models)
+    {
+        if (_activeModels.Count != models.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < models.Count; index++)
+        {
+            if (!ReferenceEquals(_activeModels[index], models[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IApplicationModel[] SnapshotModels(IReadOnlyList<IApplicationModel> models)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        if (models.Count == 0)
+        {
+            throw new ArgumentException(
+                "At least one application model is required.",
+                nameof(models));
+        }
+
+        var snapshot = new IApplicationModel[models.Count];
+        for (int index = 0; index < models.Count; index++)
+        {
+            IApplicationModel? model = models[index];
+            if (model is null)
+            {
+                throw new ArgumentNullException($"{nameof(models)}[{index}]");
+            }
+
+            snapshot[index] = model;
+        }
+
+        return snapshot;
+    }
+
+    private static IReadOnlyList<IApplicationModel> Singleton(IApplicationModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return new[] { model };
     }
 
     private static IReadOnlyList<IApplicationResource> ResolveDependencies(
@@ -742,19 +1208,18 @@ public abstract class ApplicationGateway : IApplicationGateway
         return dependencies;
     }
 
-    private void MarkDependentsBlocked(
-        IReadOnlyList<IApplicationResourceDescriptor> order,
-        IApplicationResourceDescriptor failed)
+    private void MarkDependentsBlocked(ModelResource failed)
     {
-        foreach (IApplicationResourceDescriptor descriptor in order)
+        foreach (ModelResource candidate in _order)
         {
-            if (!ReferenceEquals(descriptor, failed)
-                && DependsOnTransitively(descriptor, failed))
+            if (ReferenceEquals(candidate.Model, failed.Model)
+                && !ReferenceEquals(candidate.Descriptor, failed.Descriptor)
+                && DependsOnTransitively(candidate.Descriptor, failed.Descriptor))
             {
-                State.SetState(
-                    descriptor.Resource.Id,
+                GetApplicationState(candidate.Model).SetState(
+                    candidate.Descriptor.Resource.Id,
                     ResourceLifecycle.Blocked,
-                    $"Dependency '{failed.Resource.Name}' did not become ready.");
+                    $"Dependency '{failed.Descriptor.Resource.Name}' did not become ready.");
             }
         }
     }
@@ -855,10 +1320,31 @@ public abstract class ApplicationGateway : IApplicationGateway
         return false;
     }
 
+    private readonly record struct ApplicationResourceKey(
+        ApplicationName Application,
+        ResourceId Resource);
+
+    private readonly record struct ModelResource(
+        IApplicationModel Model,
+        IApplicationResourceDescriptor Descriptor)
+    {
+        public ApplicationResourceKey Key => new(Model.Name, Descriptor.Resource.Id);
+    }
+
+    private readonly record struct ApplicationStateView(
+        IApplicationModel Model,
+        IApplicationResourceStateManager State,
+        IDisposable? OwnedState);
+
     private readonly record struct RealizedResource(
-        IApplicationResourceDescriptor Descriptor,
+        ModelResource Item,
         IApplicationResourceController Controller,
         ResourceControlContext Context);
+
+    private readonly record struct ExportEndpointAddresses(
+        string Internal,
+        string? Public,
+        bool HasInternalObservation);
 
     private sealed class UnavailableResourceArtifact : IResourceArtifact
     {

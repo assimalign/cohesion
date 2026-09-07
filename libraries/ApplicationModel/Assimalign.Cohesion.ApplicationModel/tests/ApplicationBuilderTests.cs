@@ -225,8 +225,8 @@ public class ApplicationBuilderTests
         consumerResource.LastReferences.ShouldNotBeNull()["metrics"].Name.ShouldBe((ResourceName)"metrics");
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Cross-application references remain external")]
-    public void Build_RequiredCrossApplicationReference_AddsNoLocalEdge()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Cross-application references become external nodes")]
+    public void Build_RequiredCrossApplicationReference_AddsExternalDependency()
     {
         // Arrange
         ResourceManifest consumer = TestManifestFactory.Create("api") with
@@ -241,7 +241,12 @@ public class ApplicationBuilderTests
         IApplicationModel model = builder.Build().Model;
 
         // Assert
-        model.Descriptors.ShouldHaveSingleItem().Dependencies.ShouldBeEmpty();
+        model.Descriptors.Count.ShouldBe(2);
+        IApplicationResourceDescriptor external = model.Descriptors[1];
+        external.Resource.Name.ShouldBe((ResourceName)"configuration-store");
+        external.Resource.ShouldBeAssignableTo<IExternalResource>();
+        model.Descriptors[0].Resource.Name.ShouldBe((ResourceName)"api");
+        model.Descriptors[0].Dependencies.ShouldHaveSingleItem().ShouldBeSameAs(external);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Required missing manifest references fail Build")]

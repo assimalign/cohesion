@@ -16,6 +16,7 @@ internal sealed class TestGateway : ApplicationGateway
     private readonly IApplicationResourceStateManager _state;
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? _inputResolver;
+    private readonly ResourceName _name;
 
     public List<string> Gathered { get; } = new();
 
@@ -24,15 +25,17 @@ internal sealed class TestGateway : ApplicationGateway
         IReadOnlyList<IApplicationResourceController> controllers,
         TimeSpan? readinessBudget = null,
         ApplicationGatewayOptions? options = null,
-        Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? inputResolver = null)
+        Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? inputResolver = null,
+        ResourceName? name = null)
         : base(Configure(options, readinessBudget))
     {
         _state = state;
         _controllers = controllers;
         _inputResolver = inputResolver;
+        _name = name ?? (ResourceName)"test";
     }
 
-    public override ResourceName Name => "test";
+    public override ResourceName Name => _name;
 
     protected override IReadOnlyList<IApplicationResourceController> Controllers => _controllers;
 
@@ -51,6 +54,14 @@ internal sealed class TestGateway : ApplicationGateway
         _inputResolver is null
             ? base.ResolveInputsAsync(descriptor, context, cancellationToken)
             : _inputResolver(descriptor, context, cancellationToken);
+
+    protected override Task PublishApplicationExportAsync(
+        ApplicationExportDocument document,
+        CancellationToken cancellationToken) => Task.CompletedTask;
+
+    protected override Task RemoveApplicationExportAsync(
+        ApplicationName application,
+        CancellationToken cancellationToken) => Task.CompletedTask;
 
     private static ApplicationGatewayOptions Configure(
         ApplicationGatewayOptions? options,

@@ -84,7 +84,7 @@ internal sealed class LocalPlanController : IApplicationResourceController
     public Task StopAsync(
         IResourceControlContext context,
         CancellationToken cancellationToken = default) =>
-        _supervisor.StopAsync(context.Resource, cancellationToken);
+        _supervisor.StopAsync(context, cancellationToken);
 
     public async Task DeleteAsync(
         IResourceControlContext context,
@@ -92,7 +92,7 @@ internal sealed class LocalPlanController : IApplicationResourceController
     {
         await _supervisor
             .UninstallAsync(
-                context.Resource,
+                context,
                 TimeSpan.FromSeconds(context.Plan.Workload.StopGraceSeconds),
                 cancellationToken)
             .ConfigureAwait(false);
