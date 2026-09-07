@@ -51,7 +51,30 @@ public sealed class ResourceManifestSdkIntegrationTests
         web.GetProperty("application").GetString().ShouldBe("inventory");
         web.GetProperty("applicationModel").GetString().ShouldBe("Assimalign.Cohesion.Web.ApplicationModel");
         web.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();
-        web.GetProperty("endpoints").EnumerateArray().Single().GetProperty("name").GetString().ShouldBe("http");
+        JsonElement webEndpoint = web.GetProperty("endpoints").EnumerateArray().Single();
+        webEndpoint.GetProperty("name").GetString().ShouldBe("http");
+        webEndpoint.GetProperty("scheme").GetString().ShouldBe("http");
+        webEndpoint.GetProperty("protocol").GetString().ShouldBe("tcp");
+        webEndpoint.GetProperty("containerPort").GetInt32().ShouldBe(8080);
+        webEndpoint.GetProperty("devPort").GetInt32().ShouldBe(18080);
+        webEndpoint.GetProperty("public").GetBoolean().ShouldBeFalse();
+
+        JsonElement webControlPlane = web.GetProperty("controlPlane");
+        webControlPlane.GetProperty("endpoint").GetString().ShouldBe("http");
+        webControlPlane.GetProperty("path").GetString().ShouldBe("/cohesion/v1");
+
+        JsonElement webProbes = web.GetProperty("probes");
+        webProbes.GetProperty("readiness").GetProperty("endpoint").GetString().ShouldBe("http");
+        webProbes.GetProperty("readiness").GetProperty("http").GetString().ShouldBe("/readyz");
+        webProbes.GetProperty("liveness").GetProperty("endpoint").GetString().ShouldBe("http");
+        webProbes.GetProperty("liveness").GetProperty("http").GetString().ShouldBe("/livez");
+
+        JsonElement webLifecycle = web.GetProperty("lifecycle");
+        webLifecycle.GetProperty("workload").GetString().ShouldBe("Deployment");
+        webLifecycle.GetProperty("replicas").GetInt32().ShouldBe(1);
+        webLifecycle.GetProperty("maxReplicas").ValueKind.ShouldBe(JsonValueKind.Null);
+        webLifecycle.GetProperty("stopGraceSeconds").GetInt32().ShouldBe(30);
+        webLifecycle.GetProperty("restartPolicy").GetString().ShouldBe("OnFailure");
         web.GetProperty("mounts").EnumerateArray().Single().GetProperty("name").GetString().ShouldBe("cache");
         web.GetProperty("settings").EnumerateArray().Single().GetProperty("key").GetString().ShouldBe("Orders:PageSize");
         web.GetProperty("properties").GetProperty("web.kind").GetString().ShouldBe("Api");
@@ -65,8 +88,50 @@ public sealed class ResourceManifestSdkIntegrationTests
 
         JsonElement database = databaseManifest.RootElement;
         database.GetProperty("kind").GetString().ShouldBe("Database");
-        database.GetProperty("mounts").EnumerateArray().Single().GetProperty("size").GetString().ShouldBe("10Gi");
-        database.GetProperty("lifecycle").GetProperty("workload").GetString().ShouldBe("StatefulSet");
+        database.GetProperty("applicationModel").GetString().ShouldBe("Assimalign.Cohesion.Database.ApplicationModel");
+        database.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();
+
+        JsonElement databaseEndpoint = database
+            .GetProperty("endpoints")
+            .EnumerateArray()
+            .Single(endpoint => endpoint.GetProperty("name").GetString() == "db");
+        databaseEndpoint.GetProperty("scheme").GetString().ShouldBe("cohesion-db");
+        databaseEndpoint.GetProperty("protocol").GetString().ShouldBe("tcp");
+        databaseEndpoint.GetProperty("containerPort").GetInt32().ShouldBe(5740);
+        databaseEndpoint.GetProperty("devPort").GetInt32().ShouldBe(15740);
+        databaseEndpoint.GetProperty("public").GetBoolean().ShouldBeFalse();
+
+        JsonElement adminEndpoint = database
+            .GetProperty("endpoints")
+            .EnumerateArray()
+            .Single(endpoint => endpoint.GetProperty("name").GetString() == "admin");
+        adminEndpoint.GetProperty("scheme").GetString().ShouldBe("http");
+        adminEndpoint.GetProperty("protocol").GetString().ShouldBe("tcp");
+        adminEndpoint.GetProperty("containerPort").GetInt32().ShouldBe(8081);
+        adminEndpoint.GetProperty("public").GetBoolean().ShouldBeFalse();
+
+        JsonElement databaseControlPlane = database.GetProperty("controlPlane");
+        databaseControlPlane.GetProperty("endpoint").GetString().ShouldBe("admin");
+        databaseControlPlane.GetProperty("path").GetString().ShouldBe("/cohesion/v1");
+
+        JsonElement databaseProbes = database.GetProperty("probes");
+        databaseProbes.GetProperty("readiness").GetProperty("endpoint").GetString().ShouldBe("admin");
+        databaseProbes.GetProperty("readiness").GetProperty("http").GetString().ShouldBe("/readyz");
+        databaseProbes.GetProperty("liveness").GetProperty("endpoint").GetString().ShouldBe("admin");
+        databaseProbes.GetProperty("liveness").GetProperty("http").GetString().ShouldBe("/livez");
+
+        JsonElement dataMount = database.GetProperty("mounts").EnumerateArray().Single();
+        dataMount.GetProperty("name").GetString().ShouldBe("data");
+        dataMount.GetProperty("kind").GetString().ShouldBe("Volume");
+        dataMount.GetProperty("containerPath").GetString().ShouldBe("/data");
+        dataMount.GetProperty("size").GetString().ShouldBe("10Gi");
+
+        JsonElement databaseLifecycle = database.GetProperty("lifecycle");
+        databaseLifecycle.GetProperty("workload").GetString().ShouldBe("StatefulSet");
+        databaseLifecycle.GetProperty("replicas").GetInt32().ShouldBe(1);
+        databaseLifecycle.GetProperty("maxReplicas").GetInt32().ShouldBe(1);
+        databaseLifecycle.GetProperty("stopGraceSeconds").GetInt32().ShouldBe(30);
+        databaseLifecycle.GetProperty("restartPolicy").GetString().ShouldBe("OnFailure");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk] - disabled application model produces no resource outputs")]

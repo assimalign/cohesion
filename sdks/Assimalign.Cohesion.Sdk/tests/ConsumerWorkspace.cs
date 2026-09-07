@@ -15,6 +15,12 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 internal sealed class ConsumerWorkspace : IDisposable
 {
     private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
+    private static readonly string[] RequiredSdkPackageIds =
+    [
+        BaseSdkPackageId,
+        "Assimalign.Cohesion.Sdk.Web",
+        "Assimalign.Cohesion.Sdk.Database"
+    ];
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string PackageVersion = ResolvePackageVersion();
     private static readonly string TestProjectsRoot = Path.Combine(
@@ -43,11 +49,14 @@ internal sealed class ConsumerWorkspace : IDisposable
     public static ConsumerWorkspace Create(params string[] fixtureNames)
     {
         string feedDirectory = Path.Combine(RepositoryRoot, "_out", "packages");
-        string sdkPackage = Path.Combine(feedDirectory, $"{BaseSdkPackageId}.{PackageVersion}.nupkg");
-        if (!File.Exists(sdkPackage))
+        string[] missingSdkPackages = RequiredSdkPackageIds
+            .Select(packageId => Path.Combine(feedDirectory, $"{packageId}.{PackageVersion}.nupkg"))
+            .Where(packagePath => !File.Exists(packagePath))
+            .ToArray();
+        if (missingSdkPackages.Length > 0)
         {
             throw new InvalidOperationException(
-                $"The package-boundary SDK tests require '{sdkPackage}'. " +
+                $"The package-boundary SDK tests require '{string.Join("', '", missingSdkPackages)}'. " +
                 "Run ./installer/scripts/Install-Local.ps1 before running this test project.");
         }
 
@@ -258,13 +267,16 @@ internal sealed class ConsumerWorkspace : IDisposable
             ["version"] = sdkSettings.GetProperty("version").GetString(),
             ["rollForward"] = sdkSettings.GetProperty("rollForward").GetString()
         };
+        var sdkPackages = new JsonObject();
+        foreach (string packageId in RequiredSdkPackageIds)
+        {
+            sdkPackages[packageId] = PackageVersion;
+        }
+
         var document = new JsonObject
         {
             ["sdk"] = sdk,
-            ["msbuild-sdks"] = new JsonObject
-            {
-                [BaseSdkPackageId] = PackageVersion
-            }
+            ["msbuild-sdks"] = sdkPackages
         };
 
         File.WriteAllText(

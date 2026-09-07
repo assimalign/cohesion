@@ -1,4 +1,27 @@
 <Project>
+	<!--
+		Area orchestration defaults use Include so a consuming project can override
+		a named item with Update, for example:
+		<CohesionEndpoint Update="db" DevPort="15740" />.
+		The resource's domain composition remains in its Program.cs.
+	-->
+	<PropertyGroup>
+		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Database</CohesionResourceKind>
+		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
+		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
+		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">StatefulSet</CohesionWorkloadKind>
+		<CohesionReplicas Condition="'$(CohesionReplicas)' == ''">1</CohesionReplicas>
+		<CohesionMaxReplicas Condition="'$(CohesionMaxReplicas)' == ''">1</CohesionMaxReplicas>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<CohesionEndpoint Include="db" Scheme="cohesion-db" ContainerPort="5740" Public="false" />
+		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />
+		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
+		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
+	</ItemGroup>
+
     <!--
         Build tasks for database projects. The Tasks DLL sits next to the SDK's
         Sdk/ and Targets/ folders in the packaged layout (same shape as the base

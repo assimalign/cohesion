@@ -1,4 +1,4 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,14 +9,10 @@
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
     <CohesionResourceName>inventory-web</CohesionResourceName>
-    <CohesionResourceKind>Web</CohesionResourceKind>
-    <CohesionResourceApplicationModel>Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
-    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
-    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
   </PropertyGroup>
 
   <ItemGroup>
-    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" DevPort="18080" />
+    <CohesionEndpoint Update="http" DevPort="18080" />
     <CohesionMount Include="cache" Kind="Configuration" Source="parameter:cache-path" />
     <CohesionSetting Include="Orders:PageSize" Default="50" Type="int" />
     <CohesionResourceReference Include="..\EnabledDatabase\EnabledDatabase.csproj" Endpoints="db" />

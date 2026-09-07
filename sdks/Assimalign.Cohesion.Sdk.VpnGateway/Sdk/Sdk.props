@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.VpnGateway" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.VpnGateway.props" />
 </Project>

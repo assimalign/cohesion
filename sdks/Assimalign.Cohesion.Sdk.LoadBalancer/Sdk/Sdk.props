@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.LoadBalancer" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.LoadBalancer.props" />
 </Project>

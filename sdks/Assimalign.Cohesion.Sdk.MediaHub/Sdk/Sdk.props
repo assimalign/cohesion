@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.MediaHub" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.MediaHub.props" />
 </Project>
