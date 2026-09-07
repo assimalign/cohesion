@@ -11,7 +11,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ConfigurationStore.Client.Tests.TestObjects;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Client.Tests;
 
@@ -39,7 +38,7 @@ public class ConfigurationStoreClientTests
         });
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-            new EndpointAddress("https", "configuration.test", 8443, "/api"),
+            new Uri("https://configuration.test:8443/api"),
             new ClientCredential("bootstrap-token"),
             transport);
 
@@ -80,7 +79,7 @@ public class ConfigurationStoreClientTests
         });
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-            new EndpointAddress("https", "configuration.test", 8443),
+            new Uri("https://configuration.test:8443"),
             new ClientCredential("bootstrap-token"),
             transport);
         var command = new ResourceCommand(
@@ -126,7 +125,7 @@ public class ConfigurationStoreClientTests
         });
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-            new EndpointAddress("https", "configuration.test", 8443),
+            new Uri("https://configuration.test:8443"),
             new ClientCredential("bootstrap-token"),
             transport);
 
@@ -149,7 +148,7 @@ public class ConfigurationStoreClientTests
             }));
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-            new EndpointAddress("https", "configuration.test", 8443),
+            new Uri("https://configuration.test:8443"),
             new ClientCredential("bootstrap-token"),
             transport);
 
@@ -164,7 +163,7 @@ public class ConfigurationStoreClientTests
     public void Create_WhenEndpointIsNotHttp_ShouldThrowArgumentException()
     {
         // Arrange
-        var endpoint = new EndpointAddress("tcp", "configuration.test", 8443);
+        var endpoint = new Uri("tcp://configuration.test:8443");
         var credential = new ClientCredential("bootstrap-token");
 
         // Act
@@ -172,6 +171,33 @@ public class ConfigurationStoreClientTests
 
         // Assert
         Should.Throw<ArgumentException>(action).ParamName.ShouldBe("endpoint");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - Create: Should reject an endpoint with a query")]
+    public void Create_WhenEndpointHasQuery_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var endpoint = new Uri("https://configuration.test:8443?q=1");
+        var credential = new ClientCredential("bootstrap-token");
+
+        // Act
+        Action action = () => ConfigurationStoreClient.Create(endpoint, credential);
+
+        // Assert
+        Should.Throw<ArgumentException>(action).ParamName.ShouldBe("endpoint");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - Create: Should reject a null endpoint")]
+    public void Create_WhenEndpointIsNull_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var credential = new ClientCredential("bootstrap-token");
+
+        // Act
+        Action action = () => ConfigurationStoreClient.Create(null!, credential);
+
+        // Assert
+        Should.Throw<ArgumentNullException>(action).ParamName.ShouldBe("endpoint");
     }
 
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - ClientCredential: Should redact the token when formatted")]

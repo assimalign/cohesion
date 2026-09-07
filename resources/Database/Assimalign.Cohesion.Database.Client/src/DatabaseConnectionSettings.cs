@@ -73,17 +73,35 @@ public sealed class DatabaseConnectionSettings
         string? database = null,
         string principal = "anonymous")
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
-        if (string.IsNullOrWhiteSpace(endpoint.Host) || endpoint.Port is <= 0 or > 65535)
-        {
-            throw new ArgumentException(
-                "The database endpoint must have a host and a valid positive port.",
-                nameof(endpoint));
-        }
+        return For(endpoint.Url, database, principal);
+    }
 
-        EndPoint endPoint = IPAddress.TryParse(endpoint.Host, out IPAddress? address)
-            ? new IPEndPoint(address, endpoint.Port)
-            : new DnsEndPoint(endpoint.Host, endpoint.Port);
+    /// <summary>
+    /// Creates client settings for a resource endpoint supplied by the Cohesion
+    /// application model or ambient resource context.
+    /// </summary>
+    /// <param name="endpoint">The resolved endpoint URI.</param>
+    /// <param name="database">The optional database to bind to.</param>
+    /// <param name="principal">The principal to claim during authentication.</param>
+    /// <returns>Connection settings that target <paramref name="endpoint"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="endpoint"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="endpoint"/> is not an endpoint URI or
+    /// <paramref name="principal"/> is null or whitespace.
+    /// </exception>
+    /// <remarks>
+    /// The socket-facing host uses <see cref="Uri.IdnHost"/> by convention, which removes IPv6
+    /// brackets and converts internationalized domain names to their ASCII-compatible form.
+    /// </remarks>
+    public static DatabaseConnectionSettings For(
+        Uri endpoint,
+        string? database = null,
+        string principal = "anonymous")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        Uri.ThrowIfNotEndpoint(endpoint);
+
+        EndPoint endPoint = new DnsEndPoint(endpoint.IdnHost, endpoint.Port);
 
         return new DatabaseConnectionSettings
         {

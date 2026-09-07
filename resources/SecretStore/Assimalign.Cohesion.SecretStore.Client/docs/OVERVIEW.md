@@ -9,7 +9,7 @@ and hides its BCL HTTP implementation behind `ISecretStoreClient`.
 ## Public surface
 
 - `ISecretStoreClient` reads secret bytes, reads PEM certificates, and sends a generic command.
-- `SecretStoreClient.Create(EndpointAddress, ClientCredential)` creates the internal protocol
+- `SecretStoreClient.Create(Uri, ClientCredential)` creates the internal protocol
   implementation without performing network I/O.
 - `ClientCredential` carries the opaque bootstrap token and redacts it when formatted.
 - `ResourceCommand` is the generic command envelope; item 31c adds typed SecretStore commands.
@@ -17,10 +17,9 @@ and hides its BCL HTTP implementation behind `ISecretStoreClient`.
 ## Usage
 
 ```csharp
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.SecretStore.Client;
 
-EndpointAddress endpoint = new("https", "secretstore.internal", 8443, "/api");
+var endpoint = new Uri("https://secretstore.internal:8443/api");
 var credential = new ClientCredential(bootstrapToken);
 ISecretStoreClient client = SecretStoreClient.Create(endpoint, credential);
 

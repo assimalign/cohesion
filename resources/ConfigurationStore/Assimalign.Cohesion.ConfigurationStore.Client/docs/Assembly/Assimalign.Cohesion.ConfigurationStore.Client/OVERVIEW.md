@@ -10,7 +10,7 @@ access. Its public types use the exact `Assimalign.Cohesion.ConfigurationStore.C
 | Type | Role |
 | --- | --- |
 | `IConfigurationStoreClient` | Reads a named namespace and submits resource commands asynchronously. |
-| `ConfigurationStoreClient` | Creates clients bound to an HTTP or HTTPS `EndpointAddress`. |
+| `ConfigurationStoreClient` | Creates clients bound to an HTTP or HTTPS endpoint `Uri`. |
 | `ClientCredential` | Carries an opaque Bearer token and returns only a redacted formatted value. |
 | `ResourceCommand` | Immutable command envelope containing id, kind, owner, key, and payload bytes. |
 
@@ -18,10 +18,9 @@ access. Its public types use the exact `Assimalign.Cohesion.ConfigurationStore.C
 
 ```csharp
 using Assimalign.Cohesion.ConfigurationStore.Client;
-using Assimalign.Cohesion.Core;
 
 IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-    new EndpointAddress("https", "configuration.internal", 8443, "/api"),
+    new Uri("https://configuration.internal:8443/api"),
     new ClientCredential(bootstrapToken));
 
 IReadOnlyDictionary<string, string?> values =

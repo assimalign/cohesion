@@ -7,8 +7,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ConfigurationStore.Client;
 
 internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
@@ -17,11 +15,11 @@ internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
     private const string namespaceRoute = "/cohesion/v1/namespaces";
 
     private readonly ClientCredential _credential;
-    private readonly EndpointAddress _endpoint;
+    private readonly Uri _endpoint;
     private readonly HttpMessageInvoker _transport;
 
     internal HttpConfigurationStoreClient(
-        EndpointAddress endpoint,
+        Uri endpoint,
         ClientCredential credential,
         HttpMessageInvoker transport)
     {
@@ -91,9 +89,9 @@ internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
         string? queryName = null,
         string? queryValue = null)
     {
-        var uriBuilder = new UriBuilder(_endpoint.Url)
+        var uriBuilder = new UriBuilder(_endpoint)
         {
-            Path = $"{_endpoint.Url.AbsolutePath.TrimEnd('/')}{route}"
+            Path = $"{_endpoint.AbsolutePath.TrimEnd('/')}{route}"
         };
 
         if (queryName is not null && queryValue is not null)

@@ -27,15 +27,31 @@ public static class SqlDatabaseServerOptionsExtensions
         /// </exception>
         public SqlDatabaseServerOptions Listen(EndpointAddress endpoint)
         {
-            ArgumentNullException.ThrowIfNull(options);
-            if (string.IsNullOrWhiteSpace(endpoint.Host) || endpoint.Port <= 0)
-            {
-                throw new ArgumentException(
-                    "The database endpoint must have a host and a positive port.",
-                    nameof(endpoint));
-            }
+            return options.Listen(endpoint.Url);
+        }
 
-            IPAddress address = ResolveHost(endpoint.Host);
+        /// <summary>
+        /// Configures the server to listen on a resolved Cohesion endpoint.
+        /// </summary>
+        /// <param name="endpoint">The resolved database endpoint.</param>
+        /// <returns><paramref name="options"/> for fluent composition.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="options"/> or <paramref name="endpoint"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="endpoint"/> is not an endpoint URI.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the endpoint host is not a literal IP address, <c>localhost</c>, or a wildcard.
+        /// </exception>
+        /// <remarks>
+        /// The socket-facing host uses <see cref="Uri.IdnHost"/> by convention, which removes IPv6
+        /// brackets and converts internationalized domain names to their ASCII-compatible form.
+        /// </remarks>
+        public SqlDatabaseServerOptions Listen(Uri endpoint)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            Uri.ThrowIfNotEndpoint(endpoint);
+
+            IPAddress address = ResolveHost(endpoint.IdnHost);
             options.Listener = TcpConnectionListener.Create(
                 tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port));
             return options;

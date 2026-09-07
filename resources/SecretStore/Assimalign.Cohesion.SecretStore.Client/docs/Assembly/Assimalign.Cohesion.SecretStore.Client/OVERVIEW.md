@@ -7,7 +7,7 @@ The namespace contains the gateway-side SecretStore protocol contract and factor
 ## Types
 
 - `ISecretStoreClient` exposes asynchronous secret, certificate, and generic command operations.
-- `SecretStoreClient` creates the internal HTTP implementation from an `EndpointAddress` and
+- `SecretStoreClient` creates the internal HTTP implementation from a `Uri` and
   `ClientCredential`.
 - `ClientCredential` carries an opaque bearer token and redacts its formatted representation.
 - `ResourceCommand` carries an id, kind, owner, key, and payload bytes serialized as base64 JSON.

@@ -8,10 +8,9 @@ must resolve configuration without referencing the ConfigurationStore hosting ru
 
 ```csharp
 using Assimalign.Cohesion.ConfigurationStore.Client;
-using Assimalign.Cohesion.Core;
 
 IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-    new EndpointAddress("https", "configuration.internal", 8443),
+    new Uri("https://configuration.internal:8443"),
     new ClientCredential(bootstrapToken));
 
 IReadOnlyDictionary<string, string?> values =
@@ -34,7 +33,7 @@ An endpoint base path is preserved and prepended to both routes. Non-success HTT
 
 ## Dependencies
 
-The package references only `Assimalign.Cohesion.Core` for `EndpointAddress` and uses the BCL HTTP
+The package references only `Assimalign.Cohesion.Core` for the `Uri` endpoint guard and uses the BCL HTTP
 and source-generated JSON stacks. It does not reference ConfigurationStore.Hosting, dependency
 injection, or a shared framework.
 

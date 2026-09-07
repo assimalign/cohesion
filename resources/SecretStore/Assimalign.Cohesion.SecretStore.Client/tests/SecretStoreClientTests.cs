@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.SecretStore.Client.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.SecretStore.Client.Tests;
@@ -35,7 +34,7 @@ public class SecretStoreClientTests
         });
         using var transport = new HttpMessageInvoker(handler);
         ISecretStoreClient client = SecretStoreClient.Create(
-            new EndpointAddress("https", "secrets.test", 8443, "/api"),
+            new Uri("https://secrets.test:8443/api"),
             new ClientCredential("bootstrap-token"),
             transport);
 
@@ -61,7 +60,7 @@ public class SecretStoreClientTests
             }));
         using var transport = new HttpMessageInvoker(handler);
         ISecretStoreClient client = SecretStoreClient.Create(
-            new EndpointAddress("http", "127.0.0.1", 5080),
+            new Uri("http://127.0.0.1:5080"),
             new ClientCredential("bootstrap-token"),
             transport);
 
@@ -92,7 +91,7 @@ public class SecretStoreClientTests
         });
         using var transport = new HttpMessageInvoker(handler);
         ISecretStoreClient client = SecretStoreClient.Create(
-            new EndpointAddress("https", "secrets.test", 443),
+            new Uri("https://secrets.test:443"),
             new ClientCredential("bootstrap-token"),
             transport);
         var command = new ResourceCommand(
@@ -123,7 +122,7 @@ public class SecretStoreClientTests
     public void Create_WhenEndpointIsNotHttp_ShouldThrowArgumentException()
     {
         // Arrange
-        var endpoint = new EndpointAddress("tcp", "secrets.test", 8443);
+        var endpoint = new Uri("tcp://secrets.test:8443");
         var credential = new ClientCredential("bootstrap-token");
 
         // Act
@@ -131,6 +130,33 @@ public class SecretStoreClientTests
 
         // Assert
         Should.Throw<ArgumentException>(action).ParamName.ShouldBe("endpoint");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SecretStore] - Create: Should reject an endpoint with a query")]
+    public void Create_WhenEndpointHasQuery_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var endpoint = new Uri("https://secrets.test:8443?q=1");
+        var credential = new ClientCredential("bootstrap-token");
+
+        // Act
+        Action action = () => SecretStoreClient.Create(endpoint, credential);
+
+        // Assert
+        Should.Throw<ArgumentException>(action).ParamName.ShouldBe("endpoint");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SecretStore] - Create: Should reject a null endpoint")]
+    public void Create_WhenEndpointIsNull_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var credential = new ClientCredential("bootstrap-token");
+
+        // Act
+        Action action = () => SecretStoreClient.Create(null!, credential);
+
+        // Assert
+        Should.Throw<ArgumentNullException>(action).ParamName.ShouldBe("endpoint");
     }
 
     [Fact(DisplayName = "Cohesion Test [SecretStore] - ClientCredential: Should redact the token when formatted")]

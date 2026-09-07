@@ -38,13 +38,28 @@ public static class ProbeSpec
     /// </exception>
     public static IProbeSpec Http(EndpointAddress address)
     {
+        return Http(address.Url);
+    }
+
+    /// <summary>Creates an HTTP probe against an absolute address.</summary>
+    /// <param name="address">The absolute HTTP or HTTPS endpoint URI.</param>
+    /// <returns>An HTTP probe specification.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="address"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="address"/> is not an endpoint URI or does not use the HTTP or HTTPS scheme.
+    /// </exception>
+    public static IProbeSpec Http(Uri address)
+    {
+        Uri.ThrowIfNotEndpoint(address);
+
         if (!string.Equals(address.Scheme, "http", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(address.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("An HTTP probe address must use the http or https scheme.", nameof(address));
         }
 
-        return new ProbeDefinition(ProbeKind.Http, endpoint: null, address, address.Path, Array.Empty<string>());
+        var endpointAddress = new EndpointAddress(address.Scheme, address.Host, address.Port, address.EndpointPath);
+        return new ProbeDefinition(ProbeKind.Http, endpoint: null, endpointAddress, address.EndpointPath, Array.Empty<string>());
     }
 
     /// <summary>Creates a TCP probe against a named resource endpoint.</summary>

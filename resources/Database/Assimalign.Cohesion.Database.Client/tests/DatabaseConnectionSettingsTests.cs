@@ -1,9 +1,9 @@
+using System;
 using System.Net;
 
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client.Tests;
@@ -18,7 +18,7 @@ public class DatabaseConnectionSettingsTests
     {
         // Act
         var settings = DatabaseConnectionSettings.For(
-            new EndpointAddress("tcp", "database.internal", 5740),
+            new Uri("tcp://database.internal:5740"),
             database: "orders",
             principal: "orders-api");
 
@@ -31,23 +31,53 @@ public class DatabaseConnectionSettingsTests
         endpoint.Port.ShouldBe(5740);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: resource IP literals create socket-ready endpoints")]
-    public void For_ResourceIpEndpoint_ShouldPreserveIpAddress()
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: resource IP literals create socket-ready DNS endpoints")]
+    public void For_ResourceIpEndpoint_ShouldUseUnbracketedSocketHost()
     {
         // Act
         var settings = DatabaseConnectionSettings.For(
-            new EndpointAddress("cohesion-db", "127.0.0.1", 5740));
+            new Uri("cohesion-db://127.0.0.1:5740"));
 
         // Assert
-        var endpoint = settings.EndPoint.ShouldBeOfType<IPEndPoint>();
-        endpoint.Address.ShouldBe(IPAddress.Loopback);
+        var endpoint = settings.EndPoint.ShouldBeOfType<DnsEndPoint>();
+        endpoint.Host.ShouldBe("127.0.0.1");
         endpoint.Port.ShouldBe(5740);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: a default resource endpoint is rejected")]
-    public void For_DefaultResourceEndpoint_ShouldRejectAddress()
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: IPv6 resource endpoints use an unbracketed socket host")]
+    public void For_Ipv6ResourceEndpoint_ShouldUseUnbracketedSocketHost()
     {
-        Should.Throw<System.ArgumentException>(() => DatabaseConnectionSettings.For(default));
+        // Act
+        var settings = DatabaseConnectionSettings.For(
+            new Uri("tcp://[::1]:5740"));
+
+        // Assert
+        var endpoint = settings.EndPoint.ShouldBeOfType<DnsEndPoint>();
+        endpoint.Host.ShouldBe("::1");
+        endpoint.Port.ShouldBe(5740);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: IDN resource endpoints use an ASCII-compatible socket host")]
+    public void For_IdnResourceEndpoint_ShouldUseAsciiCompatibleSocketHost()
+    {
+        // Act
+        var settings = DatabaseConnectionSettings.For(
+            new Uri("tcp://münich.example:5740"));
+
+        // Assert
+        var endpoint = settings.EndPoint.ShouldBeOfType<DnsEndPoint>();
+        endpoint.Host.ShouldBe("xn--mnich-kva.example");
+        endpoint.Port.ShouldBe(5740);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: a null resource endpoint is rejected")]
+    public void For_NullResourceEndpoint_ShouldRejectAddress()
+    {
+        // Act
+        Action action = () => DatabaseConnectionSettings.For(null!);
+
+        // Assert
+        Should.Throw<ArgumentNullException>(action).ParamName.ShouldBe("endpoint");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Settings: connection strings parse database, principal, endpoint, and pool size")]

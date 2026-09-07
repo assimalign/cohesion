@@ -9,7 +9,7 @@ ConfigurationStore hosting runtime and is delivered as a standalone NuGet packag
 ## Public surface
 
 - `IConfigurationStoreClient` exposes asynchronous namespace reads and command submission.
-- `ConfigurationStoreClient` creates a client for a Core `EndpointAddress` and credential.
+- `ConfigurationStoreClient` creates a client for an endpoint `Uri` and credential.
 - `ClientCredential` carries an opaque Bearer token and redacts it when formatted.
 - `ResourceCommand` carries the id, kind, owner, key, and payload bytes sent to the control plane.
 
