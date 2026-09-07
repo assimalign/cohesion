@@ -1,24 +1,32 @@
-﻿using Assimalign.Cohesion.Scheduler;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Scheduler;
 
-public class CronSchedule : Schedule
+/// <summary>
+/// Base class for schedules driven by a crontab expression. The Scheduler area is not started yet
+/// (design item 31 scaffolds only its filler application); this type keeps the dormant Cron package
+/// aligned with the area root's <see cref="Schedule{TContext}"/> contract until the Scheduler program
+/// defines its schedule model.
+/// </summary>
+/// <typeparam name="TContext">The schedule context type.</typeparam>
+public abstract class CronSchedule<TContext> : Schedule<TContext>
+    where TContext : IScheduleContext
 {
-    public CronSchedule()
+    /// <summary>
+    /// Initializes the schedule against its provider.
+    /// </summary>
+    /// <param name="provider">The schedule provider that owns this schedule.</param>
+    protected CronSchedule(IScheduleProvider provider)
+        : base(provider)
     {
-        
     }
 
-    public sealed override async Task RunAsync(CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    /// <remarks>Dormant: the cron evaluation loop lands with the Scheduler program.</remarks>
+    public sealed override Task RunAsync(CancellationToken cancellationToken = default)
     {
-        while (true)
-        {
-
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
     }
 }
