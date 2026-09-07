@@ -9,6 +9,29 @@ namespace Assimalign.Cohesion.ApplicationModel;
 public interface IApplicationBuilder
 {
     /// <summary>
+    /// Gets the environment selected from <c>--environment</c> or the process environment.
+    /// </summary>
+    IApplicationEnvironment Environment { get; }
+
+    /// <summary>
+    /// Gets the operation selected by <c>--mode</c>.
+    /// </summary>
+    GatewayRunMode RunMode { get; }
+
+    /// <summary>
+    /// Gets the gateway identity requested by <c>--gateway</c>, or <see langword="null"/>
+    /// when provider selection should use its normal default.
+    /// </summary>
+    ResourceName? RequestedGateway { get; }
+
+    /// <summary>
+    /// Sets the application identity used by the model and by platform ownership checks.
+    /// </summary>
+    /// <param name="name">The application name. It is validated as an RFC1123 label by <see cref="Build"/>.</param>
+    /// <returns>This builder.</returns>
+    IApplicationBuilder UseName(ApplicationName name);
+
+    /// <summary>
     /// Adds a resource to the model and returns its descriptor so dependency edges can
     /// be chained fluently (for example <c>builder.AddWebApp("admin").DependsOn(identity)</c>).
     /// </summary>
@@ -16,6 +39,31 @@ public interface IApplicationBuilder
     /// <returns>The descriptor wrapping <paramref name="resource"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="resource"/> is <see langword="null"/>.</exception>
     IApplicationResourceDescriptor AddResource(IApplicationResource resource);
+
+    /// <summary>
+    /// Adds a manifest-backed resource using the common platform-neutral planning options.
+    /// Planning is deferred until <see cref="Build"/>.
+    /// </summary>
+    /// <param name="manifest">The build-produced resource manifest.</param>
+    /// <returns>The descriptor wrapping the manifest-backed resource.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="manifest"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A resource with the same name was already added.</exception>
+    IApplicationResourceDescriptor AddResource(ResourceManifest manifest);
+
+    /// <summary>
+    /// Adds a manifest-backed resource with typed, platform-neutral deployer options.
+    /// Planning is deferred until <see cref="Build"/>.
+    /// </summary>
+    /// <typeparam name="TOptions">The resource area's planning-option type.</typeparam>
+    /// <param name="manifest">The build-produced resource manifest.</param>
+    /// <param name="options">The deployer-owned planning overrides.</param>
+    /// <returns>The descriptor wrapping the manifest-backed resource.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="manifest"/> or <paramref name="options"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">A resource with the same name was already added.</exception>
+    IApplicationResourceDescriptor AddResource<TOptions>(ResourceManifest manifest, TOptions options)
+        where TOptions : class, IResourceOptions;
 
     /// <summary>
     /// Adds a resource produced from the in-progress model, letting a resource read
@@ -37,12 +85,14 @@ public interface IApplicationBuilder
 
     /// <summary>
     /// Validates the graph — unique resource names, no dependency cycles, all
-    /// dependencies present, and a gateway selected — and returns the runnable application.
+    /// dependencies present, an RFC1123 application name, and a gateway selected — and
+    /// returns the runnable application.
     /// </summary>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
-    /// No gateway was selected, a resource name is duplicated, a dependency is missing,
-    /// or the dependency graph contains a cycle.
+    /// No gateway was selected, the application name is invalid, no resources are realized,
+    /// a resource name is duplicated, a dependency is missing, or the dependency graph
+    /// contains a cycle.
     /// </exception>
     IApplication Build();
 }

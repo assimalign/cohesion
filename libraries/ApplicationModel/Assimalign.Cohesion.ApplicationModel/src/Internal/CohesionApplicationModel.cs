@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
@@ -12,26 +13,115 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     public CohesionApplicationModel(
         ApplicationName name,
         IApplicationEnvironment environment,
-        IReadOnlyList<IApplicationResourceDescriptor> descriptors)
+        IReadOnlyList<IApplicationResourceDescriptor> descriptors,
+        IReadOnlyList<ResourceManifest> manifests,
+        IReadOnlyList<ResourcePlan> plans,
+        GatewayRunMode runMode,
+        ResourceName gatewayIdentity,
+        bool adopt)
     {
         Name = name;
         Environment = environment ?? throw new ArgumentNullException(nameof(environment));
-        Descriptors = descriptors ?? throw new ArgumentNullException(nameof(descriptors));
+        ArgumentNullException.ThrowIfNull(descriptors);
+        ArgumentNullException.ThrowIfNull(manifests);
+        ArgumentNullException.ThrowIfNull(plans);
 
-        var resources = new IApplicationResource[descriptors.Count];
-        for (int i = 0; i < descriptors.Count; i++)
+        if (manifests.Count != descriptors.Count)
         {
-            resources[i] = descriptors[i].Resource;
+            throw new ArgumentException(
+                "The manifest count must match the descriptor count.",
+                nameof(manifests));
         }
 
-        Resources = resources;
+        if (plans.Count != 0 && plans.Count != descriptors.Count)
+        {
+            throw new ArgumentException(
+                "The plan count must be empty for an authoring snapshot or match the descriptor count.",
+                nameof(plans));
+        }
+
+        Descriptors = CopyDescriptors(descriptors);
+        Manifests = Copy(manifests);
+        Plans = Copy(plans);
+        RunMode = runMode;
+        GatewayIdentity = gatewayIdentity;
+        Adopt = adopt;
+        Owner = $"{name}@{gatewayIdentity}";
+
+        var resources = new IApplicationResource[Descriptors.Count];
+        for (int i = 0; i < Descriptors.Count; i++)
+        {
+            resources[i] = Descriptors[i].Resource;
+        }
+
+        Resources = new ReadOnlyCollection<IApplicationResource>(resources);
     }
 
     public ApplicationName Name { get; }
 
     public IApplicationEnvironment Environment { get; }
 
+    public GatewayRunMode RunMode { get; }
+
+    public ResourceName GatewayIdentity { get; }
+
+    public string Owner { get; }
+
+    public bool Adopt { get; }
+
     public IReadOnlyList<IApplicationResourceDescriptor> Descriptors { get; }
 
     public IReadOnlyList<IApplicationResource> Resources { get; }
+
+    public IReadOnlyList<ResourceManifest> Manifests { get; }
+
+    public IReadOnlyList<ResourcePlan> Plans { get; }
+
+    private static IReadOnlyList<T> Copy<T>(IReadOnlyList<T> source)
+    {
+        var copy = new T[source.Count];
+        for (int index = 0; index < source.Count; index++)
+        {
+            copy[index] = source[index];
+        }
+
+        return new ReadOnlyCollection<T>(copy);
+    }
+
+    private static IReadOnlyList<IApplicationResourceDescriptor> CopyDescriptors(
+        IReadOnlyList<IApplicationResourceDescriptor> source)
+    {
+        var copies = new Dictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor>(
+            ReferenceEqualityComparer.Instance);
+        var topLevel = new IApplicationResourceDescriptor[source.Count];
+
+        for (int index = 0; index < topLevel.Length; index++)
+        {
+            topLevel[index] = CopyDescriptor(source[index], copies);
+        }
+
+        return new ReadOnlyCollection<IApplicationResourceDescriptor>(topLevel);
+    }
+
+    private static BuiltApplicationResourceDescriptor CopyDescriptor(
+        IApplicationResourceDescriptor source,
+        IDictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor> copies)
+    {
+        if (copies.TryGetValue(source, out BuiltApplicationResourceDescriptor? existing))
+        {
+            return existing;
+        }
+
+        var copy = new BuiltApplicationResourceDescriptor(source.Resource);
+        copies.Add(source, copy);
+
+        var dependencies = new IApplicationResourceDescriptor[source.Dependencies.Count];
+        for (int index = 0; index < dependencies.Length; index++)
+        {
+            dependencies[index] = CopyDescriptor(source.Dependencies[index], copies);
+        }
+
+        copy.SetDependencies(dependencies);
+        return copy;
+    }
 }

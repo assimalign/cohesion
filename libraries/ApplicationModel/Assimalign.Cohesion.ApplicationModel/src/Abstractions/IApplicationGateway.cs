@@ -6,8 +6,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <summary>
 /// The control plane that realizes an <see cref="IApplicationModel"/> on a target —
 /// local processes, Docker, or Kubernetes. A gateway packages or gathers each resource's
-/// artifact, provisions resources in dependency order gating on readiness, supervises
-/// them, and tears them down in reverse order.
+/// artifact, provisions resources in dependency order gating on readiness, and supervises
+/// them. Destructive teardown is a distinct <see cref="GatewayRunMode.Teardown"/> operation.
 /// </summary>
 /// <remarks>
 /// The base library ships no concrete gateway; implementations live in the
@@ -32,9 +32,11 @@ public interface IApplicationGateway
     Task StartAsync(IApplicationModel model, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Tears the application down in reverse dependency order, honoring per-resource grace.
+    /// Stops active supervision and releases runtime-scoped resources, honoring
+    /// per-resource grace. Persistent platform objects remain; this operation is not
+    /// destructive teardown.
     /// </summary>
-    /// <param name="cancellationToken">Bounds how long teardown may take.</param>
-    /// <returns>A task that completes once the application has stopped.</returns>
+    /// <param name="cancellationToken">Bounds how long supervision shutdown may take.</param>
+    /// <returns>A task that completes once active supervision has stopped.</returns>
     Task StopAsync(CancellationToken cancellationToken = default);
 }

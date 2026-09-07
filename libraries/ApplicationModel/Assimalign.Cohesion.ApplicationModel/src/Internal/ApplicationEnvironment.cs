@@ -22,7 +22,12 @@ internal sealed class ApplicationEnvironment : IApplicationEnvironment
 
     public static ApplicationEnvironment FromHost()
     {
-        string name = AppEnvironment.GetEnvironmentName();
+        return FromName(AppEnvironment.GetEnvironmentName());
+    }
+
+    public static ApplicationEnvironment FromName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         bool isDevelopment = string.Equals(name, DevelopmentEnvironment, StringComparison.OrdinalIgnoreCase);
 

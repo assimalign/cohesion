@@ -17,19 +17,25 @@ or platform code**, and depends only on `Assimalign.Cohesion.Core`.
 Two planes share one vocabulary here:
 
 - **Declarative plane** — `IApplication`, `IApplicationModel`, `IApplicationBuilder`,
-  `IApplicationResource` (+ the `IExecutableResource` / `IEndpointResource` /
-  `IMountResource` capability interfaces), `IApplicationResourceDescriptor`,
-  `IApplicationResourceCollection`, `IApplicationEnvironment`, and the
-  `ResourceEndpoint` / `ResourceMount` value objects.
+  `IApplicationResource`, `ResourceManifest`, `IManifestResource`,
+  `IPlannedResource`, the platform-neutral `ResourcePlan` records,
+  `IApplicationResourceDescriptor`, `IApplicationResourceCollection`, and
+  `IApplicationEnvironment`. The older `IExecutableResource` /
+  `IEndpointResource` / `IMountResource` capability interfaces remain as a
+  compatibility surface for gateways and hand-written resources while resource
+  areas move to generated manifests and plans.
 - **Control plane** (contracts only; implementations live in the `…Gateway.*`
   packages) — `IApplicationGateway`, `IApplicationResourceController`,
   `IResourceControlContext`, `IApplicationResourceStateManager`,
   `IApplicationResourcePackager`, and the `IResourceArtifact` family.
 
-The only concrete types shipped here are the internal builder/model/descriptor/
-collection/environment/application implementations behind the `Application` static
-factory, plus the two `CohesionValueType`-generated identity wrappers
-`ResourceName`/`ResourceId` and the new `ApplicationName`/`EnvironmentName`.
+The guided implementation surface is `PlannedResource`; resource-area types derive
+from it and override `CreatePlan(PlanContext)` only when the generic trait mapping
+is insufficient. The package also ships manifest records, immutable plan records,
+typed deployer options, their source-generated JSON contexts, and the generated
+identity wrappers `ResourceName`/`ResourceId` and `ApplicationName`/`EnvironmentName`.
+The mutable authoring builder, descriptors, and collection remain internal; `Build()`
+copies descriptor edges and manifest collections into the immutable model snapshot.
 
 The internal application-environment implementation delegates process resolution to Core's
 `AppEnvironment`. That keeps the frozen Cohesion variable name and the
@@ -41,8 +47,9 @@ orchestration package.
 - **`IApplication` does not extend a host abstraction.** A host runs inside one
   process; an application is *described* then *realized* by a gateway across many
   processes/containers/pods it does not own. Conflating them forces single-process
-  assumptions. `RunAsync` hands the model to the gateway and blocks until
-  cancellation — it hosts nothing itself.
+  assumptions. `RunAsync` dispatches the requested mode: Run delegates realization
+  and supervision to the gateway, while Describe writes the model with no platform
+  contact. It hosts nothing itself.
 - **The graph type is `IApplicationModel`, not `IApplicationContext`.** The name
   already existed in the code and `IApplication.Model` returns it; reintroducing a
   second "context" type was rejected as drift.
@@ -51,13 +58,19 @@ orchestration package.
   `Resources` as a read-only one-to-one projection for convenience, and the mutable
   working collection lives only on the builder. Surfacing a mutable `IList` on an
   "immutable desired state" was a contradiction that an early review caught.
-- **Capability interfaces over one fat resource type.** A resource opts into
-  `IExecutableResource` / `IEndpointResource` / `IMountResource`; gateways
-  pattern-match (`resource is IExecutableResource`, AOT-safe) and ignore
-  capabilities they do not understand. A local gateway needs only the first; the
-  Kubernetes gateway needs all three. New gateways add new capability interfaces in
-  their own package without editing this contract, and the manifest never grows a
-  feature-flag matrix.
+- **Facts in manifests; realization in plans.** `ResourceManifest` mirrors the
+  `cohesion/resource/v1` build artifact and contains resource facts only. At
+  `Build()`, every resource produces a `cohesion/plan/v1` `ResourcePlan` from its
+  manifest, deployer options, environment, and references. `GenericPlanner` is the
+  inherited default: workload kind is explicit, volume mounts produce per-replica
+  claims and a governing headless service, endpoints produce services, public
+  endpoints produce exposures, and probes map one-for-one. Platform gateways compile
+  this IR; they do not branch on resource kind or CLR type.
+- **Typed escape hatches stop at deployer-owned facts.** `ResourceOptions` permits
+  replica and storage-size overrides. `Build()` validates replicas against the
+  manifest's `maxReplicas`, then runs `ResourcePlanValidator`; platform-specific
+  knobs belong to the selected gateway's compiler and never enter a resource-area
+  package.
 - **`UseGateway` is mandatory — no reflection.** An earlier design reflected a
   default gateway when none was set; that would have propagated a
   `RequiresUnreferencedCode` marker onto `Build()` (the one API every consumer
@@ -85,24 +98,31 @@ orchestration package.
 
 ## Lifecycle and error model
 
-- `Application.CreateBuilder()` → fluent `AddResource(...).DependsOn(...)` +
-  `UseGateway(...)` → `Build()`.
+- `Application.CreateBuilder(ApplicationName, args)` → fluent
+  `AddResource(...).DependsOn(...)` + `UseGateway(...)` → `Build()`. `UseName`
+  remains available for callers that start from the parameterless overload.
 - `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
-  all dependencies present, no dependency cycles (DFS), and a gateway selected.
+  at least one realized resource, all dependencies present, no dependency cycles
+  (DFS), a selected gateway, an RFC 1123 application name, each typed override, and
+  every computed plan. Planning deliberately happens here rather than in MSBuild or
+  when the resource is added.
   Every failure is an `InvalidOperationException` with an actionable message; there
   are no custom exception types in this library (an area-scoped root can be added
   later if the surface grows).
-- `IApplication.RunAsync` mirrors `Host<TContext>.RunAsync`: a linked
+- In Run mode, `IApplication.RunAsync` mirrors `Host<TContext>.RunAsync`: a linked
   `CancellationTokenSource` plus a `TaskCompletionSource` completed on cancellation.
-  It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es within a
-  bounded shutdown window (default 30s).
+  It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es supervision
+  within a bounded shutdown window (default 30s). Stop leaves persistent platform
+  objects running; destructive removal is the separate Teardown mode. Describe emits
+  the model document and never contacts the selected gateway.
 
 ## AOT posture
 
-This package is `Core`-only and AOT-clean: capability matching is `is`-based, there
-is **no reflection** (the reflective gateway resolver was removed), and the only
-runtime-code-adjacent call is `Assembly.GetEntryAssembly()` for a default
-application name (AOT-safe, with a literal fallback). The generated value types use
+This package is `Core`-only and AOT-clean: capability matching is `is`-based and
+there is **no reflection-based serialization**. Manifest, plan, and describe-mode
+model documents use explicit `JsonSerializerContext` contracts. Entry-assembly name
+fallback is used only in Development and is slugged before validation; assembly
+attributes are never read at run time. The generated value types use
 `System.Text.Json` converters that are source-emitted, not reflection-based.
 
 **Note on the family:** the sibling `…Gateway` base and `…Gateway.Docker` packages
@@ -116,10 +136,10 @@ contract library. See the area-root `../../DESIGN.md` §13.
 - `…ApplicationModel.Gateway` (Layer 2a) — the guided `ApplicationGateway` base +
   `LocalGateway`; implements the control-plane contracts defined here.
 - `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — Kubernetes, Docker, … .
-- `{Resource}.ApplicationModel` (Layer 3d) — manifest packages that reference
-  **this package only**, provide `Add{Resource}(name)` extensions and an
-  `IApplicationResource` (+ capability) implementation, and advertise a pre-built
-  container image via reference-free MSBuild metadata.
+- `{Resource}.ApplicationModel` (Layer 3d) — Core-only manifest packages that
+  provide a typed `PlannedResource`, `Add{Resource}(manifest, options)`, the area's
+  planner when it differs from `GenericPlanner`, and the resource-side default
+  control-plane contract served by `{Resource}.Hosting`.
 
 ## Non-goals
 
@@ -128,5 +148,6 @@ contract library. See the area-root `../../DESIGN.md` §13.
   resource).
 - Referencing or rebuilding any `{Resource}.Application` runtime — the orchestrator
   only ever references contract + manifest packages.
-- Serialization/manifest formats, Kubernetes types, or process supervision — all of
-  that lives in the gateway packages.
+- Platform object formats, Kubernetes types, and process supervision — those live
+  in gateway/compiler packages. The platform-neutral resource manifest, realization
+  plan, and describe-mode model document are contracts of this package.

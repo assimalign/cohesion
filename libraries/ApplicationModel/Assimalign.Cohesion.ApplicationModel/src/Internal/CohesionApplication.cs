@@ -5,10 +5,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// The default <see cref="IApplication"/>. <see cref="RunAsync"/> starts the gateway, blocks
-/// until cancellation, then stops the gateway within a bounded shutdown window — mirroring the
-/// <c>Host&lt;TContext&gt;.RunAsync</c> pattern (a linked token source plus a task-completion
-/// source completed on cancellation).
+/// The default <see cref="IApplication"/>. It dispatches the model's run mode; ordinary Run
+/// starts the gateway, blocks until cancellation, then stops supervision within a bounded
+/// shutdown window, while Describe writes the model without gateway contact.
 /// </summary>
 internal sealed class CohesionApplication : IApplication
 {
@@ -26,7 +25,18 @@ internal sealed class CohesionApplication : IApplication
 
     public IApplicationModel Model { get; }
 
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public Task RunAsync(CancellationToken cancellationToken = default)
+    {
+        return Model.RunMode switch
+        {
+            GatewayRunMode.Run => RunCoreAsync(cancellationToken),
+            GatewayRunMode.Describe => ApplicationModelDocumentWriter.WriteAsync(Model, cancellationToken),
+            _ => throw new NotSupportedException(
+                $"Gateway run mode '{Model.RunMode}' is not implemented until its platform execution/compiler support is available. No gateway operation was attempted."),
+        };
+    }
+
+    private async Task RunCoreAsync(CancellationToken cancellationToken)
     {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

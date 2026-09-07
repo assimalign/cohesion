@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
 using System.Reflection;
 
 namespace Assimalign.Cohesion.ApplicationModel;
@@ -10,19 +12,44 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 internal sealed class ApplicationBuilder : IApplicationBuilder
 {
-    private readonly string[] _args;
+    private readonly GatewayCommandLineOptions _options;
+    private readonly ApplicationEnvironment _environment;
     private readonly ApplicationResourceCollection _resources = new();
     private readonly List<ApplicationResourceDescriptor> _descriptors = new();
+    private ApplicationName? _name;
     private IApplicationGateway? _gateway;
 
     public ApplicationBuilder()
-        : this(Array.Empty<string>())
+        : this((ApplicationName)"application", Array.Empty<string>())
     {
     }
 
     public ApplicationBuilder(string[] args)
     {
-        _args = args ?? Array.Empty<string>();
+        _options = GatewayCommandLineOptions.Parse(args);
+        _environment = _options.Environment is null
+            ? ApplicationEnvironment.FromHost()
+            : ApplicationEnvironment.FromName(_options.Environment);
+    }
+
+    public ApplicationBuilder(ApplicationName name, string[] args)
+        : this(args)
+    {
+        _name = name;
+    }
+
+    public IApplicationEnvironment Environment => _environment;
+
+    public GatewayRunMode RunMode => _options.RunMode;
+
+    public ResourceName? RequestedGateway => _options.Gateway is null
+        ? default(ResourceName?)
+        : (ResourceName)_options.Gateway;
+
+    public IApplicationBuilder UseName(ApplicationName name)
+    {
+        _name = name;
+        return this;
     }
 
     public IApplicationResourceDescriptor AddResource(IApplicationResource resource)
@@ -35,6 +62,21 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         var descriptor = new ApplicationResourceDescriptor(resource);
         _descriptors.Add(descriptor);
         return descriptor;
+    }
+
+    public IApplicationResourceDescriptor AddResource(ResourceManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        return AddResource(manifest, new ResourceOptions());
+    }
+
+    public IApplicationResourceDescriptor AddResource<TOptions>(ResourceManifest manifest, TOptions options)
+        where TOptions : class, IResourceOptions
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(options);
+
+        return AddResource(new GenericPlannedResource<TOptions>(manifest, options));
     }
 
     public IApplicationResourceDescriptor AddResource(Func<IApplicationModel, IApplicationResource> configure)
@@ -56,10 +98,24 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
 
     public IApplication Build()
     {
+        if (_descriptors.Count == 0)
+        {
+            ApplicationName emptyApplicationName = ResolveName(_environment);
+            throw new InvalidOperationException(
+                $"every reference crossed an application boundary; declare CohesionApplication or reference a resource of {emptyApplicationName}");
+        }
+
         if (_gateway is null)
         {
             throw new InvalidOperationException(
                 "No IApplicationGateway selected. Call UseGateway(...) or UseLocalGateway() before Build().");
+        }
+
+        if (_options.Gateway is not null &&
+            !string.Equals(_options.Gateway, _gateway.Name.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Gateway '{_options.Gateway}' was requested, but gateway '{_gateway.Name}' was selected.");
         }
 
         IApplicationModel model = BuildModel(validate: true);
@@ -69,13 +125,232 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
     private CohesionApplicationModel BuildModel(bool validate)
     {
         ApplicationResourceDescriptor[] descriptors = _descriptors.ToArray();
+        ApplicationName name = ResolveName(_environment);
 
         if (validate)
         {
+            ValidateApplicationName(name);
+
             ValidateGraph(descriptors);
         }
 
-        return new CohesionApplicationModel(ResolveName(), ApplicationEnvironment.FromHost(), descriptors);
+        ResourceManifest[] manifests = CreateManifests(descriptors, name);
+        ResourcePlan[] plans = validate
+            ? CreatePlans(descriptors, manifests)
+            : Array.Empty<ResourcePlan>();
+
+        ResourceName gatewayIdentity = _gateway is not null
+            ? _gateway.Name
+            : _options.Gateway is not null
+                ? (ResourceName)_options.Gateway
+                : (ResourceName)"unselected";
+        return new CohesionApplicationModel(
+            name,
+            _environment,
+            descriptors,
+            manifests,
+            plans,
+            _options.RunMode,
+            gatewayIdentity,
+            _options.Adopt);
+    }
+
+    private ResourcePlan[] CreatePlans(
+        IReadOnlyList<ApplicationResourceDescriptor> descriptors,
+        IReadOnlyList<ResourceManifest> manifests)
+    {
+        var manifestByDescriptor = new Dictionary<IApplicationResourceDescriptor, ResourceManifest>(descriptors.Count);
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            ResourceManifest manifest;
+            try
+            {
+                manifest = manifests[index].Validate();
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Resource '{descriptors[index].Resource.Name}' has an invalid manifest: {exception.Message}",
+                    exception);
+            }
+            if (manifest.Name != descriptors[index].Resource.Name)
+            {
+                throw new InvalidOperationException(
+                    $"Resource '{descriptors[index].Resource.Name}' exposes manifest '{manifest.Name}'. " +
+                    "A resource and its manifest must have the same name.");
+            }
+
+            manifestByDescriptor.Add(descriptors[index], manifest);
+        }
+
+        var plans = new ResourcePlan[descriptors.Count];
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            ApplicationResourceDescriptor descriptor = descriptors[index];
+            ResourceManifest manifest = manifests[index];
+            var references = new Dictionary<string, ResourceManifest>(StringComparer.Ordinal);
+
+            foreach (IApplicationResourceDescriptor dependency in descriptor.Dependencies)
+            {
+                ResourceManifest reference = manifestByDescriptor[dependency];
+                references.Add(reference.Name.ToString(), reference);
+            }
+
+            IResourceOptions options = descriptor.Resource is IPlannedResource plannedResource
+                ? plannedResource.Options
+                : new ResourceOptions();
+            var context = new PlanContext(manifest, options, _environment, references);
+
+            ResourcePlan plan = descriptor.Resource is IPlannedResource planned
+                ? planned.CreatePlan(context)
+                : GenericPlanner.CreatePlan(context);
+
+            ResourcePlanValidator.Validate(plan, context);
+            plans[index] = plan;
+        }
+
+        return plans;
+    }
+
+    private static ResourceManifest[] CreateManifests(
+        IReadOnlyList<ApplicationResourceDescriptor> descriptors,
+        ApplicationName application)
+    {
+        var manifests = new ResourceManifest[descriptors.Count];
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            IApplicationResource resource = descriptors[index].Resource;
+            if (resource is IManifestResource manifestResource)
+            {
+                ResourceManifest manifest = manifestResource.Manifest ?? throw new InvalidOperationException(
+                    $"Manifest resource '{resource.Name}' returned a null manifest.");
+                manifests[index] = ResourceManifestSnapshot.Create(manifest);
+            }
+            else
+            {
+                manifests[index] = CreateLegacyManifest(resource, application);
+            }
+        }
+
+        return manifests;
+    }
+
+    private static ResourceManifest CreateLegacyManifest(
+        IApplicationResource resource,
+        ApplicationName application)
+    {
+        ResourceManifestEndpoint[] endpoints = CreateLegacyEndpoints(resource);
+        ResourceManifestMount[] mounts = CreateLegacyMounts(resource);
+        bool hasVolume = false;
+        for (int index = 0; index < mounts.Length; index++)
+        {
+            hasVolume |= mounts[index].Kind == ResourceMountKind.Volume;
+        }
+
+        string artifact = resource is IExecutableResource executable &&
+            !string.IsNullOrWhiteSpace(executable.Artifact)
+                ? executable.Artifact
+                : resource.Name.ToString();
+        IReadOnlyDictionary<string, string> environment = resource is IExecutableResource environmentResource
+            ? CopyDictionary(environmentResource.EnvironmentVariables)
+            : new ReadOnlyDictionary<string, string>(new Dictionary<string, string>());
+
+        return new ResourceManifest
+        {
+            Name = resource.Name,
+            Kind = "Legacy",
+            Application = application,
+            ApplicationModel = "Assimalign.Cohesion.ApplicationModel.Legacy",
+            Artifact = new ResourceManifestArtifact
+            {
+                Assembly = string.IsNullOrWhiteSpace(artifact) ? "legacy" : artifact,
+            },
+            Endpoints = new ReadOnlyCollection<ResourceManifestEndpoint>(endpoints),
+            ControlPlane = new ResourceManifestControlPlane
+            {
+                Endpoint = endpoints[0].Name,
+                Path = "/cohesion/v1",
+            },
+            Mounts = new ReadOnlyCollection<ResourceManifestMount>(mounts),
+            EnvironmentVariables = environment,
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                Workload = hasVolume ? WorkloadKind.StatefulSet : WorkloadKind.Deployment,
+            },
+        };
+    }
+
+    private static ResourceManifestEndpoint[] CreateLegacyEndpoints(IApplicationResource resource)
+    {
+        if (resource is not IEndpointResource endpointResource || endpointResource.Endpoints.Count == 0)
+        {
+            // cohesion/resource/v1 requires every manifest to bind a control plane to a
+            // declared endpoint. This sentinel exists only for the temporary legacy-resource
+            // compatibility path; it is not added to the original resource descriptor.
+            return
+            [
+                new ResourceManifestEndpoint
+                {
+                    Name = "control",
+                    Scheme = "http",
+                    Protocol = "tcp",
+                    ContainerPort = 1,
+                },
+            ];
+        }
+
+        var endpoints = new ResourceManifestEndpoint[endpointResource.Endpoints.Count];
+        for (int index = 0; index < endpoints.Length; index++)
+        {
+            ResourceEndpoint endpoint = endpointResource.Endpoints[index];
+            endpoints[index] = new ResourceManifestEndpoint
+            {
+                Name = endpoint.Name,
+                Scheme = endpoint.Scheme,
+                Protocol = string.Equals(endpoint.Scheme, "udp", StringComparison.OrdinalIgnoreCase)
+                    ? "udp"
+                    : "tcp",
+                ContainerPort = endpoint.Port == 0 ? 1 : endpoint.Port,
+                Public = endpoint.IsPublic,
+            };
+        }
+
+        return endpoints;
+    }
+
+    private static ResourceManifestMount[] CreateLegacyMounts(IApplicationResource resource)
+    {
+        if (resource is not IMountResource mountResource)
+        {
+            return Array.Empty<ResourceManifestMount>();
+        }
+
+        var mounts = new ResourceManifestMount[mountResource.Mounts.Count];
+        for (int index = 0; index < mounts.Length; index++)
+        {
+            ResourceMount mount = mountResource.Mounts[index];
+            mounts[index] = new ResourceManifestMount
+            {
+                Name = mount.Name,
+                ContainerPath = mount.Path,
+                Kind = mount.Kind,
+                Size = mount.Kind == ResourceMountKind.Volume ? "1Gi" : null,
+            };
+        }
+
+        return mounts;
+    }
+
+    private static IReadOnlyDictionary<string, string> CopyDictionary(
+        IReadOnlyDictionary<string, string> source)
+    {
+        var copy = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string key, string value) in source)
+        {
+            copy.Add(key, value);
+        }
+
+        return new ReadOnlyDictionary<string, string>(copy);
     }
 
     private static void ValidateGraph(IReadOnlyList<ApplicationResourceDescriptor> descriptors)
@@ -129,9 +404,94 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         }
     }
 
-    private static ApplicationName ResolveName()
+    private ApplicationName ResolveName(IApplicationEnvironment environment)
     {
-        string? name = Assembly.GetEntryAssembly()?.GetName().Name;
-        return string.IsNullOrWhiteSpace(name) ? "application" : name;
+        if (_name is ApplicationName configured)
+        {
+            return configured;
+        }
+
+        if (!environment.IsDevelopment)
+        {
+            return default;
+        }
+
+        string? entryAssemblyName = Assembly.GetEntryAssembly()?.GetName().Name;
+        return Slugify(entryAssemblyName);
+    }
+
+    private static void ValidateApplicationName(ApplicationName name)
+    {
+        string? value = name.ToString();
+        if (string.IsNullOrEmpty(value))
+        {
+            throw new InvalidOperationException(
+                "An RFC1123 application name is required. Pass it to Application.CreateBuilder(ApplicationName, args) or call UseName(...) before Build(); only unnamed Development builders use the entry-assembly fallback.");
+        }
+
+        if (value.Length > 63 ||
+            !IsAsciiLetterOrDigit(value[0]) ||
+            !IsAsciiLetterOrDigit(value[^1]))
+        {
+            ThrowInvalidApplicationName(value);
+        }
+
+        foreach (char character in value)
+        {
+            if (!IsAsciiLetterOrDigit(character) && character != '-')
+            {
+                ThrowInvalidApplicationName(value);
+            }
+        }
+    }
+
+    private static ApplicationName Slugify(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "application";
+        }
+
+        Span<char> buffer = value.Length <= 256
+            ? stackalloc char[value.Length]
+            : new char[value.Length];
+        int length = 0;
+        bool lastWasSeparator = true;
+
+        foreach (char input in value)
+        {
+            char character = char.ToLowerInvariant(input);
+            if (IsAsciiLetterOrDigit(character))
+            {
+                if (length == 63)
+                {
+                    break;
+                }
+
+                buffer[length++] = character;
+                lastWasSeparator = false;
+            }
+            else if (!lastWasSeparator && length < 63)
+            {
+                buffer[length++] = '-';
+                lastWasSeparator = true;
+            }
+        }
+
+        while (length > 0 && buffer[length - 1] == '-')
+        {
+            length--;
+        }
+
+        return length == 0 ? "application" : new string(buffer[..length]);
+    }
+
+    private static bool IsAsciiLetterOrDigit(char character) =>
+        character is >= 'a' and <= 'z' or >= '0' and <= '9';
+
+    private static void ThrowInvalidApplicationName(string value)
+    {
+        throw new InvalidOperationException(
+            $"Application name '{value}' is invalid. Use an RFC1123 label containing 1-63 lowercase letters, numbers, or '-' characters, beginning and ending with a letter or number.");
     }
 }
