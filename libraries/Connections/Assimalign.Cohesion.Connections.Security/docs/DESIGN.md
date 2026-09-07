@@ -49,6 +49,8 @@ Two composition styles, both backed by the same decorator:
 ## Lifecycle and Error Model
 
 - Disposing the secured connection disposes the `SslStream`, then the inner connection.
+- A TLS-layered listener forwards `BindAsync` to its inner listener and owns that listener for
+  disposal, so layering does not change endpoint acquisition or release timing.
 - The handshake honors a configurable `HandshakeTimeout` (linked with the caller's cancellation
   token). On failure the `SslStream` is disposed and the exception (typically
   `AuthenticationException` from the platform TLS stack) propagates; the caller still owns the inner

@@ -60,6 +60,9 @@ for an area-classified dependency exception (restartable), 70 for any other pre-
 (final), and 75 for any other post-ready failure (restartable). A SIGINT drain that exceeds its
 budget maps to 130; other requested-stop drain cancellations map to 143. The typed classification
 seam uses static type tests supplied by the area registration and performs no reflection.
+`HostStartupException` provides a public envelope for startup and bind failures while retaining the
+original cause in `InnerException`. Classification recursively inspects that cause, so wrapped typed
+configuration and dependency failures retain their 64 and 69 mappings.
 
 Resource shutdown is governed by one declared value: `stopGraceSeconds`, defaulting to 30. The
 wrapper always overwrites `HostOptions.ShutdownTimeout` with

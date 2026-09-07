@@ -115,8 +115,8 @@ machines there is nothing to drive: an engine registered on the application
 (`DatabaseApplicationOptions.Engines`) is an **observational** entry on the
 context — the composition root that created it owns it. Durability-on-shutdown
 moved from "host stops engines last" to "composition root disposes engines after
-the host stops," which the Application executable's composition object does in
-dependency order (application → server → listener → engine).
+  the host stops," which the Application executable's composition object does in
+  dependency order (application → server-owned listener → engine).
 
 ## Configuration conventions
 

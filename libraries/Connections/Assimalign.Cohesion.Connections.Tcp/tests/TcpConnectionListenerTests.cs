@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,81 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 public class TcpConnectionListenerTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Should bind an ephemeral endpoint explicitly")]
+    public async Task BindAsync_WithEphemeralEndPoint_ShouldReflectBoundPort()
+    {
+        // Arrange
+        await using TcpConnectionListener listener = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+
+        // Act
+        await listener.BindAsync();
+        EndPoint firstBoundEndPoint = listener.EndPoint;
+        await listener.BindAsync();
+
+        // Assert
+        IPEndPoint boundEndPoint = listener.EndPoint.ShouldBeOfType<IPEndPoint>();
+        boundEndPoint.Port.ShouldNotBe(0);
+        boundEndPoint.ShouldBe(firstBoundEndPoint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Dispose should release a fixed endpoint for a new listener")]
+    public async Task BindAsync_AfterDisposedListenerOnSameEndPoint_ShouldSucceed()
+    {
+        // Arrange
+        TcpConnectionListener first = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+
+        await first.BindAsync();
+        IPEndPoint endPoint = first.EndPoint.ShouldBeOfType<IPEndPoint>();
+
+        // Act
+        await first.DisposeAsync();
+
+        await using TcpConnectionListener second = TcpConnectionListener.Create(
+            options => options.EndPoint = endPoint);
+        await second.BindAsync();
+
+        // Assert
+        second.EndPoint.ShouldBe(endPoint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Occupied endpoint failure should leave the listener bindable")]
+    public async Task BindAsync_WithOccupiedEndPoint_ShouldThrowSocketExceptionAndRemainBindable()
+    {
+        // Arrange
+        await using TcpConnectionListener first = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await first.BindAsync();
+
+        TcpConnectionListener second = TcpConnectionListener.Create(
+            options => options.EndPoint = first.EndPoint);
+
+        // Act
+        Exception? bindException = await Record.ExceptionAsync(async () => await second.BindAsync());
+        await first.DisposeAsync();
+        Exception? retryException = await Record.ExceptionAsync(async () => await second.BindAsync());
+        Exception? disposeException = await Record.ExceptionAsync(async () => await second.DisposeAsync());
+
+        // Assert
+        bindException.ShouldBeOfType<SocketException>();
+        retryException.ShouldBeNull();
+        disposeException.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Disposed listener should reject bind and accept")]
+    public async Task BindAsync_AfterDispose_ShouldThrowObjectDisposedException()
+    {
+        // Arrange
+        TcpConnectionListener listener = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await listener.DisposeAsync();
+
+        // Act / Assert
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.BindAsync());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.AcceptAsync());
+    }
 
     [Fact]
     public void Create_WithNullConfigure_ShouldThrowArgumentNullException()

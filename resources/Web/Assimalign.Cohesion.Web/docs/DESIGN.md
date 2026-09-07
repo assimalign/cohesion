@@ -43,6 +43,15 @@ extensibility mechanism, which is why the pipeline contracts here stay this smal
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
 registration form.
 
+## Server lifecycle contract
+
+`IWebApplicationServer.StartAsync` is the endpoint-acquisition boundary: it does not
+complete until every listener is bound and ready to accept. Binding failures propagate
+through startup instead of surfacing later from an accept loop. `StopAsync` is the
+symmetric release boundary and does not complete until the endpoints are released.
+Hosted restart constructs a fresh server/listener instance after the prior instance
+stops; a disposed listener is not rebound.
+
 ## Ordering is registration order
 
 Middleware ordering is positional. Some features carry hard ordering contracts — for

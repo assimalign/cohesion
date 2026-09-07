@@ -104,6 +104,11 @@ and a later dial throws `ConnectionAbortedException`. The transport has a single
 the endpoint argument to `ConnectAsync` selects nothing further; the returned connection reports
 the listener's endpoint as its remote endpoint, and endpoints mirror across the pair.
 
+`BindAsync` is a logical, allocation-free bind because there is no operating-system endpoint to
+acquire. It still honors cancellation and rejects a disposed listener, keeping the same host lifecycle
+contract as the resource-owning drivers. Disposal is terminal; a restart creates a new listener and a
+factory bound to that new instance.
+
 ## AOT Posture
 
 No reflection, no runtime code generation, no dynamic dispatch beyond interface calls. A pure

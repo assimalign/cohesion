@@ -1,17 +1,19 @@
 ﻿using System;
-using System.Linq;
 using System.Collections.Generic;
-using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
-using Assimalign.Cohesion.Hosting;
 
-
+/// <summary>
+/// Configures the servers that participate in a web application's host lifecycle.
+/// </summary>
 public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
@@ -45,6 +47,16 @@ public sealed class WebApplicationServerBuilder
                 MaxConcurrentConnections = _maxConcurrentConnections
             });
         });
+        _builder.Services.AddSingleton<IHostService>(serviceProvider =>
+        {
+            // The default server participates in host startup only when at least one listener was
+            // configured through this builder. A custom-only server composition must not also try
+            // to start an empty default listener, but keeping this descriptor in its original
+            // position preserves host-service ordering when the default is configured.
+            return _configurations.Count == 0
+                ? new InactiveDefaultServerService()
+                : (IHostService)serviceProvider.GetRequiredService<IWebApplicationServer>();
+        });
     }
 
     /// <summary>
@@ -75,11 +87,14 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// 
+    /// Adds a preconstructed custom server to the web application's host lifecycle.
     /// </summary>
-    /// <param name="server"></param>
-    /// <returns></returns>
-    public WebApplicationServerBuilder UseServer<TServer>(TServer server) where TServer : IWebApplicationServer, IHostService
+    /// <typeparam name="TServer">The custom server type.</typeparam>
+    /// <param name="server">The server to start and stop with the application.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="server"/> is <see langword="null"/>.</exception>
+    public WebApplicationServerBuilder UseServer<TServer>(TServer server)
+        where TServer : IWebApplicationServer, IHostService
     {
         ArgumentNullException.ThrowIfNull(server);
         _builder.Services.AddSingleton<IHostService>(server);
@@ -87,11 +102,14 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// 
+    /// Adds a custom server created from the application's service provider.
     /// </summary>
-    /// <param name="factory"></param>
-    /// <returns></returns>
-    public WebApplicationServerBuilder UseServer<TServer>(Func<IServiceProvider, TServer> factory) where TServer : IWebApplicationServer, IHostService
+    /// <typeparam name="TServer">The custom server type.</typeparam>
+    /// <param name="factory">The factory that creates the server.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
+    public WebApplicationServerBuilder UseServer<TServer>(Func<IServiceProvider, TServer> factory)
+        where TServer : IWebApplicationServer, IHostService
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -106,10 +124,11 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// Configures the default web server.
+    /// Configures the default web server's HTTP connection listener.
     /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="configure">The listener configuration callback.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
     public WebApplicationServerBuilder UseServer(Action<HttpConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
@@ -118,10 +137,11 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// 
+    /// Configures the default web server's HTTP connection listener using application services.
     /// </summary>
-    /// <param name="configure"></param>
-    /// <returns></returns>
+    /// <param name="configure">The callback that receives the service provider and listener options.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
     public WebApplicationServerBuilder UseServer(Action<IServiceProvider, HttpConnectionListenerOptions> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);
@@ -144,5 +164,21 @@ public sealed class WebApplicationServerBuilder
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+    }
+
+    private sealed class InactiveDefaultServerService : IHostService
+    {
+        public ServiceId Id { get; } = ServiceId.New();
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 }

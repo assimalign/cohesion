@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Security;
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
-/// Options controlling the key-value database server front-end: the bound
+/// Options controlling the key-value database server front-end: the
 /// transport listener, the authenticator, and the DoS guardrails.
 /// </summary>
 /// <remarks>
@@ -18,9 +18,10 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 public sealed class KeyValueDatabaseServerOptions
 {
     /// <summary>
-    /// Gets or sets the bound transport listener the server accepts connections
-    /// from. The composition root composes the listener (TCP, named pipe,
-    /// in-memory, …) and retains ownership — the server never disposes it.
+    /// Gets or sets the transport listener the server binds and accepts
+    /// connections from. The composition root configures the listener (TCP,
+    /// named pipe, in-memory, …), then transfers its lifecycle to the server.
+    /// Stop terminally disposes the listener.
     /// </summary>
     public IConnectionListener? Listener { get; set; }
 

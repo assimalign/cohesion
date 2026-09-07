@@ -28,6 +28,7 @@ transport-neutral health contributions, and service base classes for Cohesion ap
 - HostContext
 - HostEnvironment
 - HostException
+- HostStartupException
 - HostExtensions
 - HostOptions
 - HostState

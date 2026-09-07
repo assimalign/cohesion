@@ -342,12 +342,15 @@ root's rollup).
 ### Composition seam
 
 `SqlDatabaseServer.Create(engine, options)` — or the `AddSqlServer(engine,
-configure)` builder verb — composes a server. The options carry a **bound
-`IConnectionListener` instance**, not a listener factory: Connections drivers
-bind at construction, so a factory would add a layer that defers nothing, and
-passing the instance keeps ownership unambiguous — *the composition root
-creates and disposes the listener; the server only accepts from it*. Stop is
-signaled by cancelling the pending accept, never by disposing the listener.
+configure)` builder verb — composes a server. The options carry one configured
+`IConnectionListener` instance, not a listener factory. `StartAsync` explicitly
+awaits `BindAsync` before it starts the accept loop or returns; a bind failure is
+propagated only after the listener is terminally disposed, so a partially
+acquired endpoint cannot remain live. `StopAsync` cancels the pending accept,
+drains sessions within the configured budget, then terminally disposes the
+listener. Listener ownership therefore transfers to the server when start is
+attempted. Stop is terminal: restart symmetry is a fresh server with a fresh
+listener, never reuse of the disposed pair.
 `options.Authenticator` defaults to `DatabaseAuthenticator.AllowAll`
 (`Database.Security`) — the MVP development posture, deliberately an explicit,
 discoverable object rather than hidden server behavior. The engine is likewise
@@ -425,8 +428,8 @@ Server non-goals: no host-service adapter (`Database.Hosting` wraps
 `IDatabaseServer` generically through the root seam); no connection-level
 replication endpoints; no transaction frames yet (explicit transaction control
 over the wire lands with the protocol's `Transaction` payload schema); no
-TLS/transport policy — transports come bound from `libraries/Connections`
-drivers, and the composition root owns them.
+TLS/transport policy — transport configuration stays in `libraries/Connections`
+drivers, while the server owns bind-through-release lifecycle.
 
 ## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
 

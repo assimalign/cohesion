@@ -58,8 +58,8 @@ internal static class DatabaseApplicationBootstrap
             options.Durability = durability;
         });
 
-        // Bind all interfaces (container-style: the gateway injects the port and
-        // owns the network boundary); an unset port lets the OS assign one.
+        // Configure all interfaces (container-style: the gateway injects the port and
+        // owns the network boundary); an unset port is assigned by the OS at server start.
         var listener = new TcpConnectionListener(new TcpConnectionListenerOptions
         {
             EndPoint = new IPEndPoint(IPAddress.Any, configuration.Port ?? 0),

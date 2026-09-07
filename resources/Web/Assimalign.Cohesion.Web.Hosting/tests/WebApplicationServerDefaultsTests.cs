@@ -1,5 +1,11 @@
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Web;
 
 using Shouldly;
 
@@ -9,6 +15,26 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public class WebApplicationServerDefaultsTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: A custom-only server should not start the empty default server")]
+    public async Task UseServer_WithCustomServerOnly_ShouldRunOnlyTheCustomServer()
+    {
+        // Arrange
+        TrackingApplicationServer customServer = new();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseServer(customServer);
+        await using WebApplication application = builder.Build();
+
+        // Act
+        await ((IWebApplication)application).StartAsync();
+
+        // Assert
+        customServer.StartCount.ShouldBe(1);
+        application.Context.Servers.Single().ShouldBeSameAs(customServer);
+
+        await ((IWebApplication)application).StopAsync();
+        customServer.StopCount.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the max-request-body-size interceptor first")]
     public void ApplyDefaultInterceptors_ShouldInstallRequestLimitsFirst()
     {
@@ -41,5 +67,26 @@ public class WebApplicationServerDefaultsTests
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
+    }
+
+    private sealed class TrackingApplicationServer : IWebApplicationServer, IHostService
+    {
+        public ServiceId Id { get; } = ServiceId.New();
+
+        public int StartCount { get; private set; }
+
+        public int StopCount { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            StartCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            StopCount++;
+            return Task.CompletedTask;
+        }
     }
 }

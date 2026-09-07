@@ -24,7 +24,8 @@ shared storage, with DDL flowing through the relational catalog
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
 - **The wire-protocol server** — `SqlDatabaseServer` (+ `SqlDatabaseServerOptions`)
-  fronts one engine on a bound `Connections` listener; the session state
+  fronts one engine on a configured `Connections` listener that it binds at
+  start and releases at stop; the session state
   machine, guardrails, and two-phase drain are implemented inside this package
   (servers are per-model and each model carries its own copy of the machinery —
   owner decision 2026-07-14; see DESIGN.md).
@@ -64,7 +65,7 @@ SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
 
 SqlDatabaseServer server = builder.AddSqlServer(engine, options =>
 {
-    options.Listener = listener;               // the bound transport listener
+    options.Listener = listener;               // server binds and owns its lifecycle
 });
 ```
 

@@ -47,9 +47,9 @@ is what the gateway E2E launches) until that issue lands.
   model's own verb (`builder.AddSqlDatabase(...)` — shipped by `Database.Sql`
   against the root's `IDatabaseApplicationBuilder` seam; the engine is a data
   machine, operational the moment the verb returns), fronts it with the SQL
-  model's server (`builder.AddSqlServer(engine, ...)` over the TCP listener —
-  eager, not deferred: a per-model server needs only its one engine, already in
-  hand), and parks the default-database provisioner on
+  model's server (`builder.AddSqlServer(engine, ...)` over the configured TCP
+  listener — the server awaits binding at start and owns listener release), and
+  parks the default-database provisioner on
   `builder.Options.Services`. Hand-assembling `DatabaseApplicationOptions` was
   the interim shape; the builder is the same options object with the model
   registration inverted to the package that owns the model.

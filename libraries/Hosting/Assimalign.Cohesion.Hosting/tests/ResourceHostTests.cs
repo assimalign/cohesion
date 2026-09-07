@@ -343,6 +343,54 @@ public class ResourceHostTests
         unrelatedCancellation.ShouldBe(75);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Exit codes: Classifies wrapped startup failures")]
+    public void ClassifyExitCode_WithWrappedStartupFailures_PreservesTypedMappings()
+    {
+        // Arrange
+        var options = new ResourceHostOptions(
+            stopEventName: string.Empty,
+            exceptionClassifier: ResourceHostOptions.CreateExceptionClassifier<
+                TestResourceConfigurationException,
+                TestResourceDependencyException>(),
+            exitCodeHandler: static _ => { },
+            signalSource: new TestResourceHostSignalSource());
+
+        var configurationFailure = new HostStartupException(
+            "The resource host failed to start.",
+            new TestResourceConfigurationException());
+        var dependencyFailure = new HostStartupException(
+            "The resource host failed to start.",
+            new TestResourceDependencyException());
+        var genericFailure = new HostStartupException(
+            "The resource host failed to start.",
+            new InvalidOperationException());
+
+        // Act
+        int configuration = ResourceHost.ClassifyExitCode(
+            configurationFailure,
+            options,
+            hasReachedReady: false,
+            isDrainAborted: false,
+            ResourceHostStopSignal.None);
+        int dependency = ResourceHost.ClassifyExitCode(
+            dependencyFailure,
+            options,
+            hasReachedReady: false,
+            isDrainAborted: false,
+            ResourceHostStopSignal.None);
+        int startup = ResourceHost.ClassifyExitCode(
+            genericFailure,
+            options,
+            hasReachedReady: false,
+            isDrainAborted: false,
+            ResourceHostStopSignal.None);
+
+        // Assert
+        configuration.ShouldBe(64);
+        dependency.ShouldBe(69);
+        startup.ShouldBe(70);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "ShutdownTimeout: Derives default and floor from stop grace")]
     public void ShutdownTimeout_WithDefaultAndShortGrace_DerivesExpectedBudget()
     {

@@ -12,6 +12,20 @@ public class InMemoryConnectionListenerTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - BindAsync: Logical bind should complete until listener disposal")]
+    public async Task BindAsync_BeforeAndAfterDispose_ShouldRespectTerminalDisposal()
+    {
+        // Arrange
+        InMemoryConnectionListener listener = new();
+
+        // Act
+        await listener.BindAsync();
+        await listener.DisposeAsync();
+
+        // Assert
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.BindAsync());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Listener: Dial then accept should yield a connected pair")]
     public async Task Dial_ThenAccept_ShouldYieldConnectedPair()
     {

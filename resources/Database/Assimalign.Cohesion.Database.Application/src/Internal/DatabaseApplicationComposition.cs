@@ -10,10 +10,9 @@ namespace Assimalign.Cohesion.Database.Application.Internal;
 
 /// <summary>
 /// The composed parts of the standalone database host, owned as one unit: the
-/// engine, the bound listener, the wire-protocol server, and the application that
-/// hosts them. Disposal tears the parts down in dependency order (application →
-/// server → listener → engine); the composition root creates and disposes the
-/// listener — the server only accepts from it.
+/// engine, the configured listener, the wire-protocol server, and the application
+/// that hosts them. The server binds and releases the listener through the
+/// application's lifecycle; composition disposal then releases the engine.
 /// </summary>
 internal sealed class DatabaseApplicationComposition : IAsyncDisposable
 {
@@ -32,7 +31,7 @@ internal sealed class DatabaseApplicationComposition : IAsyncDisposable
     /// <summary>Gets the SQL engine the host serves.</summary>
     internal SqlDatabaseEngine Engine { get; }
 
-    /// <summary>Gets the bound TCP listener the endpoint accepts from.</summary>
+    /// <summary>Gets the TCP listener whose endpoint is acquired when the application starts.</summary>
     internal TcpConnectionListener Listener { get; }
 
     /// <summary>Gets the SQL model's wire-protocol server fronting the engine.</summary>
@@ -55,7 +54,6 @@ internal sealed class DatabaseApplicationComposition : IAsyncDisposable
     {
         await ((IAsyncDisposable)Application).DisposeAsync().ConfigureAwait(false);
         await Server.DisposeAsync().ConfigureAwait(false);
-        await Listener.DisposeAsync().ConfigureAwait(false);
         await Engine.DisposeAsync().ConfigureAwait(false);
     }
 }

@@ -133,8 +133,12 @@ Model-specific wire surface (binary command frames, if measurement ever demands
 them) grows here, in this copy, without touching any other model. The machinery
 design record (composition seam, state machine, error taxonomy, two-phase stop)
 is documented in `Database.Sql`'s DESIGN.md server section, whose decisions
-this copy currently mirrors; when this copy diverges, this section records the
-divergence.
+this copy currently mirrors. In particular, `StartAsync` awaits the configured
+listener's `BindAsync` before starting the accept loop or returning; bind
+failure terminally disposes the listener. `StopAsync` cancels accept, drains
+sessions, then terminally disposes the listener. Stop is terminal, so restart
+symmetry composes a fresh server and listener rather than reusing the disposed
+pair. When this copy diverges, this section records the divergence.
 
 ## Engine-owned background workers
 

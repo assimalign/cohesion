@@ -44,24 +44,33 @@ Three properties fall out of that intent and shape the whole implementation:
 ## Server dispatch model
 
 ```
-StartAsync ──> AcceptLoopAsync (one stored Task)
-                  │  (optional) await a concurrency slot
-                  ├─ await listener.AcceptOrListenAsync
-                  └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
-                                    await using connection
-                                      OpenAsync
-                                      await foreach ReceiveAsync
-                                        pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
-                                      dispose context
-                                    (connection disposed by await using)
+StartAsync ──> await listener.BindAsync ──> AcceptLoopAsync (one stored Task)
+                                             │  (optional) await a concurrency slot
+                                             ├─ await listener.AcceptOrListenAsync
+                                             └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
+                                                               await using connection
+                                                                 OpenAsync
+                                                                 await foreach ReceiveAsync
+                                                                   pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
+                                                                 dispose context
+                                                               (connection disposed by await using)
 ```
 
-**One accept loop, one task per connection.** `StartAsync` schedules a single
-accept loop as a stored `Task` and returns immediately (the host-service contract
-uses the start token only to abort startup, which completes synchronously here).
-The loop accepts a connection and *hands it off* to `ServeConnectionAsync` on its
-own `Task`, then loops straight back to accept the next one. The loop never awaits
-a connection's service.
+**Bind before Started.** `StartAsync` first awaits the aggregate HTTP listener's
+`BindAsync`. Only after every transport endpoint is bound does it schedule the
+stored accept-loop task and return. A bind failure is surfaced as
+`HostStartupException`, preserving the transport exception as its inner exception;
+`ResourceHost` can therefore classify typed configuration/dependency causes as
+exit 64/69 and other pre-ready bind failures as exit 70. The default server is
+registered as both `IWebApplicationServer` and `IHostService`, resolving to the
+same singleton, so the host lifecycle actually drives this boundary. When an
+application registers only a custom server and supplies no default-listener
+configuration, the reserved default host-service slot is inert; it does not start an
+empty aggregate alongside the custom server.
+
+**One accept loop, one task per connection.** The loop accepts a connection and
+*hands it off* to `ServeConnectionAsync` on its own `Task`, then loops straight
+back to accept the next one. The loop never awaits a connection's service.
 
 **Why this is the whole point.** The previous implementation queued one
 `async void` thread-pool work item that accepted a connection and then
@@ -166,12 +175,14 @@ internal state.
    surfacing an unobserved `OperationCanceledException` or any other escaped
    exception.
 4. **Dispose the listener**, then the shutdown token source and (if present) the
-   concurrency semaphore.
+   concurrency semaphore. Listener disposal runs from a `finally`, including when
+   the caller's drain token expires, so `StopAsync` never completes with the port
+   still owned by this server.
 
-Cancelling before starting, or stopping twice, is a safe no-op guarded by
-interlocked flags. The drain budget is owned by the caller's host lifecycle
-(`Host<TContext>.StopAsync` applies `ShutdownTimeout`); the server does not
-impose its own.
+Cancelling before starting, or stopping twice, is safe and idempotent. The drain
+budget is owned by the caller's host lifecycle (`Host<TContext>.StopAsync` applies
+`ShutdownTimeout`); the server honors that token while awaiting its loops but
+still performs listener release.
 
 **Cancellation is drain, not force-kill of in-progress requests.** A single token
 governs both "stop accepting" and "unblock in-flight connections." Idle
@@ -543,36 +554,27 @@ protocols to TLS 1.3 when the caller leaves them unset (a caller-supplied list i
 preserved unmodified); the `TlsServerOptions` overload applies those defaults
 eagerly to the passed options so a later read observes them, matching `UseHttp2s`.
 
-### Async materialization — why a deferred factory that blocks once
+### Async binding without sync-over-async
 
-The stream-protocol sugar composes a *synchronous* listener factory
-(`() => TcpConnectionListener.Create(...)`), but binding a QUIC listener is
-asynchronous (`QuicConnectionListener.CreateAsync`). That mismatch is what the earlier
-`WebHostingExtensions` remarks recorded as the reason h3 had no callback overload.
-
-Rather than push an async shape up through the whole registration surface (and the
-synchronous `IWebApplicationServer` DI factory that resolves it), the h3 members reuse
-the transport's existing synchronous deferred-factory seam
-(`HttpConnectionListenerOptions.UseHttp3(Func<IMultiplexedConnectionListener>)`) and
-supply a factory that **materializes the QUIC listener at server start** — inside the
-`HttpConnectionListener` constructor, which the default server resolves lazily — and
-**blocks once** on the async bind there. The block is offloaded to the thread pool
-(`Task.Run(() => CreateAsync(...).AsTask()).GetAwaiter().GetResult()`) so no captured
-`SynchronizationContext` can deadlock it — the same sync-over-async bridge the
-connection primitives use (`DuplexPipeStream`, the request-body streams). Listener
-creation therefore happens at start, never at configuration time: the callback is not
-even invoked until the listener materializes, which a registration-time defer test pins.
+The registration surface remains synchronous: its deferred factory constructs an
+*unbound* `QuicConnectionListener` and returns it immediately. Resource acquisition
+does not occur in the factory or in the `HttpConnectionListener` constructor. The
+aggregate listener's asynchronous `BindAsync` awaits the QUIC driver's asynchronous
+bind from `WebApplicationServer.StartAsync`, alongside every configured stream
+listener. This removes the previous sync-over-async bridge and makes TCP and QUIC obey
+the same explicit start/release lifecycle. The callback is still deferred until the
+HTTP listener materializes, so configuration time remains resource-free.
 
 ### Platform posture
 
 `System.Net.Quic` is available only on Windows, Linux, and macOS, and only when the
-platform ships a usable QUIC implementation (for example libmsquic). The h3 members —
-and the private materialization helper — are annotated
+platform ships a usable QUIC implementation (for example libmsquic). The h3 members
+are annotated
 `[SupportedOSPlatform("windows"/"linux"/"macos")]` to match the QUIC driver, so a call
 site on another OS is flagged by the platform-compatibility analyzer. At run time, when
-the platform lacks QUIC support (`QuicListener.IsSupported` is `false`), materialization
-throws `PlatformNotSupportedException` **at start**, propagated straight from
-`QuicConnectionListener.CreateAsync`. The tests gate on `QuicListener.IsSupported` and
+the platform lacks QUIC support (`QuicListener.IsSupported` is `false`), awaited binding
+throws `PlatformNotSupportedException` **at start**, propagated from
+`QuicConnectionListener.BindAsync`. The tests gate on `QuicListener.IsSupported` and
 assert the bind on supported platforms or the `PlatformNotSupportedException` otherwise,
 so a CI machine without QUIC never hard-fails.
 
@@ -604,7 +606,7 @@ server-side dispatch observation.
 
 ### AOT posture
 
-No reflection, no runtime codegen. Registration is plain delegate wiring; the ALPN/TLS
-defaults are list/enum assignments; materialization is `Task.Run` +
-`GetAwaiter().GetResult()` over `QuicConnectionListener.CreateAsync`.
-`IsAotCompatible=true` holds with no special handling.
+No reflection, no runtime codegen, and no sync-over-async bridge. Registration is plain
+delegate wiring; the ALPN/TLS defaults are list/enum assignments; awaited transport
+binding uses ordinary `ValueTask` APIs. `IsAotCompatible=true` holds with no special
+handling.

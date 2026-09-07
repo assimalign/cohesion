@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,6 +9,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Hosting;
 
 /// <summary>
 /// The default <see cref="IWebApplicationServer"/>: a dedicated accept loop that dispatches every
@@ -31,7 +33,7 @@ using Assimalign.Cohesion.Http.Connections;
 /// re-implement any wire-protocol behaviour.
 /// </para>
 /// </remarks>
-internal sealed class WebApplicationServer : IWebApplicationServer
+internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 {
     private readonly IWebApplicationPipeline _pipeline;
     private readonly IHttpConnectionListener _listener;
@@ -45,10 +47,12 @@ internal sealed class WebApplicationServer : IWebApplicationServer
     // Null == unlimited. Otherwise a fair gate around accept: a slot is acquired before accepting
     // and released when the connection it was acquired for finishes, bounding concurrent service.
     private readonly SemaphoreSlim? _connectionSlots;
+    private readonly Lock _lifecycleLock = new();
 
     private long _connectionKey;
+    private Task? _startTask;
+    private Task? _stopTask;
     private Task? _acceptLoop;
-    private int _started;
     private int _stopped;
 
     public WebApplicationServer(WebApplicationServerOptions options)
@@ -74,37 +78,81 @@ internal sealed class WebApplicationServer : IWebApplicationServer
         }
     }
 
+    /// <inheritdoc />
+    public ServiceId Id { get; } = ServiceId.New();
+
     /// <summary>
-    /// Starts the accept loop and returns immediately.
+    /// Binds the configured listener and then starts the accept loop.
     /// </summary>
     /// <remarks>
     /// Per the host-service contract the loop runs as a stored <see cref="Task"/> — never an
     /// <c>async void</c> thread-pool work item — so its exceptions are observable rather than
-    /// escalated to a process-terminating unhandled exception. Repeated calls are no-ops.
+    /// escalated to a process-terminating unhandled exception. Concurrent and repeated calls await
+    /// the same bind operation.
     /// </remarks>
-    /// <param name="cancellationToken">Unused beyond the start; the running loop is controlled by <see cref="StopAsync"/>.</param>
-    /// <returns>A completed task once the loop has been scheduled.</returns>
+    /// <param name="cancellationToken">The cancellation token for listener binding.</param>
+    /// <returns>A task that completes only after the listener is bound and the loop is scheduled.</returns>
+    /// <exception cref="HostStartupException">Thrown when the configured listener cannot be bound.</exception>
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        // A stop already ran (or is running): the shutdown source is cancelled/disposed, so a stray
-        // start is a no-op rather than a restart. The server is single start/stop by design.
-        if (Volatile.Read(ref _stopped) == 1)
+        lock (_lifecycleLock)
         {
-            return Task.CompletedTask;
+            // A stop already ran (or is running): the shutdown source is cancelled/disposed, so a
+            // stray start is a no-op. In-process restart builds a fresh host and listener instance.
+            if (Volatile.Read(ref _stopped) == 1)
+            {
+                return Task.CompletedTask;
+            }
+
+            return _startTask ??= StartCoreAsync(cancellationToken);
+        }
+    }
+
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource bindCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _shutdown.Token);
+
+        try
+        {
+            await _listener.BindAsync(bindCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // StopAsync won a race with startup. It awaits this task and owns terminal listener
+            // release, so cancellation of the pending bind is a clean stop rather than a startup
+            // failure.
+            return;
+        }
+        catch (HostStartupException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new HostStartupException(
+                "The web application server failed to bind its configured listener.",
+                exception);
         }
 
-        // The accept loop's lifetime is bound to StopAsync, not the startup token: the host-service
-        // contract uses the start token to abort startup only, which here completes synchronously.
-        if (Interlocked.Exchange(ref _started, 1) == 1)
+        lock (_lifecycleLock)
         {
-            return Task.CompletedTask;
+            // Stop may have won a race with an asynchronous bind. In that case StopAsync owns
+            // listener release and this start completes without touching its disposed token source.
+            if (Volatile.Read(ref _stopped) == 1)
+            {
+                return;
+            }
+
+            // Capture the token on this thread so the scheduled loop never reads a disposed source.
+            CancellationToken shutdownToken = _shutdown.Token;
+            _acceptLoop = Task.Run(() => AcceptLoopAsync(shutdownToken));
         }
-
-        // Capture the token on this thread so the scheduled loop never reads a disposed source.
-        CancellationToken shutdownToken = _shutdown.Token;
-        _acceptLoop = Task.Run(() => AcceptLoopAsync(shutdownToken));
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -117,36 +165,85 @@ internal sealed class WebApplicationServer : IWebApplicationServer
     /// completes without surfacing an unobserved <see cref="OperationCanceledException"/>. Repeated
     /// calls, and a stop before start, are safe.
     /// </remarks>
-    /// <param name="cancellationToken">Unused; the drain budget is owned by the caller's host lifecycle.</param>
+    /// <param name="cancellationToken">The cancellation token that bounds waits during the drain.</param>
     /// <returns>A task that completes when the accept loop and all in-flight connections have drained.</returns>
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _stopped, 1) == 1)
+        lock (_lifecycleLock)
         {
-            return;
+            return _stopTask ??= StopCoreAsync(cancellationToken);
         }
+    }
 
-        _shutdown.Cancel();
+    private async Task StopCoreAsync(CancellationToken cancellationToken)
+    {
+        Volatile.Write(ref _stopped, 1);
+        Exception? shutdownSignalFailure = null;
 
-        // Wait for the accept loop to observe cancellation first: once it has stopped, no new
-        // connection task can be added, so the in-flight snapshot below is complete.
-        if (_acceptLoop is not null)
+        try
         {
-            await _acceptLoop.ConfigureAwait(false);
-        }
+            try
+            {
+                _shutdown.Cancel();
+            }
+            catch (Exception exception)
+            {
+                // Cancellation callbacks are user-extensible. Record their failure, but continue
+                // through bind/accept unwinding and listener release before surfacing it.
+                shutdownSignalFailure = exception;
+            }
 
-        Task[] inFlight = _connections.Values.ToArray();
-        if (inFlight.Length > 0)
+            if (_startTask is not null)
+            {
+                try
+                {
+                    await _startTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Startup itself was cancelled. Stop still owns terminal listener cleanup.
+                }
+                catch (HostStartupException)
+                {
+                    // The bind failure was already delivered to the startup caller. Stop is the
+                    // rollback path and must release resources without reporting it a second time.
+                }
+            }
+
+            // Wait for the accept loop to observe cancellation first: once it has stopped, no new
+            // connection task can be added, so the in-flight snapshot below is complete.
+            if (_acceptLoop is not null)
+            {
+                await _acceptLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            Task[] inFlight = _connections.Values.ToArray();
+            if (inFlight.Length > 0)
+            {
+                // Every connection task is self-contained (it never rethrows), so WhenAll drains
+                // them without observing an exception.
+                await Task.WhenAll(inFlight).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (shutdownSignalFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(shutdownSignalFailure).Throw();
+            }
+        }
+        finally
         {
-            // Every connection task is self-contained (it never rethrows), so WhenAll drains them
-            // without observing an exception.
-            await Task.WhenAll(inFlight).ConfigureAwait(false);
+            // Releasing the listener is not optional when a drain budget expires: StopAsync does
+            // not complete until the endpoint is free for a replacement host instance.
+            try
+            {
+                await _listener.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _shutdown.Dispose();
+                _connectionSlots?.Dispose();
+            }
         }
-
-        await _listener.DisposeAsync().ConfigureAwait(false);
-
-        _shutdown.Dispose();
-        _connectionSlots?.Dispose();
     }
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
@@ -172,7 +269,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer
                 {
                     // The slot was reserved for a connection we never accepted; return it so a
                     // transient accept failure does not permanently shrink the cap.
-                    _connectionSlots?.Release();
+                    ReleaseConnectionSlot();
                     throw;
                 }
 
@@ -260,7 +357,21 @@ internal sealed class WebApplicationServer : IWebApplicationServer
         finally
         {
             _connections.TryRemove(key, out _);
+            ReleaseConnectionSlot();
+        }
+    }
+
+    private void ReleaseConnectionSlot()
+    {
+        try
+        {
             _connectionSlots?.Release();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _stopped) == 1)
+        {
+            // A caller's drain budget expired and terminal cleanup disposed the gate before an
+            // application task that ignored cancellation returned. The server is already stopped;
+            // releasing that retired slot has no observable purpose.
         }
     }
 

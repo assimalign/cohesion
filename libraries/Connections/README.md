@@ -32,6 +32,10 @@ by protocol identity. Direction is structural — servers hold listeners, client
 and connection transformations compose at establishment via `listener.Use(layer)` /
 `factory.Use(layer)`.
 
+Listeners acquire their configured endpoints explicitly through `BindAsync`. Binding is idempotent
+while a listener is active; `DisposeAsync` releases the endpoint and terminally ends that listener
+instance. A later host start creates and binds a new listener rather than reusing a disposed one.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Core` (all projects)

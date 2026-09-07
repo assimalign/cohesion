@@ -50,7 +50,7 @@ public static class SqlDatabaseApplicationExtensions
         /// serves.
         /// </summary>
         /// <param name="engine">The SQL engine the server fronts — typically the return of <c>AddSqlDatabase</c>, or an engine the composition root created itself. The composition root owns and disposes the engine.</param>
-        /// <param name="configure">Configures the server options; must supply the bound <see cref="SqlDatabaseServerOptions.Listener"/> (the composition root owns the listener).</param>
+        /// <param name="configure">Configures the server options; must supply the <see cref="SqlDatabaseServerOptions.Listener"/> whose lifecycle transfers to the server.</param>
         /// <returns>
         /// The registered <see cref="SqlDatabaseServer"/> (the Web convention of
         /// returning the feature's own composition object).

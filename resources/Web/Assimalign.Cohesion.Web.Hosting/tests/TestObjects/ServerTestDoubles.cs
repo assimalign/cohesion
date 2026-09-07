@@ -27,6 +27,8 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
     private readonly Channel<IHttpConnection> _connections = Channel.CreateUnbounded<IHttpConnection>();
 
     private int _disposeCount;
+    private int _bindCount;
+    private int _acceptCount;
 
     public FakeHttpConnectionListener(params IHttpConnection[] connections)
     {
@@ -41,18 +43,37 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
 
+    public int BindCount => Volatile.Read(ref _bindCount);
+
+    public int AcceptCount => Volatile.Read(ref _acceptCount);
+
+    public Func<CancellationToken, ValueTask>? BindHandler { get; init; }
+
+    public Func<ValueTask>? DisposeHandler { get; init; }
+
     public HttpProtocol Protocols => HttpProtocol.Http11;
+
+    public ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _bindCount);
+        return BindHandler?.Invoke(cancellationToken) ?? ValueTask.CompletedTask;
+    }
 
     public async Task<IHttpConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
+        Interlocked.Increment(ref _acceptCount);
         return await _connections.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Interlocked.Increment(ref _disposeCount);
         _connections.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+
+        if (DisposeHandler is not null)
+        {
+            await DisposeHandler().ConfigureAwait(false);
+        }
     }
 }
 

@@ -10,7 +10,7 @@ by a parent process (socket activation).
 
 ## Scope
 
-- `TcpConnectionListener` — the accept side: binds lazily on first accept and produces live
+- `TcpConnectionListener` — the accept side: binds explicitly through `BindAsync` and produces live
   `Connection`s. Binds an `IPEndPoint`, a `UnixDomainSocketEndPoint` (with socket-file lifecycle), or
   adopts a `FileHandleEndPoint` (inherited descriptor).
 - `TcpConnectionFactory` — the dial side: connects an outbound socket to any of the same endpoint forms.

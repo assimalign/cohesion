@@ -204,6 +204,12 @@ to it. The interface remains the canonical surface consumers depend on.
 
 ## Lifecycle and Error Model
 
+- A listener is configured when constructed and acquires its endpoint through `BindAsync`. Binding is
+  idempotent while active. `DisposeAsync` releases the endpoint and is terminal for that listener
+  instance; restart constructs and binds a new listener. Guided bases provide a completed logical-bind
+  default for custom listeners that are pre-bound or own no external endpoint, while resource-owning
+  drivers override it. `AcceptAsync` remains the connection-production operation, not the endpoint-
+  acquisition signal.
 - A connection is **live when produced** — there is no separate open step and no
   connection-versus-context duality. Read and write immediately.
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;

@@ -18,5 +18,7 @@
 		<!-- The KeyValueDatabaseServer wire suite runs over the in-memory
 		     Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- Lifecycle symmetry is proven against a real fixed TCP endpoint. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 </Project>

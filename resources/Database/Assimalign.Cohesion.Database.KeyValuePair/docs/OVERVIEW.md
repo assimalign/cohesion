@@ -42,8 +42,8 @@ keys order by unsigned lexicographic byte comparison.
   and the shared tuple codec (direct references; the rest of the kernel arrives
   through the root).
 - `Assimalign.Cohesion.Connections` — the transport listeners the model's
-  wire-protocol server accepts from (the composition root binds and owns the
-  listener).
+  wire-protocol server binds and accepts from (the server owns listener
+  lifecycle once start is attempted).
 
 ## Usage
 
