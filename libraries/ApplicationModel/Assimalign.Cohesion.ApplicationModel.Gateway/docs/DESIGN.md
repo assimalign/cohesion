@@ -17,12 +17,14 @@ This package implements the control-plane contracts defined in
   `IApplicationResourceStateManager` for gateway authors.
 - **`LocalGateway`** (+ `LocalGatewayOptions`) — the default gateway for local development,
   which realizes each resource as a supervised child process.
-- Internal pieces: `ResourceControlContext`, `LocalResourceResolver`,
-  `LocalGatewayProcessSupervisor`, `LocalProcessController`, `ExecutableArtifact`.
-- **`UseLocalGateway()`** builder extensions.
+- Internal pieces: `ResourceControlContext`, `LocalResourceResolver`, port and mount
+  materializers, the probe runner, `LocalGatewayProcessSupervisor`, `LocalProcessController`,
+  `ExecutableArtifact`.
+- **`UseLocalGateway()`** and **`AddExecutable(...)`** builder extensions.
 
-It references `Assimalign.Cohesion.ApplicationModel` only, and is `IsAotCompatible` /
-AOT-gated — no reflection, no `Microsoft.Extensions.*`. Publishing the concrete reference
+It references the Core-only `Assimalign.Cohesion.ApplicationModel` and
+`Assimalign.Cohesion.Security.DataProtection` packages, and is `IsAotCompatible` / AOT-gated —
+no reflection, no `Microsoft.Extensions.*`. Publishing the concrete reference
 state manager is the signed-off, narrowly scoped exception to the repository's interface-first
 default; the interface remains the control-plane contract.
 
@@ -69,17 +71,33 @@ the registration under the same lock.
 
 ## LocalGateway — process realization
 
-- **Resolution**: `LocalResourceResolver` maps an `IExecutableResource.Artifact` to
-  `{artifact}.exe` (Windows) or `{artifact}` (elsewhere) next to the orchestrator's
-  `AppContext.BaseDirectory`. A `dotnet run`-against-project dev fallback is a planned follow-up.
-- **Supervision**: `LocalGatewayProcessSupervisor` is the gateway's single state writer. It
-  spawns the child with redirected output (piped with a `[resource-name]` prefix), marks it
-  `Starting`, then `Running` on a readiness signal — a configurable stdout marker, or (default)
-  surviving a short settle window. Process exit maps to `Stopped` (exit 0) or `Failed`; either
-  state observed before `Running` fails initial readiness immediately.
+- **Resolution**: manifest-backed resources launch the exact `artifact.apphost`; the local
+  gateway never falls back to the managed assembly DLL. A plain or orchestration-disabled
+  executable can launch only through `AddExecutable(name, path, options)`, with an explicit
+  readiness probe or per-resource stdout marker.
+- **Endpoints**: each endpoint gets a loopback port persisted in
+  `.cohesion/<application>/ports.json`. The gateway injects the frozen `ResourceEnvironment`
+  endpoint contract (caller values win), publishes the allocated endpoints atomically with the
+  first `Running` transition. Dependency environment injection remains design item 21.
+- **Probes**: HTTP (exactly 200 succeeds; 404/405 fail startup immediately), TCP, and exec are
+  gateway-side and AOT-safe. Missing manifest probe roles use the resource's default control-plane
+  endpoint and role route (`<path>/readyz` for startup/readiness, `<path>/livez` for liveness);
+  explicit `none` disables a role. The canonical
+  `cohesion-resource: ready` stdout line starts manifest probing but is not readiness proof.
+  `AddExecutable` may instead use its configured marker as the whole readiness signal.
+- **Supervision**: stdout and stderr are piped with a `[resource-name]` prefix. A failed liveness
+  attempt moves `Running` to `Degraded` with the probe detail. Three consecutive failures restart
+  under `OnFailure` (default), `Always`, or `Never`, with 1-second exponential backoff capped at
+  30 seconds and five restart attempts. A restart observes
+  `Degraded → Stopping → Starting → Running`; dependents are never re-gated.
+- **Mounts**: resources receive `COHESION_MOUNT_<M>_PATH` rooted at
+  `.cohesion/<application>/<resource>/<mount>`. POSIX directories/files use exact 0700/0600
+  modes. Windows files are DataProtection ciphertext backed by a CurrentUser DPAPI-protected key
+  ring; this makes no ACL claim. Gateway-side source resolution and a distinct child-readable
+  Windows delivery carrier remain design item 25 work.
 - **Shutdown**: reverse-order `Kill(entireProcessTree: true)` bounded by `StopGrace`, marking
   `Stopped`. A graceful, platform-specific `SIGTERM` / console-Ctrl-C ahead of the kill is a
-  planned follow-up (there is no cross-platform BCL primitive for it).
+  planned item-20 follow-up, together with process groups and pid-file re-attachment.
 
 ## Testing posture
 
@@ -89,8 +107,10 @@ failure→`Blocked`+throw, and readiness-timeout; the state manager asserts term
 for `Running`/`Failed`/`Stopped`/timeout, cancellation propagation and cleanup, non-gating
 `Degraded`, race-free set-before-subscribe, observed endpoints, and the event). The generic
 algorithm also verifies that post-`Running` degradation does not re-gate dependents. Real
-child-process spawning is exercised end-to-end by the Scheduler proof (Phase 3);
-`LocalGateway`'s own tests cover its identity, wiring, and the artifact-resolution error path.
+child-process spawning is exercised by a co-located, BCL-only test apphost. `LocalGateway` tests
+cover persisted ports and contract environment, default and explicit HTTP readiness (including
+404 fail-fast), TCP and exec probes, liveness degradation/restart/backoff, mount materialization,
+prefixed stdout/stderr, and `AddExecutable` marker readiness.
 
 ## Non-goals
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -33,9 +34,18 @@ public sealed class LocalGateway : ApplicationGateway
     public LocalGateway(LocalGatewayOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _options.Validate();
         _resolver = new LocalResourceResolver(_options.BaseDirectory ?? AppContext.BaseDirectory);
+        string stateDirectory = _options.StateDirectory
+            ?? Path.Combine(Environment.CurrentDirectory, ".cohesion");
+        var ports = new LocalPortStore(stateDirectory);
+        var mounts = new LocalMountMaterializer(stateDirectory);
+        var preparer = new LocalResourcePreparer(ports, mounts);
         var supervisor = new LocalGatewayProcessSupervisor(_state, _options);
-        _controllers = new IApplicationResourceController[] { new LocalProcessController(supervisor) };
+        _controllers = new IApplicationResourceController[]
+        {
+            new LocalProcessController(preparer, supervisor),
+        };
     }
 
     /// <inheritdoc/>
@@ -50,16 +60,41 @@ public sealed class LocalGateway : ApplicationGateway
     /// <inheritdoc/>
     protected override TimeSpan ReadinessBudget => _options.ReadinessBudget;
 
+    internal IApplicationResourceStateManager ResourceStates => _state;
+
     /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)
     {
-        if (resource is not IExecutableResource executable)
+        string path;
+        if (resource is LocalExecutableResource localExecutable)
+        {
+            path = _resolver.ResolveExecutable(localExecutable.Path);
+        }
+        else if (resource is IManifestResource manifestResource
+                 && resource is IExecutableResource)
+        {
+            string? appHost = manifestResource.Manifest.Artifact.AppHost;
+            if (string.IsNullOrWhiteSpace(appHost))
+            {
+                throw new FileNotFoundException(
+                    $"Resource '{resource.Name}' has no apphost in its manifest artifact. "
+                    + "The local gateway does not launch the managed assembly DLL.");
+            }
+
+            path = _resolver.ResolveAppHost(appHost);
+        }
+        else if (resource is IExecutableResource)
+        {
+            throw new InvalidOperationException(
+                $"Executable resource '{resource.Name}' has no resource manifest. "
+                + "Add a plain or disabled executable with AddExecutable(name, path, options).");
+        }
+        else
         {
             throw new InvalidOperationException(
                 $"The local gateway can only realize executable resources; '{resource.Name}' does not implement IExecutableResource.");
         }
 
-        string path = _resolver.Resolve(executable.Artifact);
         return Task.FromResult<IResourceArtifact>(new ExecutableArtifact(resource.Id, path));
     }
 }

@@ -1,5 +1,11 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,46 +13,794 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
+[Collection(LocalGatewayConsoleCollection.Name)]
 public class LocalGatewayTests
 {
-    [Fact]
-    public void Name_IsLocal()
+    private const string ApplicationNameValue = "gateway-tests";
+    private const string TestHostAssembly = "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost";
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: name is local")]
+    public void Name_DefaultGateway_IsLocal()
     {
         new LocalGateway().Name.ShouldBe((ResourceName)"local");
     }
 
-    [Fact]
-    public void UseLocalGateway_SelectsLocalGatewayAndBuilds()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: restart policy preserves final sysexits")]
+    [InlineData(RestartPolicy.OnFailure, 0, false)]
+    [InlineData(RestartPolicy.OnFailure, 1, true)]
+    [InlineData(RestartPolicy.OnFailure, 64, false)]
+    [InlineData(RestartPolicy.OnFailure, 69, true)]
+    [InlineData(RestartPolicy.OnFailure, 70, false)]
+    [InlineData(RestartPolicy.OnFailure, 75, true)]
+    [InlineData(RestartPolicy.Always, 0, true)]
+    [InlineData(RestartPolicy.Always, 64, false)]
+    [InlineData(RestartPolicy.Always, 70, false)]
+    [InlineData(RestartPolicy.Never, 75, false)]
+    public void ShouldRestart_ExitCodeAndPolicy_ReturnExpected(
+        RestartPolicy policy,
+        int exitCode,
+        bool expected)
     {
-        IApplicationBuilder builder = Application.CreateBuilder().UseLocalGateway();
-        builder.AddResource(new TestExecutableResource("svc", "does-not-matter"));
-
-        IApplication app = builder.Build();
-
-        app.ShouldNotBeNull();
+        LocalGatewayProcessSupervisor.ShouldRestart(policy, exitCode).ShouldBe(expected);
     }
 
-    [Fact]
-    public async Task RunAsync_WhenArtifactCannotBeResolved_Throws()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: direct plain executable is rejected")]
+    public async Task RunAsync_DirectPlainExecutable_RequiresAddExecutable()
     {
-        string emptyDirectory = Directory.CreateTempSubdirectory("cohesion-local-gateway-test").FullName;
+        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+            .UseLocalGateway();
+        builder.AddResource(new TestExecutableResource("svc", "does-not-matter"));
+        IApplication application = builder.Build();
 
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await application.RunAsync().WaitAsync(TestTimeout));
+
+        exception.Message.ShouldContain("AddExecutable");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: ports persist across gateway instances")]
+    public async Task RunAsync_TwoGatewayInstances_ReusesAllocatedPortAndInjectsContract()
+    {
+        string root = CreateTestDirectory();
         try
         {
-            IApplicationBuilder builder = Application.CreateBuilder()
-                .UseLocalGateway(options => options.BaseDirectory = emptyDirectory);
-            builder.AddResource(new TestExecutableResource("svc", "Assimalign.Cohesion.NoSuchApp"));
-            IApplication app = builder.Build();
+            string firstCapture = Path.Combine(root, "first-env.json");
+            string secondCapture = Path.Combine(root, "second-env.json");
 
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await Should.ThrowAsync<FileNotFoundException>(async () => await app.RunAsync(cancellation.Token));
+            int firstPort = await RunOnceAndGetPortAsync(root, firstCapture);
+            int secondPort = await RunOnceAndGetPortAsync(root, secondCapture);
+
+            firstPort.ShouldBe(secondPort);
+            File.Exists(Path.Combine(root, ".cohesion", ApplicationNameValue, "ports.json")).ShouldBeTrue();
+
+            IReadOnlyDictionary<string, string> environment = ReadStringMap(secondCapture);
+            environment[ResourceEnvironment.Application].ShouldBe(ApplicationNameValue);
+            environment[ResourceEnvironment.Resource].ShouldBe("svc");
+            environment[ResourceEnvironment.Gateway].ShouldBe("local");
+            environment[ResourceEnvironment.Endpoint("http", "HOST")].ShouldBe("127.0.0.1");
+            environment[ResourceEnvironment.Endpoint("http", "PORT")]
+                .ShouldBe(firstPort.ToString(CultureInfo.InvariantCulture));
+            environment[ResourceEnvironment.Endpoint("http", "SCHEME")].ShouldBe("http");
+            environment[ResourceEnvironment.Endpoint("http", "PUBLIC_URL")]
+                .ShouldBe($"http://127.0.0.1:{firstPort}");
         }
         finally
         {
-            Directory.Delete(emptyDirectory, recursive: true);
+            DeleteTestDirectory(root);
         }
     }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: default control-plane probes use role paths")]
+    public async Task RunAsync_DefaultControlPlaneProbes_UseRolePaths()
+    {
+        string root = CreateTestDirectory();
+        string status = Path.Combine(root, "ready.status");
+        string requests = Path.Combine(root, "requests.log");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_READY_STATUS_PATH"] = status,
+            ["TEST_REQUEST_LOG_PATH"] = requests,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: null,
+            startup: null,
+            liveness: null);
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForFileAsync(requests);
+            gateway.ResourceStates.GetState(ResourceIdOf(manifest.Name)).ShouldBe(ResourceLifecycle.Starting);
+
+            File.WriteAllText(status, "200", Encoding.UTF8);
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            try
+            {
+                await WaitForConditionAsync(
+                    () => CountLinesContaining(requests, "GET /cohesion/v1/livez") > 0,
+                    "The default control-plane liveness route was not probed.");
+            }
+            catch (TimeoutException exception)
+            {
+                ResourceLifecycle state = gateway.ResourceStates.GetState(ResourceIdOf(manifest.Name));
+                string diagnosticLog = File.Exists(requests) ? File.ReadAllText(requests) : "<missing>";
+                throw new TimeoutException(
+                    $"{exception.Message} State: {state}. Requests: {diagnosticLog}",
+                    exception);
+            }
+
+            string requestLog = File.ReadAllText(requests);
+            requestLog.ShouldContain("GET /cohesion/v1/readyz");
+            requestLog.ShouldContain("GET /cohesion/v1/livez");
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: HTTP 404 fails readiness immediately")]
+    public async Task RunAsync_HttpProbeReturns404_FailsFastWithActionableDetail()
+    {
+        string root = CreateTestDirectory();
+        string status = Path.Combine(root, "ready.status");
+        File.WriteAllText(status, "404", Encoding.UTF8);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_READY_STATUS_PATH"] = status,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: HttpProbe("/readyz"),
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+        LocalGateway gateway = CreateGateway(root, options => options.ReadinessBudget = TimeSpan.FromSeconds(10));
+        var failed = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        gateway.ResourceStates.StateChanged += (_, args) =>
+        {
+            if (args.Resource == ResourceIdOf(manifest.Name) && args.Current == ResourceLifecycle.Failed)
+            {
+                failed.TrySetResult(args.Detail);
+            }
+        };
+        IApplication application = BuildApplication(gateway, manifest);
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+                async () => await application.RunAsync().WaitAsync(TestTimeout));
+            string? detail = await failed.Task.WaitAsync(TestTimeout);
+
+            stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+            exception.Message.ShouldContain("did not reach Running");
+            detail.ShouldNotBeNull();
+            detail.ShouldContain("404");
+            detail.ShouldContain("/readyz");
+            detail.ShouldContain("Verify");
+        }
+        finally
+        {
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: TCP readiness probe reaches Running")]
+    public async Task RunAsync_TcpReadinessProbe_ReachesRunning()
+    {
+        string root = CreateTestDirectory();
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment: null,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+
+        await RunAndAssertRunningAsync(root, manifest);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: ready line starts the exec readiness probe")]
+    public async Task RunAsync_ReadyLine_StartsExecReadinessProbe()
+    {
+        string root = CreateTestDirectory();
+        string status = Path.Combine(root, "exec.status");
+        string markerGate = Path.Combine(root, "marker.gate");
+        string bound = Path.Combine(root, "bound.txt");
+        string probeCapture = Path.Combine(root, "probe.txt");
+        File.WriteAllText(status, "0", Encoding.UTF8);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_READY_MARKER_GATE_PATH"] = markerGate,
+            ["TEST_BOUND_PATH"] = bound,
+            ["TEST_EXEC_PROBE_CAPTURE_PATH"] = probeCapture,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: new ResourceManifestProbe
+            {
+                Exec = new[] { TestHostPath, "exec-probe", status },
+            },
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForFileAsync(bound);
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+            File.Exists(probeCapture).ShouldBeFalse();
+            gateway.ResourceStates.GetState(ResourceIdOf(manifest.Name)).ShouldBe(ResourceLifecycle.Starting);
+
+            File.WriteAllText(markerGate, string.Empty, Encoding.UTF8);
+            await WaitForFileAsync(probeCapture);
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: liveness degradation restarts with backoff")]
+    [InlineData("OnFailure")]
+    [InlineData("Always")]
+    public async Task RunAsync_ThreeLivenessFailures_DegradesAndRestartsWithBackoff(
+        string restartPolicy)
+    {
+        string root = CreateTestDirectory();
+        string liveStatus = Path.Combine(root, "live.status");
+        string launchCount = Path.Combine(root, "launch-count.txt");
+        File.WriteAllText(liveStatus, "200", Encoding.UTF8);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_LIVE_STATUS_PATH"] = liveStatus,
+            ["TEST_LAUNCH_COUNT_PATH"] = launchCount,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: HttpProbe("/readyz"),
+            startup: NoneProbe(),
+            liveness: HttpProbe("/livez"),
+            restartPolicy: restartPolicy);
+        LocalGateway gateway = CreateGateway(root, options =>
+        {
+            options.ProbeInterval = TimeSpan.FromMilliseconds(100);
+            options.InitialRestartBackoff = TimeSpan.FromMilliseconds(200);
+            options.MaximumRestartBackoff = TimeSpan.FromMilliseconds(200);
+        });
+        var transitions = new ConcurrentQueue<StateObservation>();
+        int runningCount = 0;
+        var restarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        gateway.ResourceStates.StateChanged += (_, args) =>
+        {
+            if (args.Resource != ResourceIdOf(manifest.Name))
+            {
+                return;
+            }
+
+            transitions.Enqueue(new StateObservation(args.Current, args.Detail, Stopwatch.GetTimestamp()));
+            if (args.Current == ResourceLifecycle.Running
+                && Interlocked.Increment(ref runningCount) == 2)
+            {
+                restarted.TrySetResult();
+            }
+        };
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            File.WriteAllText(liveStatus, "500", Encoding.UTF8);
+            await WaitForTextAsync(launchCount, "2");
+            File.WriteAllText(liveStatus, "200", Encoding.UTF8);
+            await restarted.Task.WaitAsync(TestTimeout);
+
+            StateObservation[] observed = transitions.ToArray();
+            int degraded = IndexOf(observed, ResourceLifecycle.Degraded);
+            int stopping = IndexOf(observed, ResourceLifecycle.Stopping, degraded + 1);
+            int starting = IndexOf(observed, ResourceLifecycle.Starting, stopping + 1);
+            int running = IndexOf(observed, ResourceLifecycle.Running, starting + 1);
+
+            degraded.ShouldBeGreaterThanOrEqualTo(0);
+            stopping.ShouldBeGreaterThan(degraded);
+            starting.ShouldBeGreaterThan(stopping);
+            running.ShouldBeGreaterThan(starting);
+            string? degradedDetail = observed[degraded].Detail;
+            degradedDetail.ShouldNotBeNull();
+            degradedDetail!.ShouldContain("500");
+
+            TimeSpan failureWindow = Stopwatch.GetElapsedTime(
+                observed[degraded].Timestamp,
+                observed[stopping].Timestamp);
+            failureWindow.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(150));
+
+            TimeSpan measuredBackoff = Stopwatch.GetElapsedTime(
+                observed[stopping].Timestamp,
+                observed[starting].Timestamp);
+            measuredBackoff.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(150));
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: Never policy keeps a failed liveness probe Degraded")]
+    public async Task RunAsync_LivenessFailsWithNeverPolicy_DoesNotRestartAndCanRecover()
+    {
+        string root = CreateTestDirectory();
+        string liveStatus = Path.Combine(root, "live.status");
+        string launchCount = Path.Combine(root, "launch-count.txt");
+        string requests = Path.Combine(root, "requests.log");
+        File.WriteAllText(liveStatus, "200", Encoding.UTF8);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_LIVE_STATUS_PATH"] = liveStatus,
+            ["TEST_LAUNCH_COUNT_PATH"] = launchCount,
+            ["TEST_REQUEST_LOG_PATH"] = requests,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: HttpProbe("/readyz"),
+            startup: NoneProbe(),
+            liveness: HttpProbe("/livez"),
+            restartPolicy: "Never");
+        LocalGateway gateway = CreateGateway(root, options =>
+            options.ProbeInterval = TimeSpan.FromMilliseconds(75));
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            ResourceId resource = ResourceIdOf(manifest.Name);
+            await WaitForStateAsync(gateway, resource, ResourceLifecycle.Running);
+            int healthyRequests = CountLinesContaining(requests, "GET /livez");
+            File.WriteAllText(liveStatus, "500", Encoding.UTF8);
+
+            await WaitForStateAsync(gateway, resource, ResourceLifecycle.Degraded);
+            await WaitForConditionAsync(
+                () => CountLinesContaining(requests, "GET /livez") >= healthyRequests + 4,
+                "The Never-policy liveness probe did not continue after becoming Degraded.");
+
+            File.ReadAllText(launchCount).Trim().ShouldBe("1");
+            gateway.ResourceStates.GetState(resource).ShouldBe(ResourceLifecycle.Degraded);
+
+            File.WriteAllText(liveStatus, "200", Encoding.UTF8);
+            await WaitForStateAsync(gateway, resource, ResourceLifecycle.Running);
+            File.ReadAllText(launchCount).Trim().ShouldBe("1");
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: mounts materialize and inject paths")]
+    public async Task RunAsync_ConfigurationMount_MaterializesAndInjectsPath()
+    {
+        string root = CreateTestDirectory();
+        string capture = Path.Combine(root, "mounts.json");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_MOUNT_CAPTURE_PATH"] = capture,
+            ["TEST_MOUNT_NAMES"] = "settings",
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            mounts: new[]
+            {
+                new ResourceManifestMount
+                {
+                    Name = "settings",
+                    Kind = ResourceMountKind.Configuration,
+                    ContainerPath = "/settings.json",
+                    Source = "literal:mount-value",
+                },
+            });
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(capture);
+
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(capture));
+            JsonElement mount = document.RootElement.GetProperty(ResourceEnvironment.Mount("settings"));
+            string path = mount.GetProperty("path").GetString()!;
+            byte[] content = mount.GetProperty("content").GetBytesFromBase64();
+            path.ShouldBe(Path.Combine(root, ".cohesion", ApplicationNameValue, "svc", "settings"));
+            File.Exists(path).ShouldBeTrue();
+
+            if (OperatingSystem.IsWindows())
+            {
+                content.ShouldNotBe(Encoding.UTF8.GetBytes("mount-value"));
+                Encoding.UTF8.GetString(content).ShouldNotContain("mount-value");
+                Directory.GetFiles(Path.Combine(root, ".cohesion", ApplicationNameValue, ".keys"))
+                    .Length.ShouldBeGreaterThan(0);
+            }
+            else
+            {
+                Encoding.UTF8.GetString(content).ShouldBe("mount-value");
+                File.GetUnixFileMode(path).ShouldBe(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: child output receives resource prefix")]
+    public async Task RunAsync_ChildOutput_PrefixesStdoutAndStderr()
+    {
+        string root = CreateTestDirectory();
+        TextWriter originalOut = Console.Out;
+        TextWriter originalError = Console.Error;
+        using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        using var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+
+        try
+        {
+            ResourceManifest manifest = CreateManifest(
+                "svc",
+                environment: null,
+                readiness: TcpProbe(),
+                startup: NoneProbe(),
+                liveness: NoneProbe());
+            await RunAndAssertRunningAsync(root, manifest);
+
+            stdout.ToString().ShouldContain("[svc] test-host stdout");
+            stderr.ToString().ShouldContain("[svc] test-host stderr");
+            stdout.ToString().ShouldNotContain("[svc] svc: GenericPlanner");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: AddExecutable launches on its ready marker")]
+    public async Task RunAsync_AddExecutableReadyMarker_IsOnlyReadinessSignal()
+    {
+        string root = CreateTestDirectory();
+        string markerGate = Path.Combine(root, "emit-marker");
+        string bound = Path.Combine(root, "bound.txt");
+        LocalGateway gateway = CreateGateway(root);
+        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+            .UseGateway(gateway);
+        IApplicationResourceDescriptor descriptor = builder.AddExecutable(
+            "opaque",
+            TestHostPath,
+            options => options
+                .UseReadyMarker("opaque-ready")
+                .AddEndpoint(new ResourceEndpoint("http", "http", 0))
+                .AddEnvironment("TEST_READY_MARKER", "opaque-ready")
+                .AddEnvironment("TEST_READY_MARKER_GATE_PATH", markerGate)
+                .AddEnvironment("TEST_BOUND_PATH", bound));
+        IApplication application = builder.Build();
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForFileAsync(bound);
+            gateway.ResourceStates.GetState(descriptor.Resource.Id).ShouldBe(ResourceLifecycle.Starting);
+
+            File.WriteAllText(markerGate, string.Empty, Encoding.UTF8);
+            await WaitForStateAsync(gateway, descriptor.Resource.Id, ResourceLifecycle.Running);
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    private static string TestHostPath => Path.Combine(
+        AppContext.BaseDirectory,
+        TestHostAssembly + (OperatingSystem.IsWindows() ? ".exe" : string.Empty));
+
+    private static LocalGateway CreateGateway(string root, Action<LocalGatewayOptions>? configure = null)
+    {
+        var options = new LocalGatewayOptions
+        {
+            BaseDirectory = AppContext.BaseDirectory,
+            StateDirectory = Path.Combine(root, ".cohesion"),
+            ProbeInterval = TimeSpan.FromMilliseconds(50),
+            ProbeTimeout = TimeSpan.FromSeconds(2),
+            ReadinessBudget = TimeSpan.FromSeconds(10),
+            InitialRestartBackoff = TimeSpan.FromMilliseconds(100),
+            MaximumRestartBackoff = TimeSpan.FromSeconds(1),
+            StopGrace = TimeSpan.FromSeconds(5),
+        };
+        configure?.Invoke(options);
+        return new LocalGateway(options);
+    }
+
+    private static IApplication BuildApplication(LocalGateway gateway, ResourceManifest manifest)
+    {
+        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+            .UseGateway(gateway);
+        builder.AddResource(manifest);
+        return builder.Build();
+    }
+
+    private static ResourceManifest CreateManifest(
+        string name,
+        IReadOnlyDictionary<string, string>? environment,
+        ResourceManifestProbe? readiness,
+        ResourceManifestProbe? startup,
+        ResourceManifestProbe? liveness,
+        string restartPolicy = "Never",
+        IReadOnlyList<ResourceManifestMount>? mounts = null)
+    {
+        return new ResourceManifest
+        {
+            Name = (ResourceName)name,
+            Application = ApplicationName.Parse(ApplicationNameValue),
+            Kind = "test",
+            ApplicationModel = "Assimalign.Cohesion.Test.ApplicationModel",
+            Artifact = new ResourceManifestArtifact
+            {
+                Assembly = TestHostAssembly + ".dll",
+                AppHost = TestHostPath,
+            },
+            Endpoints = new[]
+            {
+                new ResourceManifestEndpoint
+                {
+                    Name = "http",
+                    Scheme = "http",
+                    Protocol = "tcp",
+                    ContainerPort = 8080,
+                    Public = true,
+                },
+            },
+            Probes = new ResourceManifestProbes
+            {
+                Readiness = readiness,
+                Startup = startup,
+                Liveness = liveness,
+            },
+            ControlPlane = new ResourceManifestControlPlane
+            {
+                Endpoint = "http",
+                Path = "/cohesion/v1",
+            },
+            Mounts = mounts ?? Array.Empty<ResourceManifestMount>(),
+            EnvironmentVariables = environment ?? new Dictionary<string, string>(),
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                RestartPolicy = restartPolicy,
+            },
+        };
+    }
+
+    private static ResourceManifestProbe HttpProbe(string path) => new()
+    {
+        Endpoint = "http",
+        Http = path,
+    };
+
+    private static ResourceManifestProbe TcpProbe() => new()
+    {
+        Endpoint = "http",
+        Tcp = true,
+    };
+
+    private static ResourceManifestProbe NoneProbe() => new() { None = true };
+
+    private static async Task RunAndAssertRunningAsync(string root, ResourceManifest manifest)
+    {
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    private static async Task<int> RunOnceAndGetPortAsync(string root, string capture)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_ENV_CAPTURE_PATH"] = capture,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            IReadOnlyList<ResourceEndpoint> endpoints = gateway.ResourceStates.GetObservedEndpoints(
+                ResourceIdOf(manifest.Name));
+            endpoints.Count.ShouldBe(1);
+            endpoints[0].Host.ShouldBe("127.0.0.1");
+            return endpoints[0].Port;
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+        }
+    }
+
+    private static async Task WaitForStateAsync(
+        LocalGateway gateway,
+        ResourceId resource,
+        ResourceLifecycle expected)
+    {
+        var terminals = new HashSet<ResourceLifecycle>
+        {
+            expected,
+            ResourceLifecycle.Failed,
+            ResourceLifecycle.Stopped,
+        };
+        ResourceLifecycle reached = await gateway.ResourceStates
+            .WaitForStateAsync(resource, terminals, TestTimeout)
+            .WaitAsync(TestTimeout);
+        reached.ShouldBe(expected);
+    }
+
+    private static async Task WaitForFileAsync(string path)
+    {
+        await WaitForConditionAsync(() => File.Exists(path), $"File '{path}' was not created.");
+    }
+
+    private static async Task WaitForTextAsync(string path, string expected)
+    {
+        await WaitForConditionAsync(
+            () => File.Exists(path)
+                  && string.Equals(File.ReadAllText(path).Trim(), expected, StringComparison.Ordinal),
+            $"File '{path}' did not contain '{expected}'.");
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, string failure)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TestTimeout)
+        {
+            try
+            {
+                if (condition())
+                {
+                    return;
+                }
+            }
+            catch (IOException)
+            {
+                // An atomic producer may still have the file open.
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
+
+        throw new TimeoutException(failure);
+    }
+
+    private static async Task StopApplicationAsync(CancellationTokenSource cancellation, Task run)
+    {
+        cancellation.Cancel();
+        await run.WaitAsync(TestTimeout);
+    }
+
+    private static IReadOnlyDictionary<string, string> ReadStringMap(string path)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in document.RootElement.EnumerateObject())
+        {
+            values.Add(property.Name, property.Value.GetString()!);
+        }
+
+        return values;
+    }
+
+    private static int IndexOf(
+        IReadOnlyList<StateObservation> observations,
+        ResourceLifecycle state,
+        int start = 0)
+    {
+        for (int index = start; index < observations.Count; index++)
+        {
+            if (observations[index].State == state)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int CountLinesContaining(string path, string value)
+    {
+        if (!File.Exists(path))
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (string line in File.ReadAllLines(path))
+        {
+            if (line.Contains(value, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static ResourceId ResourceIdOf(ResourceName name)
+        => Guid.AsDeterministicGuid(name);
+
+    private static string CreateTestDirectory()
+        => Directory.CreateTempSubdirectory("cohesion-gateway-").FullName;
+
+    private static void DeleteTestDirectory(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+    }
+
+    private readonly record struct StateObservation(
+        ResourceLifecycle State,
+        string? Detail,
+        long Timestamp);
 }

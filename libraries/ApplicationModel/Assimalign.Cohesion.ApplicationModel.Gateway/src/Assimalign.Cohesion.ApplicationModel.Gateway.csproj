@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
+		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
+	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.Tests" />
 	</ItemGroup>
 </Project>

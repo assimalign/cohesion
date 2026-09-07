@@ -9,22 +9,28 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </summary>
 internal sealed class LocalProcessController : IApplicationResourceController
 {
+    private readonly LocalResourcePreparer _preparer;
     private readonly LocalGatewayProcessSupervisor _supervisor;
 
-    public LocalProcessController(LocalGatewayProcessSupervisor supervisor)
+    public LocalProcessController(
+        LocalResourcePreparer preparer,
+        LocalGatewayProcessSupervisor supervisor)
     {
+        _preparer = preparer;
         _supervisor = supervisor;
     }
 
     public bool CanControl(IApplicationResource resource) => resource is IExecutableResource;
 
-    public Task ReconcileAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
+    public async Task ReconcileAsync(
+        IResourceControlContext context,
+        CancellationToken cancellationToken = default)
     {
-        var resource = (IExecutableResource)context.Resource;
         IExecutableArtifact artifact = context.GetArtifact<IExecutableArtifact>();
-
-        _supervisor.Start(context.Resource, artifact, resource.EnvironmentVariables);
-        return Task.CompletedTask;
+        LocalResourceConfiguration configuration = await _preparer
+            .PrepareAsync(context, artifact, cancellationToken)
+            .ConfigureAwait(false);
+        _supervisor.Start(configuration);
     }
 
     public Task DeleteAsync(IResourceControlContext context, CancellationToken cancellationToken = default)

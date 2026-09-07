@@ -10,6 +10,38 @@ public static class LocalGatewayExtensions
     extension(IApplicationBuilder builder)
     {
         /// <summary>
+        /// Adds a manifest-less executable that only the local gateway can realize.
+        /// </summary>
+        /// <param name="name">The resource name.</param>
+        /// <param name="path">The apphost or native executable path.</param>
+        /// <param name="configure">
+        /// Configures the executable's probe or stdout ready marker, endpoints, environment,
+        /// and restart policy.
+        /// </param>
+        /// <returns>The resource descriptor, for declaring dependencies.</returns>
+        /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="configure"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="InvalidOperationException">
+        /// Neither a readiness probe nor a stdout ready marker was configured.
+        /// </exception>
+        public IApplicationResourceDescriptor AddExecutable(
+            ResourceName name,
+            string path,
+            Action<IExecutableResourceOptionsBuilder> configure)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+            ArgumentNullException.ThrowIfNull(configure);
+
+            var options = new ExecutableResourceOptionsBuilder();
+            configure(options);
+            options.Validate();
+
+            return builder.AddResource(new LocalExecutableResource(name, path, options));
+        }
+
+        /// <summary>
         /// Selects a <see cref="LocalGateway"/> with default options.
         /// </summary>
         /// <returns>The builder, for chaining.</returns>
