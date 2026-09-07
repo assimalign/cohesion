@@ -176,11 +176,15 @@ Step 3d is guarded, not merely documented: `Assert-CohesionReleaseInventory` fai
 
 `$(CohesionVersion)` lives in `build/Targets/Build.Version.props` and is the single source of truth. Every Cohesion package — SDK, Ref pack, Runtime pack, library — shares this version. Bumping is a one-line edit.
 
-`frameworks/Directory.Build.props` sets `<VersionPrefix>$(CohesionVersion)</VersionPrefix>` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that line** — it's the only thing keeping framework `.nupkg` versions aligned with the SDK.
+The current version line is `<CohesionPatchVersion>1-preview.3</CohesionPatchVersion>`, which resolves to `10.0.1-preview.3`. Rule of record: **cohesion's version never sorts below any version present on a feed.** Inspect GitHub Packages and nuget.org before selecting a line, and bump `main` immediately after tagging so development never moves behind a published version.
+
+Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.1-preview.3.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. The complete staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING.md`](../../docs/VERSIONING.md).
+
+`frameworks/Directory.Build.props` sets `VersionPrefix` and `VersionSuffix` from `CohesionVersionPrefix` and `CohesionVersionSuffix` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that mapping** — it is what keeps framework `.nupkg` versions aligned with the SDK without feeding a prerelease suffix to `AssemblyVersion`.
 
 ## Dev loop: `Install-Local.ps1`
 
-Packs all SDKs + framework families (Ref + per-RID Runtime each) into the in-tree feed at `_out/packages/`. Consumers restore from that feed via a `nuget.config` mapping `Assimalign.Cohesion.*` to it — the repo does not currently check one in, so add the mapping in the consumer (or a local repo-root `nuget.config`) when smoke-testing.
+Packs all SDKs + framework families (Ref + per-RID Runtime each) into the in-tree feed at `_out/packages/`, using the canonical prerelease plus `.local`. Before rebuilding, it removes only that local-version cache entry for each selected SDK/framework/library package and prunes stale library/resource package files from the flat feed by exact package id. Consumers restore from that feed via a `nuget.config` mapping `Assimalign.Cohesion.*` to it — the repo does not currently check one in, so add the mapping in the consumer (or a local repo-root `nuget.config`) when smoke-testing.
 
 Flags worth knowing:
 - `-Configuration Release` — Release pack (default Debug)
@@ -210,13 +214,13 @@ Path-filtered on push, each a thin matrix over project names calling the shared 
 
 ### Release — `.github/workflows/release.yml`
 
-Triggered solely by a **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included. Five jobs:
+There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same five jobs:
 
-1. **prepare** — resolves the tag to a commit, proves it is reachable from `main`, validates the version against `Get-CohesionVersion.ps1`, and emits the validation matrix from `Get-ReleaseMatrix.ps1`. Fails fast, before ~130 build legs run. Every downstream job checks out **that commit**, not the tag, so a tag moved mid-run cannot publish something no job built.
+1. **prepare** — resolves the tag to a commit, proves it is reachable from `main`, validates the version against `Get-CohesionVersion.ps1`, and emits the validation matrix from `Get-ReleaseMatrix.ps1`. Fails fast, before the large build matrix runs. Every downstream job checks out **that commit**, not the tag, so a tag moved mid-run cannot publish something no job built.
 2. **validate-release** — one leg per shipping package (Linux only; the per-area workflows already carry the three-OS matrix), running the same `.github/actions/build` recipe at the release commit.
-3. **pack-packages** — runs `Pack-Release.ps1` (300 packages: 129 libraries and resources, 19 SDK packs, 19 targeting packs, 19 x 7 runtime packs), asserts the produced set and its package metadata, and uploads `_out/release/packages` as the `Assimalign.Cohesion.Packages` artifact.
-4. **publish-github-packages** — stages the artifact in GitHub Packages with `--skip-duplicate`. A release version is immutable, so re-running the pipeline for the same tag is a no-op on the feed.
-5. **publish-nuget** — promotes that same artifact to nuget.org via OIDC (`NuGet/login`), routed through the `nuget-org` environment (which must still be created and given required reviewers — GitHub auto-creates a referenced environment with no protection rules). Only `-preview.` and `-rc.` versions promote; other prereleases stop at the staging feed and stable versions are deliberately not matched yet.
+3. **pack-packages** — runs `Pack-Release.ps1`, asserts the inventory-derived package set and its metadata, writes the exact release count to `package-order.txt`, and uploads `_out/release/packages` as the `Assimalign.Cohesion.Packages` artifact.
+4. **publish-github-packages** — stages the artifact in GitHub Packages with `--skip-duplicate`. This is unconditional after a matching published release validates; the manual promotion path safely restages the same immutable version as a no-op.
+5. **publish-nuget** — runs only on `workflow_dispatch` with `promote=true`, promotes the same artifact to nuget.org via OIDC (`NuGet/login`), and is routed through the `nuget-org` environment. That environment must be created with required reviewers; referencing its name does not configure protection. Only `-preview.` and `-rc.` versions are eligible; alpha/beta and stable versions stop at staging.
 
 Both publish jobs re-verify `checksums.sha256` before pushing, so "what we published is what we validated" is checked, not assumed.
 

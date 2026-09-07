@@ -26,11 +26,11 @@
         publish jobs in .github/workflows/release.yml consume; they never check out the
         repository, so the producer has to hand them the file list and the hashes.
 
-    Roughly 300 packages are produced (131 libraries and resources, 19 SDK packs, 19 targeting
-    packs, and 19 x 7 runtime packs). Expect a long run.
+    The exact package count is inventory-derived and recorded in package-order.txt. Expect a long
+    run.
 
 .PARAMETER Version
-    The SemVer package version to produce, for example 10.0.1 or 10.0.1-preview.2. Must match the
+    The SemVer package version to produce, for example 10.0.1 or 10.0.1-preview.3. Must match the
     canonical CohesionVersion; .github/workflows/release.yml enforces that against the release tag
     before calling this script.
 
@@ -45,8 +45,12 @@
 .PARAMETER PackageDirectory
     Overrides the output directory. Defaults to _out/release/packages under the repository root.
 
+.PARAMETER RepositoryCommit
+    Commit SHA embedded in package repository metadata. Release automation passes the commit pinned
+    by its prepare job; local callers default to GITHUB_SHA and then the checked-out HEAD.
+
 .EXAMPLE
-    ./installer/scripts/Pack-Release.ps1 -Version 10.0.1-preview.2
+    ./installer/scripts/Pack-Release.ps1 -Version 10.0.1-preview.3
 #>
 [CmdletBinding()]
 param(
@@ -58,7 +62,9 @@ param(
 
     [string[]] $RuntimeIdentifier,
 
-    [string] $PackageDirectory
+    [string] $PackageDirectory,
+
+    [string] $RepositoryCommit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,13 +82,18 @@ if (-not $versionMatch.Success) {
     throw "Version '$Version' must be SemVer in the supported form MAJOR.MINOR.PATCH[-PRERELEASE]."
 }
 if ($versionMatch.Groups['suffix'].Success) {
-    foreach ($identifier in $versionMatch.Groups['suffix'].Value.Split('.')) {
+    $versionIdentifier = $versionMatch.Groups['suffix'].Value.Split('.')
+    foreach ($identifier in $versionIdentifier) {
         if ([string]::IsNullOrWhiteSpace($identifier)) {
             throw "Version '$Version' contains an empty prerelease identifier."
         }
         if ($identifier -match '^[0-9]+$' -and $identifier -notmatch '^(0|[1-9][0-9]*)$') {
             throw "Version '$Version' contains a numeric prerelease identifier with a leading zero."
         }
+    }
+
+    if ($versionIdentifier -contains 'local') {
+        throw "Version '$Version' contains the reserved local identifier and cannot be release-packed."
     }
 }
 
@@ -93,7 +104,7 @@ $versionSuffix = $versionMatch.Groups['suffix'].Value
 $versionPrefix = "$majorVersion.$minorVersion.$patchCoreVersion"
 
 # build/Targets/Build.Version.props treats CohesionPatchVersion as the patch number PLUS any
-# prerelease tag ("1-preview.2"), splitting the numeric core back out for AssemblyVersion. Feed it
+# prerelease tag ("1-preview.3"), splitting the numeric core back out for AssemblyVersion. Feed it
 # the same shape so the props file's own derivation stays self-consistent.
 $patchVersion = $patchCoreVersion
 if (-not [string]::IsNullOrWhiteSpace($versionSuffix)) {
@@ -108,6 +119,31 @@ $repositoryDirectory = [System.IO.Path]::GetFullPath((Split-Path $PSScriptRoot -
 
 Import-Module (Join-Path $PSScriptRoot 'modules/CohesionPackaging.psm1') -Force
 Assert-CohesionReleaseInventory -RepositoryDirectory $repositoryDirectory
+
+# Validate the immutable source identity before clearing any prior release artifacts. Manual
+# promotion runs start on main but explicitly check out the published release commit, so GITHUB_SHA
+# alone is not authoritative for that path.
+$resolvedRepositoryCommit = $RepositoryCommit
+if ([string]::IsNullOrWhiteSpace($resolvedRepositoryCommit)) {
+    $resolvedRepositoryCommit = $env:GITHUB_SHA
+}
+if ([string]::IsNullOrWhiteSpace($resolvedRepositoryCommit)) {
+    $resolvedRepositoryCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Resolving the repository commit failed.'
+    }
+}
+if ($resolvedRepositoryCommit -notmatch '^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$') {
+    throw "Repository commit '$resolvedRepositoryCommit' is not a full Git object id."
+}
+
+$checkedOutCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw 'Resolving the checked-out repository commit failed.'
+}
+if (-not $resolvedRepositoryCommit.Equals($checkedOutCommit, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Repository commit $resolvedRepositoryCommit does not match checked-out HEAD $checkedOutCommit."
+}
 
 if (-not $RuntimeIdentifier -or $RuntimeIdentifier.Count -eq 0) {
     $RuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier
@@ -148,14 +184,6 @@ Get-ChildItem -LiteralPath $packageDirectory -File |
     } |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
 
-$repositoryCommit = $env:GITHUB_SHA
-if ([string]::IsNullOrWhiteSpace($repositoryCommit)) {
-    $repositoryCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Resolving the repository commit failed.'
-    }
-}
-
 # ---------------------------------------------------------------------------------------------
 # Build properties
 # ---------------------------------------------------------------------------------------------
@@ -175,7 +203,7 @@ $buildProperties = @(
     "-p:VersionSuffix=$versionSuffix"
     "-p:PackageVersion=$Version"
     '-p:ContinuousIntegrationBuild=true'
-    "-p:RepositoryCommit=$repositoryCommit"
+    "-p:RepositoryCommit=$resolvedRepositoryCommit"
     "-p:PackageOutputPath=$packageDirectory"
 )
 

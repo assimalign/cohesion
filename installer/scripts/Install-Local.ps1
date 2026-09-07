@@ -24,6 +24,9 @@
             Assimalign.Cohesion.<Library>.<ver>.nupkg
             ... one per project in the curated release inventory
 
+    Local packages append a final .local prerelease identifier to the canonical
+    version (for example, 10.0.1-preview.3.local). They are never release artifacts.
+
     SDK-path consumers write <Project Sdk="Assimalign.Cohesion.Sdk"> and the
     SDK auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
     which the SDK's KnownFrameworkReference machinery resolves by pulling the
@@ -92,12 +95,28 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
 
-# Resolve the Cohesion version. Delegated to a shared helper so the GitHub
-# Actions workflow (.github/workflows/framework.yml) and this script can never
-# drift on what they think the package version is. See Get-CohesionVersion.ps1
-# for the derivation details — Build.TargetFramework.props remains the single
-# source of truth for the major version.
-$cohesionVersion = & (Join-Path $PSScriptRoot 'Get-CohesionVersion.ps1') -RepoRoot $repoRoot
+# Resolve the canonical version, then derive a local-only prerelease above it. Local packages must
+# never reuse the id/version of a published artifact. A stable canonical line is rejected because
+# adding -local would sort below the stable release; the required post-tag bump must land first.
+Import-Module (Join-Path $PSScriptRoot 'modules/CohesionLocalPackaging.psm1') -Force
+$canonicalVersion = & (Join-Path $PSScriptRoot 'Get-CohesionVersion.ps1') -RepoRoot $repoRoot
+$localVersion = Get-CohesionLocalPackageVersion -Version $canonicalVersion
+$cohesionVersion = $localVersion.Version
+
+# Global MSBuild properties keep every package shape and every generated dependency version on the
+# same local identity. This mirrors Pack-Release.ps1's explicit release-version vector.
+$localPackProperties = @(
+    "-p:CohesionMajorVersion=$($localVersion.MajorVersion)"
+    "-p:CohesionMinorVersion=$($localVersion.MinorVersion)"
+    "-p:CohesionPatchVersion=$($localVersion.PatchVersion)"
+    "-p:CohesionVersionPrefix=$($localVersion.VersionPrefix)"
+    "-p:CohesionVersionSuffix=$($localVersion.VersionSuffix)"
+    "-p:CohesionVersion=$($localVersion.Version)"
+    "-p:VersionPrefix=$($localVersion.VersionPrefix)"
+    "-p:VersionSuffix=$($localVersion.VersionSuffix)"
+    "-p:PackageVersion=$($localVersion.Version)"
+    "-p:PackageOutputPath=$feedDir"
+)
 
 if (-not $Rids -or $Rids.Count -eq 0) {
     $Rids = @((& dotnet --info | Select-String -Pattern '^\s*RID:\s*(\S+)').Matches.Groups[1].Value)
@@ -107,7 +126,8 @@ if (-not $Rids -or $Rids.Count -eq 0) {
 }
 
 Write-Host "Cohesion local pack" -ForegroundColor Cyan
-Write-Host "  Version       : $cohesionVersion"
+Write-Host "  Source version: $canonicalVersion"
+Write-Host "  Local version : $cohesionVersion"
 Write-Host "  Configuration : $Configuration"
 Write-Host "  RIDs          : $($Rids -join ', ')"
 Write-Host "  Repo root     : $repoRoot"
@@ -120,9 +140,9 @@ Write-Host ""
 # serving the OLD extract from ~/.nuget/packages/ instead of re-reading the
 # fresh .nupkg in our local feed. Prune cached extracts up front so the next
 # restore picks up the fresh package.
-# The framework and SDK families come from the shared packaging module, so the local
-# dogfooding feed and the release set (installer/scripts/Pack-Release.ps1) cannot
-# disagree about what exists. Adding a family is one edit, in
+# The framework, SDK, and library/resource sets come from the shared packaging module, so the
+# local dogfooding feed and the release set (installer/scripts/Pack-Release.ps1) cannot disagree
+# about what exists. Adding a shipping package is one edit, in
 # installer/scripts/modules/CohesionPackaging.psm1 - not two lists that drift.
 #
 # Each framework family has a Ref pack (one .nupkg) and a per-RID Runtime pack (one
@@ -134,10 +154,23 @@ Write-Host ""
 Import-Module (Join-Path $PSScriptRoot 'modules/CohesionPackaging.psm1') -Force
 $cohesionFrameworks = Get-CohesionReleaseFramework
 $cohesionSdks       = Get-CohesionReleaseSdk
+$cohesionLibraries  = @(Get-CohesionReleaseLibrary -RepositoryDirectory $repoRoot)
 
-$cohesionPackages = @($cohesionSdks | ForEach-Object { $_.ToLowerInvariant() }) `
-    + ($cohesionFrameworks | ForEach-Object { "$($_.ToLowerInvariant()).ref" }) `
-    + ($cohesionFrameworks | ForEach-Object { $fw = $_.ToLowerInvariant(); $Rids | ForEach-Object { "$fw.runtime.$_" } })
+$cohesionPackages = @(
+    if (-not $SkipSdks) {
+        $cohesionSdks | ForEach-Object { $_.ToLowerInvariant() }
+    }
+    if (-not $SkipFramework) {
+        $cohesionFrameworks | ForEach-Object { "$($_.ToLowerInvariant()).ref" }
+        $cohesionFrameworks | ForEach-Object {
+            $frameworkPackage = $_.ToLowerInvariant()
+            $Rids | ForEach-Object { "$frameworkPackage.runtime.$_" }
+        }
+    }
+    if (-not $SkipLibraries) {
+        $cohesionLibraries | ForEach-Object { $_.PackageId.ToLowerInvariant() }
+    }
+)
 
 $globalPackagesRoot = & dotnet nuget locals global-packages --list 2>$null |
     ForEach-Object { ($_ -split ':\s*', 2)[-1].Trim() } |
@@ -193,7 +226,7 @@ if ($globalPackagesRoot -and -not $Force) {
 
 if ($globalPackagesRoot) {
     foreach ($pkg in $cohesionPackages) {
-        $cached = Join-Path $globalPackagesRoot $pkg
+        $cached = Join-Path (Join-Path $globalPackagesRoot $pkg) $cohesionVersion
         if (Test-Path -LiteralPath $cached) {
             Remove-Item -LiteralPath $cached -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -227,7 +260,7 @@ if (-not $SkipSdks) {
             continue
         }
         Write-Host "  pack $proj" -ForegroundColor DarkGray
-        & dotnet pack $proj -c $Configuration --nologo
+        & dotnet pack $proj -c $Configuration --nologo @localPackProperties
         if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed for $proj" }
     }
 }
@@ -247,7 +280,7 @@ if (-not $SkipFramework) {
         }
         foreach ($rid in $Rids) {
             Write-Host "  pack $framework runtime ($rid)" -ForegroundColor DarkGray
-            & dotnet pack $runtimeProj -c $Configuration -p:RuntimeIdentifier=$rid --nologo
+            & dotnet pack $runtimeProj -c $Configuration -p:RuntimeIdentifier=$rid --nologo @localPackProperties
             if ($LASTEXITCODE -ne 0) { throw "Runtime pack failed for $framework / $rid" }
         }
     }
@@ -267,7 +300,7 @@ if (-not $SkipFramework) {
             continue
         }
         Write-Host "  pack $framework refs" -ForegroundColor DarkGray
-        & dotnet pack $refsProj -c $Configuration --nologo
+        & dotnet pack $refsProj -c $Configuration --nologo @localPackProperties
         if ($LASTEXITCODE -ne 0) { throw "Targeting pack failed for $framework" }
     }
 }
@@ -293,16 +326,31 @@ else {
 # aligned with Pack-Release.ps1.
 if (-not $SkipLibraries) {
     Write-Host "[5/5] Packing libraries + resources..." -ForegroundColor Cyan
+
+    # A prior local run may have left a different version of a library in the flat feed. Remove
+    # only complete package-id + SemVer matches from the curated library/resource inventory;
+    # prefix-sharing package ids and SDK/framework packages remain untouched.
+    New-Item -ItemType Directory -Path $feedDir -Force | Out-Null
+    $staleLibraryPackage = @(
+        Get-CohesionStaleLibraryPackage `
+            -PackageDirectory $feedDir `
+            -PackageId @($cohesionLibraries | ForEach-Object PackageId)
+    )
+    foreach ($packagePath in $staleLibraryPackage) {
+        Remove-Item -LiteralPath $packagePath -Force
+    }
+    Write-Host ("  pruned {0} stale library/resource package(s) from the local feed" -f
+        $staleLibraryPackage.Count) -ForegroundColor DarkGray
+
     $libraryProjects = @(
-        Get-CohesionReleaseLibrary |
-            ForEach-Object { Get-Item -LiteralPath $_.ProjectPath }
+        $cohesionLibraries | ForEach-Object { Get-Item -LiteralPath $_.ProjectPath }
     ) | Sort-Object FullName
     Write-Host ("  found {0} project(s)" -f $libraryProjects.Count) -ForegroundColor DarkGray
 
     $libraryFailures = @()
     foreach ($p in $libraryProjects) {
         Write-Host "  pack $($p.FullName)" -ForegroundColor DarkGray
-        & dotnet pack $p.FullName -c $Configuration --nologo
+        & dotnet pack $p.FullName -c $Configuration --nologo @localPackProperties
         if ($LASTEXITCODE -ne 0) {
             if ($ContinueOnLibraryError) {
                 $libraryFailures += $p.FullName

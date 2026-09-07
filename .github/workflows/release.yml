@@ -1,9 +1,11 @@
 # Official Cohesion release pipeline.
 #
-# A published GitHub Release is the only package-publication trigger. The release tag must match
-# the complete centrally declared CohesionVersion, including any prerelease suffix. The validated
-# set is staged automatically in GitHub Packages; promotion of that same artifact to nuget.org is
-# routed through the `nuget-org` environment.
+# A published GitHub Release automatically validates and stages its packages in GitHub Packages.
+# Public promotion is a separate manual dispatch from the default branch, naming the published
+# release tag and explicitly enabling the `promote` input. The release tag must match the complete
+# centrally declared CohesionVersion, including any prerelease suffix. Each path validates and
+# checksums its release set; nuget.org promotion is additionally routed through the protected
+# `nuget-org` environment.
 #
 # SETUP REQUIRED before the first tagged release:
 #   * Create the `nuget-org` repository environment and give it required reviewers. GitHub
@@ -28,6 +30,17 @@ name: release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published vMAJOR.MINOR.PATCH[-PRERELEASE] tag to promote
+        required: true
+        type: string
+      promote:
+        description: Promote an already-published release tag from staging to nuget.org
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,26 +48,66 @@ permissions:
 jobs:
   # Resolves the release version and the validation matrix before anything expensive runs.
   #
-  # Viu resolves its version inside the pack job; with ~130 validation legs ahead of the pack, a
-  # tag/version mismatch found there would waste the whole matrix. Cohesion can afford to check
+  # Viu resolves its version inside the pack job; with a large validation matrix ahead of the pack,
+  # a tag/version mismatch found there would waste the whole matrix. Cohesion can afford to check
   # first because Get-CohesionVersion.ps1 reads the props files as XML - no SDK, no restore. The
   # single derivation is preserved: pack-packages consumes this job's output rather than
   # re-deriving the version.
   prepare:
     name: resolve release version and matrix
-    if: github.event_name == 'release' && github.event.release.draft == false
     runs-on: ubuntu-24.04
     outputs:
       commit: ${{ steps.commit.outputs.commit }}
       version: ${{ steps.version.outputs.version }}
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
+      - name: Verify the selected release is published
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COHESION_EVENT_NAME: ${{ github.event_name }}
+          COHESION_WORKFLOW_REF: ${{ github.ref }}
+          COHESION_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          COHESION_RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:COHESION_RELEASE_TAG)) {
+            throw 'No release tag was selected.'
+          }
+
+          if ($env:COHESION_RELEASE_TAG -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$') {
+            throw 'The release tag must use vMAJOR.MINOR.PATCH[-PRERELEASE].'
+          }
+
+          if ($env:COHESION_EVENT_NAME -eq 'workflow_dispatch') {
+            $expectedWorkflowRef = "refs/heads/$env:COHESION_DEFAULT_BRANCH"
+            if ($env:COHESION_WORKFLOW_REF -ne $expectedWorkflowRef) {
+              throw "nuget.org promotion must run from the default branch ($expectedWorkflowRef)."
+            }
+
+            $releaseJson = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:COHESION_RELEASE_TAG"
+            if ($LASTEXITCODE -ne 0) {
+              throw "No published GitHub release was found for tag $env:COHESION_RELEASE_TAG."
+            }
+
+            $release = $releaseJson | ConvertFrom-Json
+            if ($release.draft -or [string]::IsNullOrWhiteSpace([string] $release.published_at)) {
+              throw "GitHub release $env:COHESION_RELEASE_TAG is not published."
+            }
+          }
+
+          "tag=$env:COHESION_RELEASE_TAG" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag_ref=refs/tags/$env:COHESION_RELEASE_TAG" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Selected published release: $env:COHESION_RELEASE_TAG"
+
       - name: Checkout release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ steps.release.outputs.tag_ref }}
 
       # The tag is resolved to a commit ONCE, here, and every downstream job checks out that
       # commit rather than the tag. A git tag is movable: re-pointing it between the validation
@@ -88,10 +141,10 @@ jobs:
         id: version
         shell: pwsh
         env:
-          COHESION_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          COHESION_RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          # Shared with installer/scripts/Install-Local.ps1 and the framework workflow, so the
-          # version this pipeline publishes cannot drift from what the local packer produces.
+          # This is the canonical source shared with Install-Local.ps1. Release packaging uses it
+          # exactly; local packaging deliberately derives the same prerelease plus `.local`.
           $canonicalVersion = (& ./installer/scripts/Get-CohesionVersion.ps1)
           if (-not $canonicalVersion) {
             throw 'Get-CohesionVersion.ps1 produced no output.'
@@ -144,12 +197,11 @@ jobs:
 
   # One leg per shipping package, running the same canonical build-and-test recipe the per-area
   # workflows run on push. Linux only: the per-area workflows already cover the ubuntu/windows/macos
-  # matrix continuously, so re-running three OSes here would triple a ~130-leg matrix to prove
+  # matrix continuously, so re-running three OSes here would triple an already-large matrix to prove
   # something the branch already proved.
   validate-release:
     name: validate ${{ matrix.project }}
     needs: prepare
-    if: github.event_name == 'release'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -174,7 +226,6 @@ jobs:
   pack-packages:
     name: pack all NuGet packages
     needs: [prepare, validate-release]
-    if: github.event_name == 'release' && github.event.release.draft == false
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ needs.prepare.outputs.version }}
@@ -199,7 +250,11 @@ jobs:
         shell: pwsh
         env:
           COHESION_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: ./installer/scripts/Pack-Release.ps1 -Version $env:COHESION_PACKAGE_VERSION
+          COHESION_RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: >-
+          ./installer/scripts/Pack-Release.ps1
+          -Version $env:COHESION_PACKAGE_VERSION
+          -RepositoryCommit $env:COHESION_RELEASE_COMMIT
 
       # The publish jobs assert the artifact they download still carries every package this job
       # produced. They cannot compute that themselves - they only download the artifact and never
@@ -236,7 +291,6 @@ jobs:
 
   publish-github-packages:
     name: stage packages in GitHub Packages
-    if: github.event_name == 'release'
     needs: pack-packages
     runs-on: ubuntu-24.04
     permissions:
@@ -304,12 +358,13 @@ jobs:
 
   publish-nuget:
     name: promote packages to nuget.org
-    # nuget.org promotion is limited to the public prerelease channels: preview and
-    # release-candidate versions promote; alpha/beta releases stop at the GitHub Packages
-    # staging feed. Stable (suffixless) versions are deliberately NOT matched yet - when the
-    # stable channel opens, add a suffixless condition here alongside these two.
+    # A suffix alone never promotes. An owner must manually dispatch this workflow from the default
+    # branch, name the already-published release tag, and set promote=true. A required reviewer for
+    # the nuget-org environment must then approve the job. Public channels are preview and rc only;
+    # alpha/beta and stable releases stop at GitHub Packages.
     if: >-
-      github.event_name == 'release' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.promote == true &&
       (contains(needs.pack-packages.outputs.version, '-preview.') ||
        contains(needs.pack-packages.outputs.version, '-rc.'))
     needs: [pack-packages, publish-github-packages]

@@ -11,5 +11,5 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
   - [Common MSBuild Properties](./build/MSBUILD_COMMON_PROPS.md) — where shared build properties are defined
   - [Common MSBuild Targets](./build/MSBUILD_COMMON_TARGETS.md) — standard MSBuild target execution order
-- [Versioning](./versioning/VERSIONING.md) — the mono-repo fixed versioning strategy
+- [Versioning and Release Channels](./VERSIONING.md) — synchronized versions, staging, promotion, and local package policy
 - [References](./REFERENCES.md) — external MSBuild and tooling references

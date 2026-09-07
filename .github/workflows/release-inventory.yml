@@ -50,9 +50,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test the release inventory guard
+      - name: Test release packaging policy
         shell: pwsh
-        run: Invoke-Pester ./installer/scripts/modules/tests/CohesionPackaging.Tests.ps1 -CI
+        run: Invoke-Pester ./installer/scripts/modules/tests -CI
 
       - name: Assert the inventory matches the repository and CI
         shell: pwsh
