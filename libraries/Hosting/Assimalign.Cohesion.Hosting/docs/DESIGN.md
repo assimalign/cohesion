@@ -39,6 +39,35 @@ A start/stop cycle drives four host-level specialization hooks around the servic
 - **Shutdown is best-effort.** A failing service stop never leaks the services behind it: failures are collected while every service is still given its stop (serially in reverse registration order, or concurrently when `StopServicesConcurrently` is set), then thrown together after the host reaches `Stopped`. The abort policy is deliberately not coupled to the concurrency flag. Startup keeps the opposite default - serial start aborts on the first failure and the rollback path (below) compensates - because refusing to continue past a broken dependency is the safer start-side behavior.
 - Stopping or disposing a never-started (`Idle`) host is a no-op. Only a `Started` host actually runs the stop sequence, which also guarantees the per-run state exists - there is no "has not started" failure mode on the stop path.
 
+### Resource run wrapper
+
+`ResourceHost` is an internal decorator installed only when the opt-in resource registration
+places `ResourceHostOptions` on the host context. `Host<TContext>.RunAsync` otherwise follows the
+ordinary host path unchanged, so a plain executable gains no orchestration behavior.
+
+The wrapper registers one process-wide signal fan-out for SIGINT, SIGTERM, and SIGHUP, plus the
+Windows SIGQUIT mapping used by `CTRL_BREAK_EVENT`. Each active resource subscribes to that fan-out;
+Windows out-of-process resources also wait on the fresh named event supplied through
+`COHESION_STOP_EVENT`. A signal is forwarded to `HostContext.Shutdown()` only while that host is
+`Started`, so a pre-start signal never invokes the explicit shutdown API.
+
+After startup completes, the wrapper writes `cohesion-resource: ready`. A handled stop writes
+`cohesion-resource: stopping` before the drain and `cohesion-resource: stopped` after it completes.
+It applies `COHESION_CONTENT_ROOT`, falling back to the application base directory when no value
+was supplied. The configured root must be absolute. Failures are converted at this executable
+boundary to `cohesion/sysexits/v1`: 64 for an area-classified configuration exception (final), 69
+for an area-classified dependency exception (restartable), 70 for any other pre-ready failure
+(final), and 75 for any other post-ready failure (restartable). A SIGINT drain that exceeds its
+budget maps to 130; other requested-stop drain cancellations map to 143. The typed classification
+seam uses static type tests supplied by the area registration and performs no reflection.
+
+Resource shutdown is governed by one declared value: `stopGraceSeconds`, defaulting to 30. The
+wrapper always overwrites `HostOptions.ShutdownTimeout` with
+`max(5 seconds, stopGraceSeconds - 5 seconds)` before startup. Values below five seconds are
+rejected because the five-second floor would otherwise make the drain budget exceed the supervisor
+grace. A resource therefore cannot configure `ShutdownTimeout` independently above its grace; the
+ordinary host default remains 30 seconds for non-resource applications.
+
 ### Start failure
 
 A failed or cancelled start never wedges the host in `Starting` with partially-started services leaked (e.g. a bound socket). The coordinator compensates and rethrows:

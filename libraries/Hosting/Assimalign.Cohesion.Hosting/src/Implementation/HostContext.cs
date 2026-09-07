@@ -36,6 +36,8 @@ public abstract class HostContext : IHostContext
 
     internal Action? ShutdownCallback { get; set; }
 
+    internal ResourceHostOptions? ResourceHostOptions { get; set; }
+
     /// <summary>
     /// Returns a task that completes when the host's run ends - a transition to
     /// <see cref="HostState.Stopped"/> or <see cref="HostState.Failed"/> - or a completed
@@ -76,6 +78,21 @@ public abstract class HostContext : IHostContext
         stoppedSource?.TrySetResult();
     }
 
+    internal bool TryBeginStop(Action? onTransition = null)
+    {
+        lock (_lock)
+        {
+            if (_state is not HostState.Started)
+            {
+                return false;
+            }
+
+            onTransition?.Invoke();
+            _state = HostState.Stopping;
+            return true;
+        }
+    }
+
     private static bool IsTerminal(HostState state)
     {
         return state is HostState.Stopped or HostState.Failed;
@@ -86,5 +103,27 @@ public abstract class HostContext : IHostContext
         InvalidOperationException.ThrowIf(ShutdownCallback is null, "Host has not started.");
 
         ShutdownCallback.Invoke();
+    }
+
+    internal bool TryShutdown(
+        Action expectedShutdownCallback,
+        Action? onAccepted = null)
+    {
+        Action? shutdownCallback;
+
+        lock (_lock)
+        {
+            if (_state is not HostState.Started ||
+                !ReferenceEquals(ShutdownCallback, expectedShutdownCallback))
+            {
+                return false;
+            }
+
+            shutdownCallback = expectedShutdownCallback;
+            onAccepted?.Invoke();
+        }
+
+        shutdownCallback.Invoke();
+        return true;
     }
 }

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Threading;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Hosting;
 
@@ -30,8 +29,14 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     public TimeSpan StartupTimeout { get; set; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
-    /// The allotted time given for shutdown before forced shutdown. Default is 30 seconds.
+    /// Gets or sets the allotted time given for shutdown before forced shutdown. The default
+    /// for an ordinary host is 30 seconds.
     /// </summary>
+    /// <remarks>
+    /// A resource host derives this value from its declared stop grace period as
+    /// <c>stopGraceSeconds - 5</c> seconds, with a floor of 5 seconds. Resource applications
+    /// configure the stop grace period; they do not configure this timeout independently.
+    /// </remarks>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
