@@ -6,4 +6,5 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true)]
 [JsonSerializable(typeof(PortAllocationDocument))]
+[JsonSerializable(typeof(LocalProcessRegistration))]
 internal partial class LocalGatewayJsonContext : JsonSerializerContext;

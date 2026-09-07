@@ -6,21 +6,19 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// The default <see cref="IApplication"/>. It dispatches the model's run mode; ordinary Run
-/// starts the gateway, blocks until cancellation, then stops supervision within a bounded
-/// shutdown window, while Describe writes the model without gateway contact.
+/// starts the gateway, blocks until cancellation, then lets the gateway apply its per-resource
+/// shutdown budgets, while Describe writes the model without gateway contact.
 /// </summary>
 internal sealed class CohesionApplication : IApplication
 {
-    private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(30);
-
     private readonly IApplicationGateway _gateway;
-    private readonly TimeSpan _shutdownTimeout;
+    private readonly TimeSpan? _shutdownTimeout;
 
     public CohesionApplication(IApplicationModel model, IApplicationGateway gateway, TimeSpan? shutdownTimeout = null)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
-        _shutdownTimeout = shutdownTimeout ?? DefaultShutdownTimeout;
+        _shutdownTimeout = shutdownTimeout;
     }
 
     public IApplicationModel Model { get; }
@@ -49,7 +47,14 @@ internal sealed class CohesionApplication : IApplication
 
         await stopped.Task.ConfigureAwait(false);
 
-        using var shutdown = new CancellationTokenSource(_shutdownTimeout);
-        await _gateway.StopAsync(shutdown.Token).ConfigureAwait(false);
+        if (_shutdownTimeout is TimeSpan shutdownTimeout)
+        {
+            using var shutdown = new CancellationTokenSource(shutdownTimeout);
+            await _gateway.StopAsync(shutdown.Token).ConfigureAwait(false);
+        }
+        else
+        {
+            await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }

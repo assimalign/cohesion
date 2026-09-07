@@ -18,8 +18,8 @@ This package implements the control-plane contracts defined in
 - **`LocalGateway`** (+ `LocalGatewayOptions`) — the default gateway for local development,
   which realizes each resource as a supervised child process.
 - Internal pieces: `ResourceControlContext`, `LocalResourceResolver`, port and mount
-  materializers, the probe runner, `LocalGatewayProcessSupervisor`, `LocalProcessController`,
-  `ExecutableArtifact`.
+  materializers, the probe runner, `LocalGatewayProcessSupervisor`, `LocalProcessStateStore`,
+  `LocalProcessSignal`, `LocalProcessController`, `ExecutableArtifact`.
 - **`UseLocalGateway()`** and **`AddExecutable(...)`** builder extensions.
 
 It references the Core-only `Assimalign.Cohesion.ApplicationModel` and
@@ -95,9 +95,20 @@ the registration under the same lock.
   modes. Windows files are DataProtection ciphertext backed by a CurrentUser DPAPI-protected key
   ring; this makes no ACL claim. Gateway-side source resolution and a distinct child-readable
   Windows delivery carrier remain design item 25 work.
-- **Shutdown**: reverse-order `Kill(entireProcessTree: true)` bounded by `StopGrace`, marking
-  `Stopped`. A graceful, platform-specific `SIGTERM` / console-Ctrl-C ahead of the kill is a
-  planned item-20 follow-up, together with process groups and pid-file re-attachment.
+- **Shutdown**: Windows launches use `CreateNewProcessGroup`; POSIX launches use `setsid` when
+  the host provides it, with a best-effort `setpgid` fallback. On Windows, a fresh manual-reset
+  event named by `COHESION_STOP_EVENT` is primary and targeted `CTRL_BREAK` is the console
+  fallback; POSIX sends `SIGTERM` to the process group when isolation succeeded. The gateway
+  waits the manifest's `lifecycle.stopGraceSeconds` (30 seconds by default;
+  `LocalGatewayOptions.StopGrace` is the
+  fallback for opaque executables), then force-kills the whole group/tree. A process that exits
+  during grace becomes `Stopped`; one that requires escalation becomes `Failed(forced)`.
+- **Recovery**: `.cohesion/<application>/owner` records the gateway identity and
+  `.cohesion/<application>/<resource>/pid` records PID, process start time, executable path,
+  process-group ownership, and the Windows stop-event name. A new gateway independently verifies
+  PID + start time + executable before adopting a live child and rebuilds readiness from probes.
+  `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each
+  verified child and launches a fresh attempt.
 
 ## Testing posture
 
@@ -110,7 +121,8 @@ algorithm also verifies that post-`Running` degradation does not re-gate depende
 child-process spawning is exercised by a co-located, BCL-only test apphost. `LocalGateway` tests
 cover persisted ports and contract environment, default and explicit HTTP readiness (including
 404 fail-fast), TCP and exec probes, liveness degradation/restart/backoff, mount materialization,
-prefixed stdout/stderr, and `AddExecutable` marker readiness.
+prefixed stdout/stderr, `AddExecutable` marker readiness, the full exponential-backoff sequence,
+graceful and forced stop classification, PID-file re-attachment, and explicit orphan restart.
 
 ## Non-goals
 

@@ -18,7 +18,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         IReadOnlyList<ResourcePlan> plans,
         GatewayRunMode runMode,
         ResourceName gatewayIdentity,
-        bool adopt)
+        bool adopt,
+        bool restartOrphans)
     {
         Name = name;
         Environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -46,6 +47,7 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         RunMode = runMode;
         GatewayIdentity = gatewayIdentity;
         Adopt = adopt;
+        RestartOrphans = restartOrphans;
         Owner = $"{name}@{gatewayIdentity}";
 
         var resources = new IApplicationResource[Descriptors.Count];
@@ -68,6 +70,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     public string Owner { get; }
 
     public bool Adopt { get; }
+
+    public bool RestartOrphans { get; }
 
     public IReadOnlyList<IApplicationResourceDescriptor> Descriptors { get; }
 

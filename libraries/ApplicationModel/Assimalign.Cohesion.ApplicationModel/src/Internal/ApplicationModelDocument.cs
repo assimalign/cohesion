@@ -19,6 +19,7 @@ internal sealed class ApplicationModelDocument
         string owner,
         string mode,
         bool adopt,
+        bool restartOrphans,
         IReadOnlyList<ApplicationModelResourceDocument> resources)
     {
         Schema = CurrentSchema;
@@ -28,6 +29,7 @@ internal sealed class ApplicationModelDocument
         Owner = owner;
         Mode = mode;
         Adopt = adopt;
+        RestartOrphans = restartOrphans;
         Resources = resources;
     }
 
@@ -44,6 +46,8 @@ internal sealed class ApplicationModelDocument
     public string Mode { get; }
 
     public bool Adopt { get; }
+
+    public bool RestartOrphans { get; }
 
     public IReadOnlyList<ApplicationModelResourceDocument> Resources { get; }
 
@@ -82,6 +86,7 @@ internal sealed class ApplicationModelDocument
             model.Owner,
             model.RunMode.ToString().ToLowerInvariant(),
             model.Adopt,
+            model.RestartOrphans,
             new ReadOnlyCollection<ApplicationModelResourceDocument>(resources));
     }
 }

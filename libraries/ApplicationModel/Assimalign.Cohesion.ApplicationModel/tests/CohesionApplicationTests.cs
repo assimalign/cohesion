@@ -29,6 +29,7 @@ public class CohesionApplicationTests
 
         gateway.Calls.ShouldBe(new[] { "start", "stop" });
         gateway.StartedModel.ShouldBeSameAs(app.Model);
+        gateway.StopTokenCanBeCanceled.ShouldBe(false);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Describe emits the model document without gateway contact")]
@@ -37,7 +38,7 @@ public class CohesionApplicationTests
         var gateway = new FakeGateway();
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--mode=describe", "--gateway=fake", "--environment=Development"])
+                ["--mode=describe", "--gateway=fake", "--environment=Development", "--restart-orphans"])
             .UseGateway(gateway);
         builder.AddResource(TestManifestFactory.Create());
         IApplication app = builder.Build();
@@ -58,6 +59,7 @@ public class CohesionApplicationTests
             root.GetProperty("gateway").GetString().ShouldBe("fake");
             root.GetProperty("owner").GetString().ShouldBe("appa@fake");
             root.GetProperty("mode").GetString().ShouldBe("describe");
+            root.GetProperty("restartOrphans").GetBoolean().ShouldBeTrue();
             JsonElement resource = root.GetProperty("resources")[0];
             resource.GetProperty("name").GetString().ShouldBe("worker");
             resource.GetProperty("manifest").GetProperty("schema").GetString()

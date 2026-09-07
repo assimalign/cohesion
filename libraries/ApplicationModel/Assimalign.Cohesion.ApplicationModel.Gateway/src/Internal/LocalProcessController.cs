@@ -30,7 +30,7 @@ internal sealed class LocalProcessController : IApplicationResourceController
         LocalResourceConfiguration configuration = await _preparer
             .PrepareAsync(context, artifact, cancellationToken)
             .ConfigureAwait(false);
-        _supervisor.Start(configuration);
+        await _supervisor.StartAsync(configuration, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DeleteAsync(IResourceControlContext context, CancellationToken cancellationToken = default)

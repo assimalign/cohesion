@@ -23,6 +23,8 @@ internal sealed class FakeGateway : IApplicationGateway
 
     public IApplicationModel? StartedModel { get; private set; }
 
+    public bool? StopTokenCanBeCanceled { get; private set; }
+
     public Task StartAsync(IApplicationModel model, CancellationToken cancellationToken = default)
     {
         Calls.Add("start");
@@ -33,6 +35,7 @@ internal sealed class FakeGateway : IApplicationGateway
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         Calls.Add("stop");
+        StopTokenCanBeCanceled = cancellationToken.CanBeCanceled;
         return Task.CompletedTask;
     }
 }

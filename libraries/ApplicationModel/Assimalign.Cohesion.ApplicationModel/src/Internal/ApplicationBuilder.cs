@@ -152,7 +152,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             plans,
             _options.RunMode,
             gatewayIdentity,
-            _options.Adopt);
+            _options.Adopt,
+            _options.RestartOrphans);
     }
 
     private ResourcePlan[] CreatePlans(

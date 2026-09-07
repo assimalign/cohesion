@@ -12,6 +12,8 @@ internal sealed class GatewayCommandLineOptions
 
     public bool Adopt { get; private set; }
 
+    public bool RestartOrphans { get; private set; }
+
     public static GatewayCommandLineOptions Parse(string[]? args)
     {
         var options = new GatewayCommandLineOptions();
@@ -40,7 +42,15 @@ internal sealed class GatewayCommandLineOptions
             }
             else if (TrySplit(argument, "--adopt", out inlineValue))
             {
-                options.Adopt = ReadAdoptValue(args, ref index, inlineValue);
+                options.Adopt = ReadOptionalBoolean(args, ref index, "--adopt", inlineValue);
+            }
+            else if (TrySplit(argument, "--restart-orphans", out inlineValue))
+            {
+                options.RestartOrphans = ReadOptionalBoolean(
+                    args,
+                    ref index,
+                    "--restart-orphans",
+                    inlineValue);
             }
         }
 
@@ -92,11 +102,15 @@ internal sealed class GatewayCommandLineOptions
         return value;
     }
 
-    private static bool ReadAdoptValue(string[] args, ref int index, string? inlineValue)
+    private static bool ReadOptionalBoolean(
+        string[] args,
+        ref int index,
+        string option,
+        string? inlineValue)
     {
         if (inlineValue is not null)
         {
-            return ParseBoolean("--adopt", inlineValue);
+            return ParseBoolean(option, inlineValue);
         }
 
         if (index + 1 < args.Length && bool.TryParse(args[index + 1], out bool parsed))

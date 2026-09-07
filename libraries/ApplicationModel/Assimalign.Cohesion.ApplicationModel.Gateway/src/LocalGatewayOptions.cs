@@ -61,9 +61,17 @@ public sealed class LocalGatewayOptions
 
     /// <summary>
     /// How long to wait for a child process to exit during shutdown before it is force-killed.
-    /// Defaults to 10&#160;seconds.
+    /// This is the fallback for manifest-less executables; manifest-backed resources use
+    /// their lifecycle grace. Defaults to 30&#160;seconds.
     /// </summary>
-    public TimeSpan StopGrace { get; set; } = TimeSpan.FromSeconds(10);
+    public TimeSpan StopGrace { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets whether verified child processes left by an earlier gateway instance are
+    /// gracefully stopped and relaunched instead of re-attached. Defaults to <see langword="false"/>.
+    /// The <c>--restart-orphans</c> invocation option enables the same behavior.
+    /// </summary>
+    public bool RestartOrphans { get; set; }
 
     internal void Validate()
     {

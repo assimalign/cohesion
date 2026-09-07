@@ -49,6 +49,12 @@ public interface IApplicationModel
     bool Adopt { get; }
 
     /// <summary>
+    /// Gets whether a local gateway should gracefully replace verified child processes left
+    /// by an earlier gateway instance instead of re-attaching to them.
+    /// </summary>
+    bool RestartOrphans { get; }
+
+    /// <summary>
     /// The dependency descriptors — authoritative. Each descriptor wraps a resource and
     /// the resources it must be realized after.
     /// </summary>

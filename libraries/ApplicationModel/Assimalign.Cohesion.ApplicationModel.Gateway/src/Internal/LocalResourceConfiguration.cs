@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
@@ -14,7 +15,9 @@ internal sealed class LocalResourceConfiguration
         IProbeSpec? livenessProbe,
         string? probeStartMarker,
         bool markerIsReadiness,
-        RestartPolicy restartPolicy)
+        RestartPolicy restartPolicy,
+        TimeSpan stopGrace,
+        bool useStopEvent)
     {
         Resource = resource;
         Artifact = artifact;
@@ -26,6 +29,8 @@ internal sealed class LocalResourceConfiguration
         ProbeStartMarker = probeStartMarker;
         MarkerIsReadiness = markerIsReadiness;
         RestartPolicy = restartPolicy;
+        StopGrace = stopGrace;
+        UseStopEvent = useStopEvent;
     }
 
     public IApplicationResource Resource { get; }
@@ -47,4 +52,8 @@ internal sealed class LocalResourceConfiguration
     public bool MarkerIsReadiness { get; }
 
     public RestartPolicy RestartPolicy { get; }
+
+    public TimeSpan StopGrace { get; }
+
+    public bool UseStopEvent { get; }
 }

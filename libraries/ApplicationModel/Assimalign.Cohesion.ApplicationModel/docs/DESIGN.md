@@ -109,7 +109,12 @@ orchestration package.
 
 - `Application.CreateBuilder(ApplicationName, args)` → fluent
   `AddResource(...).DependsOn(...)` + `UseGateway(...)` → `Build()`. `UseName`
-  remains available for callers that start from the parameterless overload.
+  remains available for callers that start from the parameterless overload. Invocation intent
+  carried by the immutable model includes `--adopt` ownership consent and
+  `--restart-orphans` local-process recovery policy; platform gateways decide how to realize it.
+- After run cancellation, `CohesionApplication` lets the selected gateway apply its own
+  per-resource stop budgets. It does not impose one 30-second outer timeout across a
+  reverse-ordered resource set, which would truncate later resources' declared grace periods.
 - `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
   at least one realized resource, all dependencies present, no dependency cycles
   (DFS), a selected gateway, an RFC 1123 application name, each typed override, and
@@ -121,9 +126,9 @@ orchestration package.
 - In Run mode, `IApplication.RunAsync` mirrors `Host<TContext>.RunAsync`: a linked
   `CancellationTokenSource` plus a `TaskCompletionSource` completed on cancellation.
   It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es supervision
-  within a bounded shutdown window (default 30s). Stop leaves persistent platform
-  objects running; destructive removal is the separate Teardown mode. Describe emits
-  the model document and never contacts the selected gateway.
+  using the gateway's own resource-aware stop bounds. Stop leaves persistent platform objects
+  running; destructive removal is the separate Teardown mode. Describe emits the model document
+  and never contacts the selected gateway.
 
 ## AOT posture
 

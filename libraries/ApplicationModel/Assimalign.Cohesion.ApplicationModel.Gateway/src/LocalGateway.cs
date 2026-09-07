@@ -17,6 +17,7 @@ public sealed class LocalGateway : ApplicationGateway
     private readonly InMemoryResourceStateManager _state = new();
     private readonly LocalResourceResolver _resolver;
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
+    private readonly LocalGatewayProcessSupervisor _supervisor;
 
     /// <summary>
     /// Initializes a new <see cref="LocalGateway"/> with default options.
@@ -40,11 +41,12 @@ public sealed class LocalGateway : ApplicationGateway
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion");
         var ports = new LocalPortStore(stateDirectory);
         var mounts = new LocalMountMaterializer(stateDirectory);
-        var preparer = new LocalResourcePreparer(ports, mounts);
-        var supervisor = new LocalGatewayProcessSupervisor(_state, _options);
+        var processState = new LocalProcessStateStore(stateDirectory);
+        var preparer = new LocalResourcePreparer(ports, mounts, _options);
+        _supervisor = new LocalGatewayProcessSupervisor(_state, _options, processState);
         _controllers = new IApplicationResourceController[]
         {
-            new LocalProcessController(preparer, supervisor),
+            new LocalProcessController(preparer, _supervisor),
         };
     }
 
@@ -61,6 +63,10 @@ public sealed class LocalGateway : ApplicationGateway
     protected override TimeSpan ReadinessBudget => _options.ReadinessBudget;
 
     internal IApplicationResourceStateManager ResourceStates => _state;
+
+    /// <inheritdoc/>
+    protected override Task StartObserverAsync(IApplicationModel model, CancellationToken cancellationToken)
+        => _supervisor.InitializeAsync(model, cancellationToken);
 
     /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)

@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 public class ApplicationBuilderTests
 {
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Command-line options support split and equals forms")]
-    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt")]
-    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt", "true")]
-    [InlineData("--mode=describe", "--gateway=fake", "--environment=Development", "--adopt=true")]
+    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt", "--restart-orphans")]
+    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt", "true", "--restart-orphans", "true")]
+    [InlineData("--mode=describe", "--gateway=fake", "--environment=Development", "--adopt=true", "--restart-orphans=true")]
     public void CreateBuilder_CommandLineOptions_AreCarriedByModel(params string[] args)
     {
         IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), args)
@@ -31,6 +31,7 @@ public class ApplicationBuilderTests
         model.Environment.Name.ShouldBe((EnvironmentName)"Development");
         model.Environment.IsDevelopment.ShouldBeTrue();
         model.Adopt.ShouldBeTrue();
+        model.RestartOrphans.ShouldBeTrue();
         model.Owner.ShouldBe("appa@fake");
     }
 

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -26,16 +28,25 @@ internal static class Program
         }
 
         using var stopping = new CancellationTokenSource();
+        using var stopSignals = new StopSignalSubscription(stopping);
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
         {
             eventArgs.Cancel = true;
-            stopping.Cancel();
+            stopSignals.Observe();
         };
         Console.CancelKeyPress += cancelHandler;
 
         try
         {
-            await RunServerAsync(stopping.Token).ConfigureAwait(false);
+            if (args.Length > 0 && string.Equals(args[0], "wait", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, stopping.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await RunServerAsync(stopping.Token).ConfigureAwait(false);
+            }
+
             return 0;
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
@@ -65,6 +76,7 @@ internal static class Program
 
         try
         {
+            StartDescendant(Environment.GetEnvironmentVariable("TEST_DESCENDANT_PID_PATH"));
             int boundPort = ((IPEndPoint)listener.LocalEndpoint).Port;
             int launchCount = IncrementLaunchCount(Environment.GetEnvironmentVariable("TEST_LAUNCH_COUNT_PATH"));
 
@@ -399,7 +411,13 @@ internal static class Program
         }
 
         EnsureParentDirectory(path);
-        File.AppendAllText(path, $"{method} {target}{Environment.NewLine}", new UTF8Encoding(false));
+        using var stream = new FileStream(
+            path,
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        writer.WriteLine($"{method} {target}");
     }
 
     private static void WriteOptionalText(string? path, string value)
@@ -408,6 +426,29 @@ internal static class Program
         {
             WriteAtomically(path, Encoding.UTF8.GetBytes(value));
         }
+    }
+
+    private static void StartDescendant(string? processIdPath)
+    {
+        if (string.IsNullOrWhiteSpace(processIdPath))
+        {
+            return;
+        }
+
+        string executable = Environment.ProcessPath
+            ?? throw new InvalidOperationException("The test host process path is unavailable.");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("wait");
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("The test-host descendant did not start.");
+        WriteOptionalText(
+            processIdPath,
+            process.Id.ToString(CultureInfo.InvariantCulture));
     }
 
     private static void WriteJson(string path, Action<Utf8JsonWriter> write)
@@ -544,4 +585,65 @@ internal static class Program
             503 => "Service Unavailable",
             _ => "Status",
         };
+
+    private sealed class StopSignalSubscription : IDisposable
+    {
+        private readonly CancellationTokenSource _stopping;
+        private readonly bool _ignore;
+        private readonly string? _observedPath;
+        private readonly EventWaitHandle? _stopEvent;
+        private readonly RegisteredWaitHandle? _registeredWait;
+        private readonly PosixSignalRegistration? _terminate;
+        private int _observed;
+
+        public StopSignalSubscription(CancellationTokenSource stopping)
+        {
+            _stopping = stopping;
+            _ignore = string.Equals(
+                Environment.GetEnvironmentVariable("TEST_IGNORE_STOP"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            _observedPath = Environment.GetEnvironmentVariable("TEST_STOP_OBSERVED_PATH");
+
+            string? stopEventName = Environment.GetEnvironmentVariable(ResourceEnvironment.StopEvent);
+            if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(stopEventName))
+            {
+                _stopEvent = EventWaitHandle.OpenExisting(stopEventName);
+                _registeredWait = ThreadPool.RegisterWaitForSingleObject(
+                    _stopEvent,
+                    static (state, _) => ((StopSignalSubscription)state!).Observe(),
+                    this,
+                    Timeout.Infinite,
+                    executeOnlyOnce: true);
+            }
+            else if (!OperatingSystem.IsWindows())
+            {
+                _terminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+                {
+                    context.Cancel = true;
+                    Observe();
+                });
+            }
+        }
+
+        public void Observe()
+        {
+            if (Interlocked.Exchange(ref _observed, 1) == 0)
+            {
+                WriteOptionalText(_observedPath, "observed");
+            }
+
+            if (!_ignore)
+            {
+                _stopping.Cancel();
+            }
+        }
+
+        public void Dispose()
+        {
+            _registeredWait?.Unregister(null);
+            _stopEvent?.Dispose();
+            _terminate?.Dispose();
+        }
+    }
 }

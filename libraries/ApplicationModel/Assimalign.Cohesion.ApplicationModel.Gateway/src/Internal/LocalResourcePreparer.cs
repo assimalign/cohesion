@@ -14,13 +14,16 @@ internal sealed class LocalResourcePreparer
 
     private readonly LocalPortStore _ports;
     private readonly LocalMountMaterializer _mounts;
+    private readonly LocalGatewayOptions _options;
 
     public LocalResourcePreparer(
         LocalPortStore ports,
-        LocalMountMaterializer mounts)
+        LocalMountMaterializer mounts,
+        LocalGatewayOptions options)
     {
         _ports = ports;
         _mounts = mounts;
+        _options = options;
     }
 
     public async Task<LocalResourceConfiguration> PrepareAsync(
@@ -76,7 +79,9 @@ internal sealed class LocalResourcePreparer
                 Normalize(localExecutable.LivenessProbe),
                 localExecutable.ReadyMarker,
                 markerIsReadiness,
-                localExecutable.RestartPolicy);
+                localExecutable.RestartPolicy,
+                _options.StopGrace,
+                useStopEvent: false);
         }
 
         if (resource is not IManifestResource manifestResource)
@@ -103,7 +108,9 @@ internal sealed class LocalResourcePreparer
             MapManifestProbe(manifest.Probes.Liveness, defaultLivenessProbe),
             ResourceReadyMarker,
             markerIsReadiness: false,
-            ParseRestartPolicy(manifest.Lifecycle.RestartPolicy, resource.Name));
+            ParseRestartPolicy(manifest.Lifecycle.RestartPolicy, resource.Name),
+            TimeSpan.FromSeconds(manifest.Lifecycle.StopGraceSeconds),
+            useStopEvent: true);
     }
 
     private static IProbeSpec CreateDefaultControlPlaneProbe(
