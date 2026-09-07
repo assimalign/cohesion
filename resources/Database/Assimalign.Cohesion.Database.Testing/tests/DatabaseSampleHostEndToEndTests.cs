@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -119,8 +120,13 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     {
         // Arrange
         using var cancellation = new CancellationTokenSource(TestTimeout);
-        ResourceManifest manifest = ResourceManifest.Load(GetSampleGeneratedPath("resource.json"));
+        ResourceManifest generatedManifest = ResourceManifest.Load(
+            GetSampleGeneratedPath("resource.json"));
         Directory.CreateDirectory(_statePath);
+
+        // Bootstrap issuance and authenticated default probing belong to the gateway. Supply
+        // those upstream inputs explicitly so this fixture remains a #973-owned Database E2E.
+        ResourceManifest manifest = PrepareRuntimeManifest(generatedManifest);
 
         LocalGateway firstGateway = CreateGateway();
         IApplicationModel firstModel = BuildModel(manifest, firstGateway);
@@ -274,12 +280,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 
     private string ReadBootstrapCredential(ResourceManifest manifest)
     {
-        string credentialPath = Path.Combine(
-            _statePath,
-            manifest.Application.ToString(),
-            manifest.Name.ToString(),
-            ".state",
-            "bootstrap.token");
+        string credentialPath = GetBootstrapCredentialPath(manifest);
         byte[] content = new Assimalign.Cohesion.Hosting.ResourceMount(credentialPath).ReadAllBytes();
         try
         {
@@ -289,6 +290,79 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         {
             CryptographicOperations.ZeroMemory(content);
         }
+    }
+
+    private ResourceManifest PrepareRuntimeManifest(ResourceManifest manifest)
+    {
+        ResourceManifestProbe startup = manifest.Probes.Readiness
+            ?? throw new InvalidOperationException(
+                "The generated Database sample manifest must declare its readiness probe.");
+        string credentialPath = GetBootstrapCredentialPath(manifest);
+        Directory.CreateDirectory(Path.GetDirectoryName(credentialPath)!);
+
+        byte[] credential = Encoding.UTF8.GetBytes("database-sample-e2e-bootstrap");
+        try
+        {
+            WriteBootstrapCredential(credentialPath, credential);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(credential);
+        }
+
+        var environment = new Dictionary<string, string>(
+            manifest.EnvironmentVariables,
+            StringComparer.Ordinal)
+        {
+            [ResourceEnvironment.BootstrapTokenPath] = credentialPath,
+        };
+
+        return manifest with
+        {
+            EnvironmentVariables = environment,
+            Probes = manifest.Probes with { Startup = startup },
+        };
+    }
+
+    private string GetBootstrapCredentialPath(ResourceManifest manifest)
+    {
+        return Path.Combine(
+            _statePath,
+            manifest.Application.ToString(),
+            manifest.Name.ToString(),
+            ".state",
+            "bootstrap.token");
+    }
+
+    private static void WriteBootstrapCredential(string path, byte[] credential)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            byte[] protectedCredential = ProtectedData.Protect(
+                credential,
+                optionalEntropy: null,
+                DataProtectionScope.CurrentUser);
+            try
+            {
+                File.WriteAllBytes(path, protectedCredential);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(protectedCredential);
+            }
+
+            return;
+        }
+
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+        };
+        using var stream = new FileStream(path, options);
+        stream.Write(credential);
     }
 
     private static async Task SeedDatabaseAsync(
