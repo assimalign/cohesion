@@ -64,6 +64,7 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/ApplicationModel
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway'
 
     # libraries/Cache
     'libraries/Cache/Assimalign.Cohesion.Caching'
