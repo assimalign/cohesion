@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -66,6 +68,20 @@ public sealed class LocalGateway : ApplicationGateway
 
     /// <inheritdoc/>
     protected override IApplicationResourceStateManager State => _state;
+
+    /// <inheritdoc/>
+    protected override async ValueTask<ResourceInputs> ResolveInputsAsync(
+        IApplicationResourceDescriptor resource,
+        IResourceControlContext context,
+        CancellationToken cancellationToken)
+    {
+        ResourceInputs inputs = await base
+            .ResolveInputsAsync(resource, context, cancellationToken)
+            .ConfigureAwait(false);
+        byte[] credential = Encoding.ASCII.GetBytes(
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+        return new ResourceInputs(inputs.Mounts, credential);
+    }
 
     internal IApplicationResourceStateManager ResourceStates => _state;
 

@@ -366,6 +366,7 @@ public class LocalGatewayTests
         {
             ["TEST_READY_STATUS_PATH"] = status,
             ["TEST_REQUEST_LOG_PATH"] = requests,
+            ["TEST_REQUIRE_CONTROL_PLANE_BEARER"] = "true",
         };
         ResourceManifest manifest = CreateManifest(
             "svc",
@@ -707,8 +708,9 @@ public class LocalGatewayTests
             {
                 content.ShouldNotBe(Encoding.UTF8.GetBytes("mount-value"));
                 Encoding.UTF8.GetString(content).ShouldNotContain("mount-value");
-                Directory.GetFiles(Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", ".keys"))
-                    .Length.ShouldBeGreaterThan(0);
+                Encoding.UTF8.GetString(
+                    new Assimalign.Cohesion.Hosting.ResourceMount(path).ReadAllBytes())
+                    .ShouldBe("mount-value");
             }
             else
             {

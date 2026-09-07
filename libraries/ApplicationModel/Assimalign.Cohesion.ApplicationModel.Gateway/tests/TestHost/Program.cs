@@ -135,8 +135,16 @@ internal static class Program
             return;
         }
 
-        while (!string.IsNullOrEmpty(await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)))
+        string? authorization = null;
+        string? header;
+        while (!string.IsNullOrEmpty(
+            header = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)))
         {
+            const string authorizationPrefix = "Authorization:";
+            if (header.StartsWith(authorizationPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                authorization = header[authorizationPrefix.Length..].Trim();
+            }
         }
 
         string[] parts = requestLine.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
@@ -146,7 +154,14 @@ internal static class Program
         AppendRequest(method, target);
 
         int statusCode;
-        if (!string.Equals(method, "GET", StringComparison.Ordinal)
+        if (RequiresBearerCredential(path) &&
+            (authorization is null ||
+             !authorization.StartsWith("Bearer ", StringComparison.Ordinal) ||
+             authorization.Length == "Bearer ".Length))
+        {
+            statusCode = 401;
+        }
+        else if (!string.Equals(method, "GET", StringComparison.Ordinal)
             && !string.Equals(method, "HEAD", StringComparison.Ordinal))
         {
             statusCode = 405;
@@ -183,6 +198,15 @@ internal static class Program
         string configured = Environment.GetEnvironmentVariable("TEST_LIVE_PATH") ?? "/livez";
         return string.Equals(path, configured, StringComparison.Ordinal)
             || string.Equals(path, "/cohesion/v1/livez", StringComparison.Ordinal);
+    }
+
+    private static bool RequiresBearerCredential(string path)
+    {
+        return string.Equals(
+                Environment.GetEnvironmentVariable("TEST_REQUIRE_CONTROL_PLANE_BEARER"),
+                "true",
+                StringComparison.OrdinalIgnoreCase) &&
+            path.StartsWith("/cohesion/v1/", StringComparison.Ordinal);
     }
 
     private static int ReadStatus(string? statusPath)

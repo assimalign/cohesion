@@ -34,11 +34,6 @@ internal sealed class LocalMountMaterializer
         ArgumentNullException.ThrowIfNull(inputs);
 
         IReadOnlyList<MountBinding> mounts = plan.Container.Mounts;
-        if (mounts.Count == 0)
-        {
-            return;
-        }
-
         bool isComposite = string.Equals(plan.Kind, "Composite", StringComparison.OrdinalIgnoreCase);
         var mountVariables = new string[mounts.Count];
         var uniqueMountVariables = new HashSet<string>(StringComparer.Ordinal);
@@ -69,6 +64,14 @@ internal sealed class LocalMountMaterializer
                 SafeChild(applicationDirectory, ".state", "gateway metadata"),
                 application)
             : null;
+
+        await MaterializeBootstrapCredentialAsync(
+            resourceDirectory,
+            resource.Name,
+            inputs.BootstrapCredential,
+            protector,
+            environment,
+            cancellationToken).ConfigureAwait(false);
 
         for (int index = 0; index < mounts.Count; index++)
         {
@@ -213,6 +216,58 @@ internal sealed class LocalMountMaterializer
                 File.Delete(temporaryPath);
             }
         }
+    }
+
+    private static async Task MaterializeBootstrapCredentialAsync(
+        string resourceDirectory,
+        ResourceName resource,
+        ReadOnlyMemory<byte> credential,
+        ILocalFileProtector? protector,
+        IDictionary<string, string> environment,
+        CancellationToken cancellationToken)
+    {
+        string stateDirectory = SafeChild(resourceDirectory, ".state", "resource state");
+        string credentialPath = SafeChild(
+            stateDirectory,
+            "bootstrap.token",
+            "bootstrap credential");
+
+        if (credential.IsEmpty)
+        {
+            GatewayEnvironmentVariables.Remove(
+                environment,
+                ResourceEnvironment.BootstrapTokenPath);
+            if (File.Exists(credentialPath))
+            {
+                File.Delete(credentialPath);
+            }
+
+            return;
+        }
+
+        CreatePrivateDirectory(stateDirectory);
+        byte[] content = credential.ToArray();
+        byte[]? persisted = null;
+        try
+        {
+            persisted = protector is null
+                ? content
+                : protector.Protect(resource.ToString(), "bootstrap.token", content);
+            await WriteFileAsync(credentialPath, persisted, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(content);
+            if (persisted is not null && !ReferenceEquals(content, persisted))
+            {
+                CryptographicOperations.ZeroMemory(persisted);
+            }
+        }
+
+        GatewayEnvironmentVariables.Set(
+            environment,
+            ResourceEnvironment.BootstrapTokenPath,
+            credentialPath);
     }
 
     private static void CreatePrivateDirectory(string path)

@@ -6,6 +6,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -78,8 +79,17 @@ internal sealed class LocalProbeRunner
         CancellationToken cancellationToken)
     {
         EndpointAddress address = ResolveAddress(probe, configuration, includePath: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, address.Url);
+        if (probe is LocalControlPlaneProbe controlPlaneProbe &&
+            !controlPlaneProbe.BootstrapCredential.IsEmpty)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Authorization",
+                "Bearer " + Encoding.UTF8.GetString(controlPlaneProbe.BootstrapCredential.Span));
+        }
+
         using HttpResponseMessage response = await HttpClient
-            .GetAsync(address.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.OK)

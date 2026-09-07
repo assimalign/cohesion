@@ -88,10 +88,12 @@ internal sealed class LocalResourcePreparer
         ResourceManifest manifest = manifestResource.Manifest;
         IProbeSpec defaultReadinessProbe = CreateDefaultControlPlaneProbe(
             manifest.ControlPlane,
-            "readyz");
+            "readyz",
+            compilation.Inputs.BootstrapCredential);
         IProbeSpec defaultLivenessProbe = CreateDefaultControlPlaneProbe(
             manifest.ControlPlane,
-            "livez");
+            "livez",
+            compilation.Inputs.BootstrapCredential);
 
         return new LocalResourceConfiguration(
             application,
@@ -127,12 +129,15 @@ internal sealed class LocalResourcePreparer
 
     private static IProbeSpec CreateDefaultControlPlaneProbe(
         ResourceManifestControlPlane controlPlane,
-        string rolePath)
+        string rolePath,
+        ReadOnlyMemory<byte> bootstrapCredential)
     {
         string path = controlPlane.Path.EndsWith("/", StringComparison.Ordinal)
             ? controlPlane.Path + rolePath
             : controlPlane.Path + "/" + rolePath;
-        return ProbeSpec.Http(controlPlane.Endpoint, path);
+        return new LocalControlPlaneProbe(
+            ProbeSpec.Http(controlPlane.Endpoint, path),
+            bootstrapCredential);
     }
 
     private static IReadOnlyList<ResourceEndpoint> GetDeclaredEndpoints(IApplicationResource resource)

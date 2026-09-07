@@ -724,10 +724,6 @@ function Test-CohesionProjectIsPackable {
         [string] $ProjectPath
     )
 
-    $projectContent = Get-Content -LiteralPath $ProjectPath -Raw
-    $isPackable = $projectContent -match '<Project\b[^>]*\bSdk\s*=' -or
-        $projectContent -match '<Sdk\s+Name\s*='
-
     $readXml = {
         param([string] $Path)
 

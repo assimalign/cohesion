@@ -115,9 +115,14 @@ the registration under the same lock.
   modes. A Composite plan's flattened `<member>-<mount>` claim instead receives the outer carrier
   `COHESION_MOUNT_<COMPOSITE>_<MEMBER>_<M>_PATH`, pointing to the same resource-rooted claim;
   inward remapping belongs to `ProcessHost`.
-  Windows files are DataProtection ciphertext backed by a CurrentUser DPAPI-protected key
-  ring; this makes no ACL claim. Gateway-side source resolution and a distinct child-readable
-  Windows delivery carrier remain design item 25 work.
+  Windows files are CurrentUser DPAPI ciphertext; this makes no ACL claim. The
+  `ResourceMount` reader in `Assimalign.Cohesion.Hosting` decrypts that file for the child while
+  retaining the raw path for tools that require one.
+- **Bootstrap credential**: every local reconcile receives a fresh ASCII bearer credential.
+  The apply path writes it with the same private file discipline at
+  `.cohesion/<application>/<resource>/.state/bootstrap.token` and injects only
+  `COHESION_BOOTSTRAP_TOKEN_PATH`; the credential is never placed directly in the environment.
+  A later reconcile rotates the file atomically.
 - **Shutdown**: Windows launches use `CreateNewProcessGroup`; POSIX launches use `setsid` when
   the host provides it, with a best-effort `setpgid` fallback. On Windows, a fresh manual-reset
   event named by `COHESION_STOP_EVENT` is primary and targeted `CTRL_BREAK` is the console
