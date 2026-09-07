@@ -66,6 +66,15 @@ orchestration package.
   claims and a governing headless service, endpoints produce services, public
   endpoints produce exposures, and probes map one-for-one. Platform gateways compile
   this IR; they do not branch on resource kind or CLR type.
+- **The planning path is visible at `Build()`.** `IPlannedResource.PlannerName`
+  defaults to `GenericPlanner`; an area-owned planner overrides it with the full
+  stable label (for example, `Database planner`). After each plan validates,
+  `Build()` writes exactly one informational line to standard error in declaration
+  order, preserving standard output for describe/render documents. A named area
+  planner is paired with the selected gateway's stable platform identity
+  (`appa-database: Database planner → kubernetes compiler`); the inherited or
+  legacy fallback is always explicit (`worker: GenericPlanner`). No CLR-type
+  inspection or platform-package reference is needed.
 - **Typed escape hatches stop at deployer-owned facts.** `ResourceOptions` permits
   replica and storage-size overrides. `Build()` validates replicas against the
   manifest's `maxReplicas`, then runs `ResourcePlanValidator`; platform-specific

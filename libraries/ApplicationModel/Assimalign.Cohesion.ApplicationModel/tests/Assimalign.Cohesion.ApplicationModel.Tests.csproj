@@ -16,4 +16,8 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

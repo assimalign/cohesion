@@ -84,15 +84,18 @@ public interface IApplicationBuilder
     IApplicationBuilder UseGateway(IApplicationGateway gateway);
 
     /// <summary>
-    /// Validates the graph — unique resource names, no dependency cycles, all
-    /// dependencies present, an RFC1123 application name, and a gateway selected — and
-    /// returns the runnable application.
+    /// Validates the graph, application identity, resource manifests, typed overrides,
+    /// planner diagnostics, and realization plans, then returns the runnable application.
     /// </summary>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
-    /// No gateway was selected, the application name is invalid, no resources are realized,
-    /// a resource name is duplicated, a dependency is missing, or the dependency graph
-    /// contains a cycle.
+    /// No gateway was selected; no resources are realized; or the application name, resource
+    /// graph, manifest, typed override, planner diagnostic, or realization plan is invalid.
     /// </exception>
+    /// <remarks>
+    /// After each resource plan validates, this method writes one informational
+    /// planner-to-compiler path to standard error in resource declaration order.
+    /// Standard output remains reserved for machine-readable describe and render output.
+    /// </remarks>
     IApplication Build();
 }

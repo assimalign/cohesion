@@ -12,7 +12,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 /// </summary>
 internal sealed class FakeGateway : IApplicationGateway
 {
-    public ResourceName Name => "fake";
+    public FakeGateway(string name = "fake")
+    {
+        Name = name;
+    }
+
+    public ResourceName Name { get; }
 
     public List<string> Calls { get; } = new();
 

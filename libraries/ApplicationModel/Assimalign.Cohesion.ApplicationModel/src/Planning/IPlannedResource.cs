@@ -5,6 +5,14 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public interface IPlannedResource : IManifestResource
 {
+    /// <summary>
+    /// Gets the planner label written by <see cref="IApplicationBuilder.Build"/>.
+    /// Resource-area planners override this with a full label such as
+    /// <c>Database planner</c>; direct implementations inherit the explicit
+    /// <see cref="GenericPlanner"/> fallback label.
+    /// </summary>
+    string PlannerName => nameof(GenericPlanner);
+
     /// <summary>Gets the deployer-owned planning overrides for this resource.</summary>
     IResourceOptions Options { get; }
 

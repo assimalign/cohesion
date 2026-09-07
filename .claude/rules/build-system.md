@@ -121,6 +121,27 @@ Privacy is enforced at the package boundary, not the type system — keep cross-
 
 Also available: `CohesionCodeGenValueType` for generating strongly typed value objects.
 
+## Resource orchestration dependency guards
+
+`build/Targets/Build.Rules.targets` protects the boundary between resource-area packages and the
+orchestration gateway:
+
+- **COHAM001** is the strict dependency-closure guard for an assembly under `resources/**` whose
+  name ends in `.ApplicationModel`. It activates only when that project sets
+  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; this staged opt-in exists
+  because Web.ApplicationModel still has a runtime-heavy closure. Once active, the only permitted
+  non-BCL assemblies are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
+  `Assimalign.Cohesion.ApplicationModel`, and `Assimalign.Cohesion.Hosting`. BCL means assemblies
+  supplied by the `Microsoft.NETCore.App` reference pack; third-party packages are not implicitly
+  allowed.
+- **COHRES003** applies automatically to every non-harness project under `resources/**` and bans
+  any `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. It has no opt-in and no exemption.
+
+Both guards inspect the direct/transitive project-reference graph before assembly resolution and
+the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The latter catches package
+assets and raw `<Reference>`+`HintPath` routes. Tests, examples, and samples are exempt; error text
+names each offending assembly so the dependency can be removed at its source.
+
 ## Adding a new framework + SDK domain
 
 ```powershell

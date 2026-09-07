@@ -134,16 +134,16 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             ValidateGraph(descriptors);
         }
 
-        ResourceManifest[] manifests = CreateManifests(descriptors, name);
-        ResourcePlan[] plans = validate
-            ? CreatePlans(descriptors, manifests)
-            : Array.Empty<ResourcePlan>();
-
         ResourceName gatewayIdentity = _gateway is not null
             ? _gateway.Name
             : _options.Gateway is not null
                 ? (ResourceName)_options.Gateway
                 : (ResourceName)"unselected";
+        ResourceManifest[] manifests = CreateManifests(descriptors, name);
+        ResourcePlan[] plans = validate
+            ? CreatePlans(descriptors, manifests, gatewayIdentity)
+            : Array.Empty<ResourcePlan>();
+
         return new CohesionApplicationModel(
             name,
             _environment,
@@ -157,7 +157,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
 
     private ResourcePlan[] CreatePlans(
         IReadOnlyList<ApplicationResourceDescriptor> descriptors,
-        IReadOnlyList<ResourceManifest> manifests)
+        IReadOnlyList<ResourceManifest> manifests,
+        ResourceName gateway)
     {
         var manifestByDescriptor = new Dictionary<IApplicationResourceDescriptor, ResourceManifest>(descriptors.Count);
         for (int index = 0; index < descriptors.Count; index++)
@@ -196,20 +197,46 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
                 references.Add(reference.Name.ToString(), reference);
             }
 
-            IResourceOptions options = descriptor.Resource is IPlannedResource plannedResource
+            IPlannedResource? plannedResource = descriptor.Resource as IPlannedResource;
+            IResourceOptions options = plannedResource is not null
                 ? plannedResource.Options
                 : new ResourceOptions();
             var context = new PlanContext(manifest, options, _environment, references);
 
-            ResourcePlan plan = descriptor.Resource is IPlannedResource planned
-                ? planned.CreatePlan(context)
+            ResourcePlan plan = plannedResource is not null
+                ? plannedResource.CreatePlan(context)
                 : GenericPlanner.CreatePlan(context);
 
             ResourcePlanValidator.Validate(plan, context);
+            WritePlanningDiagnostic(descriptor.Resource, plannedResource, gateway);
             plans[index] = plan;
         }
 
         return plans;
+    }
+
+    private static void WritePlanningDiagnostic(
+        IApplicationResource resource,
+        IPlannedResource? plannedResource,
+        ResourceName gateway)
+    {
+        string plannerName = plannedResource?.PlannerName ?? nameof(GenericPlanner);
+        if (string.IsNullOrWhiteSpace(plannerName)
+            || plannerName.Contains('\r')
+            || plannerName.Contains('\n'))
+        {
+            throw new InvalidOperationException(
+                $"Resource '{resource.Name}' returned an invalid {nameof(IPlannedResource)}.{nameof(IPlannedResource.PlannerName)}. " +
+                $"Use a non-empty, single-line label such as 'Database planner' or '{nameof(GenericPlanner)}'.");
+        }
+
+        if (string.Equals(plannerName, nameof(GenericPlanner), StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine($"{resource.Name}: {nameof(GenericPlanner)}");
+            return;
+        }
+
+        Console.Error.WriteLine($"{resource.Name}: {plannerName} → {gateway} compiler");
     }
 
     private static ResourceManifest[] CreateManifests(

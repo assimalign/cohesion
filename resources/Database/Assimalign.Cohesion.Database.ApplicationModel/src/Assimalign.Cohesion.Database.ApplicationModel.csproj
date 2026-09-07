@@ -5,6 +5,10 @@
 		plane ONLY - never the database runtime. Orchestrator apps reference this
 		package; the database host never does.
 	-->
+	<PropertyGroup>
+		<!-- Enforce the strict ApplicationModel dependency closure (COHAM001). -->
+		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 	</ItemGroup>

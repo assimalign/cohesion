@@ -62,6 +62,9 @@ public abstract class PlannedResource :
     public ResourceManifest Manifest { get; }
 
     /// <inheritdoc />
+    public virtual string PlannerName => nameof(GenericPlanner);
+
+    /// <inheritdoc />
     public IResourceOptions Options { get; }
 
     /// <inheritdoc />
