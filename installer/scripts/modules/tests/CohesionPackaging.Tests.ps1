@@ -318,6 +318,41 @@ jobs:
             Should -Throw -ExpectedMessage "*$relativePath*"
     }
 
+    It 'does not treat matrix-shaped text in a block scalar as coverage' {
+        $name = 'Test.ScriptText'
+        $relativePath = Add-CohesionTestProject `
+            -RepositoryDirectory $repository `
+            -Root 'tooling' `
+            -Name $name
+        Set-Content `
+            -LiteralPath (Join-Path $repository '.github/workflows/release.yml') `
+            -NoNewline `
+            -Value @"
+name: Script text
+jobs:
+  build:
+    strategy:
+      matrix:
+        commands:
+          - |
+              strategy:
+                matrix:
+                  projects: ["$name"]
+    steps:
+      - run: |
+          strategy:
+            matrix:
+              projects: ["$name"]
+      - "run": &script |
+          strategy:
+            matrix:
+              projects: ["$name"]
+"@
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*$relativePath*"
+    }
+
     It 'accepts an exact exclusion with a non-empty reason' {
         $relativePath = Add-CohesionTestProject -RepositoryDirectory $repository -Root 'tooling' -Name 'Test.Excluded'
         InModuleScope CohesionPackaging -Parameters @{ RelativePath = $relativePath } {
@@ -410,6 +445,50 @@ jobs:
       </PropertyGroup>
     </When>
   </Choose>
+</Project>
+'@
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*$relativePath*"
+    }
+
+    It 'ignores IsPackable metadata outside evaluated project property groups' {
+        $name = 'Test.UnrelatedPackability'
+        $relativePath = Add-CohesionTestProject `
+            -RepositoryDirectory $repository `
+            -Root 'tooling' `
+            -Name $name
+        $projectPath = Join-Path $repository ($relativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        Set-Content -LiteralPath $projectPath -NoNewline -Value @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Widget Include="example">
+      <IsPackable>false</IsPackable>
+    </Widget>
+  </ItemGroup>
+  <Target Name="SetTargetProperty">
+    <PropertyGroup>
+      <IsPackable>false</IsPackable>
+    </PropertyGroup>
+  </Target>
+</Project>
+'@
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*$relativePath*"
+    }
+
+    It 'recognizes explicit SDK imports as packable SDK-style projects' {
+        $name = 'Test.ExplicitSdkImport'
+        $relativePath = Add-CohesionTestProject `
+            -RepositoryDirectory $repository `
+            -Root 'tooling' `
+            -Name $name
+        $projectPath = Join-Path $repository ($relativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        Set-Content -LiteralPath $projectPath -NoNewline -Value @'
+<Project>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 </Project>
 '@
 

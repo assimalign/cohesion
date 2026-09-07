@@ -726,6 +726,16 @@ function Test-CohesionProjectIsPackable {
         }
     }
 
+    $projectXml = & $readXml $ProjectPath
+    if ($null -eq $projectXml) {
+        return $true
+    }
+
+    $projectRoot = $projectXml.DocumentElement
+    $isPackable = -not [string]::IsNullOrWhiteSpace([string] $projectRoot.GetAttribute('Sdk')) -or
+        @($projectXml.SelectNodes('//*[local-name()="Sdk" and string-length(@Name) > 0]')).Count -gt 0 -or
+        @($projectXml.SelectNodes('//*[local-name()="Import" and string-length(@Sdk) > 0]')).Count -gt 0
+
     $hasConditionalContext = {
         param([System.Xml.XmlNode] $Node)
 
@@ -733,7 +743,7 @@ function Test-CohesionProjectIsPackable {
         while ($null -ne $context -and $context.NodeType -ne [System.Xml.XmlNodeType]::Document) {
             if ($context.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                 if (-not [string]::IsNullOrWhiteSpace([string] $context.GetAttribute('Condition')) -or
-                    $context.LocalName -in @('When', 'Otherwise')) {
+                    $context.LocalName -in @('When', 'Otherwise', 'Target')) {
                     return $true
                 }
             }
@@ -755,7 +765,8 @@ function Test-CohesionProjectIsPackable {
             return $true
         }
 
-        foreach ($node in @($xml.SelectNodes('//*[local-name()="IsPackable"]'))) {
+        foreach ($node in @($xml.SelectNodes(
+                    '//*[local-name()="PropertyGroup"]/*[local-name()="IsPackable"]'))) {
             $value = $node.InnerText.Trim()
             if (& $hasConditionalContext $node) {
                 # A conditional false leaves the other branch unchanged. A conditional true or an
@@ -856,13 +867,9 @@ function Test-CohesionProjectIsPackable {
         $isPackable = & $applyPackability $isPackable $file
     }
 
-    $projectXml = & $readXml $ProjectPath
-    if ($null -eq $projectXml) {
-        return $true
-    }
-
     $isTestProject = @(
-        $projectXml.SelectNodes('//*[local-name()="IsTestProject"]') |
+        $projectXml.SelectNodes(
+            '//*[local-name()="PropertyGroup"]/*[local-name()="IsTestProject"]') |
             Where-Object {
                 $_.InnerText.Trim() -ieq 'true' -and
                 -not (& $hasConditionalContext $_)
@@ -870,7 +877,7 @@ function Test-CohesionProjectIsPackable {
     ).Count -gt 0
     $hasTestSdk = @(
         $projectXml.SelectNodes(
-            '//*[local-name()="PackageReference" or local-name()="CohesionPackageReference"]') |
+            '//*[local-name()="ItemGroup"]/*[local-name()="PackageReference" or local-name()="CohesionPackageReference"]') |
             Where-Object {
                 $_.GetAttribute('Include') -ieq 'Microsoft.NET.Test.Sdk' -and
                 -not (& $hasConditionalContext $_)
@@ -946,9 +953,37 @@ function Get-CohesionWorkflowMatrixProject {
     foreach ($workflow in @(Get-ChildItem -LiteralPath $workflowDirectory -Filter '*.yml' -File)) {
         $context = [System.Collections.Generic.List[object]]::new()
         $matrixValue = $null
+        $blockScalarIndent = $null
         foreach ($rawLine in @(Get-Content -LiteralPath $workflow.FullName)) {
             $line = (& $removeYamlComment $rawLine).TrimEnd()
             if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+
+            $lineIndent = ([regex]::Match($line, '^[ ]*')).Value.Length
+            if ($null -ne $blockScalarIndent) {
+                if ($lineIndent -gt $blockScalarIndent) {
+                    continue
+                }
+
+                $blockScalarIndent = $null
+            }
+
+            $blockScalar = [regex]::Match(
+                $line,
+                @'
+(?x)^
+(?<indent>[ ]*)
+(?:
+    (?:-\s+)?(?:[A-Za-z0-9_-]+|'(?:[^']|'')+'|"(?:[^"\\]|\\.)+"):
+    \s*(?:[!&]\S+\s+)*[|>][0-9+-]*
+  |
+    -\s+(?:[!&]\S+\s+)*[|>][0-9+-]*
+)
+\s*$
+'@)
+            if ($blockScalar.Success) {
+                $blockScalarIndent = $blockScalar.Groups['indent'].Value.Length
                 continue
             }
 
